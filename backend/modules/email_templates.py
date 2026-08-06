@@ -144,20 +144,30 @@ def preview_template(
     }
 
 
-def _template_api_key() -> str | None:
-    for candidate in (
+def _template_api_keys() -> list[str]:
+    keys = _collect_template_keys(
         settings.email_template_gemini_api_key,
-        settings.gemini_api_key,
-        settings.llm_api_key,
-    ):
+        settings.email_template_gemini_api_keys,
+    )
+    if keys:
+        return keys
+    for candidate in (settings.gemini_api_key, settings.llm_api_key):
         key = (candidate or "").strip()
         if key:
-            return key
-    return None
+            return _collect_template_keys(key, settings.gemini_api_keys)
+    return _collect_template_keys(None, settings.gemini_api_keys)
+
+
+def _collect_template_keys(primary: str | None, extras_csv: str | None) -> list[str]:
+    keys = _parse_csv(extras_csv)
+    primary_key = (primary or "").strip()
+    if primary_key and primary_key not in keys:
+        keys.insert(0, primary_key)
+    return keys
 
 
 def template_llm_enabled() -> bool:
-    return bool(_template_api_key())
+    return bool(_template_api_keys())
 
 
 def _parse_csv(value: str | None) -> list[str]:
@@ -184,8 +194,8 @@ def _template_model_chain() -> list[str]:
 def _generate_template_text(*, system: str, prompt: str) -> str:
     from modules.llm_client import _is_retryable_model_error
 
-    api_key = _template_api_key()
-    if not api_key:
+    api_keys = _template_api_keys()
+    if not api_keys:
         raise RuntimeError(
             "EMAIL_TEMPLATE_GEMINI_API_KEY (or GEMINI_API_KEY) is not set. "
             "Add it to backend/.env to enable AI template creation."
@@ -197,7 +207,7 @@ def _generate_template_text(*, system: str, prompt: str) -> str:
     except Exception as exc:
         raise RuntimeError("Google GenAI SDK is not installed.") from exc
 
-    client = genai.Client(api_key=api_key)
+    clients = [genai.Client(api_key=key) for key in api_keys]
     max_tokens = max(256, int(settings.email_template_gemini_max_output_tokens or 2048))
     config = genai_types.GenerateContentConfig(
         max_output_tokens=max_tokens,
@@ -206,23 +216,24 @@ def _generate_template_text(*, system: str, prompt: str) -> str:
 
     last_error: Exception | None = None
     retryable = False
-    for model in _template_model_chain():
-        try:
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt,
-                config=config,
-            )
-            text = (response.text or "").strip()
-            if text:
-                return text
-            raise RuntimeError("Empty model response")
-        except Exception as exc:
-            last_error = exc
-            if _is_retryable_model_error(exc):
-                retryable = True
-                continue
-            raise RuntimeError(f"Gemini generation failed ({model}): {exc}") from exc
+    for client in clients:
+        for model in _template_model_chain():
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=config,
+                )
+                text = (response.text or "").strip()
+                if text:
+                    return text
+                raise RuntimeError("Empty model response")
+            except Exception as exc:
+                last_error = exc
+                if _is_retryable_model_error(exc):
+                    retryable = True
+                    continue
+                raise RuntimeError(f"Gemini generation failed ({model}): {exc}") from exc
 
     if retryable:
         raise RuntimeError(

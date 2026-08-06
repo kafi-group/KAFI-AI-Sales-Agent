@@ -50,27 +50,34 @@ def _model_chain(
     return chain or [DEFAULT_MODEL]
 
 
-def _get_gemini_clients(api_key: str | None) -> list[Any]:
-    key = (api_key or "").strip()
-    if not key:
+def _collect_api_keys(primary: str | None, extras_csv: str | None) -> list[str]:
+    keys = _parse_csv(extras_csv)
+    primary_key = (primary or "").strip()
+    if primary_key and primary_key not in keys:
+        keys.insert(0, primary_key)
+    return keys
+
+
+def _get_gemini_clients(api_keys: list[str]) -> list[Any]:
+    if not api_keys:
         return []
     try:
         from google import genai  # type: ignore[import]
 
-        return [genai.Client(api_key=key)]
+        return [genai.Client(api_key=key) for key in api_keys]
     except Exception:
         return []
 
 
 def _generate(
     *,
-    api_key: str | None,
+    api_keys: list[str],
     model_chain: list[str],
     max_output_tokens: int,
     system: str,
     prompt: str,
 ) -> str:
-    clients = _get_gemini_clients(api_key)
+    clients = _get_gemini_clients(api_keys)
     if not clients:
         raise RuntimeError("Gemini API key is not configured for this AI Mode profile.")
 
@@ -110,25 +117,33 @@ def _generate(
     raise RuntimeError(f"Gemini generation failed: {last_error}") from last_error
 
 
-def _query_api_key() -> str | None:
-    """Dedicated AI Mode query key, else shared GEMINI_API_KEY / LLM_API_KEY."""
-    for candidate in (
+def _query_api_keys() -> list[str]:
+    """Dedicated AI Mode query keys, else shared GEMINI_API_KEY (+ GEMINI_API_KEYS)."""
+    keys = _collect_api_keys(
         settings.ai_mode_query_gemini_api_key,
-        settings.gemini_api_key,
-        settings.llm_api_key,
-    ):
-        key = (candidate or "").strip()
-        if key:
-            return key
-    return None
+        settings.ai_mode_query_gemini_api_keys,
+    )
+    if keys:
+        return keys
+    return _collect_api_keys(
+        settings.gemini_api_key or settings.llm_api_key,
+        settings.gemini_api_keys,
+    )
 
 
 def query_llm_enabled() -> bool:
-    return bool(_query_api_key())
+    return bool(_query_api_keys())
+
+
+def _auto_reply_api_keys() -> list[str]:
+    return _collect_api_keys(
+        settings.ai_mode_auto_reply_gemini_api_key,
+        settings.ai_mode_auto_reply_gemini_api_keys,
+    )
 
 
 def auto_reply_llm_enabled() -> bool:
-    return bool((settings.ai_mode_auto_reply_gemini_api_key or "").strip())
+    return bool(_auto_reply_api_keys())
 
 
 def _query_model_chain() -> list[str]:
@@ -199,7 +214,7 @@ def draft_query_email_reply(
             max(256, int(settings.ai_mode_query_gemini_max_output_tokens or 512)),
         )
         body = _generate(
-            api_key=_query_api_key(),
+            api_keys=_query_api_keys(),
             model_chain=_query_model_chain(),
             max_output_tokens=max_tokens,
             system=system,
@@ -284,7 +299,7 @@ def draft_auto_reply_message(
 
     try:
         body = _generate(
-            api_key=settings.ai_mode_auto_reply_gemini_api_key,
+            api_keys=_auto_reply_api_keys(),
             model_chain=_auto_reply_model_chain(),
             max_output_tokens=max_tokens,
             system=system,

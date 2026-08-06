@@ -114,18 +114,21 @@ class Settings(BaseSettings):
 
     # AI Mode — Company lifecycle query replies (New Lead manual reply)
     ai_mode_query_gemini_api_key: str | None = None
+    ai_mode_query_gemini_api_keys: str | None = None  # optional comma-separated extra keys
     ai_mode_query_gemini_model: str = "gemini-3.1-flash-lite"
     ai_mode_query_gemini_fallback_models: str | None = None
     ai_mode_query_gemini_max_output_tokens: int = 512
 
     # AI Mode — after-hours auto-reply (email + WhatsApp)
     ai_mode_auto_reply_gemini_api_key: str | None = None
+    ai_mode_auto_reply_gemini_api_keys: str | None = None  # optional comma-separated extra keys
     ai_mode_auto_reply_gemini_model: str = "gemini-3.1-flash-lite"
     ai_mode_auto_reply_gemini_fallback_models: str | None = None
     ai_mode_auto_reply_gemini_max_output_tokens: int = 1024
 
     # Email Templates — "Generate with AI" from template title
     email_template_gemini_api_key: str | None = None
+    email_template_gemini_api_keys: str | None = None  # optional comma-separated extra keys
     email_template_gemini_model: str = "gemini-3.1-flash-lite"
     email_template_gemini_fallback_models: str | None = None
     email_template_gemini_max_output_tokens: int = 2048
