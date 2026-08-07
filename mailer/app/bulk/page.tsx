@@ -7,6 +7,10 @@ import { loginFromHandoff, clearSession, getStoredToken } from "@/lib/api";
 import { useAuth } from "@/components/AuthProvider";
 import { TemplatePicker } from "@/components/TemplatePicker";
 import {
+  AiComposeAssist,
+  type ComposeWriteMode,
+} from "@/components/AiComposeAssist";
+import {
   EmailBodyEditor,
   emailBodyHasContent,
 } from "@/components/EmailBodyEditor";
@@ -87,6 +91,7 @@ function BulkInner() {
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   const [templateId, setTemplateId] = useState("");
+  const [writeMode, setWriteMode] = useState<ComposeWriteMode>("free");
   const [tplNotice, setTplNotice] = useState<string | null>(null);
 
   const leads: Lead[] = (preview?.leads || []).filter((l) =>
@@ -280,11 +285,27 @@ function BulkInner() {
             if (tpl) {
               setSubject(tpl.subject);
               setBody(tpl.body);
+              setWriteMode("free");
               setTplNotice(`Loaded template “${tpl.name}”`);
             } else {
               setTplNotice(null);
             }
           }}
+        />
+
+        <AiComposeAssist
+          mode={writeMode}
+          onModeChange={setWriteMode}
+          subject={subject}
+          body={body}
+          bulkPlaceholders
+          contextHint="Bulk campaign — recipients vary; prefer {{contact_name}} and {{company_name}} placeholders."
+          onDraft={(draft) => {
+            setSubject(draft.subject);
+            setBody(draft.body);
+          }}
+          onNotice={setTplNotice}
+          onError={(msg) => setTplNotice(msg ? `Error: ${msg}` : null)}
         />
 
         <label>Subject</label>

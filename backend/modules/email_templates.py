@@ -296,3 +296,51 @@ def generate_template_from_title(title: str) -> dict[str, str]:
         raise RuntimeError("AI returned an incomplete template — try again.")
 
     return {"name": name[:200], "subject": subject[:500], "body": body}
+
+
+def generate_compose_draft_from_prompt(
+    prompt: str,
+    *,
+    to_hint: str | None = None,
+    context: str | None = None,
+) -> dict[str, str]:
+    """Draft a one-off compose email (subject + body) from a free-form user prompt."""
+    from pathlib import Path
+
+    cleaned = (prompt or "").strip()
+    if len(cleaned) < 8:
+        raise ValueError("Describe what the email should say (at least a short prompt).")
+
+    system_path = (
+        Path(__file__).resolve().parent.parent / "prompts" / "mailer_compose_draft_prompt.md"
+    )
+    try:
+        system = system_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        system = (
+            "You draft professional B2B emails for Kafi Commodities. "
+            'Respond with ONLY JSON: {"subject":"...","body":"..."}.'
+        )
+
+    extras: list[str] = []
+    if (to_hint or "").strip():
+        extras.append(f"Recipient email / To field: {(to_hint or '').strip()}")
+    if (context or "").strip():
+        extras.append(f"Extra context: {(context or '').strip()}")
+    extra_block = ("\n".join(extras) + "\n\n") if extras else ""
+
+    user_prompt = (
+        f"{extra_block}"
+        f"User request:\n{cleaned}\n\n"
+        "Draft one outbound email matching that request.\n"
+        'Respond with ONLY valid JSON: {"subject":"...","body":"..."}'
+    )
+
+    raw = _generate_template_text(system=system, prompt=user_prompt)
+    data = _parse_json_object(raw)
+    subject = str(data.get("subject") or "").strip()
+    body = str(data.get("body") or "").strip()
+    if not subject or not body:
+        raise RuntimeError("AI returned an incomplete draft — try again.")
+
+    return {"subject": subject[:500], "body": body}

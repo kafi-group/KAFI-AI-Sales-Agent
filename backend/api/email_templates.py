@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db
 from api.schemas import (
+    EmailComposeDraftRequest,
+    EmailComposeDraftResponse,
     EmailTemplateCreate,
     EmailTemplateGenerateRequest,
     EmailTemplateGenerateResponse,
@@ -98,6 +100,34 @@ def generate_email_template_from_title(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"AI template generation failed: {exc}") from exc
     return EmailTemplateGenerateResponse(**result)
+
+
+@router.post("/draft-from-prompt", response_model=EmailComposeDraftResponse)
+def draft_email_from_prompt(
+    payload: EmailComposeDraftRequest,
+    user: AppUser = Depends(get_current_user),
+):
+    """One-off compose draft from a free-form prompt (mailer AI Suggestion)."""
+    _ = user
+    if not templates_module.template_llm_enabled():
+        raise HTTPException(
+            503,
+            "AI draft is not configured. Set EMAIL_TEMPLATE_GEMINI_API_KEY "
+            "(or GEMINI_API_KEY) on the backend.",
+        )
+    try:
+        result = templates_module.generate_compose_draft_from_prompt(
+            payload.prompt,
+            to_hint=payload.to,
+            context=payload.context,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"AI draft failed: {exc}") from exc
+    return EmailComposeDraftResponse(**result)
 
 
 @router.get("/{template_id}", response_model=EmailTemplateRead)

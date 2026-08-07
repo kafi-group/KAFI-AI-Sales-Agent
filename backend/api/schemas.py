@@ -319,6 +319,17 @@ class EmailTemplateGenerateResponse(BaseModel):
     body: str
 
 
+class EmailComposeDraftRequest(BaseModel):
+    prompt: str = Field(min_length=8, max_length=4000)
+    to: Optional[str] = Field(default=None, max_length=500)
+    context: Optional[str] = Field(default=None, max_length=2000)
+
+
+class EmailComposeDraftResponse(BaseModel):
+    subject: str
+    body: str
+
+
 class EmailTemplateRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

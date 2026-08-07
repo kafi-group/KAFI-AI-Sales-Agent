@@ -449,6 +449,63 @@ select.template-select {
   margin-bottom: 0;
 }
 
+.compose-mode {
+  margin-bottom: 1rem;
+}
+
+.compose-mode-toggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0b1220;
+  margin-bottom: 0.65rem;
+}
+
+.compose-mode-toggle button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.compose-mode-toggle button.active {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.compose-mode-hint {
+  margin: 0 0 0.5rem;
+}
+
+.ai-draft-box {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(29, 78, 216, 0.08);
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.ai-draft-box textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0b1220;
+  color: var(--text);
+  padding: 0.65rem 0.75rem;
+  margin-bottom: 0.45rem;
+}
+
+.ai-draft-box .btn {
+  margin-top: 0.35rem;
+}
+
 /* Rich-text email editor */
 .rte {
   border: 1px solid var(--border);

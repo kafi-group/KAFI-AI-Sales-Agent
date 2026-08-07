@@ -6,6 +6,10 @@ import { apiFetch, getStoredToken } from "@/lib/api";
 import { useAuth } from "@/components/AuthProvider";
 import { TemplatePicker } from "@/components/TemplatePicker";
 import {
+  AiComposeAssist,
+  type ComposeWriteMode,
+} from "@/components/AiComposeAssist";
+import {
   EmailBodyEditor,
   emailBodyHasContent,
 } from "@/components/EmailBodyEditor";
@@ -22,6 +26,7 @@ function ComposeInner() {
   const [subject, setSubject] = useState(params.get("subject") || "");
   const [body, setBody] = useState(params.get("body") || "");
   const [templateId, setTemplateId] = useState("");
+  const [writeMode, setWriteMode] = useState<ComposeWriteMode>("free");
   const [sending, setSending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,9 +111,24 @@ function ComposeInner() {
           if (tpl) {
             setSubject(tpl.subject);
             setBody(tpl.body);
+            setWriteMode("free");
             setNotice(`Loaded template “${tpl.name}” — edit before send if needed`);
           }
         }}
+      />
+
+      <AiComposeAssist
+        mode={writeMode}
+        onModeChange={setWriteMode}
+        toHint={to}
+        subject={subject}
+        body={body}
+        onDraft={(draft) => {
+          setSubject(draft.subject);
+          setBody(draft.body);
+        }}
+        onNotice={setNotice}
+        onError={setError}
       />
 
       <div className="compose-to-row">
