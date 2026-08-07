@@ -14,10 +14,26 @@ const USER_KEY = "kafi_mailer_user";
 
 const PRODUCTION_API_BASE = "https://kafi-sales-agent.up.railway.app/api";
 
+function normalizeBase(raw: string): string {
+  return raw.trim().replace(/\/$/, "");
+}
+
+/** Browser must not call Vercel frontends as API — POST often returns 405 Method Not Allowed. */
+function isMisconfiguredPublicApiBase(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host === "kafi-sales-agent.vercel.app") return true;
+    if (host.endsWith(".vercel.app") && host.includes("mailer")) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
 export function getApiBase(): string {
-  const raw = (process.env.NEXT_PUBLIC_KAFI_API_BASE_URL || "").trim().replace(/\/$/, "");
-  if (raw) return raw;
-  const serverSide = (process.env.KAFI_API_BASE_URL || "").trim().replace(/\/$/, "");
+  const pub = normalizeBase(process.env.NEXT_PUBLIC_KAFI_API_BASE_URL || "");
+  if (pub && !isMisconfiguredPublicApiBase(pub)) return pub;
+  const serverSide = normalizeBase(process.env.KAFI_API_BASE_URL || "");
   if (serverSide) return serverSide;
   if (process.env.NODE_ENV === "production") return PRODUCTION_API_BASE;
   return "";

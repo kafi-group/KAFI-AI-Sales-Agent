@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { getStoredToken, ApiError } from "@/lib/api";
 import { emailBodyHasContent } from "@/components/EmailBodyEditor";
 
 export type ComposeWriteMode = "free" | "ai";
@@ -63,17 +63,34 @@ export function AiComposeAssist({
     onError?.(null);
     onNotice?.(null);
     try {
-      const result = await apiFetch<{ subject: string; body: string }>(
-        "/email-templates/draft-from-prompt",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            prompt: cleaned,
-            to: toHint?.trim() || undefined,
-            context: contextHint?.trim() || undefined,
-          }),
+      const token = getStoredToken();
+      const res = await fetch("/api/ai-draft", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-      );
+        body: JSON.stringify({
+          prompt: cleaned,
+          to: toHint?.trim() || undefined,
+          context: contextHint?.trim() || undefined,
+        }),
+      });
+      const text = await res.text();
+      let data: unknown = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        data = text;
+      }
+      if (!res.ok) {
+        const detail =
+          data && typeof data === "object" && data !== null && "detail" in data
+            ? String((data as { detail: unknown }).detail)
+            : text || res.statusText;
+        throw new ApiError(res.status, detail);
+      }
+      const result = data as { subject: string; body: string };
       onDraft({
         subject: result.subject,
         body: plainTextToEditorHtml(result.body),
