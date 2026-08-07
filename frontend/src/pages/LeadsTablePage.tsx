@@ -877,12 +877,12 @@ export function LeadsTablePage({
       null
     : null;
 
+  /** Old-clients column set + filters on every leads table section. */
+  const useClientsFilters = true;
   const isOldClients = section === "old_clients";
   const isMaster = section === "master";
-  /** Old-clients filter set (business type, grading, product, city, call timing) — also on admin Master. */
-  const useClientsFilters = isOldClients || isMaster;
   const canImportSpreadsheet = section === "all" || section === "old_clients";
-  /** Every user can manually add leads on Clients / Master / Scrapped Leads. */
+  /** Every user can manually add leads on Clients / Master / New search lead. */
   const canAddLead =
     section === "old_clients" || section === "master" || section === "all";
   const createLeadSource =

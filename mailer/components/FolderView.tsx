@@ -225,7 +225,7 @@ export function FolderView({ folder }: Props) {
               <p className="muted small">Bcc: {formatAddrList(selected.bcc)}</p>
             )}
             <div className="detail-actions">
-              {folder !== "drafts" && folder !== "sent" && (
+              {folder !== "sent" && (
                 <>
                   <button type="button" className="btn" onClick={() => openReply("reply")}>
                     Reply

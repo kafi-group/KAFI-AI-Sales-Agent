@@ -115,8 +115,8 @@ export const INDEX_SECTIONS: IndexSection[] = [
       },
       {
         id: "2.3",
-        title: "Scrapped Leads",
-        description: "Unassigned scrapped pool under Master table (admin).",
+        title: "New search lead",
+        description: "Unassigned prospect pool under Master table (admin).",
         icon: "table",
         action: { type: "table", section: "all" },
         adminOnly: true,

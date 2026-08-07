@@ -8,6 +8,11 @@ import {
 } from "../api/client";
 import { IconSearch } from "../components/icons/AppIcons";
 import { ProseTextarea } from "../components/ProseTextField";
+import { autocorrectText } from "../utils/spelling";
+import {
+  markWhatsAppThreadSeen,
+  whatsAppThreadUnread,
+} from "../utils/whatsappRead";
 
 interface WhatsAppInboxPageProps {
   onError: (message: string) => void;
@@ -23,6 +28,41 @@ function formatDate(value: string | null | undefined): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleString();
+}
+
+function formatChatTime(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  if (sameDay) {
+    return date.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function chatTitle(conv: WhatsAppConversation): string {
+  return (
+    conv.contact_phone?.trim() ||
+    conv.contact_name?.trim() ||
+    conv.company_name?.trim() ||
+    "Unknown"
+  );
+}
+
+function chatSubtitle(conv: WhatsAppConversation): string {
+  if (conv.contact_phone && conv.company_name) return conv.company_name;
+  if (conv.contact_name && conv.contact_name !== chatTitle(conv)) {
+    return conv.contact_name;
+  }
+  return conv.contact_name || conv.company_name || "";
 }
 
 function initialsFrom(label: string): string {
@@ -103,6 +143,8 @@ export function WhatsAppInboxPage({
       try {
         const rows = await client.listWhatsAppConversationMessages(conversation.contact_id);
         setMessages(rows);
+        markWhatsAppThreadSeen(conversation.contact_id, conversation.last_message_at);
+        void refreshConversations({ silent: true });
       } catch (e) {
         if (!options?.silent) {
           onError(e instanceof Error ? e.message : "Failed to load conversation");
@@ -111,7 +153,7 @@ export function WhatsAppInboxPage({
         if (!options?.silent) setLoadingThread(false);
       }
     },
-    [onError],
+    [onError, refreshConversations],
   );
 
   // Deep-link from buyer profile: open a specific contact thread once.
@@ -203,12 +245,14 @@ export function WhatsAppInboxPage({
   }, [needsTemplate]);
 
   async function handleSend() {
-    if (!selected || !reply.trim()) return;
+    if (!selected) return;
+    const cleaned = autocorrectText(reply.trim());
+    if (!cleaned) return;
     setSending(true);
     setNotice(null);
     try {
       const result = await client.replyToWhatsAppConversation(selected.contact_id, {
-        content: reply,
+        content: cleaned,
         send: true,
       });
       if (!result.sent) {
@@ -355,90 +399,95 @@ export function WhatsAppInboxPage({
         </p>
       ) : null}
 
-      <div className="grid grid-cols-1 md:grid-cols-[minmax(280px,360px)_1fr] gap-0 rounded-xl border border-slate-800 bg-slate-900/50 overflow-hidden min-h-[min(78vh,640px)]">
+      <div className="grid grid-cols-1 md:grid-cols-[minmax(300px,380px)_1fr] gap-0 rounded-xl border border-[#2a3942] bg-[#111b21] overflow-hidden min-h-[min(78vh,640px)]">
         <div
-          className={`border-r border-slate-800 overflow-y-auto max-h-[78vh] ${
+          className={`border-r border-[#2a3942] overflow-y-auto max-h-[78vh] bg-[#111b21] ${
             selected ? "hidden md:block" : ""
           }`}
         >
-          <div className="px-4 py-3 border-b border-slate-800 sticky top-0 bg-slate-900/95 backdrop-blur space-y-2 z-[1]">
+          <div className="px-3 py-3 border-b border-[#2a3942] sticky top-0 bg-[#202c33] space-y-2 z-[1]">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-slate-300">Conversations</h3>
-              <span className="text-xs text-slate-500">
+              <h3 className="text-sm font-medium text-[#e9edef]">Chats</h3>
+              <span className="text-xs text-[#8696a0]">
                 {chatSearch.trim()
                   ? `${filteredConversations.length} / ${conversations.length}`
                   : conversations.length}
               </span>
             </div>
             <label className="relative block">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none">
                 <IconSearch size="sm" />
               </span>
               <input
                 type="search"
                 value={chatSearch}
                 onChange={(e) => setChatSearch(e.target.value)}
-                placeholder="Search chats…"
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 pl-8 pr-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600"
+                placeholder="Search or start new chat"
+                className="w-full rounded-lg border border-[#2a3942] bg-[#2a3942] pl-8 pr-3 py-2 text-sm text-[#e9edef] placeholder:text-[#8696a0]"
               />
             </label>
           </div>
           {loadingList ? (
-            <p className="text-sm text-slate-400 p-4">Loading…</p>
+            <p className="text-sm text-[#8696a0] p-4">Loading…</p>
           ) : conversations.length === 0 ? (
-            <p className="text-sm text-slate-500 p-4">
+            <p className="text-sm text-[#8696a0] p-4">
               No WhatsApp conversations yet. Ask a contact to message{" "}
               {config?.display_number || "your Business number"}, or send an approved template from
               a lead — threads appear here for two-way chat.
             </p>
           ) : filteredConversations.length === 0 ? (
-            <p className="text-sm text-slate-500 p-4">
+            <p className="text-sm text-[#8696a0] p-4">
               No chats match “{chatSearch.trim()}”.
             </p>
           ) : (
-            filteredConversations.map((conv) => (
+            filteredConversations.map((conv) => {
+              const unread = whatsAppThreadUnread(conv);
+              const active = selected?.contact_id === conv.contact_id;
+              const subtitle = chatSubtitle(conv);
+              return (
               <button
                 key={conv.contact_id}
                 type="button"
                 onClick={() => void loadThread(conv)}
-                className={`w-full text-left px-4 py-3 border-b border-slate-800/60 flex gap-3 items-start hover:bg-slate-800/40 ${
-                  selected?.contact_id === conv.contact_id ? "bg-slate-800/60" : ""
+                className={`w-full text-left px-3 py-3 border-b border-[#2a3942]/70 flex gap-3 items-start hover:bg-[#202c33] ${
+                  active ? "bg-[#2a3942]" : ""
                 }`}
               >
-                <div className="w-8 h-8 rounded-full bg-emerald-600/20 border border-emerald-600/40 text-emerald-300 flex items-center justify-center text-xs font-medium shrink-0">
+                <div className="w-12 h-12 rounded-full bg-[#6b7178] text-[#e9edef] flex items-center justify-center text-sm font-medium shrink-0">
                   {initialsFrom(conv.contact_name || conv.company_name || "?")}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium text-slate-200 truncate">
-                      {conv.company_name || conv.contact_name || "Unknown"}
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-[15px] font-normal text-[#e9edef] truncate">
+                      {chatTitle(conv)}
                     </p>
-                    <span className="text-[10px] text-slate-500 shrink-0">
-                      {formatDate(conv.last_message_at)}
+                    <span className="text-[11px] text-[#8696a0] shrink-0 pt-0.5">
+                      {formatChatTime(conv.last_message_at)}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 truncate">{conv.contact_name}</p>
-                  <p className="text-xs text-slate-500 truncate mt-0.5">
-                    {conv.last_direction === "inbound" ? "" : "You: "}
-                    {conv.last_message}
-                  </p>
-                  {conv.within_session_window ? (
-                    <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
-                      24h window open
-                    </span>
-                  ) : (
-                    <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] border border-slate-700 bg-slate-800 text-slate-500">
-                      Template required
-                    </span>
-                  )}
+                  {subtitle ? (
+                    <p className="text-xs text-[#8696a0] truncate">{subtitle}</p>
+                  ) : null}
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <p className="text-sm text-[#8696a0] truncate">
+                      {conv.last_direction === "inbound" ? "" : "You: "}
+                      {conv.last_message || "No messages yet"}
+                    </p>
+                    {unread > 0 ? (
+                      <span className="shrink-0 min-w-[1.25rem] h-5 px-1.5 rounded-full bg-[#25d366] text-[#111b21] text-xs font-semibold flex items-center justify-center">
+                        {unread > 99 ? "99+" : unread}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
               </button>
-            ))
+            );
+            })
           )}
         </div>
 
         <div
-          className={`flex flex-col min-h-[min(78vh,640px)] ${
+          className={`flex flex-col min-h-[min(78vh,640px)] bg-[#0b141a] ${
             selected ? "" : "hidden md:flex"
           }`}
         >
@@ -543,6 +592,9 @@ export function WhatsAppInboxPage({
                 <ProseTextarea
                   value={reply}
                   onChange={setReply}
+                  onBlur={() => {
+                    if (reply.trim()) setReply(autocorrectText(reply));
+                  }}
                   rows={2}
                   placeholder={
                     selected.within_session_window

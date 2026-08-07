@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { IndexAction } from "./data/indexSections";
+import { sumWhatsAppInboxUnread } from "./utils/whatsappRead";
 import {
   client,
   QUOTATION_AGENT_URL,
@@ -158,6 +159,7 @@ function DashboardApp() {
   }, []);
   const [emailActivityUnread, setEmailActivityUnread] = useState(0);
   const [whatsappActivityUnread, setWhatsappActivityUnread] = useState(0);
+  const [whatsappInboxUnread, setWhatsappInboxUnread] = useState(0);
   const [emailTemplateCount, setEmailTemplateCount] = useState(0);
   const [personalizedEmailCount, setPersonalizedEmailCount] = useState(0);
   const [whatsappTemplateCount, setWhatsappTemplateCount] = useState(0);
@@ -348,7 +350,11 @@ function DashboardApp() {
     client
       .listWhatsAppConversations({ page: 1, page_size: 50 })
       .then((result) => {
-        const inbound = (result.rows || []).filter(
+        const rows = result.rows || [];
+        const inboxUnreadTotal = sumWhatsAppInboxUnread(rows);
+        setWhatsappInboxUnread(inboxUnreadTotal);
+
+        const inbound = rows.filter(
           (row) => row.last_direction === "inbound" && row.last_message_at,
         );
         const currentKeys = new Set(
@@ -541,13 +547,15 @@ function DashboardApp() {
   ]);
 
   useEffect(() => {
-    void loadTableCounts();
-    void loadAssigneeNavUsers();
-    void loadMailCounts();
-    void loadMailExtras();
-    void loadDiscoverLeadsCount();
-    void loadEmailTemplateCount();
-    void loadWhatsappTemplateCount();
+    void Promise.all([
+      loadTableCounts(),
+      loadAssigneeNavUsers(),
+      loadMailCounts(),
+      loadMailExtras(),
+      loadDiscoverLeadsCount(),
+      loadEmailTemplateCount(),
+      loadWhatsappTemplateCount(),
+    ]);
     requestNotificationPermission();
 
     const unlock = () => unlockNotificationAudio();
@@ -826,7 +834,7 @@ function DashboardApp() {
       ? [
           {
             id: "all" as const,
-            label: "Scrapped Leads",
+            label: "New search lead",
             count: tableCounts.all,
           },
         ]
@@ -878,10 +886,15 @@ function DashboardApp() {
     {
       id: "whatsapp-inbox",
       label: "WhatsApp",
-      count: whatsappTemplateCount + whatsappActivityUnread,
-      alert: whatsappActivityUnread > 0,
+      count: 0,
+      alert: whatsappInboxUnread > 0,
       children: [
-        { id: "whatsapp-inbox", label: "WhatsApp inbox", count: 0 },
+        {
+          id: "whatsapp-inbox",
+          label: "WhatsApp inbox",
+          count: whatsappInboxUnread,
+          alert: whatsappInboxUnread > 0,
+        },
         {
           id: "whatsapp-templates",
           label: "WhatsApp templates",
@@ -909,10 +922,10 @@ function DashboardApp() {
     {
       id: "inbox",
       label: "Mail",
-      count: inboxUnread + emailActivityUnread,
-      alert: inboxUnread > 0 || emailActivityUnread > 0,
+      count: 0,
+      alert: inboxUnread > 0,
       children: [
-        { id: "inbox", label: "Inbox", count: mailCounts.inbox },
+        { id: "inbox", label: "Inbox", count: mailCounts.inbox, alert: inboxUnread > 0 },
         { id: "sent", label: "Sent", count: mailCounts.sent },
         { id: "drafts", label: "Drafts", count: mailDraftCount },
         { id: "trash", label: "Trash", count: mailCounts.trash },

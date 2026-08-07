@@ -1461,7 +1461,8 @@ export interface WhatsAppConversation {
   window_expires_at: string | null;
   last_message: string | null;
   last_message_at: string | null;
-  last_direction: string | null;
+    last_direction: string | null;
+  unread_count?: number;
 }
 
 export interface WhatsAppConversationListResponse {

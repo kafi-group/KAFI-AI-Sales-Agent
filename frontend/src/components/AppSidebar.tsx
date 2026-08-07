@@ -78,6 +78,7 @@ export type NavChild = {
   id: string;
   label: string;
   count: number;
+  alert?: boolean;
 };
 
 export type NavItem =
@@ -400,17 +401,19 @@ export function AppSidebar({
                       />
                       <span className="truncate">{item.label}</span>
                     </span>
-                    <span
-                      className={`shrink-0 text-xs tabular-nums px-1.5 py-0.5 rounded ${
-                        hasAlert && !parentHighlighted
-                          ? "bg-emerald-500/20 text-emerald-300"
-                          : parentHighlighted
-                            ? "bg-emerald-500/30 text-emerald-50"
-                            : "bg-slate-800 text-slate-400"
-                      }`}
-                    >
-                      {item.count}
-                    </span>
+                    {!isExpandableParent && item.count > 0 ? (
+                      <span
+                        className={`shrink-0 text-xs tabular-nums px-1.5 py-0.5 rounded ${
+                          hasAlert && !parentHighlighted
+                            ? "bg-emerald-500/20 text-emerald-300"
+                            : parentHighlighted
+                              ? "bg-emerald-500/30 text-emerald-50"
+                              : "bg-slate-800 text-slate-400"
+                        }`}
+                      >
+                        {item.count}
+                      </span>
+                    ) : null}
                   </button>
 
                   {isExpandableParent && setMenuOpen && (
@@ -479,15 +482,19 @@ export function AppSidebar({
                             />
                             <span className="truncate">{child.label}</span>
                           </span>
-                          <span
-                            className={`shrink-0 text-xs tabular-nums px-1.5 py-0.5 rounded ${
-                              childActive
-                                ? "bg-emerald-500/30 text-emerald-50"
-                                : "bg-slate-800/80 text-slate-500"
-                            }`}
-                          >
-                            {child.count}
-                          </span>
+                          {child.count > 0 ? (
+                            <span
+                              className={`shrink-0 text-xs tabular-nums px-1.5 py-0.5 rounded min-w-[1.25rem] text-center ${
+                                childActive
+                                  ? "bg-emerald-500/30 text-emerald-50"
+                                  : child.id === "whatsapp-inbox"
+                                    ? "bg-emerald-500 text-white font-semibold"
+                                    : "bg-slate-800/80 text-slate-300"
+                              }`}
+                            >
+                              {child.count}
+                            </span>
+                          ) : null}
                         </button>
                       );
                     })}

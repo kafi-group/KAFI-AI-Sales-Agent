@@ -1440,6 +1440,7 @@ class WhatsAppConversationRead(BaseModel):
     last_message: Optional[str] = None
     last_message_at: Optional[datetime] = None
     last_direction: Optional[str] = None
+    unread_count: int = 0
 
 
 class WhatsAppConversationListResponse(BaseModel):

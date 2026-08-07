@@ -23,6 +23,28 @@ from modules.email_attachments import (
 WHATSAPP_SESSION_WINDOW_HOURS = 24
 
 
+def _whatsapp_unread_count(db: Session, contact_id: int) -> int:
+    """Inbound messages since the last outbound — awaiting a reply."""
+    last_outbound = (
+        db.query(Interaction)
+        .filter(
+            Interaction.contact_id == contact_id,
+            Interaction.channel == Channel.whatsapp,
+            Interaction.direction == Direction.outbound,
+        )
+        .order_by(Interaction.created_at.desc())
+        .first()
+    )
+    query = db.query(Interaction).filter(
+        Interaction.contact_id == contact_id,
+        Interaction.channel == Channel.whatsapp,
+        Interaction.direction == Direction.inbound,
+    )
+    if last_outbound and last_outbound.created_at:
+        query = query.filter(Interaction.created_at > last_outbound.created_at)
+    return int(query.count())
+
+
 class CommsGenerator:
     """Template-based draft messages. LLM generation plugs in later."""
 
