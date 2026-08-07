@@ -200,6 +200,22 @@ def buyer_ids_with_placed_call_outcome(
     }
 
 
+def twilio_balance() -> dict:
+    """Admin-only Twilio prepaid balance snapshot."""
+    cfg = call_config()
+    result = voice_client.fetch_account_balance()
+    return {
+        "configured": bool(cfg.get("configured")),
+        "caller_id_masked": cfg.get("caller_id_masked"),
+        "twilio_account_sid": cfg.get("twilio_account_sid"),
+        "ok": bool(result.get("ok")),
+        "balance": result.get("balance"),
+        "currency": result.get("currency"),
+        "message": result.get("message"),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def call_config() -> dict:
     from config import settings
 

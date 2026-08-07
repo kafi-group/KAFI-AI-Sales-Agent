@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
-from api.deps import get_current_user, get_db
+from api.deps import get_current_user, get_db, require_admin
 from api.schemas import (
     CallConfigRead,
     CallHistoryItem,
@@ -12,6 +12,7 @@ from api.schemas import (
     CallNotesRequest,
     DialableLeadsResponse,
     ManualCallRequest,
+    TwilioBalanceRead,
     VoiceTokenRead,
 )
 from db.models import AppUser, AppUserRole
@@ -113,6 +114,12 @@ def _transcribe_in_background(interaction_id: int) -> None:
 def get_call_config():
     cfg = calls_module.call_config()
     return CallConfigRead(**cfg)
+
+
+@router.get("/calls/twilio-balance", response_model=TwilioBalanceRead)
+def get_twilio_balance(_admin: AppUser = Depends(require_admin)):
+    """Admin-only live Twilio prepaid balance for voice calling."""
+    return TwilioBalanceRead(**calls_module.twilio_balance())
 
 
 @router.get("/calls/twilio-status")

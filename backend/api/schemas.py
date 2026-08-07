@@ -911,6 +911,17 @@ class CallConfigRead(BaseModel):
     twilio_validate_webhooks: bool = True
 
 
+class TwilioBalanceRead(BaseModel):
+    configured: bool
+    caller_id_masked: Optional[str] = None
+    twilio_account_sid: Optional[str] = None
+    ok: bool
+    balance: Optional[float] = None
+    currency: Optional[str] = None
+    message: Optional[str] = None
+    fetched_at: Optional[str] = None
+
+
 class VoiceTokenRead(BaseModel):
     token: str
     identity: str

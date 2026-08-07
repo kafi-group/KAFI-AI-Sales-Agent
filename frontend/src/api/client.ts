@@ -559,6 +559,17 @@ export interface CallConfig {
   twilio_validate_webhooks?: boolean;
 }
 
+export interface TwilioBalance {
+  configured: boolean;
+  caller_id_masked?: string | null;
+  twilio_account_sid?: string | null;
+  ok: boolean;
+  balance?: number | null;
+  currency?: string | null;
+  message?: string | null;
+  fetched_at?: string | null;
+}
+
 export interface VoiceToken {
   token: string;
   identity: string;
@@ -2273,6 +2284,7 @@ export const client = {
   },
 
   getCallConfig: () => request<CallConfig>("/calls/config"),
+  getTwilioBalance: () => request<TwilioBalance>("/calls/twilio-balance"),
   listInterestedFollowUps: () =>
     request<InterestedFollowUp[]>("/leads/interested-follow-ups"),
   acknowledgeInterestedFollowUp: (buyerId: number) =>

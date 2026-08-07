@@ -214,6 +214,42 @@ class VoiceClient:
             "</Response>"
         )
 
+    def fetch_account_balance(self) -> dict[str, Any]:
+        """Live Twilio prepaid balance (admin diagnostics)."""
+        if not settings.twilio_account_sid or not settings.twilio_auth_token:
+            return {
+                "ok": False,
+                "message": "Twilio is not configured on the server.",
+            }
+        try:
+            from twilio.rest import Client
+
+            client = Client(
+                settings.twilio_account_sid.strip(),
+                settings.twilio_auth_token.strip(),
+            )
+            record = client.api.v2010.accounts(settings.twilio_account_sid.strip()).balance.fetch()
+            balance_raw = getattr(record, "balance", None)
+            currency = (getattr(record, "currency", None) or "USD").upper()
+            try:
+                balance = float(balance_raw)
+            except (TypeError, ValueError):
+                return {
+                    "ok": False,
+                    "message": f"Unexpected balance value from Twilio: {balance_raw!r}",
+                }
+            return {
+                "ok": True,
+                "balance": balance,
+                "currency": currency,
+                "account_status": "active",
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "message": f"Could not fetch Twilio balance: {exc}",
+            }
+
     def setup_hints(self) -> dict[str, Any]:
         missing: list[str] = []
         if not settings.twilio_account_sid:

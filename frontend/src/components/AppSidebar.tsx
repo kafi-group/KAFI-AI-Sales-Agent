@@ -26,7 +26,8 @@ export type Tab =
   | "chatbot"
   | "kpi"
   | "ai-mode"
-  | "users";
+  | "users"
+  | "settings";
 
 export type LeadsTableSection =
   | "all"

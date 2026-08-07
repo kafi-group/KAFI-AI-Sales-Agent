@@ -510,6 +510,7 @@ export function NavIcon({
   if (navId === "ai-mode") return <IconSparkles {...props} />;
   if (navId === "kpi") return <IconChart {...props} />;
   if (navId === "users") return <IconUser {...props} />;
+  if (navId === "settings") return <IconSettings {...props} />;
 
   return <LogoOutlook size={size} />;
 }

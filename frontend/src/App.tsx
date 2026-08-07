@@ -41,6 +41,7 @@ import { ChatbotPage } from "./pages/ChatbotPage";
 import { KpiPage } from "./pages/KpiPage";
 import { LoginPage } from "./pages/LoginPage";
 import { UsersPage } from "./pages/UsersPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { TwilioVoiceProvider, useTwilioVoiceOptional } from "./hooks/useTwilioVoice";
 import { CallQueueProvider } from "./hooks/useCallQueue";
 import { PostCallRemarksModal } from "./components/PostCallRemarksModal";
@@ -184,6 +185,9 @@ function DashboardApp() {
       setSelectedLeadId(null);
     }
     if (!isAdmin && tab === "users") {
+      setTab("inbox");
+    }
+    if (!isAdmin && tab === "settings") {
       setTab("inbox");
     }
   }, [isAdmin, tab]);
@@ -953,6 +957,7 @@ function DashboardApp() {
     },
     { id: "kpi", label: "KPI Generation", count: 0 },
     ...(isAdmin ? [{ id: "users" as const, label: "Users", count: 0 }] : []),
+    ...(isAdmin ? [{ id: "settings" as const, label: "Settings", count: 0 }] : []),
   ];
 
   return (
@@ -1198,6 +1203,7 @@ function DashboardApp() {
                 }}
               />
             )}
+            {tab === "settings" && isAdmin && <SettingsPage onError={setError} />}
           </main>
         </div>
       </div>
