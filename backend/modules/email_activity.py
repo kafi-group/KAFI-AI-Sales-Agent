@@ -339,12 +339,33 @@ def mark_read(
     return int(updated or 0)
 
 
+def _event_label(event: EmailActivityEvent) -> str:
+    details = event.details or {}
+    is_whatsapp = details.get("channel") == "whatsapp" or (event.title or "").startswith(
+        "WhatsApp"
+    )
+    if not is_whatsapp:
+        catalog = EVENT_CATALOG.get(event.event_type, {})
+        return catalog.get("label", event.event_type.replace("_", " ").title())
+    whatsapp_labels = {
+        "sent": "WhatsApp sent",
+        "send_failed": "WhatsApp send failed",
+        "bulk_started": "Bulk WhatsApp started",
+        "bulk_completed": "Bulk WhatsApp completed",
+        "bulk_partial": "Bulk WhatsApp partial",
+        "invalid_recipient": "WhatsApp invalid recipient",
+    }
+    return whatsapp_labels.get(
+        event.event_type,
+        event.event_type.replace("_", " ").title(),
+    )
+
+
 def event_to_dict(event: EmailActivityEvent, *, actor: AppUser | None = None) -> dict[str, Any]:
-    catalog = EVENT_CATALOG.get(event.event_type, {})
     return {
         "id": event.id,
         "event_type": event.event_type,
-        "event_label": catalog.get("label", event.event_type.replace("_", " ").title()),
+        "event_label": _event_label(event),
         "severity": event.severity,
         "title": event.title,
         "message": event.message,

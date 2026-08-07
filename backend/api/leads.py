@@ -877,7 +877,7 @@ def clean_company_fields(
 
 
 @router.get("/discover/regions", response_model=DiscoveryRegionsResponse)
-def get_discovery_regions(_: AppUser = Depends(require_admin)):
+def get_discovery_regions(_: AppUser = Depends(get_current_user)):
     data = list_discovery_regions()
     return DiscoveryRegionsResponse(**data)
 
@@ -886,7 +886,7 @@ def get_discovery_regions(_: AppUser = Depends(require_admin)):
 def discover_similar_leads(
     payload: DiscoverLeadsRequest,
     db: Session = Depends(get_db),
-    _: AppUser = Depends(require_admin),
+    _: AppUser = Depends(get_current_user),
 ):
     result = discover_leads(
         db,
@@ -913,7 +913,7 @@ def discover_similar_leads(
 def enrich_discovered_lead(
     payload: DiscoveryCandidateRead,
     db: Session = Depends(get_db),
-    _: AppUser = Depends(require_admin),
+    _: AppUser = Depends(get_current_user),
 ):
     candidate = discovery_candidate_from_dict(payload.model_dump())
     enrich_discovery_candidate(candidate)

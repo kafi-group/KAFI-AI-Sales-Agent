@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { client } from "../api/client";
 import { useTwilioVoice } from "../hooks/useTwilioVoice";
 import { type CallOutcome, callOutcomeSectionHint } from "../utils/callOutcomes";
@@ -48,8 +49,8 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     clearPendingFollowUp();
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60">
       <div
         className="w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-xl border border-slate-700 bg-slate-900 shadow-2xl p-5 space-y-4"
         role="dialog"
@@ -89,6 +90,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
           Skip for now
         </ActionButton>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

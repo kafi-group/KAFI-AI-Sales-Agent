@@ -949,6 +949,7 @@ class VoiceTokenRead(BaseModel):
 
 class CallInitiateRequest(BaseModel):
     contact_id: Optional[int] = None
+    phone: Optional[str] = None
 
 
 class ManualCallRequest(BaseModel):

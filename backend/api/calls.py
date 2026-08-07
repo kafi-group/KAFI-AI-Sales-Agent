@@ -368,6 +368,7 @@ def initiate_lead_call(
             db,
             buyer_id=lead_id,
             contact_id=payload.contact_id,
+            phone=payload.phone,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

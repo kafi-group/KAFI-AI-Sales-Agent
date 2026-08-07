@@ -65,7 +65,7 @@ export function CallLeadButton({
 
     setCalling(true);
     try {
-      const result = await twilioVoice.placeCall(leadId, contactId);
+      const result = await twilioVoice.placeCall(leadId, contactId, phone ?? undefined);
       onSuccess?.(result);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Call failed");

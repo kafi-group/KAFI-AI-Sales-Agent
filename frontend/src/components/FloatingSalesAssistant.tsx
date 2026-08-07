@@ -126,7 +126,28 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
     }
   }, [input, sending, unlocked, messages, onNavigate, onError]);
 
-  if (enabled === false) return null;
+  if (enabled === false) {
+    return createPortal(
+      <button
+        type="button"
+        aria-label="Sales assistant unavailable"
+        title="Sales assistant not configured on server yet"
+        className="fixed z-[89] flex items-center justify-center rounded-full border border-slate-600 bg-slate-800 text-slate-500 shadow-lg opacity-70 cursor-not-allowed"
+        style={{ left: 16, bottom: 16, width: FAB_SIZE, height: FAB_SIZE }}
+        disabled
+      >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M12 3c-4.4 0-8 2.7-8 6v5l-2 2v1h20v-1l-2-2v-5c0-3.3-3.6-6-8-6Z"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>,
+      document.body,
+    );
+  }
 
   const panel = (
     <div

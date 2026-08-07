@@ -2489,7 +2489,7 @@ export const client = {
     ),
   initiateLeadCall: (
     leadId: number,
-    data: { contact_id?: number } = {},
+    data: { contact_id?: number; phone?: string } = {},
   ) =>
     request<CallInitiateResult>(`/leads/${leadId}/call`, {
       method: "POST",

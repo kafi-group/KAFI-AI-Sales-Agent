@@ -442,11 +442,32 @@ def _prepare_call_interaction(
     return payload
 
 
+def _lead_phone_from_contact(contact: Contact, *, preferred: str | None = None) -> str:
+    if preferred and preferred.strip():
+        lead_phone = normalize_e164(preferred.strip())
+        if lead_phone:
+            return lead_phone
+        raise ValueError(
+            f"Phone '{preferred}' is not valid E.164. Use international format: +971501234567"
+        )
+    for raw in (
+        contact.phone,
+        contact.primary_phone,
+        contact.secondary_mobile,
+        contact.secondary_phone,
+    ):
+        lead_phone = normalize_e164(raw or "")
+        if lead_phone:
+            return lead_phone
+    raise ValueError("Contact has no dialable phone number")
+
+
 def initiate_lead_call(
     db: Session,
     *,
     buyer_id: int,
     contact_id: int | None = None,
+    phone: str | None = None,
 ) -> dict:
     """Prepare a browser call — creates interaction; frontend dials via Twilio Voice SDK."""
     buyer = buyers_module.get_buyer(db, buyer_id)
@@ -462,19 +483,17 @@ def initiate_lead_call(
         contact = buyers_module.get_contact(db, contact_id)
         if not contact or contact.buyer_id != buyer_id:
             raise ValueError("Contact not found for this lead")
+    elif phone and phone.strip():
+        contact = _find_contact_by_phone(db, phone.strip())
+        if not contact or contact.buyer_id != buyer_id:
+            contact = _primary_contact_for_call(db, buyer_id)
     else:
         contact = _primary_contact_for_call(db, buyer_id)
 
     if not contact:
         raise ValueError("No contact with a phone number on this lead")
-    if not contact.phone or not contact.phone.strip():
-        raise ValueError("Contact has no phone number")
 
-    lead_phone = normalize_e164(contact.phone)
-    if not lead_phone:
-        raise ValueError(
-            f"Phone '{contact.phone}' is not valid E.164. Use international format: +971501234567"
-        )
+    lead_phone = _lead_phone_from_contact(contact, preferred=phone)
 
     return _prepare_call_interaction(
         db,

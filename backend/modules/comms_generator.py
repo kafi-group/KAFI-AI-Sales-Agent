@@ -660,6 +660,7 @@ class CommsGenerator:
         template_variables: list[str] | None = None,
         require_opt_in: bool = True,
         send: bool = True,
+        user_id: int | None = None,
     ) -> dict:
         import time
 
@@ -702,6 +703,7 @@ class CommsGenerator:
                 title=f"Bulk WhatsApp send started ({len(buyer_ids)} leads)",
                 message=f"Sending approved template '{template.name}'. "
                 "Per-message updates are summarized when the batch finishes.",
+                user_id=user_id,
                 details={"buyer_ids": buyer_ids, "template_id": template_id, "channel": "whatsapp"},
             )
 
@@ -759,6 +761,7 @@ class CommsGenerator:
                         template_name=template.name,
                         template_language=template.language or "en_US",
                         template_variables=variables,
+                        user_id=user_id,
                     )
                     status = (send_result or {}).get("status")
                     item["sent"] = status == "sent"
@@ -786,6 +789,7 @@ class CommsGenerator:
                         title=f"Skipped — {buyer.company_name}",
                         message=reason,
                         buyer_id=buyer_id,
+                        user_id=user_id,
                         details={"reason": reason, "channel": "whatsapp"},
                     )
 
@@ -807,6 +811,7 @@ class CommsGenerator:
                     f"{sent_count} sent, {failed_count} failed, {len(skipped)} skipped "
                     f"out of {len(buyer_ids)} selected."
                 ),
+                user_id=user_id,
                 details={
                     "sent_count": sent_count,
                     "failed_count": failed_count,
@@ -841,6 +846,7 @@ class CommsGenerator:
         template_language: str = "en_US",
         template_variables: list[str] | None = None,
         mailbox_user=None,
+        user_id: int | None = None,
     ) -> tuple[Interaction, dict | None]:
         draft = db.get(Interaction, interaction_id)
         if not draft:
@@ -872,6 +878,7 @@ class CommsGenerator:
                 template_name=template_name or draft.template_name,
                 template_language=template_language,
                 template_variables=template_variables,
+                user_id=user_id,
             )
 
         return draft, send_result
@@ -946,6 +953,7 @@ class CommsGenerator:
         template_name: str | None,
         template_language: str,
         template_variables: list[str] | None,
+        user_id: int | None = None,
     ) -> dict:
         from modules import email_activity
 
@@ -1014,6 +1022,7 @@ class CommsGenerator:
                     else f"WhatsApp send failed — {buyer.company_name if buyer else 'lead'}"
                 ),
                 message=send_result.get("message") or "",
+                user_id=user_id,
                 buyer_id=contact.buyer_id,
                 contact_id=contact.id,
                 interaction_id=draft.id,

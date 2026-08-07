@@ -150,7 +150,7 @@ def list_whatsapp_templates(
 def create_whatsapp_template(
     payload: WhatsAppTemplateCreateRequest,
     db: Session = Depends(get_db),
-    user: AppUser = Depends(require_admin),
+    user: AppUser = Depends(get_current_user),
 ):
     """Submit a new WhatsApp template to Meta for review."""
     from modules import whatsapp_templates as templates_module
@@ -250,6 +250,7 @@ def create_whatsapp_campaign_drafts(
             require_opt_in=payload.require_opt_in,
             # Bulk WhatsApp always sends immediately — no approval queue.
             send=True,
+            user_id=user.id,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -378,6 +379,7 @@ def reply_to_whatsapp_conversation(
                 template_name=payload.template_name,
                 template_language=payload.template_language or "en_US",
                 template_variables=payload.template_variables or None,
+                user_id=user.id,
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc

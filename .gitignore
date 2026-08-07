@@ -40,3 +40,4 @@ backend/storage/quotations/*.html
 backend/storage/email_attachments/
 backend/storage/call_recordings/
 backend/storage/inbox_cutoff.json
+.vercel

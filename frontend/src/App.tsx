@@ -183,10 +183,6 @@ function DashboardApp() {
   }, [logout]);
 
   useEffect(() => {
-    if (!isAdmin && tab === "leads") {
-      setTab("inbox");
-      setSelectedLeadId(null);
-    }
     if (!isAdmin && tab === "users") {
       setTab("inbox");
     }
@@ -215,17 +211,13 @@ function DashboardApp() {
   }, [isAdmin, tableSection]);
 
   const loadDiscoverLeadsCount = useCallback(async () => {
-    if (!isAdmin) {
-      setDiscoverLeadsCount(0);
-      return;
-    }
     try {
       const result = await client.listLeads({ page: 1, page_size: 1 });
       setDiscoverLeadsCount(result.total);
     } catch {
       setDiscoverLeadsCount(0);
     }
-  }, [isAdmin]);
+  }, []);
 
   const loadEmailTemplateCount = useCallback(async () => {
     try {
@@ -908,9 +900,7 @@ function DashboardApp() {
         },
       ],
     },
-    ...(isAdmin
-      ? [{ id: "leads" as const, label: "Discover Leads", count: discoverLeadsCount }]
-      : []),
+    { id: "leads" as const, label: "Discover Leads", count: discoverLeadsCount },
     {
       id: "table",
       label: isAdmin ? "Master table" : "Clients table",
@@ -1139,7 +1129,7 @@ function DashboardApp() {
                 onInitialContactConsumed={() => setPendingWhatsAppContactId(null)}
               />
             )}
-            {tab === "leads" && isAdmin && selectedLeadId !== null && (
+            {tab === "leads" && selectedLeadId !== null && (
               <BuyerProfile
                 leadId={selectedLeadId}
                 onBack={handleBackFromProfile}
@@ -1149,7 +1139,7 @@ function DashboardApp() {
                 canDiscover
               />
             )}
-            {tab === "leads" && isAdmin && selectedLeadId === null && (
+            {tab === "leads" && selectedLeadId === null && (
               <LeadsPage
                 onError={setError}
                 onSelectLead={handleSelectLead}
@@ -1163,7 +1153,7 @@ function DashboardApp() {
                 onError={setError}
                 onCallFollowUpSaved={handleCallFollowUpSaved}
                 onOpenWhatsAppChat={handleOpenWhatsAppChat}
-                canDiscover={isAdmin}
+                canDiscover
               />
             )}
             {tab === "table" && selectedLeadId === null && (
@@ -1192,7 +1182,7 @@ function DashboardApp() {
                 onError={setError}
                 onCallFollowUpSaved={handleCallFollowUpSaved}
                 onOpenWhatsAppChat={handleOpenWhatsAppChat}
-                canDiscover={isAdmin}
+                canDiscover
               />
             )}
             {tab === "calls" && selectedLeadId === null && (

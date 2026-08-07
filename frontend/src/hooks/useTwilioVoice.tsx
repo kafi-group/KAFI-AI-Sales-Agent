@@ -35,7 +35,7 @@ interface TwilioVoiceContextValue {
   /** When true the global PostCallRemarksModal is suppressed (bulk queue handles it). */
   bulkModeActive: boolean;
   setBulkModeActive: (active: boolean) => void;
-  placeCall: (leadId: number, contactId?: number) => Promise<CallInitiateResult>;
+  placeCall: (leadId: number, contactId?: number, phone?: string) => Promise<CallInitiateResult>;
   placeManualCall: (
     phone: string,
     options?: { contactName?: string; country?: string },
@@ -271,7 +271,7 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const placeCall = useCallback(
-    async (leadId: number, contactId?: number) => {
+    async (leadId: number, contactId?: number, phone?: string) => {
       const device = deviceRef.current;
       if (!device) {
         await initDevice();
@@ -281,7 +281,10 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
         throw new Error("Twilio calling is not ready. Check your Twilio setup in backend/.env");
       }
 
-      const prep = await client.initiateLeadCall(leadId, { contact_id: contactId });
+      const prep = await client.initiateLeadCall(leadId, {
+        contact_id: contactId,
+        phone: phone?.trim() || undefined,
+      });
       if (!prep.lead_phone) {
         throw new Error("Lead phone number missing");
       }

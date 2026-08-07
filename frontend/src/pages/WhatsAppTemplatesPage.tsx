@@ -144,10 +144,6 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
 
   async function handleCreateSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!isAdmin) {
-      onError("Only an admin can submit WhatsApp templates to Meta.");
-      return;
-    }
     setSubmitting(true);
     setNotice(null);
     setSubmitError(null);
@@ -245,19 +241,17 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
           </p>
         </div>
         <div className="flex flex-wrap gap-2 shrink-0">
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => {
-                setShowCreator((open) => !open);
-                setNotice(null);
-              }}
-              disabled={!config?.configured}
-              className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-medium disabled:opacity-50"
-            >
-              {showCreator ? "Close creator" : "Create template"}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => {
+              setShowCreator((open) => !open);
+              setNotice(null);
+            }}
+            disabled={!config?.configured}
+            className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-medium disabled:opacity-50"
+          >
+            {showCreator ? "Close creator" : "Create template"}
+          </button>
           <button
             type="button"
             onClick={() => void handleSync()}
@@ -357,7 +351,7 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
         </p>
       )}
 
-      {isAdmin && showCreator && config?.configured && (
+      {showCreator && config?.configured && (
         <form
           onSubmit={(e) => void handleCreateSubmit(e)}
           className="rounded-xl border border-slate-800 bg-slate-900/50 p-5 space-y-4"

@@ -100,10 +100,9 @@ export const INDEX_SECTIONS: IndexSection[] = [
       {
         id: "2.1",
         title: "Discover Leads",
-        description: "Search and add new prospects from the web (admin).",
+        description: "Search and add new prospects from the web.",
         icon: "search",
         action: { type: "tab", tab: "leads" },
-        adminOnly: true,
       },
       {
         id: "2.2",

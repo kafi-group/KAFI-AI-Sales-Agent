@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   client,
@@ -36,6 +36,7 @@ export function BulkWhatsAppModal({
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [templateId, setTemplateId] = useState("");
+  const [templateSearch, setTemplateSearch] = useState("");
   const [variables, setVariables] = useState<string[]>([]);
   const [requireOptIn, setRequireOptIn] = useState(buyerIds.length > 1);
 
@@ -60,6 +61,17 @@ export function BulkWhatsAppModal({
   }, [refreshTemplates]);
 
   const selectedTemplate = templates.find((t) => String(t.id) === templateId);
+  const filteredTemplates = useMemo(() => {
+    const q = templateSearch.trim().toLowerCase();
+    if (!q) return templates;
+    return templates.filter((t) => {
+      const haystack = [t.name, t.category, t.language, t.body_text]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [templateSearch, templates]);
   const isMarketing = (selectedTemplate?.category || "").toUpperCase() === "MARKETING";
 
   useEffect(() => {
@@ -142,8 +154,16 @@ export function BulkWhatsAppModal({
               sync from Meta once your templates are approved.
             </p>
           ) : (
-            <ul className="space-y-2">
-              {templates.map((template) => {
+            <>
+              <input
+                type="search"
+                value={templateSearch}
+                onChange={(e) => setTemplateSearch(e.target.value)}
+                placeholder="Search templates by name, category, body…"
+                className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
+              />
+              <ul className="space-y-2">
+                {filteredTemplates.map((template) => {
                 const selected = String(template.id) === templateId;
                 return (
                   <li key={template.id}>
@@ -167,7 +187,11 @@ export function BulkWhatsAppModal({
                   </li>
                 );
               })}
-            </ul>
+              </ul>
+              {filteredTemplates.length === 0 && (
+                <p className="text-sm text-slate-500">No templates match your search.</p>
+              )}
+            </>
           )}
 
           {selectedTemplate && variables.length > 0 && (
