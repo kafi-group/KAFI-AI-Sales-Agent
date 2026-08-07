@@ -72,6 +72,8 @@ def list_email_activity(
 @router.get("/insights", response_model=EmailActivityInsights)
 def email_activity_insights(
     days: int | None = 30,
+    date_from: Optional[str] = Query(None, description="YYYY-MM-DD inclusive start"),
+    date_to: Optional[str] = Query(None, description="YYYY-MM-DD inclusive end"),
     channel: Optional[ChannelParam] = Query("email"),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
@@ -80,13 +82,21 @@ def email_activity_insights(
     period = None if days is not None and int(days) <= 0 else (days if days is not None else 30)
     if period is not None:
         period = max(1, min(int(period), 3650))
-    return email_activity.insights_stats(
-        db,
-        days=period,
-        user_id=user.id,
-        is_admin=_is_admin(user),
-        channel=_parse_channel(channel),
-    )
+    # Custom range overrides rolling `days` window.
+    if date_from or date_to:
+        period = None
+    try:
+        return email_activity.insights_stats(
+            db,
+            days=period,
+            date_from=date_from,
+            date_to=date_to,
+            user_id=user.id,
+            is_admin=_is_admin(user),
+            channel=_parse_channel(channel),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/catalog", response_model=list[EmailActivityCatalogItem])

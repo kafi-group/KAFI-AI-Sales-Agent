@@ -659,6 +659,7 @@ class EmailActivityModeStats(BaseModel):
 class EmailActivityInsights(BaseModel):
     period_days: int | None = None
     since: str | None = None
+    until: str | None = None
     tracking_enabled: bool = False
     totals: EmailActivityModeStats
     individual: EmailActivityModeStats

@@ -849,6 +849,7 @@ export interface EmailActivityModeStats {
 export interface EmailActivityInsights {
   period_days: number | null;
   since: string | null;
+  until?: string | null;
   tracking_enabled: boolean;
   totals: EmailActivityModeStats;
   individual: EmailActivityModeStats;
@@ -1950,13 +1951,33 @@ export const client = {
   listEmailActivityCatalog: () =>
     request<EmailActivityCatalogItem[]>("/email-activity/catalog"),
   getEmailActivityInsights: (
-    days?: number | null,
-    channel: "email" | "whatsapp" = "email",
+    params?:
+      | number
+      | null
+      | {
+          days?: number | null;
+          date_from?: string;
+          date_to?: string;
+          channel?: "email" | "whatsapp";
+        },
+    channelArg: "email" | "whatsapp" = "email",
   ) => {
     const search = new URLSearchParams();
-    if (days === null) search.set("days", "0");
-    else if (days != null) search.set("days", String(days));
-    search.set("channel", channel);
+    if (params != null && typeof params === "object") {
+      if (params.date_from || params.date_to) {
+        if (params.date_from) search.set("date_from", params.date_from);
+        if (params.date_to) search.set("date_to", params.date_to);
+      } else if (params.days === null) {
+        search.set("days", "0");
+      } else if (params.days != null) {
+        search.set("days", String(params.days));
+      }
+      search.set("channel", params.channel ?? "email");
+    } else {
+      if (params === null) search.set("days", "0");
+      else if (params != null) search.set("days", String(params));
+      search.set("channel", channelArg);
+    }
     const query = search.toString();
     return request<EmailActivityInsights>(`/email-activity/insights${query ? `?${query}` : ""}`);
   },

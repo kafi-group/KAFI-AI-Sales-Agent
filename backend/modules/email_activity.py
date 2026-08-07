@@ -396,20 +396,53 @@ def insights_stats(
     db: Session,
     *,
     days: int | None = 30,
+    date_from: str | None = None,
+    date_to: str | None = None,
     user_id: int | None = None,
     is_admin: bool = False,
     channel: ActivityChannel | None = "email",
 ) -> dict[str, Any]:
     """Aggregate outbound activity into bulk vs individual insight cards."""
-    from modules.email_tracking import public_api_base
+    from datetime import date, time, timedelta
 
     query = _scoped_query(db, user_id=user_id, is_admin=is_admin, channel=channel)
     since = None
-    if days and days > 0:
-        from datetime import timedelta
+    until = None
+    period_days = days
 
+    def _parse_day(value: str | None, *, end_of_day: bool) -> datetime | None:
+        if not value:
+            return None
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            day = date.fromisoformat(raw[:10])
+        except ValueError as exc:
+            raise ValueError(f"Invalid date '{value}'. Use YYYY-MM-DD.") from exc
+        if end_of_day:
+            return datetime.combine(day, time(23, 59, 59, 999999), tzinfo=timezone.utc)
+        return datetime.combine(day, time.min, tzinfo=timezone.utc)
+
+    if date_from or date_to:
+        since = _parse_day(date_from, end_of_day=False)
+        until = _parse_day(date_to, end_of_day=True)
+        if since and until and until < since:
+            raise ValueError("date_to must be on or after date_from")
+        if since is not None:
+            query = query.filter(EmailActivityEvent.created_at >= since)
+        if until is not None:
+            query = query.filter(EmailActivityEvent.created_at <= until)
+        if since and until:
+            period_days = max(1, (until.date() - since.date()).days + 1)
+        else:
+            period_days = None
+    elif days and days > 0:
         since = datetime.now(timezone.utc) - timedelta(days=days)
         query = query.filter(EmailActivityEvent.created_at >= since)
+        period_days = days
+    else:
+        period_days = None
 
     rows = list(query.all())
 
@@ -430,6 +463,8 @@ def insights_stats(
             )
             if since is not None:
                 orphan_q = orphan_q.filter(EmailActivityEvent.created_at >= since)
+            if until is not None:
+                orphan_q = orphan_q.filter(EmailActivityEvent.created_at <= until)
             for orphan in orphan_q.all():
                 if orphan.id not in seen_open_ids:
                     rows.append(orphan)
@@ -512,8 +547,9 @@ def insights_stats(
     from modules.email_tracking import public_api_base
 
     return {
-        "period_days": days,
+        "period_days": period_days,
         "since": since.isoformat() if since else None,
+        "until": until.isoformat() if until else None,
         "tracking_enabled": bool(public_api_base()),
         "totals": {
             "attempted": total_attempted,

@@ -19,7 +19,21 @@ interface EmailActivityPageProps {
 const PAGE_SIZE = 25;
 const POLL_MS = 12_000;
 
-type InsightsPeriod = 7 | 30 | 90 | null;
+type InsightsPreset = 1 | 7 | 30 | 90 | null | "range";
+
+function isoDateLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function defaultRangeBounds(): { from: string; to: string } {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 6);
+  return { from: isoDateLocal(from), to: isoDateLocal(to) };
+}
 
 function severityClasses(severity: string) {
   switch (severity) {
@@ -134,7 +148,9 @@ export function EmailActivityPage({
   const [showCatalog, setShowCatalog] = useState(false);
   // Insights open by default for email so mailer + in-app sends are easy to review.
   const [showInsights, setShowInsights] = useState(channel === "email");
-  const [insightsPeriod, setInsightsPeriod] = useState<InsightsPeriod>(30);
+  const [insightsPeriod, setInsightsPeriod] = useState<InsightsPreset>(30);
+  const [rangeFrom, setRangeFrom] = useState(() => defaultRangeBounds().from);
+  const [rangeTo, setRangeTo] = useState(() => defaultRangeBounds().to);
   const [insights, setInsights] = useState<EmailActivityInsights | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -167,9 +183,22 @@ export function EmailActivityPage({
   }, [channel, isWhatsApp, onError, onUnreadChange, page, unreadOnly]);
 
   const refreshInsights = useCallback(async () => {
+    if (insightsPeriod === "range" && !rangeFrom && !rangeTo) {
+      return;
+    }
     setInsightsLoading(true);
     try {
-      const result = await client.getEmailActivityInsights(insightsPeriod, channel);
+      const result =
+        insightsPeriod === "range"
+          ? await client.getEmailActivityInsights({
+              date_from: rangeFrom || undefined,
+              date_to: rangeTo || undefined,
+              channel,
+            })
+          : await client.getEmailActivityInsights({
+              days: insightsPeriod,
+              channel,
+            });
       setInsights(result);
     } catch (e) {
       onError(
@@ -182,7 +211,7 @@ export function EmailActivityPage({
     } finally {
       setInsightsLoading(false);
     }
-  }, [channel, insightsPeriod, isWhatsApp, onError]);
+  }, [channel, insightsPeriod, isWhatsApp, onError, rangeFrom, rangeTo]);
 
   useEffect(() => {
     setPage(1);
@@ -320,28 +349,63 @@ export function EmailActivityPage({
                   : "Sent vs failed, opened vs not opened, split by individual and bulk outreach."}
               </p>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {(
-                [
-                  [7, "7d"],
-                  [30, "30d"],
-                  [90, "90d"],
-                  [null, "All"],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => setInsightsPeriod(value)}
-                  className={`px-2.5 py-1 rounded-md text-xs border ${
-                    insightsPeriod === value
-                      ? "bg-sky-600 border-sky-500 text-white"
-                      : "bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="flex flex-col items-end gap-2">
+              <div className="flex flex-wrap justify-end gap-1.5">
+                {(
+                  [
+                    [1, "Daily"],
+                    [7, "7d"],
+                    [30, "30d"],
+                    [90, "90d"],
+                    [null, "All"],
+                    ["range", "Range"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => {
+                      if (value === "range") {
+                        const bounds = defaultRangeBounds();
+                        setRangeFrom((prev) => prev || bounds.from);
+                        setRangeTo((prev) => prev || bounds.to);
+                      }
+                      setInsightsPeriod(value);
+                    }}
+                    className={`px-2.5 py-1 rounded-md text-xs border ${
+                      insightsPeriod === value
+                        ? "bg-sky-600 border-sky-500 text-white"
+                        : "bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {insightsPeriod === "range" ? (
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <label className="flex items-center gap-1.5 text-xs text-slate-400">
+                    <span>From</span>
+                    <input
+                      type="date"
+                      value={rangeFrom}
+                      max={rangeTo || undefined}
+                      onChange={(e) => setRangeFrom(e.target.value)}
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200"
+                    />
+                  </label>
+                  <label className="flex items-center gap-1.5 text-xs text-slate-400">
+                    <span>To</span>
+                    <input
+                      type="date"
+                      value={rangeTo}
+                      min={rangeFrom || undefined}
+                      onChange={(e) => setRangeTo(e.target.value)}
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200"
+                    />
+                  </label>
+                </div>
+              ) : null}
             </div>
           </div>
 
