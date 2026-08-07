@@ -55,6 +55,26 @@ function formatWhen(iso: string | null) {
   return date.toLocaleString();
 }
 
+const WHATSAPP_EVENT_LABELS: Record<string, string> = {
+  sent: "WhatsApp sent",
+  send_failed: "WhatsApp send failed",
+  bulk_started: "Bulk WhatsApp started",
+  bulk_completed: "Bulk WhatsApp completed",
+  bulk_partial: "Bulk WhatsApp partial",
+  invalid_recipient: "WhatsApp invalid recipient",
+};
+
+function activityEventLabel(event: EmailActivityEvent, isWhatsApp: boolean): string {
+  if (!isWhatsApp) return event.event_label;
+  const fromType = WHATSAPP_EVENT_LABELS[event.event_type];
+  if (fromType) return fromType;
+  if (/^email sent$/i.test(event.event_label.trim())) return "WhatsApp sent";
+  if (event.title?.startsWith("WhatsApp") || event.title?.startsWith("Bulk WhatsApp")) {
+    return event.event_label.replace(/^email sent/i, "WhatsApp sent");
+  }
+  return event.event_label;
+}
+
 function StatTile({
   label,
   value,
@@ -540,8 +560,8 @@ export function EmailActivityPage({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[11px] uppercase tracking-wide opacity-70">
-                        {event.event_label}
+                      <span className="text-[11px] uppercase tracking-wide text-white/80">
+                        {activityEventLabel(event, isWhatsApp)}
                       </span>
                       {unread && (
                         <span className="text-[10px] uppercase tracking-wide rounded bg-emerald-500/20 px-1.5 py-0.5 text-emerald-200">

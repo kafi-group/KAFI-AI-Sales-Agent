@@ -523,12 +523,12 @@ export function WhatsAppInboxPage({
                       key={msg.id}
                       className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
                         msg.direction === "inbound"
-                          ? "bg-slate-800 text-slate-200 mr-auto"
-                          : "bg-emerald-600/20 border border-emerald-600/30 text-emerald-100 ml-auto"
+                          ? "bg-[#202c33] text-[#e9edef] mr-auto"
+                          : "bg-[#005c4b] text-white ml-auto"
                       }`}
                     >
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
-                      <p className="text-[10px] text-slate-500 mt-1">
+                      <p className="whitespace-pre-wrap text-inherit">{msg.content}</p>
+                      <p className="text-[10px] text-white/60 mt-1">
                         {formatDate(msg.created_at)}
                         {msg.direction === "outbound" && msg.wa_status
                           ? ` · ${msg.wa_status}`

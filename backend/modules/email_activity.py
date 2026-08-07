@@ -339,33 +339,55 @@ def mark_read(
     return int(updated or 0)
 
 
-def _event_label(event: EmailActivityEvent) -> str:
-    details = event.details or {}
-    is_whatsapp = details.get("channel") == "whatsapp" or (event.title or "").startswith(
-        "WhatsApp"
-    )
-    if not is_whatsapp:
-        catalog = EVENT_CATALOG.get(event.event_type, {})
-        return catalog.get("label", event.event_type.replace("_", " ").title())
-    whatsapp_labels = {
-        "sent": "WhatsApp sent",
-        "send_failed": "WhatsApp send failed",
-        "bulk_started": "Bulk WhatsApp started",
-        "bulk_completed": "Bulk WhatsApp completed",
-        "bulk_partial": "Bulk WhatsApp partial",
-        "invalid_recipient": "WhatsApp invalid recipient",
-    }
-    return whatsapp_labels.get(
-        event.event_type,
-        event.event_type.replace("_", " ").title(),
+WHATSAPP_EVENT_LABELS: dict[str, str] = {
+    "sent": "WhatsApp sent",
+    "send_failed": "WhatsApp send failed",
+    "bulk_started": "Bulk WhatsApp started",
+    "bulk_completed": "Bulk WhatsApp completed",
+    "bulk_partial": "Bulk WhatsApp partial",
+    "invalid_recipient": "WhatsApp invalid recipient",
+}
+
+
+def _is_whatsapp_event(event: EmailActivityEvent) -> bool:
+    details = event.details if isinstance(event.details, dict) else {}
+    title = event.title or ""
+    channel = str(details.get("channel") or "").lower()
+    return (
+        channel == "whatsapp"
+        or title.startswith("WhatsApp")
+        or title.startswith("Bulk WhatsApp")
+        or "WhatsApp" in title
     )
 
 
-def event_to_dict(event: EmailActivityEvent, *, actor: AppUser | None = None) -> dict[str, Any]:
+def _whatsapp_event_label(event: EmailActivityEvent) -> str:
+    if event.event_type in WHATSAPP_EVENT_LABELS:
+        return WHATSAPP_EVENT_LABELS[event.event_type]
+    return event.event_type.replace("_", " ").title()
+
+
+def _event_label(
+    event: EmailActivityEvent,
+    *,
+    channel: ActivityChannel | None = None,
+) -> str:
+    if channel == "whatsapp" or _is_whatsapp_event(event):
+        return _whatsapp_event_label(event)
+    catalog = EVENT_CATALOG.get(event.event_type, {})
+    return catalog.get("label", event.event_type.replace("_", " ").title())
+
+
+def event_to_dict(
+    event: EmailActivityEvent,
+    *,
+    actor: AppUser | None = None,
+    channel: ActivityChannel | None = None,
+) -> dict[str, Any]:
     return {
         "id": event.id,
         "event_type": event.event_type,
-        "event_label": _event_label(event),
+        "event_label": _event_label(event, channel=channel),
         "severity": event.severity,
         "title": event.title,
         "message": event.message,

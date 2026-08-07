@@ -63,7 +63,11 @@ def list_email_activity(
         page_size=page_size,
         total_pages=total_pages,
         rows=[
-            email_activity.event_to_dict(row, actor=actors.get(row.user_id) if row.user_id else None)
+            email_activity.event_to_dict(
+                row,
+                actor=actors.get(row.user_id) if row.user_id else None,
+                channel=ch,
+            )
             for row in rows
         ],
     )
