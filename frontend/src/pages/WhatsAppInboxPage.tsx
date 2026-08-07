@@ -497,45 +497,52 @@ export function WhatsAppInboxPage({
             </div>
           ) : (
             <>
-              <div className="px-4 py-3 border-b border-slate-800">
+              <div className="px-4 py-3 border-b border-[#2a3942] bg-[#202c33]">
                 <button
                   type="button"
                   onClick={() => setSelected(null)}
-                  className="md:hidden text-sm text-slate-400 hover:text-slate-200 mb-2"
+                  className="md:hidden text-sm text-[#8696a0] hover:text-[#e9edef] mb-2"
                 >
                   ← Back to list
                 </button>
-                <p className="text-sm font-medium text-slate-200">
+                <p className="text-sm font-medium text-[#e9edef]">
                   {selected.company_name || selected.contact_name}
                 </p>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-[#8696a0]">
                   {selected.contact_name} · {selected.contact_phone}
                 </p>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[50vh]">
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[50vh] bg-[#0b141a]">
                 {loadingThread ? (
                   <p className="text-sm text-slate-400">Loading messages…</p>
                 ) : messages.length === 0 ? (
                   <p className="text-sm text-slate-500">No messages yet.</p>
                 ) : (
-                  messages.map((msg) => (
+                  messages.map((msg) => {
+                    const outbound = msg.direction === "outbound";
+                    const status = (msg.wa_status || "").toLowerCase();
+                    const failed = status === "failed";
+                    return (
                     <div
                       key={msg.id}
-                      className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
-                        msg.direction === "inbound"
-                          ? "bg-[#202c33] text-[#e9edef] mr-auto"
-                          : "bg-[#005c4b] text-white ml-auto"
+                      className={`max-w-[75%] rounded-lg px-3 py-2 text-sm shadow-sm ${
+                        outbound
+                          ? "wa-chat-bubble-out ml-auto"
+                          : "wa-chat-bubble-in mr-auto"
                       }`}
                     >
-                      <p className="whitespace-pre-wrap text-inherit">{msg.content}</p>
-                      <p className="text-[10px] text-white/60 mt-1">
+                      <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                      <p
+                        className={`text-[10px] mt-1 wa-chat-meta ${
+                          failed ? "wa-chat-meta-failed" : ""
+                        }`}
+                      >
                         {formatDate(msg.created_at)}
-                        {msg.direction === "outbound" && msg.wa_status
-                          ? ` · ${msg.wa_status}`
-                          : ""}
+                        {outbound && msg.wa_status ? ` · ${msg.wa_status}` : ""}
                       </p>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
 

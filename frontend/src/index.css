@@ -117,3 +117,28 @@ html[data-theme="light"] body {
 .email-body-editor font[size="5"] {
   font-size: 1.25rem;
 }
+
+/* WhatsApp inbox — fixed colors (immune to light-theme token remaps) */
+.wa-chat-bubble-out {
+  background-color: #005c4b;
+  color: #e9edef !important;
+}
+.wa-chat-bubble-in {
+  background-color: #202c33;
+  color: #e9edef !important;
+}
+.wa-chat-bubble-out :is(p, span, a, strong, em),
+.wa-chat-bubble-in :is(p, span, a, strong, em) {
+  color: inherit !important;
+}
+.wa-chat-bubble-out a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.wa-chat-meta {
+  color: rgba(233, 237, 239, 0.65) !important;
+}
+.wa-chat-meta-failed {
+  color: #fca5a5 !important;
+  font-weight: 600;
+}
