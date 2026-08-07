@@ -56,23 +56,22 @@ function formatWhen(iso: string | null) {
 }
 
 const WHATSAPP_EVENT_LABELS: Record<string, string> = {
-  sent: "WhatsApp sent",
-  send_failed: "WhatsApp send failed",
-  bulk_started: "Bulk WhatsApp started",
-  bulk_completed: "Bulk WhatsApp completed",
-  bulk_partial: "Bulk WhatsApp partial",
-  invalid_recipient: "WhatsApp invalid recipient",
+  sent: "Sent",
+  send_failed: "Failed",
+  bulk_started: "Bulk started",
+  bulk_completed: "Bulk completed",
+  bulk_partial: "Bulk partial",
+  invalid_recipient: "Invalid recipient",
 };
 
 function activityEventLabel(event: EmailActivityEvent, isWhatsApp: boolean): string {
   if (!isWhatsApp) return event.event_label;
-  const fromType = WHATSAPP_EVENT_LABELS[event.event_type];
-  if (fromType) return fromType;
-  if (/^email sent$/i.test(event.event_label.trim())) return "WhatsApp sent";
-  if (event.title?.startsWith("WhatsApp") || event.title?.startsWith("Bulk WhatsApp")) {
-    return event.event_label.replace(/^email sent/i, "WhatsApp sent");
+  if (WHATSAPP_EVENT_LABELS[event.event_type]) {
+    return WHATSAPP_EVENT_LABELS[event.event_type];
   }
-  return event.event_label;
+  if (/^email sent$/i.test(event.event_label.trim())) return "Sent";
+  if (event.title?.startsWith("WhatsApp") && event.event_type === "sent") return "Sent";
+  return event.event_label.replace(/^email sent/i, "Sent");
 }
 
 function StatTile({

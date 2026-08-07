@@ -340,12 +340,12 @@ def mark_read(
 
 
 WHATSAPP_EVENT_LABELS: dict[str, str] = {
-    "sent": "WhatsApp sent",
-    "send_failed": "WhatsApp send failed",
-    "bulk_started": "Bulk WhatsApp started",
-    "bulk_completed": "Bulk WhatsApp completed",
-    "bulk_partial": "Bulk WhatsApp partial",
-    "invalid_recipient": "WhatsApp invalid recipient",
+    "sent": "Sent",
+    "send_failed": "Failed",
+    "bulk_started": "Bulk started",
+    "bulk_completed": "Bulk completed",
+    "bulk_partial": "Bulk partial",
+    "invalid_recipient": "Invalid recipient",
 }
 
 
