@@ -2785,15 +2785,7 @@ export function LeadsTablePage({
         </div>
       ) : (
         <div className={tableOuterClass}>
-          <div className="flex items-center justify-between gap-2 px-2 py-1 border-b border-slate-800/80 bg-slate-950 shrink-0">
-            <ColumnVisibilityMenu
-              columns={columnsUi.columns}
-              isVisible={columnsUi.isVisible}
-              toggle={columnsUi.toggle}
-              showAll={columnsUi.showAll}
-              resetDefaults={columnsUi.resetDefaults}
-              hiddenCount={columnsUi.hiddenCount}
-            />
+          <div className="flex items-center justify-end gap-2 px-2 py-1 border-b border-slate-800/80 bg-slate-950 shrink-0">
             <div className="flex items-center gap-1">
               <button
                 type="button"
@@ -2839,6 +2831,14 @@ export function LeadsTablePage({
                 {isFullscreen ? <FullscreenCollapseIcon /> : <FullscreenExpandIcon />}
               </button>
             </div>
+            <ColumnVisibilityMenu
+              columns={columnsUi.columns}
+              isVisible={columnsUi.isVisible}
+              toggle={columnsUi.toggle}
+              showAll={columnsUi.showAll}
+              resetDefaults={columnsUi.resetDefaults}
+              hiddenCount={columnsUi.hiddenCount}
+            />
           </div>
           <div
             ref={topScrollRef}
