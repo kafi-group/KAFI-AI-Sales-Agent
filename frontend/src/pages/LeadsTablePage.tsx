@@ -506,12 +506,20 @@ function normalizeSocialUrl(value: string | null | undefined): string | null {
   return `https://${trimmed}`;
 }
 
+function normalizeWebsiteUrl(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^www\./i.test(trimmed)) return `https://${trimmed}`;
+  return `https://${trimmed}`;
+}
+
 function buildUpdatePayload(draft: LeadTableRow): LeadTableRowUpdate {
   return {
     company_name: draft.company_name,
     country: draft.country ?? undefined,
     industry: draft.industry ?? undefined,
-    website_url: draft.website_url ?? undefined,
+    website_url: normalizeWebsiteUrl(draft.website_url) ?? undefined,
     linkedin_company_url: normalizeSocialUrl(draft.linkedin_company_url),
     facebook_company_url: normalizeSocialUrl(draft.facebook_company_url),
     instagram_company_url: normalizeSocialUrl(draft.instagram_company_url),
@@ -3496,7 +3504,7 @@ export function LeadsTablePage({
                           value={draft.website_url ?? ""}
                           onChange={(e) => updateDraft(row.id, "website_url", e.target.value)}
                           onClick={(e) => e.stopPropagation()}
-                          placeholder="https://..."
+                          placeholder="example.com"
                           className={EDIT_INPUT}
                           {...spellingPropsForLeadField("website_url")}
                         />

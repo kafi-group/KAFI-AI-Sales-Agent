@@ -1,10 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { LogoWhatsApp } from "./icons/BrandLogos";
+import { IconBell, IconMail, IconRefresh, IconSignOut } from "./icons/AppIcons";
 import { ThemeToggle } from "./ThemeToggle";
-import {
-  IconBell,
-  IconRefresh,
-  IconSignOut,
-} from "./icons/AppIcons";
+import { useEffect, useRef, useState } from "react";
 import {
   getNotificationMode,
   getNotificationPermission,
@@ -20,6 +17,10 @@ interface AppTopActionsProps {
   onLogout?: () => void;
   /** Compact strip for the mobile header. */
   compact?: boolean;
+  whatsappUnread?: number;
+  emailUnread?: number;
+  onOpenWhatsApp?: () => void;
+  onOpenEmail?: () => void;
 }
 
 const MODE_OPTIONS: { value: NotificationMode; label: string; hint: string }[] = [
@@ -40,7 +41,21 @@ const MODE_OPTIONS: { value: NotificationMode; label: string; hint: string }[] =
   },
 ];
 
-export function AppTopActions({ onRefresh, onLogout, compact = false }: AppTopActionsProps) {
+function formatBadge(count: number): string {
+  if (count <= 0) return "";
+  if (count > 99) return "99+";
+  return String(count);
+}
+
+export function AppTopActions({
+  onRefresh,
+  onLogout,
+  compact = false,
+  whatsappUnread = 0,
+  emailUnread = 0,
+  onOpenWhatsApp,
+  onOpenEmail,
+}: AppTopActionsProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mode, setMode] = useState<NotificationMode>(() => getNotificationMode());
   const [notifPermission, setNotifPermission] = useState(getNotificationPermission());
@@ -83,10 +98,59 @@ export function AppTopActions({ onRefresh, onLogout, compact = false }: AppTopAc
   }
 
   const iconBtn =
-    "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-slate-100 transition";
+    "relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-slate-100 transition";
+
+  const waBadge = formatBadge(whatsappUnread);
+  const mailBadge = formatBadge(emailUnread);
 
   return (
     <div className={`relative flex items-center gap-1.5 ${compact ? "" : ""}`} ref={panelRef}>
+      <button
+        type="button"
+        className={iconBtn}
+        title={
+          whatsappUnread > 0
+            ? `WhatsApp — ${whatsappUnread} unread`
+            : "WhatsApp inbox"
+        }
+        aria-label={
+          whatsappUnread > 0
+            ? `WhatsApp, ${whatsappUnread} unread`
+            : "WhatsApp inbox"
+        }
+        onClick={() => {
+          unlockNotificationAudio();
+          onOpenWhatsApp?.();
+        }}
+      >
+        <LogoWhatsApp size="sm" />
+        {waBadge ? (
+          <span className="absolute -top-1 -right-1 min-w-[1.1rem] h-[1.1rem] px-0.5 rounded-full bg-emerald-500 text-[9px] font-semibold leading-[1.1rem] text-center text-white">
+            {waBadge}
+          </span>
+        ) : null}
+      </button>
+
+      <button
+        type="button"
+        className={iconBtn}
+        title={emailUnread > 0 ? `New emails — ${emailUnread} unread` : "Email inbox"}
+        aria-label={
+          emailUnread > 0 ? `Email inbox, ${emailUnread} unread` : "Email inbox"
+        }
+        onClick={() => {
+          unlockNotificationAudio();
+          onOpenEmail?.();
+        }}
+      >
+        <IconMail size="sm" />
+        {mailBadge ? (
+          <span className="absolute -top-1 -right-1 min-w-[1.1rem] h-[1.1rem] px-0.5 rounded-full bg-sky-500 text-[9px] font-semibold leading-[1.1rem] text-center text-white">
+            {mailBadge}
+          </span>
+        ) : null}
+      </button>
+
       <button
         type="button"
         className={iconBtn}

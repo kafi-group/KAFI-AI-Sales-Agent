@@ -8,6 +8,10 @@ import {
   capitalizeFirstLetter,
   spellingInputProps,
 } from "../utils/spelling";
+import {
+  composeWebsiteUrl,
+  type WebsitePrefix,
+} from "../utils/websiteUrl";
 
 interface CreateLeadFormProps {
   onSuccess: (leadId: number) => void;
@@ -22,7 +26,8 @@ interface CreateLeadFormProps {
 
 const emptyForm = {
   company_name: "",
-  website_url: "",
+  website_domain: "",
+  website_prefix: "https://" as WebsitePrefix,
   country: "",
   industry: "",
   contact_name: "",
@@ -94,7 +99,7 @@ export function CreateLeadForm({
 
       const lead = await client.createLead({
         company_name: companyName,
-        website_url: form.website_url.trim() || undefined,
+        website_url: composeWebsiteUrl(form.website_prefix, form.website_domain),
         country: form.country.trim() || undefined,
         industry: industry || undefined,
         source,
@@ -185,20 +190,40 @@ export function CreateLeadForm({
           onChange={(value) => updateField("industry", value)}
         />
 
-        <label className="block sm:col-span-2">
-          <span className="text-sm text-slate-400">Website URL</span>
-          <input
-            type="url"
-            value={form.website_url}
-            onChange={(e) => updateField("website_url", e.target.value)}
-            placeholder="https://..."
-            className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600"
-            {...spellingInputProps("off")}
-          />
+        <div className="block sm:col-span-2">
+          <span className="text-sm text-slate-400">Website (optional)</span>
+          <div className="mt-1 flex rounded-lg border border-slate-700 bg-slate-950 overflow-hidden focus-within:border-emerald-500/50">
+            <label className="sr-only" htmlFor="lead-website-prefix">
+              URL prefix
+            </label>
+            <select
+              id="lead-website-prefix"
+              value={form.website_prefix}
+              onChange={(e) =>
+                updateField("website_prefix", e.target.value as WebsitePrefix)
+              }
+              disabled={submitting}
+              className="shrink-0 border-r border-slate-700 bg-slate-900 px-2.5 py-2 text-sm text-slate-300 outline-none"
+            >
+              <option value="https://">https://</option>
+              <option value="http://">http://</option>
+              <option value="www.">www.</option>
+            </select>
+            <input
+              type="text"
+              inputMode="url"
+              value={form.website_domain}
+              onChange={(e) => updateField("website_domain", e.target.value)}
+              placeholder="example.com"
+              disabled={submitting}
+              className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 outline-none"
+              {...spellingInputProps("off")}
+            />
+          </div>
           <p className="text-xs text-slate-500 mt-1">
-            Used for research — add a real company website for best results.
+            Optional — enter the domain only (e.g. alnoorfoods.com). Leave blank if unknown.
           </p>
-        </label>
+        </div>
       </div>
 
       <fieldset className="border-t border-slate-800 pt-4">

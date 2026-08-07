@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { IndexAction } from "./data/indexSections";
 import {
   client,
@@ -1031,6 +1031,13 @@ function DashboardApp() {
               compact
               onRefresh={refreshAll}
               onLogout={() => void logout()}
+              whatsappUnread={whatsappActivityUnread}
+              emailUnread={inboxUnread + emailActivityUnread}
+              onOpenWhatsApp={() => handleSelectWhatsAppSection("whatsapp-inbox")}
+              onOpenEmail={() => {
+                setMailSection("inbox");
+                handleSelectTab("inbox");
+              }}
             />
           </header>
 
@@ -1049,6 +1056,13 @@ function DashboardApp() {
             <AppTopActions
               onRefresh={refreshAll}
               onLogout={() => void logout()}
+              whatsappUnread={whatsappActivityUnread}
+              emailUnread={inboxUnread + emailActivityUnread}
+              onOpenWhatsApp={() => handleSelectWhatsAppSection("whatsapp-inbox")}
+              onOpenEmail={() => {
+                setMailSection("inbox");
+                handleSelectTab("inbox");
+              }}
             />
           </div>
 
