@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ThemeToggle } from "./ThemeToggle";
 import {
+  IconBell,
   IconRefresh,
-  IconSettings,
   IconSignOut,
 } from "./icons/AppIcons";
 import {
@@ -90,15 +90,15 @@ export function AppTopActions({ onRefresh, onLogout, compact = false }: AppTopAc
       <button
         type="button"
         className={iconBtn}
-        title="Settings"
-        aria-label="Settings"
+        title="Notification settings"
+        aria-label="Notification settings"
         aria-expanded={settingsOpen}
         onClick={() => {
           unlockNotificationAudio();
           setSettingsOpen((open) => !open);
         }}
       >
-        <IconSettings size="sm" />
+        <IconBell size="sm" />
       </button>
 
       <ThemeToggle compact />
@@ -134,7 +134,7 @@ export function AppTopActions({ onRefresh, onLogout, compact = false }: AppTopAc
           aria-label="Notification settings"
         >
           <p className="text-sm font-medium text-slate-100 flex items-center gap-2">
-            <IconSettings size="sm" className="text-slate-400" />
+            <IconBell size="sm" className="text-slate-400" />
             Notifications
           </p>
           <p className="text-xs text-slate-500 mt-1 mb-3">
