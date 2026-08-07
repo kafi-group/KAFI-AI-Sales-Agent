@@ -25,6 +25,7 @@ from api.schemas import (
     InteractionRead,
     LeadScoreRead,
     LeadTableCleanupResponse,
+    LeadTableCompanyCleanResponse,
     LeadTableNameRepairResponse,
     LeadTableDedupeResponse,
     RemoveOldClientOverlapsResponse,
@@ -840,6 +841,39 @@ def repair_location_company_names(
         sleep_s=0.05 if not dry_run else 0.0,
     )
     return LeadTableNameRepairResponse(**result)
+
+
+@router.post("/table/clean-company-fields", response_model=LeadTableCompanyCleanResponse)
+def clean_company_fields(
+    source: str | None = None,
+    exclude_source: str | None = None,
+    assigned_to_user_id: int | None = None,
+    master: bool = False,
+    dry_run: bool = False,
+    limit: int | None = None,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """Usman pass-1: move address/email/placeholder values out of Company Name."""
+    from modules.old_clients_clean import clean_old_clients_company_fields
+
+    assignee_id, unassigned_only = _maintenance_assignee_scope(
+        user,
+        assigned_to_user_id=assigned_to_user_id,
+        master=master,
+    )
+    # Default scope: Old clients (Usman's cleaning reference).
+    effective_source = source if source is not None else "old_clients"
+    result = clean_old_clients_company_fields(
+        db,
+        source=effective_source,
+        exclude_source=exclude_source,
+        assigned_to_user_id=assignee_id,
+        unassigned_only=unassigned_only,
+        dry_run=dry_run,
+        limit=limit,
+    )
+    return LeadTableCompanyCleanResponse(**result)
 
 
 @router.get("/discover/regions", response_model=DiscoveryRegionsResponse)

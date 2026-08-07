@@ -46,6 +46,7 @@ import {
   IconPlus,
   IconRefresh,
   IconSearch,
+  IconSparkles,
   IconTrash,
   IconUpload,
   IconWhatsApp,
@@ -345,6 +346,23 @@ function ExpandableCell({
 const MAX_BULK_ONBOARD = 25;
 const BULK_ONBOARD_DELAY_MS = 1000;
 const BULK_DELETE_CHUNK = 40;
+
+type ResearchPatience = "fast" | "normal" | "patient";
+
+const RESEARCH_PATIENCE: Record<
+  ResearchPatience,
+  { label: string; timeoutMs: number; expectedSec: number }
+> = {
+  fast: { label: "Fast", timeoutMs: 60_000, expectedSec: 45 },
+  normal: { label: "Normal", timeoutMs: 90_000, expectedSec: 70 },
+  patient: { label: "Patient", timeoutMs: 120_000, expectedSec: 95 },
+};
+
+function defaultResearchPatience(batchSize: number): ResearchPatience {
+  if (batchSize <= 5) return "fast";
+  if (batchSize <= 15) return "normal";
+  return "patient";
+}
 
 interface BulkOnboardRowResult {
   id: number;
@@ -657,6 +675,7 @@ export function LeadsTablePage({
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [bulkOnboarding, setBulkOnboarding] = useState(false);
+  const [researchPatience, setResearchPatience] = useState<ResearchPatience>("normal");
   const [actionProgress, setActionProgress] = useState<BulkActionProgress | null>(null);
   const [bulkResults, setBulkResults] = useState<BulkOnboardRowResult[] | null>(null);
   const [showBulkEmail, setShowBulkEmail] = useState(false);
@@ -844,6 +863,11 @@ export function LeadsTablePage({
     const timer = window.setTimeout(() => setDebouncedSearch(search), 300);
     return () => window.clearTimeout(timer);
   }, [search]);
+
+  useEffect(() => {
+    if (bulkOnboarding) return;
+    setResearchPatience(defaultResearchPatience(selected.size || 1));
+  }, [selected.size, bulkOnboarding]);
 
   const isAssignedSection = isAssignedLeadsSection(section);
   const assignedSectionUserId = assignedUserIdFromSection(section);
@@ -1546,15 +1570,23 @@ export function LeadsTablePage({
       return;
     }
 
+    const patience = RESEARCH_PATIENCE[researchPatience];
     const withoutWebsite = rows.filter((row) => ids.includes(row.id) && !row.website_url?.trim());
-    const estimateSec = ids.length * 6;
+    const estimateSec = Math.round(
+      ids.length * (patience.expectedSec + BULK_ONBOARD_DELAY_MS / 1000),
+    );
+    const estimateLabel =
+      estimateSec < 60
+        ? `~${estimateSec}s`
+        : `~${Math.floor(estimateSec / 60)}m ${estimateSec % 60}s`;
     const confirmed = window.confirm(
       `Research & score ${ids.length} lead${ids.length === 1 ? "" : "s"}?\n\n` +
         `• Looks up company details and fills empty table fields (not just the score).\n` +
         (isOldClients
           ? `• Clients table priority: city & address first, then phone/email/designation.\n`
           : `• Scrapped Leads priority: website, email, phone, socials, country.\n`) +
-        `• Runs one at a time (~${estimateSec}s estimated).\n` +
+        `• Patience: ${patience.label} (${patience.timeoutMs / 1000}s max per lead).\n` +
+        `• Runs one at a time (${estimateLabel} estimated for this batch).\n` +
         (withoutWebsite.length > 0
           ? `• ${withoutWebsite.length} selected lead${withoutWebsite.length === 1 ? " has" : "s have"} no website — fit signals will be weaker.\n`
           : "") +
@@ -1566,12 +1598,14 @@ export function LeadsTablePage({
     setBulkResults(null);
     setSaveNotice(null);
     const startedAt = Date.now();
+    const patienceLabel = `${patience.label} · ${patience.timeoutMs / 1000}s/lead`;
 
     const results: BulkOnboardRowResult[] = [];
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
       const row = rows.find((r) => r.id === id);
       const companyName = row?.company_name ?? `Lead #${id}`;
+      const itemStartedAt = Date.now();
       setActionProgress({
         title: "Researching & scoring leads",
         mode: "determinate",
@@ -1580,10 +1614,14 @@ export function LeadsTablePage({
         detail: companyName,
         startedAt,
         accent: "emerald",
+        itemStartedAt,
+        itemTimeoutMs: patience.timeoutMs,
+        expectedSecPerItem: patience.expectedSec + BULK_ONBOARD_DELAY_MS / 1000,
+        patienceLabel,
       });
 
       try {
-        const result = await client.onboardLead(id);
+        const result = await client.onboardLead(id, { timeoutMs: patience.timeoutMs });
         results.push({
           id,
           company_name: companyName,
@@ -1609,6 +1647,8 @@ export function LeadsTablePage({
         detail: companyName,
         startedAt,
         accent: "emerald",
+        patienceLabel,
+        expectedSecPerItem: patience.expectedSec + BULK_ONBOARD_DELAY_MS / 1000,
       });
 
       if (i < ids.length - 1) {
@@ -1621,6 +1661,47 @@ export function LeadsTablePage({
     setBulkResults(results);
     clearSelection();
     await loadTable();
+  }
+
+  async function cleanOldClientCompanyFields() {
+    if (!isOldClients) return;
+    const confirmed = window.confirm(
+      "Clean Old clients company fields (Usman pass-1)?\n\n" +
+        "• Moves address / postcode / street text out of Company Name → Address.\n" +
+        "• Moves email-like Company Name → Primary Email when empty.\n" +
+        "• Clears dash / N/A placeholders in Company Name.\n" +
+        "• Does not delete rows. Use Fix names afterward to recover missing company names.\n\n" +
+        "Continue?",
+    );
+    if (!confirmed) return;
+
+    setDeduping(true);
+    setSaveNotice(null);
+    setActionProgress({
+      title: "Cleaning Old clients company fields",
+      mode: "indeterminate",
+      detail: "Applying Usman pass-1 rules…",
+      startedAt: Date.now(),
+      accent: "sky",
+    });
+    try {
+      const result = await client.cleanCompanyFields(sectionTableScope(section));
+      await loadTable();
+      await loadSectionCounts();
+      const ruleSummary = Object.entries(result.by_rule)
+        .map(([rule, count]) => `${rule}: ${count}`)
+        .join(", ");
+      setSaveNotice(
+        result.changed > 0
+          ? `Cleaned ${result.changed} of ${result.scanned} Old clients${ruleSummary ? ` (${ruleSummary})` : ""}`
+          : `No company-field fixes needed (${result.scanned} scanned)`,
+      );
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to clean company fields");
+    } finally {
+      setActionProgress(null);
+      setDeduping(false);
+    }
   }
 
   async function removeEmptyImports() {
@@ -2199,6 +2280,24 @@ export function LeadsTablePage({
                 : "Starting…"
               : `Research (${selected.size})`}
           </ActionButton>
+          <label
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-300"
+            title="Max wait per lead — larger batches default to longer patience"
+          >
+            <span className="text-slate-500 hidden sm:inline">Patience</span>
+            <select
+              value={researchPatience}
+              disabled={bulkOnboarding}
+              onChange={(e) =>
+                setResearchPatience(e.target.value as ResearchPatience)
+              }
+              className="bg-transparent text-slate-200 outline-none disabled:opacity-50"
+            >
+              <option value="fast">Fast 60s</option>
+              <option value="normal">Normal 90s</option>
+              <option value="patient">Patient 2m</option>
+            </select>
+          </label>
           <ActionButton
             icon={IconTrash}
             variant="danger"
@@ -2235,6 +2334,25 @@ export function LeadsTablePage({
               {deduping && actionProgress?.title.includes("empty")
                 ? "Cleaning…"
                 : "Remove empty"}
+            </ActionButton>
+          )}
+          {isOldClients && (
+            <ActionButton
+              icon={IconSparkles}
+              variant="sky"
+              onClick={() => void cleanOldClientCompanyFields()}
+              disabled={
+                deduping ||
+                rows.length === 0 ||
+                loading ||
+                bulkOnboarding ||
+                deletingSelected
+              }
+              title="Usman pass-1: move address/email/placeholders out of Company Name"
+            >
+              {deduping && actionProgress?.title.includes("Cleaning Old clients")
+                ? "Cleaning data…"
+                : "Clean data"}
             </ActionButton>
           )}
           {isOldClients && (

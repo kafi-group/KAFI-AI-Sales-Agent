@@ -14,6 +14,14 @@ export interface BulkActionProgress {
   /** Epoch ms when the action started — used for elapsed time. */
   startedAt: number;
   accent?: BulkActionAccent;
+  /** Epoch ms when the current item started (countdown for this lead). */
+  itemStartedAt?: number;
+  /** Abort budget for the current item in ms. */
+  itemTimeoutMs?: number;
+  /** Expected seconds per remaining item (for batch countdown). */
+  expectedSecPerItem?: number;
+  /** Label like "Normal · 90s/lead". */
+  patienceLabel?: string;
 }
 
 const ACCENT_BAR: Record<BulkActionAccent, string> = {
@@ -39,16 +47,12 @@ function formatElapsed(seconds: number): string {
   return `${mins}m ${secs}s`;
 }
 
-function estimateRemaining(
-  current: number,
-  total: number,
-  elapsedSec: number,
-): string | null {
-  if (current < 1 || total <= current || elapsedSec < 1) return null;
-  const perItem = elapsedSec / current;
-  const remaining = Math.round(perItem * (total - current));
-  if (remaining < 1) return null;
-  return `~${formatElapsed(remaining)} left`;
+function formatCountdown(seconds: number): string {
+  const s = Math.max(0, Math.ceil(seconds));
+  if (s < 60) return `${s}s`;
+  const mins = Math.floor(s / 60);
+  const secs = s % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
 interface BulkActionProgressPanelProps {
@@ -71,10 +75,22 @@ export function BulkActionProgressPanel({ progress }: BulkActionProgressPanelPro
     progress.mode === "determinate" && total > 0
       ? Math.min(99, Math.floor((current / total) * 100))
       : null;
-  const eta =
-    progress.mode === "determinate" && percent != null
-      ? estimateRemaining(current, total, elapsedSec)
+
+  const itemStartedAt = progress.itemStartedAt;
+  const itemTimeoutMs = progress.itemTimeoutMs;
+  const leadCountdownSec =
+    itemStartedAt != null && itemTimeoutMs != null && itemTimeoutMs > 0
+      ? Math.max(0, (itemTimeoutMs - (now - itemStartedAt)) / 1000)
       : null;
+
+  const remainingAfterCurrent = Math.max(0, total - current - 1);
+  const expectedSec =
+    progress.expectedSecPerItem ??
+    (itemTimeoutMs != null ? (itemTimeoutMs / 1000) * 0.75 : null);
+  const batchCountdownSec =
+    leadCountdownSec != null && expectedSec != null
+      ? leadCountdownSec + remainingAfterCurrent * expectedSec
+      : leadCountdownSec;
 
   return (
     <div
@@ -102,8 +118,7 @@ export function BulkActionProgressPanel({ progress }: BulkActionProgressPanelPro
         </div>
         <span className="text-xs tabular-nums text-slate-400 shrink-0">
           {percent != null ? `${percent}% · ` : ""}
-          {formatElapsed(elapsedSec)}
-          {eta ? ` · ${eta}` : ""}
+          elapsed {formatElapsed(elapsedSec)}
         </span>
       </div>
 
@@ -139,6 +154,25 @@ export function BulkActionProgressPanel({ progress }: BulkActionProgressPanelPro
         ) : (
           <span className="text-slate-300">Working…</span>
         )}
+        {progress.patienceLabel ? (
+          <span className="text-slate-500">{progress.patienceLabel}</span>
+        ) : null}
+        {leadCountdownSec != null ? (
+          <span className="text-amber-200/90">
+            This lead{" "}
+            <span className="font-medium text-amber-100">
+              {formatCountdown(leadCountdownSec)}
+            </span>
+          </span>
+        ) : null}
+        {batchCountdownSec != null && total > 1 ? (
+          <span className="text-emerald-200/90">
+            Batch ~{" "}
+            <span className="font-medium text-emerald-100">
+              {formatCountdown(batchCountdownSec)}
+            </span>
+          </span>
+        ) : null}
         {progress.detail ? (
           <span className="truncate min-w-0 text-slate-500">
             Current: <span className="text-slate-300">{progress.detail}</span>

@@ -101,7 +101,14 @@ function messageForHttpError(status: number, text: string, statusText: string): 
 const FETCH_TIMEOUT_MS = 30_000;
 const AUTH_FETCH_TIMEOUT_MS = 20_000;
 const HEAVY_FETCH_TIMEOUT_MS = 60_000;
+/** Research / onboard: enrichment + website fetch + scoring often exceeds 30s. */
+const LEAD_ONBOARD_TIMEOUT_MS = 90_000;
 const RETRY_BACKOFF_MS = [600, 1_800, 3_500] as const;
+
+export type ApiRequestOptions = RequestInit & {
+  /** Override the path-based client abort timeout. */
+  timeoutMs?: number;
+};
 
 function timeoutForPath(path: string): number {
   if (path.startsWith("/auth/")) return AUTH_FETCH_TIMEOUT_MS;
@@ -109,11 +116,15 @@ function timeoutForPath(path: string): number {
     path.startsWith("/leads/table/dedupe") ||
     path.startsWith("/leads/table/cleanup-sparse") ||
     path.startsWith("/leads/table/repair-location-names") ||
+    path.startsWith("/leads/table/clean-company-fields") ||
     path.startsWith("/leads/table/unassign") ||
     path.startsWith("/leads/table/cleanup") ||
     path.startsWith("/leads/table/remove-old-client-overlaps")
   ) {
     return 300_000; // bulk repair jobs can take a few minutes under lock waits
+  }
+  if (/^\/leads\/\d+\/(onboard|research|score)(\?|$)/.test(path)) {
+    return LEAD_ONBOARD_TIMEOUT_MS;
   }
   if (
     path.startsWith("/leads/table") ||
@@ -139,16 +150,17 @@ function networkErrorMessage(isTimeout: boolean): string {
   return "Cannot reach the API right now. Check your connection, then refresh. If this keeps happening, Railway may be restarting.";
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(path: string, options?: ApiRequestOptions): Promise<T> {
+  const { timeoutMs: timeoutOverride, ...fetchOptions } = options ?? {};
   const headers = new Headers(authHeaders({ "Content-Type": "application/json" }));
-  if (options?.headers) {
-    const extra = new Headers(options.headers);
+  if (fetchOptions.headers) {
+    const extra = new Headers(fetchOptions.headers);
     extra.forEach((value, key) => headers.set(key, value));
   }
 
-  const method = (options?.method || "GET").toUpperCase();
+  const method = (fetchOptions.method || "GET").toUpperCase();
   const canRetry = method === "GET" || method === "HEAD";
-  const timeoutMs = timeoutForPath(path);
+  const timeoutMs = timeoutOverride ?? timeoutForPath(path);
   const maxAttempts = canRetry ? RETRY_BACKOFF_MS.length + 1 : 1;
   let lastNetworkError: Error | null = null;
   let lastWasTimeout = false;
@@ -158,7 +170,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(`${API_BASE}${path}`, {
-        ...options,
+        ...fetchOptions,
         headers,
         credentials: "include",
         signal: controller.signal,
@@ -1137,6 +1149,14 @@ export interface LeadTableNameRepairResponse {
   samples: Array<Record<string, unknown>>;
 }
 
+export interface LeadTableCompanyCleanResponse {
+  scanned: number;
+  changed: number;
+  by_rule: Record<string, number>;
+  dry_run: boolean;
+  samples: Array<Record<string, unknown>>;
+}
+
 export interface LeadTableSectionCountsResponse {
   all: number;
   old_clients: number;
@@ -1697,6 +1717,24 @@ export const client = {
       { method: "POST" },
     );
   },
+  cleanCompanyFields: (
+    params: LeadTableSectionScope & { dry_run?: boolean; limit?: number } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.source) search.set("source", params.source);
+    if (params.exclude_source) search.set("exclude_source", params.exclude_source);
+    if (params.assigned_to_user_id != null) {
+      search.set("assigned_to_user_id", String(params.assigned_to_user_id));
+    }
+    if (params.master) search.set("master", "true");
+    if (params.dry_run) search.set("dry_run", "true");
+    if (params.limit != null) search.set("limit", String(params.limit));
+    const query = search.toString();
+    return request<LeadTableCompanyCleanResponse>(
+      `/leads/table/clean-company-fields${query ? `?${query}` : ""}`,
+      { method: "POST" },
+    );
+  },
   createLead: (data: LeadCreate) =>
     request<Lead>("/leads", { method: "POST", body: JSON.stringify(data) }),
   suggestCompanyNames: (q: string, limit = 12) => {
@@ -1709,13 +1747,22 @@ export const client = {
   },
   getLead: (id: number) => request<Lead>(`/leads/${id}`),
   getLeadProfile: (id: number) => request<BuyerProfile>(`/leads/${id}/profile`),
-  researchLead: (id: number) =>
-    request<BuyerProfile>(`/leads/${id}/research`, { method: "POST" }),
+  researchLead: (id: number, opts?: { timeoutMs?: number }) =>
+    request<BuyerProfile>(`/leads/${id}/research`, {
+      method: "POST",
+      timeoutMs: opts?.timeoutMs,
+    }),
   getLatestScore: (id: number) => request<LeadScore>(`/leads/${id}/score`),
-  scoreLead: (id: number) =>
-    request<LeadScore>(`/leads/${id}/score`, { method: "POST" }),
-  onboardLead: (id: number) =>
-    request<OnboardResult>(`/leads/${id}/onboard`, { method: "POST" }),
+  scoreLead: (id: number, opts?: { timeoutMs?: number }) =>
+    request<LeadScore>(`/leads/${id}/score`, {
+      method: "POST",
+      timeoutMs: opts?.timeoutMs,
+    }),
+  onboardLead: (id: number, opts?: { timeoutMs?: number }) =>
+    request<OnboardResult>(`/leads/${id}/onboard`, {
+      method: "POST",
+      timeoutMs: opts?.timeoutMs,
+    }),
   listLeadContacts: (leadId: number) =>
     request<Contact[]>(`/leads/${leadId}/contacts`),
   createContact: (data: ContactCreate) =>

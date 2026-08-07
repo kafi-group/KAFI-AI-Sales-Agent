@@ -840,6 +840,14 @@ class LeadTableNameRepairResponse(BaseModel):
     samples: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class LeadTableCompanyCleanResponse(BaseModel):
+    scanned: int
+    changed: int
+    by_rule: dict[str, int] = Field(default_factory=dict)
+    dry_run: bool
+    samples: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class LeadTableBulkDeleteRequest(BaseModel):
     lead_ids: list[int]
 
