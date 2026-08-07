@@ -49,6 +49,7 @@ import { PostCallRemarksModal } from "./components/PostCallRemarksModal";
 import { CallingCardOverlay } from "./components/CallingCardOverlay";
 import { BulkCallQueueHost } from "./components/BulkCallQueueHost";
 import { FloatingDialpad } from "./components/FloatingDialpad";
+import { FloatingSalesAssistant } from "./components/FloatingSalesAssistant";
 import {
   alertInterestedFollowUp,
   alertInterestedClientsActivity,
@@ -985,6 +986,7 @@ function DashboardApp() {
       <CallingCardOverlay />
       <BulkCallQueueHost />
       <FloatingDialpad onError={setError} />
+      <FloatingSalesAssistant onNavigate={handleIndexNavigate} onError={setError} />
       <div className="min-h-dvh flex">
         <InboxAlertToasts
           onOpenInbox={() => {

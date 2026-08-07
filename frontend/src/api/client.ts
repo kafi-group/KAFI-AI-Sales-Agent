@@ -480,6 +480,24 @@ export interface ChatbotStatus {
   anthropic: boolean;
 }
 
+export type SalesAssistantAction = Record<string, unknown>;
+
+export interface SalesAssistantHistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface SalesAssistantStatus {
+  enabled: boolean;
+}
+
+export interface SalesAssistantChatResponse {
+  reply: string;
+  actions: SalesAssistantAction[];
+  provider: string;
+  model: string;
+}
+
 export interface InterestedFollowUp {
   id: string;
   buyer_id: number;
@@ -2351,6 +2369,29 @@ export const client = {
     }
     return res.json() as Promise<ChatResponse>;
   },
+
+  getSalesAssistantStatus: () =>
+    request<SalesAssistantStatus>("/sales-assistant/status"),
+
+  unlockSalesAssistant: (access_code: string) =>
+    request<{ ok: boolean }>("/sales-assistant/unlock", {
+      method: "POST",
+      body: JSON.stringify({ access_code }),
+    }),
+
+  sendSalesAssistantMessage: (payload: {
+    message: string;
+    access_code: string;
+    history?: SalesAssistantHistoryMessage[];
+  }) =>
+    request<SalesAssistantChatResponse>("/sales-assistant/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        message: payload.message,
+        access_code: payload.access_code,
+        history: payload.history ?? [],
+      }),
+    }),
 
   getCallConfig: () => request<CallConfig>("/calls/config"),
   getTwilioBalance: () => request<TwilioBalance>("/calls/twilio-balance"),
