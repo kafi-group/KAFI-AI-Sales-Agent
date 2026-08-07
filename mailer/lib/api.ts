@@ -12,11 +12,15 @@ export type MailerUser = {
 const TOKEN_KEY = "kafi_mailer_token";
 const USER_KEY = "kafi_mailer_user";
 
+const PRODUCTION_API_BASE = "https://kafi-sales-agent.up.railway.app/api";
+
 export function getApiBase(): string {
   const raw = (process.env.NEXT_PUBLIC_KAFI_API_BASE_URL || "").trim().replace(/\/$/, "");
   if (raw) return raw;
-  // Server-side fallback
-  return (process.env.KAFI_API_BASE_URL || "").trim().replace(/\/$/, "");
+  const serverSide = (process.env.KAFI_API_BASE_URL || "").trim().replace(/\/$/, "");
+  if (serverSide) return serverSide;
+  if (process.env.NODE_ENV === "production") return PRODUCTION_API_BASE;
+  return "";
 }
 
 export function getStoredToken(): string | null {
