@@ -5,6 +5,7 @@ import {
   subscribeNotificationPrefs,
   type InboxPopupPayload,
 } from "../utils/notify";
+import { IconMail } from "./icons/AppIcons";
 
 interface InboxAlertToastsProps {
   onOpenInbox: () => void;
@@ -59,9 +60,7 @@ export function InboxAlertToasts({ onOpenInbox }: InboxAlertToastsProps) {
         >
           <div className="px-4 py-3 border-b border-emerald-500/20 flex items-start gap-3">
             <span className="mt-0.5 shrink-0 text-emerald-400 animate-pulse" aria-hidden="true">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-5-1.6-1.6V10a5.4 5.4 0 0 0-4-5.23V4a1.4 1.4 0 0 0-2.8 0v.77A5.4 5.4 0 0 0 6.6 10v5.4L5 17a.9.9 0 0 0 .64 1.54h12.72A.9.9 0 0 0 19 17Z" />
-              </svg>
+              <IconMail size="md" />
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-emerald-300 text-xs font-semibold uppercase tracking-wide">
