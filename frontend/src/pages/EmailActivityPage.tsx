@@ -66,12 +66,8 @@ const WHATSAPP_EVENT_LABELS: Record<string, string> = {
 
 function activityEventLabel(event: EmailActivityEvent, isWhatsApp: boolean): string {
   if (!isWhatsApp) return event.event_label;
-  if (WHATSAPP_EVENT_LABELS[event.event_type]) {
-    return WHATSAPP_EVENT_LABELS[event.event_type];
-  }
-  if (/^email sent$/i.test(event.event_label.trim())) return "Sent";
-  if (event.title?.startsWith("WhatsApp") && event.event_type === "sent") return "Sent";
-  return event.event_label.replace(/^email sent/i, "Sent");
+  // WhatsApp feed: never show email catalog labels — derive from event_type only.
+  return WHATSAPP_EVENT_LABELS[event.event_type] ?? event.event_type.replace(/_/g, " ");
 }
 
 function StatTile({
