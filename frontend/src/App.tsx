@@ -197,21 +197,9 @@ function DashboardApp() {
   useEffect(() => {
     if (tab !== "master-table") return;
     setTab("table");
-    setTableSection(isAdmin ? "master" : "old_clients");
+    setTableSection("master");
     setSelectedLeadId(null);
-  }, [tab, isAdmin]);
-
-  // Sales users only get client buckets ΓÇö never Master / Scrapped Leads / assignee views.
-  useEffect(() => {
-    if (isAdmin) return;
-    if (
-      tableSection === "all" ||
-      tableSection === "master" ||
-      isAssignedLeadsSection(tableSection)
-    ) {
-      setTableSection("old_clients");
-    }
-  }, [isAdmin, tableSection]);
+  }, [tab]);
 
   const loadDiscoverLeadsCount = useCallback(async () => {
     try {
@@ -253,17 +241,13 @@ function DashboardApp() {
   }, []);
 
   const loadAssigneeNavUsers = useCallback(async () => {
-    if (!isAdmin) {
-      setAssigneeNavUsers([]);
-      return;
-    }
     try {
       const users = await client.listAssignees();
       setAssigneeNavUsers(users);
     } catch {
       setAssigneeNavUsers([]);
     }
-  }, [isAdmin]);
+  }, []);
 
   const loadMailCounts = useCallback(async () => {
     try {
@@ -641,11 +625,7 @@ function DashboardApp() {
   }
 
   function handleSelectTableSection(section: LeadsTableSection) {
-    if (!isAdmin && (section === "all" || section === "master" || isAssignedLeadsSection(section))) {
-      setTableSection("old_clients");
-    } else {
-      setTableSection(section);
-    }
+    setTableSection(section);
     setSelectedLeadId(null);
   }
 
@@ -792,19 +772,7 @@ function DashboardApp() {
     setLeadsTableRefreshToken((token) => token + 1);
   }
 
-  const assigneeSectionUsers: AppUser[] = isAdmin
-    ? assigneeNavUsers
-    : user
-      ? [
-          {
-            id: user.id,
-            username: user.username,
-            full_name: user.full_name,
-            role: user.role,
-            is_active: true,
-          },
-        ]
-      : [];
+  const assigneeSectionUsers: AppUser[] = assigneeNavUsers;
 
   // Drop stale "Leads Sent To" selection if that user was removed.
   useEffect(() => {
@@ -813,31 +781,30 @@ function DashboardApp() {
     if (selectedId == null) return;
     const stillExists = assigneeSectionUsers.some((u) => u.id === selectedId);
     if (!stillExists) {
-      setTableSection(isAdmin ? "master" : "old_clients");
+      setTableSection("master");
     }
-  }, [assigneeSectionUsers, isAdmin, tableSection]);
+  }, [assigneeSectionUsers, tableSection]);
 
-  const assigneeNavChildren = isAdmin
-    ? assigneeSectionUsers.map((u) => ({
-        id: `assigned:${u.id}`,
-        label: `Leads Sent To ${u.username}`,
-        count: tableCounts.by_assignee?.[String(u.id)] ?? 0,
-      }))
-    : [];
+  const assigneeNavChildren = assigneeSectionUsers.map((u) => ({
+    id: `assigned:${u.id}`,
+    label: `Leads Sent To ${u.username}`,
+    count: tableCounts.by_assignee?.[String(u.id)] ?? 0,
+  }));
 
   const clientSectionNavChildren = [
-    ...(isAdmin
-      ? [
-          {
-            id: "all" as const,
-            label: "New search lead",
-            count: tableCounts.all,
-          },
-        ]
-      : []),
+    {
+      id: "master" as const,
+      label: "Master table",
+      count: tableCounts.master ?? 0,
+    },
+    {
+      id: "all" as const,
+      label: "New search lead",
+      count: tableCounts.all,
+    },
     {
       id: "old_clients" as const,
-      label: isAdmin ? "Old clients" : "Clients",
+      label: "Old clients",
       count: tableCounts.old_clients,
     },
     {
@@ -860,35 +827,24 @@ function DashboardApp() {
       label: "Did not receive call",
       count: tableCounts.not_received_call_clients,
     },
-    ...(isAdmin
-      ? [
-          {
-            id: "hyperstore_targeted" as const,
-            label: "Hyperstore Targeted clients",
-            count: tableCounts.hyperstore_targeted ?? 0,
-          },
-          {
-            id: "targeted_distributor" as const,
-            label: "Targeted Distributors",
-            count: tableCounts.targeted_distributor ?? 0,
-          },
-          {
-            id: "targeted_client" as const,
-            label: "Targeted Client",
-            count: tableCounts.targeted_client ?? 0,
-          },
-        ]
-      : []),
+    {
+      id: "hyperstore_targeted" as const,
+      label: "Hyperstore Targeted clients",
+      count: tableCounts.hyperstore_targeted ?? 0,
+    },
+    {
+      id: "targeted_distributor" as const,
+      label: "Targeted Distributors",
+      count: tableCounts.targeted_distributor ?? 0,
+    },
+    {
+      id: "targeted_client" as const,
+      label: "Targeted Client",
+      count: tableCounts.targeted_client ?? 0,
+    },
   ];
 
-  const clientsTableCount =
-    tableCounts.old_clients +
-    tableCounts.interested_clients +
-    (tableCounts.sales_interested_clients ?? 0) +
-    tableCounts.not_interested_clients +
-    tableCounts.not_received_call_clients;
-
-  const defaultTableSection: LeadsTableSection = isAdmin ? "master" : "old_clients";
+  const defaultTableSection: LeadsTableSection = "master";
 
   const indexAssignees = assigneeSectionUsers.map((u) => ({
     id: u.id,
@@ -925,8 +881,8 @@ function DashboardApp() {
     { id: "leads" as const, label: "Discover Leads", count: discoverLeadsCount },
     {
       id: "table",
-      label: isAdmin ? "Master table" : "Clients table",
-      count: isAdmin ? (tableCounts.master ?? 0) : clientsTableCount,
+      label: "Master table",
+      count: tableCounts.master ?? 0,
       children: [
         ...clientSectionNavChildren,
         ...assigneeNavChildren,

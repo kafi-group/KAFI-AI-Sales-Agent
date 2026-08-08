@@ -497,7 +497,7 @@ function sectionDescription(
   isAdmin = true,
 ): string {
   if (section === "master") {
-    return "Admin-only overview of every lead in the system — including leads sent to Asim, Usman, Sadia, or any other user. Nothing is hidden by assignment.";
+    return "Overview of every lead in the system — including leads sent to Asim, Usman, Sadia, or any other user.";
   }
   if (section === "hyperstore_targeted") {
     return "Hyperstore targeted list — import a spreadsheet (upload) or move leads from New search lead (AI / web discovery). Use the toggle to filter by source.";

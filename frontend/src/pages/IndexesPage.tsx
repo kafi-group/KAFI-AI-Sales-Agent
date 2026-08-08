@@ -13,13 +13,9 @@ interface IndexesPageProps {
 function resolveAction(
   action: IndexAction,
   quotationAgentUrl: string,
-  isAdmin: boolean,
 ): IndexAction {
   if (action.type === "external" && action.url === "__QUOTATION_AGENT__") {
     return { type: "external", url: quotationAgentUrl };
-  }
-  if (action.type === "table" && action.section === "master" && !isAdmin) {
-    return { type: "table", section: "old_clients" };
   }
   return action;
 }
@@ -27,7 +23,6 @@ function resolveAction(
 function IndexSectionCard({
   section,
   quotationAgentUrl,
-  isAdmin,
   onNavigate,
 }: {
   section: IndexSection;
@@ -35,7 +30,7 @@ function IndexSectionCard({
   isAdmin: boolean;
   onNavigate: (action: IndexAction) => void;
 }) {
-  const openAction = resolveAction(section.openAction, quotationAgentUrl, isAdmin);
+  const openAction = resolveAction(section.openAction, quotationAgentUrl);
 
   return (
     <section
@@ -72,7 +67,7 @@ function IndexSectionCard({
             <button
               type="button"
               onClick={() =>
-                onNavigate(resolveAction(item.action, quotationAgentUrl, isAdmin))
+                onNavigate(resolveAction(item.action, quotationAgentUrl))
               }
               className="w-full flex items-start gap-4 px-5 py-4 text-left hover:bg-slate-800/40 transition"
             >

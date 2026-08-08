@@ -107,18 +107,16 @@ export const INDEX_SECTIONS: IndexSection[] = [
       {
         id: "2.2",
         title: "Master table",
-        description: "Admin overview — assign, score, call, and bulk outreach from one table.",
+        description: "Overview — assign, score, call, and bulk outreach from one table.",
         icon: "table",
         action: { type: "table", section: "master" },
-        adminOnly: true,
       },
       {
         id: "2.3",
         title: "New search lead",
-        description: "Unassigned prospect pool under Master table (admin).",
+        description: "Unassigned prospect pool under Master table.",
         icon: "table",
         action: { type: "table", section: "all" },
-        adminOnly: true,
       },
       {
         id: "2.4",
@@ -414,7 +412,6 @@ function assigneeIndexItems(assignees: AssigneeIndexInput[]): IndexItem[] {
       type: "table" as const,
       section: `assigned:${user.id}` as LeadsTableSection,
     },
-    adminOnly: true,
   }));
 }
 

@@ -212,6 +212,8 @@ Return JSON only with keys:
 Rules:
 - Start by confirming the phone conversation ("As per our call today…").
 - Concise, warm, professional — suitable for both email and WhatsApp.
+- NEVER repeat rude language, swearing, insults, or aggressive tone from the transcript — even if the operator used them. Summarize only the business substance (products, quantities, next steps) in polished export-sales language.
+- If the transcript is empty, unclear, or only contains frustration, write a neutral polite confirmation that thanks them for the call and offers ESSENCE product information — do not mention conflict or tone.
 - Do not invent product quantities, prices, or meeting times not in the source.
 - Sign as Kafi Commodities Export Team.
 - This email body will also be sent on WhatsApp unchanged.
@@ -221,6 +223,7 @@ Rules:
                 prompt,
                 system=(
                     "You write concise inquiry-specific follow-up emails for Kafi Commodities. "
+                    "Always professional and diplomatic — never echo profanity or negativity from call captions. "
                     "Return JSON only. One message will be used for both email and WhatsApp."
                 ),
             )
@@ -282,15 +285,6 @@ def list_drafts(
     limit: int = 100,
 ) -> dict[str, Any]:
     q = db.query(PersonalizedFollowupDraft)
-    if not _is_admin(viewer):
-        q = q.filter(
-            (PersonalizedFollowupDraft.created_by_user_id == viewer.id)
-            | (
-                PersonalizedFollowupDraft.buyer_id.in_(
-                    db.query(Buyer.id).filter(Buyer.assigned_to_user_id == viewer.id)
-                )
-            )
-        )
     if status:
         q = q.filter(PersonalizedFollowupDraft.status == status.strip().lower())
     else:
@@ -305,15 +299,6 @@ def list_drafts(
     ready_q = db.query(PersonalizedFollowupDraft).filter(
         PersonalizedFollowupDraft.status == "ready"
     )
-    if not _is_admin(viewer):
-        ready_q = ready_q.filter(
-            (PersonalizedFollowupDraft.created_by_user_id == viewer.id)
-            | (
-                PersonalizedFollowupDraft.buyer_id.in_(
-                    db.query(Buyer.id).filter(Buyer.assigned_to_user_id == viewer.id)
-                )
-            )
-        )
     return {
         "total": total,
         "pending_count": int(ready_q.count() or 0),

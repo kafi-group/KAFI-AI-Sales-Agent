@@ -18,13 +18,9 @@ interface UserManualPageProps {
 function resolveAction(
   action: IndexAction,
   quotationAgentUrl: string,
-  isAdmin: boolean,
 ): IndexAction {
   if (action.type === "external" && action.url === "__QUOTATION_AGENT__") {
     return { type: "external", url: quotationAgentUrl };
-  }
-  if (action.type === "table" && action.section === "master" && !isAdmin) {
-    return { type: "table", section: "old_clients" };
   }
   return action;
 }
@@ -66,7 +62,6 @@ function ManualGuideBlock({ guide }: { guide: UserManualGuide }) {
 function ManualSectionCard({
   section,
   quotationAgentUrl,
-  isAdmin,
   onNavigate,
   onOpenIndexesSection,
 }: {
@@ -110,7 +105,7 @@ function ManualSectionCard({
             type="button"
             onClick={() =>
               onNavigate(
-                resolveAction(section.openAction, quotationAgentUrl, isAdmin),
+                resolveAction(section.openAction, quotationAgentUrl),
               )
             }
             className="rounded-lg bg-emerald-700 hover:bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition"
@@ -141,7 +136,7 @@ function ManualSectionCard({
                       type="button"
                       onClick={() =>
                         onNavigate(
-                          resolveAction(item.action, quotationAgentUrl, isAdmin),
+                          resolveAction(item.action, quotationAgentUrl),
                         )
                       }
                       className="shrink-0 text-xs text-emerald-400 hover:text-emerald-300"

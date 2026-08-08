@@ -116,29 +116,21 @@ def _table_assignment_filters(
     placed_section = bool(call_outcome) or in_interested_clients
 
     if master:
-        if not _is_admin(user):
-            raise HTTPException(403, "Master table is admin-only")
         # Every lead (assigned + unassigned, all sources).
         return None, False, True, None, False
 
-    if _is_admin(user):
-        if assigned_to_user_id is not None:
-            # Admin viewing "Leads Sent To {username}" — only admin-sent leads.
-            return (
-                assigned_to_user_id,
-                False,
-                (not placed_section) and not source and not exclude_source,
-                None,
-                True,
-            )
-        # Admin pool sections (Leads table / Old clients): hide assigned leads.
-        unassigned_only = not placed_section
-        return None, unassigned_only, False, None, False
-
-    # Sales users only see leads an admin (or themselves) assigned to them —
-    # never the shared admin/unassigned pool. Their own imports stay visible.
-    include_placed = (not placed_section) and not source and not exclude_source
-    return user.id, False, include_placed, None, False
+    if assigned_to_user_id is not None:
+        # "Leads Sent To {username}" — only admin-sent leads.
+        return (
+            assigned_to_user_id,
+            False,
+            (not placed_section) and not source and not exclude_source,
+            None,
+            True,
+        )
+    # Pool sections (New search lead / Old clients): hide assigned leads.
+    unassigned_only = not placed_section
+    return None, unassigned_only, False, None, False
 
 
 def _require_buyer_access(db, user: AppUser, buyer_id: int) -> None:
@@ -587,11 +579,9 @@ def get_leads_table_section_counts(
 ):
     counts = leads_module.count_leads_table_sections(
         db,
-        assigned_to_user_id=None if _is_admin(user) else user.id,
+        assigned_to_user_id=None,
         pool_for_user_id=None,
     )
-    if not _is_admin(user):
-        counts = {**counts, "by_assignee": {}}
     return LeadTableSectionCountsResponse(**counts)
 
 
@@ -794,14 +784,10 @@ def _maintenance_assignee_scope(
     Returns (assigned_to_user_id, unassigned_only).
     """
     if master:
-        if not _is_admin(user):
-            raise HTTPException(403, "Master table is admin-only")
         return None, False
-    if not _is_admin(user):
-        return user.id, False
     if assigned_to_user_id is not None:
         return assigned_to_user_id, False
-    # Admin pool sections (Leads table / Old clients): only unassigned rows.
+    # Pool sections (Leads table / Old clients): only unassigned rows.
     return None, True
 
 

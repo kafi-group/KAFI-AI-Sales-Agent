@@ -143,8 +143,8 @@ def user_can_access_buyer(db: Session, *, user: AppUser, buyer_id: int) -> bool:
     buyer = buyers_module.get_buyer(db, buyer_id)
     if not buyer:
         return False
-    # Sales users only see leads assigned to them — not the admin/unassigned pool.
-    return buyer.assigned_to_user_id == user.id
+    # All active sales users can view and work leads across the shared team tables.
+    return True
 
 
 def clear_assignments_for_user(db: Session, user_id: int) -> None:

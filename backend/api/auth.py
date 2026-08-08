@@ -141,7 +141,7 @@ def list_users(
 @router.get("/assignees", response_model=list[UserRead])
 def list_assignees(
     db: Session = Depends(get_db),
-    _: AppUser = Depends(require_admin),
+    _: AppUser = Depends(get_current_user),
 ) -> Any:
     """Active sales users that can be assigned leads."""
     users = auth_module.list_users(db)
