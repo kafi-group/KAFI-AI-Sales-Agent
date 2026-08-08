@@ -1,5 +1,7 @@
 [build]
 builder = "nixpacks"
+# Full repo is cloned; service root is backend/ so ../frontend is available at build time.
+watchPatterns = ["backend/**", "frontend/**"]
 
 [deploy]
 # Migrate once before uvicorn. Keep workers at 1 until Railway memory is confirmed ample.
