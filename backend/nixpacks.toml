@@ -1,15 +1,5 @@
-# Railway all-in-one: build Vite frontend into backend/static when the full repo
-# is available (Git deploy). CLI uploads can ship pre-built backend/static instead.
-
-[phases.setup]
-nixPkgs = ["nodejs_20", "python311"]
-
-[phases.install]
-dependsOn = ["setup"]
-cmds = [
-  "pip install -r requirements.txt",
-  "if [ -d ../frontend ]; then cd ../frontend && npm ci; fi",
-]
+# Let Nixpacks auto-install Python deps; add Node only for Git builds of the SPA.
+providers = ["python", "node"]
 
 [phases.build]
 dependsOn = ["install"]
