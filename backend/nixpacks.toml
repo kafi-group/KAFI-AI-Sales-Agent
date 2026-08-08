@@ -2,7 +2,7 @@
 # is available (Git deploy). CLI uploads can ship pre-built backend/static instead.
 
 [phases.setup]
-nixPkgs = ["nodejs_24", "python311"]
+nixPkgs = ["nodejs_20", "python311"]
 
 [phases.install]
 dependsOn = ["setup"]
