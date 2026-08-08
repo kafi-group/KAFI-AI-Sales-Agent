@@ -1,5 +1,5 @@
-# Railway all-in-one: build Vite frontend into backend/static, then run FastAPI.
-# Requires Railway service root directory = backend (repo cloned fully so ../frontend exists).
+# Railway all-in-one: build Vite frontend into backend/static when the full repo
+# is available (Git deploy). CLI uploads can ship pre-built backend/static instead.
 
 [phases.setup]
 nixPkgs = ["nodejs_24", "python311"]
@@ -8,14 +8,13 @@ nixPkgs = ["nodejs_24", "python311"]
 dependsOn = ["setup"]
 cmds = [
   "pip install -r requirements.txt",
-  "cd ../frontend && npm ci",
+  "if [ -d ../frontend ]; then cd ../frontend && npm ci; fi",
 ]
 
 [phases.build]
 dependsOn = ["install"]
 cmds = [
-  "cd ../frontend && npm run build",
-  "rm -rf static && mkdir -p static && cp -r ../frontend/dist/* static/",
+  "if [ -f ../frontend/package.json ]; then cd ../frontend && npm run build && rm -rf ../backend/static && mkdir -p ../backend/static && cp -r dist/* ../backend/static/; elif [ ! -f static/index.html ]; then echo 'Missing frontend source and backend/static/index.html' && exit 1; else echo 'Using pre-built backend/static'; fi",
 ]
 
 [start]
