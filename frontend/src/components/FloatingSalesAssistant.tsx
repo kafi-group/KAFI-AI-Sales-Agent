@@ -8,8 +8,11 @@ import {
 import type { IndexAction } from "../data/indexSections";
 
 const STORAGE_KEY = "kafi_sales_assistant_code";
+export const OPEN_SALES_ASSISTANT_EVENT = "kafi:open-sales-assistant";
 const FAB_SIZE = 52;
 const PANEL_WIDTH = 340;
+/** Keep above Windows taskbar and the dialpad FAB. */
+const FAB_OFFSET = { left: 16, bottom: 88 };
 
 type UiMessage = {
   id: string;
@@ -32,7 +35,8 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
   const [unlocked, setUnlocked] = useState(false);
   const [codeInput, setCodeInput] = useState("");
   const [unlocking, setUnlocking] = useState(false);
-  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [llmEnabled, setLlmEnabled] = useState<boolean | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -46,8 +50,14 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
   useEffect(() => {
     void client
       .getSalesAssistantStatus()
-      .then((s) => setEnabled(s.enabled))
-      .catch(() => setEnabled(false));
+      .then((s) => setLlmEnabled(s.enabled))
+      .catch(() => setLlmEnabled(false));
+  }, []);
+
+  useEffect(() => {
+    const openPanel = () => setOpen(true);
+    window.addEventListener(OPEN_SALES_ASSISTANT_EVENT, openPanel);
+    return () => window.removeEventListener(OPEN_SALES_ASSISTANT_EVENT, openPanel);
   }, []);
 
   useEffect(() => {
@@ -65,6 +75,7 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
     const code = codeInput.trim();
     if (!code) return;
     setUnlocking(true);
+    setUnlockError(null);
     try {
       await client.unlockSalesAssistant(code);
       sessionStorage.setItem(STORAGE_KEY, code);
@@ -79,7 +90,9 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
         },
       ]);
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Invalid access code");
+      const message = e instanceof Error ? e.message : "Invalid access code";
+      setUnlockError(message);
+      onError(message);
     } finally {
       setUnlocking(false);
     }
@@ -126,35 +139,12 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
     }
   }, [input, sending, unlocked, messages, onNavigate, onError]);
 
-  if (enabled === false) {
-    return createPortal(
-      <button
-        type="button"
-        aria-label="Sales assistant unavailable"
-        title="Sales assistant not configured on server yet"
-        className="fixed z-[89] flex items-center justify-center rounded-full border border-slate-600 bg-slate-800 text-slate-500 shadow-lg opacity-70 cursor-not-allowed"
-        style={{ left: 16, bottom: 16, width: FAB_SIZE, height: FAB_SIZE }}
-        disabled
-      >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M12 3c-4.4 0-8 2.7-8 6v5l-2 2v1h20v-1l-2-2v-5c0-3.3-3.6-6-8-6Z"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </button>,
-      document.body,
-    );
-  }
-
   const panel = (
     <div
       className="fixed z-[90] flex flex-col rounded-2xl border border-violet-500/30 bg-slate-950/95 shadow-2xl shadow-violet-950/40 backdrop-blur-md"
       style={{
-        left: 16,
-        bottom: open ? FAB_SIZE + 28 : 16,
+        left: FAB_OFFSET.left,
+        bottom: open ? FAB_OFFSET.bottom + FAB_SIZE + 12 : FAB_OFFSET.bottom,
         width: PANEL_WIDTH,
         maxWidth: "calc(100vw - 32px)",
         maxHeight: "min(520px, calc(100dvh - 96px))",
@@ -177,6 +167,17 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
       {!unlocked ? (
         <div className="flex flex-col gap-3 p-4">
           <p className="text-sm text-slate-300">Enter access code to open the assistant.</p>
+          {llmEnabled === false && (
+            <p className="text-xs text-amber-400/90">
+              AI replies need <code className="text-amber-200/90">SALES_ASSISTANT_GEMINI_API_KEY</code> on
+              Railway — you can still unlock; chat works once the key is set.
+            </p>
+          )}
+          {unlockError ? (
+            <p className="text-xs text-red-300 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2">
+              {unlockError}
+            </p>
+          ) : null}
           <input
             type="password"
             inputMode="numeric"
@@ -264,7 +265,12 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
         title="Sales assistant (code required)"
         onClick={() => setOpen((v) => !v)}
         className="fixed z-[89] flex items-center justify-center rounded-full border border-violet-500/40 bg-violet-700 text-white shadow-lg shadow-violet-950/50 hover:bg-violet-600"
-        style={{ left: 16, bottom: 16, width: FAB_SIZE, height: FAB_SIZE }}
+        style={{
+          left: FAB_OFFSET.left,
+          bottom: FAB_OFFSET.bottom,
+          width: FAB_SIZE,
+          height: FAB_SIZE,
+        }}
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
           <path

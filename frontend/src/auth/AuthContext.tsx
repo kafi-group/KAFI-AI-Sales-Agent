@@ -10,9 +10,13 @@ import {
 } from "react";
 import { client } from "../api/client";
 import {
+  clearImpersonatorSnapshot,
   clearSession,
+  getImpersonatorSnapshot,
+  getStoredToken,
   getStoredUser,
   isAdmin,
+  storeImpersonatorSnapshot,
   storeSession,
   storeUser,
   type AuthUser,
@@ -22,9 +26,13 @@ interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
   isAdmin: boolean;
+  impersonating: boolean;
+  impersonatorLabel: string | null;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
+  switchToUser: (userId: number) => Promise<void>;
+  switchBackToAdmin: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -142,20 +150,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore — clear local session anyway */
     }
+    clearImpersonatorSnapshot();
     clearSession();
     setUser(null);
   }, []);
+
+  const switchToUser = useCallback(async (userId: number) => {
+    const currentToken = getStoredToken();
+    const currentUser = getStoredUser();
+    if (!currentToken || !currentUser || !isAdmin(currentUser)) {
+      throw new Error("Only an admin can switch users");
+    }
+    authEpochRef.current += 1;
+    const result = await client.impersonateUser(userId);
+    storeImpersonatorSnapshot(currentToken, currentUser);
+    const next: AuthUser = {
+      id: result.user.id,
+      username: result.user.username,
+      full_name: result.user.full_name,
+      role: result.user.role === "admin" ? "admin" : "user",
+      is_active: result.user.is_active,
+    };
+    storeSession(result.token, next);
+    setUser(next);
+    window.location.reload();
+  }, []);
+
+  const switchBackToAdmin = useCallback(async () => {
+    const snapshot = getImpersonatorSnapshot();
+    if (!snapshot) {
+      throw new Error("No admin session to restore");
+    }
+    authEpochRef.current += 1;
+    try {
+      await client.logout();
+    } catch {
+      /* ignore */
+    }
+    storeSession(snapshot.token, snapshot.user);
+    clearImpersonatorSnapshot();
+    setUser(snapshot.user);
+    window.location.reload();
+  }, []);
+
+  const impersonator = getImpersonatorSnapshot();
 
   const value = useMemo(
     () => ({
       user,
       loading,
       isAdmin: isAdmin(user),
+      impersonating: Boolean(impersonator),
+      impersonatorLabel: impersonator?.user.full_name || impersonator?.user.username || null,
       login,
       logout,
       refreshMe,
+      switchToUser,
+      switchBackToAdmin,
     }),
-    [user, loading, login, logout, refreshMe],
+    [user, loading, login, logout, refreshMe, switchToUser, switchBackToAdmin, impersonator],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

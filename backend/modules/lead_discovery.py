@@ -307,6 +307,8 @@ class DiscoveryCandidate:
     city: str | None = None
     address: str | None = None
     remarks: str | None = None
+    remarks_03: str | None = None
+    remarks_04: str | None = None
     source: str = "manual"
     source_detail: str = ""
     match_reason: str = ""
@@ -338,6 +340,8 @@ class DiscoveryCandidate:
             "city": self.city,
             "address": self.address,
             "remarks": self.remarks,
+            "remarks_03": self.remarks_03,
+            "remarks_04": self.remarks_04,
             "source": self.source,
             "source_detail": self.source_detail,
             "match_reason": self.match_reason,
@@ -437,6 +441,8 @@ def _import_scope_for_source(import_source: str | None) -> dict[str, str | None]
     if normalized == "csv":
         # Leads-table spreadsheet imports only collide with other leads-table rows.
         return {"source": "csv", "exclude_source": None}
+    if normalized in {"hyperstore_targeted", "targeted_distributor", "targeted_client"}:
+        return {"source": normalized, "exclude_source": None}
     return {"source": None, "exclude_source": "old_clients"}
 
 
@@ -3157,7 +3163,21 @@ def parse_csv_candidates(
     product_col = col("product", "products", "product_interest", "product_focus")
     city_col = col("city", "town")
     address_col = col("address", "street_address", "full_address")
-    remarks_col = col("remarks", "remark", "notes", "note", "comment", "comments")
+    remarks_col = col(
+        "remarks",
+        "remark",
+        "notes",
+        "note",
+        "comment",
+        "comments",
+        "remarks_02",
+        "remarks 02",
+        "remark_02",
+        "remark 02",
+        "remarks2",
+    )
+    remarks_03_col = col("remarks_03", "remarks 03", "remark_03", "remark 03", "remarks3")
+    remarks_04_col = col("remarks_04", "remarks 04", "remark_04", "remark 04", "remarks4")
 
     if not name_col and reader.fieldnames:
         name_col = reader.fieldnames[0]
@@ -3198,6 +3218,8 @@ def parse_csv_candidates(
                     city_col,
                     address_col,
                     remarks_col,
+                    remarks_03_col,
+                    remarks_04_col,
                     grading_col,
                     designation_col,
                     serial_col,
@@ -3243,6 +3265,8 @@ def parse_csv_candidates(
                 city=csv_value(row, city_col) or None,
                 address=csv_value(row, address_col) or None,
                 remarks=csv_value(row, remarks_col) or None,
+                remarks_03=csv_value(row, remarks_03_col) or None,
+                remarks_04=csv_value(row, remarks_04_col) or None,
                 source="csv",
                 source_detail="CSV import",
                 match_reason="Imported from CSV",
@@ -3290,6 +3314,8 @@ def _import_raw_to_candidate(raw: dict[str, Any]) -> DiscoveryCandidate:
         city=(raw.get("city") or "").strip() or None,
         address=(raw.get("address") or "").strip() or None,
         remarks=(raw.get("remarks") or "").strip() or None,
+        remarks_03=(raw.get("remarks_03") or "").strip() or None,
+        remarks_04=(raw.get("remarks_04") or "").strip() or None,
         source=raw.get("source") or "csv",
         source_detail="CSV import",
         match_reason="Imported from CSV",
@@ -3320,6 +3346,8 @@ def _sync_candidate_to_raw(candidate: DiscoveryCandidate, raw: dict[str, Any]) -
         "city",
         "address",
         "remarks",
+        "remarks_03",
+        "remarks_04",
     ):
         value = getattr(candidate, attr)
         if value:
@@ -3397,6 +3425,11 @@ def discover_from_csv(
     if not candidates:
         result.messages.append("No rows found in CSV.")
         return result
+
+    if import_source:
+        pool_source = import_source.strip().lower()
+        for candidate in candidates:
+            candidate.source = pool_source
 
     scope_source = import_source if import_source else None
     if for_leads_table:
@@ -3718,12 +3751,26 @@ def import_candidates(
                     "facebook_company_url": _value_or_none(raw.get("facebook_url")),
                     "instagram_company_url": _value_or_none(raw.get("instagram_url")),
                     "source": raw.get("source") or "discovery",
+                    "intake_method": (
+                        "upload"
+                        if skip_enrichment
+                        and (batch_source or "").strip().lower()
+                        in {"hyperstore_targeted", "targeted_distributor", "targeted_client"}
+                        else (
+                            "discover"
+                            if (batch_source or "").strip().lower()
+                            in {"hyperstore_targeted", "targeted_distributor", "targeted_client"}
+                            else None
+                        )
+                    ),
                     "legacy_serial_no": raw.get("legacy_serial_no"),
                     "company_grading": (raw.get("company_grading") or None),
                     "product_interest": (raw.get("product_interest") or None),
                     "city": (raw.get("city") or None),
                     "address": (raw.get("address") or None),
                     "remarks": (raw.get("remarks") or None),
+                    "remarks_03": (raw.get("remarks_03") or None),
+                    "remarks_04": (raw.get("remarks_04") or None),
                 },
                 commit=persist_each_row,
                 flush=True,

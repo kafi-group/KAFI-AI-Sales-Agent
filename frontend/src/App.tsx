@@ -49,7 +49,7 @@ import { PostCallRemarksModal } from "./components/PostCallRemarksModal";
 import { CallingCardOverlay } from "./components/CallingCardOverlay";
 import { BulkCallQueueHost } from "./components/BulkCallQueueHost";
 import { FloatingDialpad } from "./components/FloatingDialpad";
-import { FloatingSalesAssistant } from "./components/FloatingSalesAssistant";
+import { FloatingSalesAssistant, OPEN_SALES_ASSISTANT_EVENT } from "./components/FloatingSalesAssistant";
 import {
   alertInterestedFollowUp,
   alertInterestedClientsActivity,
@@ -140,6 +140,9 @@ function DashboardApp() {
     not_interested_clients: 0,
     not_received_call_clients: 0,
     master: 0,
+    hyperstore_targeted: 0,
+    targeted_distributor: 0,
+    targeted_client: 0,
     by_assignee: {},
   });
   const [assigneeNavUsers, setAssigneeNavUsers] = useState<AppUser[]>([]);
@@ -857,6 +860,25 @@ function DashboardApp() {
       label: "Did not receive call",
       count: tableCounts.not_received_call_clients,
     },
+    ...(isAdmin
+      ? [
+          {
+            id: "hyperstore_targeted" as const,
+            label: "Hyperstore Targeted clients",
+            count: tableCounts.hyperstore_targeted ?? 0,
+          },
+          {
+            id: "targeted_distributor" as const,
+            label: "Targeted Distributors",
+            count: tableCounts.targeted_distributor ?? 0,
+          },
+          {
+            id: "targeted_client" as const,
+            label: "Targeted Client",
+            count: tableCounts.targeted_client ?? 0,
+          },
+        ]
+      : []),
   ];
 
   const clientsTableCount =
@@ -931,11 +953,14 @@ function DashboardApp() {
           label: "Email templates",
           count: emailTemplateCount,
         },
-        ...mailLabels.map((label) => ({
-          id: `label:${label.id}`,
-          label: label.name,
-          count: label.count,
-        })),
+        ...mailLabels.map((label) => {
+          const isLinkedIn = /linkedin/i.test(label.name);
+          return {
+            id: (isLinkedIn ? `label-linkedin:${label.id}` : `label:${label.id}`) as MailSection,
+            label: label.name,
+            count: label.count,
+          };
+        }),
       ],
     },
     {
@@ -953,6 +978,12 @@ function DashboardApp() {
       external: QUOTATION_AGENT_URL,
     },
     { id: "chatbot", label: "Brand assistant", count: 0 },
+    {
+      id: "sales-assistant",
+      label: "Sales assistant",
+      count: 0,
+      openSalesAssistant: true,
+    },
     {
       id: "ai-mode",
       label: "AI Mode",
@@ -1006,6 +1037,9 @@ function DashboardApp() {
           onSelectMailSection={handleSelectMailSection}
           onSelectWhatsAppSection={handleSelectWhatsAppSection}
           onOpenMailer={() => void openMailerApp()}
+          onOpenSalesAssistant={() => {
+            window.dispatchEvent(new CustomEvent(OPEN_SALES_ASSISTANT_EVENT));
+          }}
           userLabel={user?.full_name || user?.username}
           userRole={user?.role}
           mobileOpen={mobileNavOpen}

@@ -22,6 +22,17 @@ from modules.research import BuyerProfile, ResearchModule
 _orchestrator = Orchestrator()
 _research = ResearchModule()
 
+TARGETED_POOL_SOURCES = frozenset(
+    {"hyperstore_targeted", "targeted_distributor", "targeted_client"}
+)
+TARGETED_POOL_EXCLUDE = ",".join(
+    ["old_clients", *sorted(TARGETED_POOL_SOURCES)]
+)
+
+
+def is_targeted_pool_source(source: str | None) -> bool:
+    return (source or "").strip().lower() in TARGETED_POOL_SOURCES
+
 _SCORE_ORDER = {"AAA": 0, "AA": 1, "A": 2}
 _SORT_FIELDS = {
     "company_name",
@@ -543,6 +554,17 @@ def _apply_lead_table_scope(
     return buyer_query
 
 
+def _apply_intake_method_scope(buyer_query, *, intake_method: str | None):
+    if not intake_method:
+        return buyer_query
+    normalized = intake_method.strip().lower()
+    if normalized not in {"upload", "discover"}:
+        return buyer_query
+    return buyer_query.filter(
+        sa_func.lower(sa_func.coalesce(Buyer.intake_method, "")) == normalized
+    )
+
+
 def _apply_call_outcome_scope(
     db: Session,
     buyer_query,
@@ -667,6 +689,8 @@ def _hydrate_lead_table_rows(
                 "city": buyer.city,
                 "address": buyer.address,
                 "remarks": resolve_current_remarks(buyer) or buyer.remarks,
+                "remarks_03": buyer.remarks_03,
+                "remarks_04": buyer.remarks_04,
                 "remarks_history": buyer.remarks_history or [],
                 "call_remarks": call_notes_by_buyer.get(buyer.id),
                 "assigned_to": buyer.assigned_to or "unassigned",
@@ -722,6 +746,7 @@ def _filtered_lead_table_rows(
     pool_for_user_id: int | None = None,
     include_placed_outcomes: bool = False,
     admin_sent_only: bool = False,
+    intake_method: str | None = None,
     page: int | None = None,
     page_size: int | None = None,
     ids_only: bool = False,
@@ -742,6 +767,7 @@ def _filtered_lead_table_rows(
         pool_for_user_id=pool_for_user_id,
         admin_sent_only=admin_sent_only,
     )
+    buyer_query = _apply_intake_method_scope(buyer_query, intake_method=intake_method)
     buyer_query, _ = _apply_call_outcome_scope(
         db,
         buyer_query,
@@ -1031,6 +1057,7 @@ def list_leads_table_ids(
     pool_for_user_id: int | None = None,
     include_placed_outcomes: bool = False,
     admin_sent_only: bool = False,
+    intake_method: str | None = None,
 ) -> dict[str, object]:
     rows, _section_total, filtered_count = _filtered_lead_table_rows(
         db,
@@ -1054,6 +1081,7 @@ def list_leads_table_ids(
         pool_for_user_id=pool_for_user_id,
         include_placed_outcomes=include_placed_outcomes,
         admin_sent_only=admin_sent_only,
+        intake_method=intake_method,
         ids_only=True,
     )
     return {
@@ -1087,6 +1115,7 @@ def list_leads_table(
     pool_for_user_id: int | None = None,
     include_placed_outcomes: bool = False,
     admin_sent_only: bool = False,
+    intake_method: str | None = None,
 ) -> dict[str, object]:
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
@@ -1113,6 +1142,7 @@ def list_leads_table(
         pool_for_user_id=pool_for_user_id,
         include_placed_outcomes=include_placed_outcomes,
         admin_sent_only=admin_sent_only,
+        intake_method=intake_method,
         page=page,
         page_size=page_size,
     )
@@ -1204,9 +1234,13 @@ def _compute_section_counts(
     unassigned_old_ids: set[int] = set()
     unassigned_other_ids: set[int] = set()
     by_assignee: dict[str, int] = {}
+    pool_counts = {key: 0 for key in TARGETED_POOL_SOURCES}
 
     for buyer_id, source, assignee_id, assigned_by_id in buyer_query.all():
-        is_old = (source or "").strip().lower() == "old_clients"
+        source_key = (source or "").strip().lower()
+        if source_key in pool_counts:
+            pool_counts[source_key] += 1
+        is_old = source_key == "old_clients"
         if is_old:
             old_client_ids.add(buyer_id)
         else:
@@ -1266,6 +1300,9 @@ def _compute_section_counts(
         # Admin master table: every lead (assigned + unassigned, all sources).
         "master": len(all_ids) if pool_for_user_id is None and assigned_to_user_id is None else 0,
         "by_assignee": by_assignee if pool_for_user_id is None else {},
+        "hyperstore_targeted": pool_counts.get("hyperstore_targeted", 0),
+        "targeted_distributor": pool_counts.get("targeted_distributor", 0),
+        "targeted_client": pool_counts.get("targeted_client", 0),
     }
 
 
@@ -1392,6 +1429,8 @@ def update_lead_table_row(
             "city",
             "address",
             "remarks",
+            "remarks_03",
+            "remarks_04",
         )
         if key in data
     }
@@ -1919,3 +1958,47 @@ def bulk_assign_lead_table_rows(
         "assigned_to": label,
         "transfer_message": (transfer_event or {}).get("message"),
     }
+
+
+def set_target_pool(
+    db: Session,
+    *,
+    lead_ids: list[int],
+    source: str,
+    intake_method: str = "discover",
+) -> dict[str, object]:
+    """Move leads into a targeted pool (Hyperstore / Distributor / Client)."""
+    from modules.audit import log_action
+
+    pool = source.strip().lower()
+    if pool not in TARGETED_POOL_SOURCES:
+        raise ValueError(f"Invalid targeted pool source: {source}")
+    method = intake_method.strip().lower()
+    if method not in {"upload", "discover"}:
+        raise ValueError("intake_method must be upload or discover")
+
+    updated_ids: list[int] = []
+    for lead_id in lead_ids:
+        buyer = buyers_module.get_buyer(db, lead_id)
+        if not buyer:
+            continue
+        buyer.source = pool
+        buyer.intake_method = method
+        updated_ids.append(lead_id)
+
+    if updated_ids:
+        invalidate_section_counts_cache()
+        db.commit()
+        log_action(
+            db,
+            entity_type="buyer",
+            entity_id=0,
+            action="set_target_pool",
+            details={
+                "source": pool,
+                "intake_method": method,
+                "lead_ids": updated_ids,
+            },
+        )
+
+    return {"updated_count": len(updated_ids), "updated_ids": updated_ids}

@@ -167,6 +167,10 @@ class Buyer(Base):
     interested_clients_list_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), index=True
     )
+    # Targeted pool modules: upload (spreadsheet) vs discover (AI / search leads).
+    intake_method: Mapped[Optional[str]] = mapped_column(String(40), index=True)
+    remarks_03: Mapped[Optional[str]] = mapped_column(Text)
+    remarks_04: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

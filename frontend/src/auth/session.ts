@@ -13,6 +13,8 @@ export interface AuthUser {
 /** Bearer backup when httpOnly cookie is missing (some proxy / browser edge cases). */
 const TOKEN_KEY = "kafi_auth_token";
 const USER_KEY = "kafi_auth_user";
+const IMPERSONATOR_TOKEN_KEY = "kafi_impersonator_token";
+const IMPERSONATOR_USER_KEY = "kafi_impersonator_user";
 
 export function getStoredToken(): string | null {
   try {
@@ -48,6 +50,29 @@ export function storeSession(token: string, user: AuthUser): void {
 export function clearSession(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+}
+
+export function getImpersonatorSnapshot(): { token: string; user: AuthUser } | null {
+  try {
+    const token = localStorage.getItem(IMPERSONATOR_TOKEN_KEY);
+    const raw = localStorage.getItem(IMPERSONATOR_USER_KEY);
+    if (!token || !raw) return null;
+    const user = JSON.parse(raw) as AuthUser;
+    if (!user?.id) return null;
+    return { token, user };
+  } catch {
+    return null;
+  }
+}
+
+export function storeImpersonatorSnapshot(token: string, user: AuthUser): void {
+  localStorage.setItem(IMPERSONATOR_TOKEN_KEY, token);
+  localStorage.setItem(IMPERSONATOR_USER_KEY, JSON.stringify(user));
+}
+
+export function clearImpersonatorSnapshot(): void {
+  localStorage.removeItem(IMPERSONATOR_TOKEN_KEY);
+  localStorage.removeItem(IMPERSONATOR_USER_KEY);
 }
 
 export function isAdmin(user: AuthUser | null | undefined): boolean {

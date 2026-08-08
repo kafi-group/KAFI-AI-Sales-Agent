@@ -651,6 +651,13 @@ export interface CallHistoryListResponse {
   rows: CallHistoryItem[];
 }
 
+export interface DialablePhoneOption {
+  index: number;
+  label: string;
+  phone: string;
+  contact_id: number | null;
+}
+
 export interface DialableLeadRow {
   id: number;
   company_name: string;
@@ -662,6 +669,7 @@ export interface DialableLeadRow {
   contact_id: number | null;
   contact_name: string | null;
   contact_phone: string | null;
+  phones?: DialablePhoneOption[];
 }
 
 export interface DialableCountryNow {
@@ -1185,6 +1193,9 @@ export interface LeadTableSectionCountsResponse {
   not_received_call_clients: number;
   master?: number;
   by_assignee?: Record<string, number>;
+  hyperstore_targeted?: number;
+  targeted_distributor?: number;
+  targeted_client?: number;
 }
 
 export interface LeadTableBulkDeleteResponse {
@@ -1220,6 +1231,8 @@ export interface LeadTableRow {
   city: string | null;
   address: string | null;
   remarks: string | null;
+  remarks_03?: string | null;
+  remarks_04?: string | null;
   /** Prior remarks entries with timestamps (oldest → newest). */
   remarks_history?: Array<{
     text: string;
@@ -1266,6 +1279,8 @@ export interface LeadTableRowUpdate {
   city?: string | null;
   address?: string | null;
   remarks?: string | null;
+  remarks_03?: string | null;
+  remarks_04?: string | null;
   assigned_to?: string | null;
   assigned_to_user_id?: number | null;
   contact_id?: number;
@@ -1370,6 +1385,7 @@ export interface LeadTableQuery {
   page_size?: number;
   assigned_to_user_id?: number;
   master?: boolean;
+  intake_method?: string;
 }
 
 export type LeadTableSectionScope = Pick<
@@ -1526,6 +1542,10 @@ export const client = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  impersonateUser: (userId: number) =>
+    request<LoginResponse>(`/auth/impersonate/${userId}`, {
+      method: "POST",
+    }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   getMe: () => request<AppUser>("/auth/me"),
   listUsers: () => request<AppUser[]>("/auth/users"),
@@ -1604,6 +1624,7 @@ export const client = {
       search.set("assigned_to_user_id", String(params.assigned_to_user_id));
     }
     if (params.master) search.set("master", "true");
+    if (params.intake_method) search.set("intake_method", params.intake_method);
     const query = search.toString();
     return request<LeadTableResponse>(`/leads/table${query ? `?${query}` : ""}`);
   },
@@ -1628,6 +1649,7 @@ export const client = {
       search.set("assigned_to_user_id", String(params.assigned_to_user_id));
     }
     if (params.master) search.set("master", "true");
+    if (params.intake_method) search.set("intake_method", params.intake_method);
     const query = search.toString();
     return request<LeadTableIdsResponse>(`/leads/table/ids${query ? `?${query}` : ""}`);
   },
@@ -1677,6 +1699,22 @@ export const client = {
         assigned_to_user_id: assignedToUserId,
       }),
     }),
+  setTargetPool: (
+    leadIds: number[],
+    source: string,
+    intakeMethod: "upload" | "discover" = "discover",
+  ) =>
+    request<{ updated_count: number; updated_ids: number[] }>(
+      "/leads/table/set-target-pool",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          lead_ids: leadIds,
+          source,
+          intake_method: intakeMethod,
+        }),
+      },
+    ),
   setInterestedClientsMembership: (leadIds: number[], inList: boolean) =>
     request<{ updated_count: number; updated_ids: number[] }>(
       "/leads/table/interested-clients-membership",

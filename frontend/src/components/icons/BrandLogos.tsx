@@ -1,6 +1,7 @@
 import whatsappLogo from "../../assets/brands/whatsapp.svg?url";
 import outlookLogo from "../../assets/brands/outlook.svg?url";
 import twilioLogo from "../../assets/brands/twilio.svg?url";
+import linkedinLogo from "../../assets/brands/linkedin.svg?url";
 
 type BrandSize = "xs" | "sm" | "md" | "lg";
 
@@ -68,6 +69,19 @@ export function LogoTwilio({ size, className, title }: BrandLogoProps) {
     <BrandImg
       src={twilioLogo}
       alt="Twilio"
+      size={size}
+      className={className}
+      title={title}
+    />
+  );
+}
+
+/** LinkedIn brand mark (for mail label folders). */
+export function LogoLinkedIn({ size, className, title }: BrandLogoProps) {
+  return (
+    <BrandImg
+      src={linkedinLogo}
+      alt="LinkedIn"
       size={size}
       className={className}
       title={title}

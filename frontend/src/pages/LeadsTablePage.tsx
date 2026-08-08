@@ -7,6 +7,8 @@ import type {
 import {
   assignedUserIdFromSection,
   isAssignedLeadsSection,
+  isTargetedPoolSection,
+  TARGETED_POOL_EXCLUDE,
 } from "../components/AppSidebar";
 import { formatCountryLabel } from "../data/countries";
 import { ScoreBadge } from "../components/ScoreBadge";
@@ -17,6 +19,7 @@ import { AssignedToSelect, type AssigneeOption } from "../components/AssignedToS
 import { FollowUpScheduleControl } from "../components/FollowUpScheduleControl";
 import { CreateLeadForm } from "../components/CreateLeadForm";
 import { LeadsTableCsvImport } from "../components/LeadsTableCsvImport";
+import { TargetedPoolLeadsTable } from "../components/TargetedPoolLeadsTable";
 import { SocialLinksCell } from "../components/SocialLinksCell";
 import { BulkEmailModal } from "../components/BulkEmailModal";
 import { BulkWhatsAppModal } from "../components/BulkWhatsAppModal";
@@ -149,6 +152,31 @@ const LEADS_WIDE_COLUMNS: ColumnDef[] = [
   { id: "call_remarks", label: "Call remarks" },
   { id: "follow_up", label: "Follow-up reminder" },
   { id: "edit", label: "Edit" },
+  { id: "actions", label: "Actions", locked: true },
+];
+
+/** Hyperstore / Targeted Distributors / Targeted Client — matches Kafi spreadsheet layout. */
+const TARGETED_POOL_COLUMNS: ColumnDef[] = [
+  { id: "select", label: "Select", locked: true },
+  { id: "serial", label: "S. No." },
+  { id: "company", label: "Company Name", locked: true },
+  { id: "business_type", label: "Business Type" },
+  { id: "designation", label: "Designation" },
+  { id: "contact_person", label: "Contact Person" },
+  { id: "primary_mobile", label: "Primary Mobile No." },
+  { id: "secondary_mobile", label: "Secondary Mobile No." },
+  { id: "primary_phone", label: "Primary Phone No." },
+  { id: "secondary_phone", label: "Secondary Phone No." },
+  { id: "primary_email", label: "Primary Email" },
+  { id: "secondary_email", label: "Secondary Email" },
+  { id: "country", label: "Country" },
+  { id: "product", label: "Product" },
+  { id: "city", label: "City" },
+  { id: "address", label: "Address" },
+  { id: "grading", label: "Grading" },
+  { id: "remarks", label: "Remarks 02" },
+  { id: "remarks_03", label: "Remarks 03" },
+  { id: "date", label: "Date" },
   { id: "actions", label: "Actions", locked: true },
 ];
 
@@ -388,15 +416,20 @@ function sectionTableScope(
 } {
   if (section === "master") return { master: true };
   if (section === "old_clients") return { source: "old_clients" };
+  if (section === "hyperstore_targeted") return { source: "hyperstore_targeted" };
+  if (section === "targeted_distributor") return { source: "targeted_distributor" };
+  if (section === "targeted_client") return { source: "targeted_client" };
   if (isAssignedLeadsSection(section)) {
     const userId = assignedUserIdFromSection(section);
     return userId != null ? { assigned_to_user_id: userId } : {};
   }
+  if (section === "all") return { exclude_source: TARGETED_POOL_EXCLUDE };
   return { exclude_source: "old_clients" };
 }
 
 function sectionTableParams(
   section: LeadsTableSection,
+  intakeMethod: "upload" | "discover" | "all" = "all",
 ): {
   source?: string;
   exclude_source?: string;
@@ -404,10 +437,29 @@ function sectionTableParams(
   in_interested_clients?: boolean;
   assigned_to_user_id?: number;
   master?: boolean;
+  intake_method?: string;
 } {
   if (section === "master") return { master: true };
   if (section === "old_clients") return { source: "old_clients" };
-    if (section === "interested_clients") return { call_outcome: "follow_up" };
+  if (section === "hyperstore_targeted") {
+    return {
+      source: "hyperstore_targeted",
+      ...(intakeMethod !== "all" ? { intake_method: intakeMethod } : {}),
+    };
+  }
+  if (section === "targeted_distributor") {
+    return {
+      source: "targeted_distributor",
+      ...(intakeMethod !== "all" ? { intake_method: intakeMethod } : {}),
+    };
+  }
+  if (section === "targeted_client") {
+    return {
+      source: "targeted_client",
+      ...(intakeMethod !== "all" ? { intake_method: intakeMethod } : {}),
+    };
+  }
+  if (section === "interested_clients") return { call_outcome: "follow_up" };
   if (section === "sales_interested_clients") return { in_interested_clients: true };
   if (section === "not_interested_clients") return { call_outcome: "not_interested" };
   if (section === "not_received_call_clients") return { call_outcome: "not_received_call" };
@@ -415,6 +467,7 @@ function sectionTableParams(
     const userId = assignedUserIdFromSection(section);
     return userId != null ? { assigned_to_user_id: userId } : {};
   }
+  if (section === "all") return { exclude_source: TARGETED_POOL_EXCLUDE };
   return { exclude_source: "old_clients" };
 }
 
@@ -425,6 +478,9 @@ function sectionTitle(
 ): string {
   if (section === "master") return "Master table";
   if (section === "old_clients") return isAdmin ? "Old clients" : "Clients";
+  if (section === "hyperstore_targeted") return "Hyperstore Targeted clients";
+  if (section === "targeted_distributor") return "Targeted Distributors";
+  if (section === "targeted_client") return "Targeted Client";
   if (section === "interested_clients") return "Follow up clients";
   if (section === "sales_interested_clients") return "Interested Clients";
   if (section === "not_interested_clients") return "Not interested";
@@ -432,7 +488,7 @@ function sectionTitle(
   if (isAssignedLeadsSection(section)) {
     return `Leads Sent To ${assigneeUsername || "user"}`;
   }
-  return "Scrapped Leads";
+  return "New search lead";
 }
 
 function sectionDescription(
@@ -442,6 +498,15 @@ function sectionDescription(
 ): string {
   if (section === "master") {
     return "Admin-only overview of every lead in the system — including leads sent to Asim, Usman, Sadia, or any other user. Nothing is hidden by assignment.";
+  }
+  if (section === "hyperstore_targeted") {
+    return "Hyperstore targeted list — import a spreadsheet (upload) or move leads from New search lead (AI / web discovery). Use the toggle to filter by source.";
+  }
+  if (section === "targeted_distributor") {
+    return "Targeted distributors — import XLS/XLSX or feed from discovered search leads. Toggle between uploaded rows and AI-searched rows.";
+  }
+  if (section === "targeted_client") {
+    return "Targeted clients — import XLS/XLSX or feed from discovered search leads. Toggle between uploaded rows and AI-searched rows.";
   }
   if (section === "old_clients") {
     return isAdmin
@@ -463,7 +528,7 @@ function sectionDescription(
   if (isAssignedLeadsSection(section)) {
     return `Only leads an admin sent to ${assigneeUsername || "this user"}. Their own spreadsheet imports stay on their account and do not appear here.`;
   }
-  return "New discoveries from Discover Leads (and spreadsheet imports into this section). Does not include Old clients — companies already in Old clients are blocked from being added here.";
+  return "New discoveries from Discover Leads (and spreadsheet imports into this section). Does not include Old clients or targeted pool lists.";
 }
 
 function sectionEmptyMessage(section: LeadsTableSection): string | null {
@@ -506,6 +571,8 @@ function rowDraftKey(row: LeadTableRow): string {
     city: row.city,
     address: row.address,
     remarks: row.remarks,
+    remarks_03: row.remarks_03,
+    remarks_04: row.remarks_04,
     assigned_to: row.assigned_to,
     assigned_to_user_id: row.assigned_to_user_id,
     follow_up_at: row.follow_up_at,
@@ -547,6 +614,8 @@ function buildUpdatePayload(draft: LeadTableRow): LeadTableRowUpdate {
     city: draft.city,
     address: draft.address,
     remarks: draft.remarks,
+    remarks_03: draft.remarks_03,
+    remarks_04: draft.remarks_04,
     assigned_to_user_id: draft.assigned_to_user_id,
     contact_id: draft.contact_id ?? undefined,
     contact_name: draft.contact_name ?? undefined,
@@ -688,6 +757,8 @@ export function LeadsTablePage({
   const [startingBulkCall, setStartingBulkCall] = useState(false);
   const callQueue = useCallQueue();
   const [showCsvImport, setShowCsvImport] = useState(false);
+  const [intakeMethodFilter, setIntakeMethodFilter] = useState<"all" | "upload" | "discover">("all");
+  const [movingToPool, setMovingToPool] = useState(false);
   const [showCreateLead, setShowCreateLead] = useState(false);
   const [bulkEmailNotice, setBulkEmailNotice] = useState<string | null>(null);
   const [deduping, setDeduping] = useState(false);
@@ -881,14 +952,23 @@ export function LeadsTablePage({
   const useClientsFilters = true;
   const isOldClients = section === "old_clients";
   const isMaster = section === "master";
-  const canImportSpreadsheet = section === "all" || section === "old_clients";
-  /** Every user can manually add leads on Clients / Master / New search lead. */
+  const isTargetedPool = isTargetedPoolSection(section);
+  const canImportSpreadsheet =
+    section === "all" || section === "old_clients" || isTargetedPool;
+  /** Every user can manually add leads on Clients / Master / New search lead / targeted pools. */
   const canAddLead =
-    section === "old_clients" || section === "master" || section === "all";
+    section === "old_clients" ||
+    section === "master" ||
+    section === "all" ||
+    isTargetedPool;
   const createLeadSource =
-    section === "all" && isAdmin ? "manual" : "old_clients";
+    section === "all" && isAdmin ? "manual" : isTargetedPool ? section : "old_clients";
   const canBulkAssign = isAdmin && (section === "all" || section === "old_clients" || isMaster);
-  const importSource = isOldClients ? "old_clients" : "csv";
+  const importSource = isOldClients
+    ? "old_clients"
+    : isTargetedPool
+      ? section
+      : "csv";
   const isCallOutcomeSection =
     section === "interested_clients" ||
     section === "sales_interested_clients" ||
@@ -904,18 +984,22 @@ export function LeadsTablePage({
     !isAssignedLeadsSection(section);
   const callOutcomeEmptyMessage = sectionEmptyMessage(section);
 
-  const isWideLayout = isOldClients || isCallOutcomeSection;
+  const isWideLayout = isOldClients || isCallOutcomeSection || isTargetedPool;
   const columnDefs = useMemo(() => {
-    const base = isWideLayout ? LEADS_WIDE_COLUMNS : LEADS_NARROW_COLUMNS;
+    const base = isTargetedPool
+      ? TARGETED_POOL_COLUMNS
+      : isWideLayout
+        ? LEADS_WIDE_COLUMNS
+        : LEADS_NARROW_COLUMNS;
     return base.filter((col) => {
       if (col.id === "call_remarks" && !isCallOutcomeSection) return false;
       if (col.id === "follow_up" && !canScheduleFollowUp) return false;
       if (col.id === "edit" && !editMode) return false;
       return true;
     });
-  }, [isWideLayout, isCallOutcomeSection, canScheduleFollowUp, editMode]);
+  }, [isWideLayout, isTargetedPool, isCallOutcomeSection, canScheduleFollowUp, editMode]);
   const columnsUi = useColumnVisibility(
-    isWideLayout ? "leads.wide" : "leads.narrow",
+    isTargetedPool ? "leads.targeted" : isWideLayout ? "leads.wide" : "leads.narrow",
     columnDefs,
     user?.id,
   );
@@ -946,6 +1030,11 @@ export function LeadsTablePage({
     canScheduleFollowUp,
   ]);
 
+  useEffect(() => {
+    setIntakeMethodFilter("all");
+    setPage(1);
+  }, [section]);
+
   const tableQueryParams = useMemo(
     () => ({
       score: useClientsFilters ? undefined : score || undefined,
@@ -959,7 +1048,7 @@ export function LeadsTablePage({
       q: debouncedSearch.trim() || undefined,
       sort_by: sortBy,
       sort_dir: sortDir,
-      ...sectionTableParams(section),
+      ...sectionTableParams(section, intakeMethodFilter),
     }),
     [
       callRecommended,
@@ -975,6 +1064,7 @@ export function LeadsTablePage({
       section,
       sortBy,
       sortDir,
+      intakeMethodFilter,
     ],
   );
 
@@ -1326,6 +1416,44 @@ export function LeadsTablePage({
     } finally {
       setBulkAssignValue("");
       setBulkAssigning(false);
+    }
+  }
+
+  async function moveSelectedToTargetPool(
+    pool: "hyperstore_targeted" | "targeted_distributor" | "targeted_client",
+  ) {
+    if (!isAdmin || selected.size === 0 || movingToPool) return;
+    const labels: Record<typeof pool, string> = {
+      hyperstore_targeted: "Hyperstore Targeted clients",
+      targeted_distributor: "Targeted Distributors",
+      targeted_client: "Targeted Client",
+    };
+    const count = selected.size;
+    const confirmed = window.confirm(
+      `Move ${count} selected lead${count === 1 ? "" : "s"} to ${labels[pool]}? They will be tagged as AI / search leads.`,
+    );
+    if (!confirmed) return;
+
+    setMovingToPool(true);
+    setSaveNotice(null);
+    try {
+      const result = await client.setTargetPool([...selected], pool, "discover");
+      const movedIds = new Set(result.updated_ids);
+      if (movedIds.size > 0) {
+        setRows((prev) => prev.filter((row) => !movedIds.has(row.id)));
+        setTotal((prev) => Math.max(0, prev - movedIds.size));
+        setFilteredCount((prev) => Math.max(0, prev - movedIds.size));
+        clearSelection();
+      }
+      await loadSectionCounts();
+      setSaveNotice(
+        `Moved ${result.updated_count} lead${result.updated_count === 1 ? "" : "s"} to ${labels[pool]}.`,
+      );
+      window.setTimeout(() => setSaveNotice(null), 5000);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to move leads to targeted pool");
+    } finally {
+      setMovingToPool(false);
     }
   }
 
@@ -2104,6 +2232,33 @@ export function LeadsTablePage({
           <p className="text-sm text-slate-500 mt-1">
             {sectionDescription(section, assigneeUsername, isAdmin)}
           </p>
+          {isTargetedPool ? (
+            <div className="mt-3 inline-flex rounded-lg border border-slate-700 bg-slate-900/80 p-0.5 text-xs">
+              {(
+                [
+                  ["all", "All leads"],
+                  ["upload", "Uploaded data"],
+                  ["discover", "AI / search leads"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    setIntakeMethodFilter(value);
+                    setPage(1);
+                  }}
+                  className={`px-3 py-1.5 rounded-md transition ${
+                    intakeMethodFilter === value
+                      ? "bg-emerald-600 text-white"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <p className="text-sm text-slate-500 mt-1">
             {filteredCount} matching · {total} in section · {TABLE_PAGE_SIZE} per page
             {selected.size > 0 ? (
@@ -2171,6 +2326,34 @@ export function LeadsTablePage({
               Clear
             </ActionButton>
           )}
+          {isAdmin && section === "all" && selected.size > 0 ? (
+            <>
+              <ActionButton
+                icon={IconSearch}
+                onClick={() => void moveSelectedToTargetPool("hyperstore_targeted")}
+                disabled={movingToPool || bulkOnboarding || editMode}
+                title="Move to Hyperstore Targeted clients"
+              >
+                {movingToPool ? "Moving…" : "→ Hyperstore"}
+              </ActionButton>
+              <ActionButton
+                icon={IconSearch}
+                onClick={() => void moveSelectedToTargetPool("targeted_distributor")}
+                disabled={movingToPool || bulkOnboarding || editMode}
+                title="Move to Targeted Distributors"
+              >
+                → Distributors
+              </ActionButton>
+              <ActionButton
+                icon={IconSearch}
+                onClick={() => void moveSelectedToTargetPool("targeted_client")}
+                disabled={movingToPool || bulkOnboarding || editMode}
+                title="Move to Targeted Client"
+              >
+                → Targeted Client
+              </ActionButton>
+            </>
+          ) : null}
           <ActionButton
             icon={IconMail}
             variant="sky"
@@ -2988,7 +3171,30 @@ export function LeadsTablePage({
             className="origin-top-left"
           >
           {columnsUi.css ? <style>{columnsUi.css}</style> : null}
-          {isOldClients || isCallOutcomeSection ? (
+          {isTargetedPool ? (
+            <TargetedPoolLeadsTable
+              rows={rows}
+              drafts={drafts}
+              selected={selected}
+              editMode={editMode}
+              theadStickyClass={theadStickyClass}
+              isFullscreen={isFullscreen}
+              allOnPageSelected={allOnPageSelected}
+              someOnPageSelected={someOnPageSelected}
+              toggleSelectAllOnPage={toggleSelectAllOnPage}
+              toggleSelected={toggleSelected}
+              sortIndicator={sortIndicator}
+              toggleSort={toggleSort}
+              onSelectLead={onSelectLead}
+              onError={onError}
+              deletingId={deletingId}
+              deletingSelected={deletingSelected}
+              deleteRows={deleteRows}
+              updateDraft={updateDraft}
+              commitDraftField={commitDraftField}
+              openWhatsAppCompose={openWhatsAppCompose}
+            />
+          ) : isOldClients || isCallOutcomeSection ? (
             <table
               className={`w-full text-sm border-collapse ${
                 canScheduleFollowUp ? "min-w-[2800px]" : "min-w-[2600px]"
@@ -3893,21 +4099,31 @@ export function LeadsTablePage({
           onError={onError}
           importSource={importSource}
           tableLabel={
-            isOldClients ? (isAdmin ? "Old clients" : "Clients") : undefined
+            isOldClients
+              ? isAdmin
+                ? "Old clients"
+                : "Clients"
+              : isTargetedPool
+                ? sectionTitle(section, assigneeUsername, isAdmin)
+                : undefined
           }
           title={
             isOldClients
               ? isAdmin
                 ? "Import old clients"
                 : "Import clients"
-              : "Import leads"
+              : isTargetedPool
+                ? `Import ${sectionTitle(section, assigneeUsername, isAdmin)}`
+                : "Import leads"
           }
           description={
             isOldClients
               ? isAdmin
                 ? "Upload CSV or Excel (.xlsx). Columns are mapped to the Old clients table. Import only saves rows as-is — research and score later from the table."
                 : "Upload CSV or Excel (.xlsx). Columns are mapped to your Clients table. Import only saves rows as-is — research and score later from the table."
-              : "Upload CSV or Excel (.xlsx). Rows are saved into your leads table as-is — research and score them from the table when ready."
+              : isTargetedPool
+                ? "Upload CSV or Excel (.xlsx). Rows are saved as uploaded data in this targeted list — use the toggle to view them separately from AI / search leads."
+                : "Upload CSV or Excel (.xlsx). Rows are saved into your leads table as-is — research and score them from the table when ready."
           }
         />
       )}

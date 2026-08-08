@@ -41,6 +41,8 @@ from api.schemas import (
     LeadTableRowRead,
     LeadTableRowUpdate,
     LeadTableSectionCountsResponse,
+    LeadTableSetTargetPoolRequest,
+    LeadTableSetTargetPoolResponse,
     ProductInterestEmailRequest,
     QuotationEligibleLeadRead,
     InterestedFollowUpAckRead,
@@ -469,6 +471,7 @@ def list_leads_table(
     page_size: int = 20,
     assigned_to_user_id: int | None = None,
     master: bool = False,
+    intake_method: str | None = None,
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -507,6 +510,7 @@ def list_leads_table(
         pool_for_user_id=pool_for_user_id,
         include_placed_outcomes=include_placed,
         admin_sent_only=admin_sent_only,
+        intake_method=intake_method,
     )
     return LeadTableResponse(**result)
 
@@ -530,6 +534,7 @@ def list_leads_table_ids(
     sort_dir: str = "desc",
     assigned_to_user_id: int | None = None,
     master: bool = False,
+    intake_method: str | None = None,
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -566,6 +571,7 @@ def list_leads_table_ids(
         pool_for_user_id=pool_for_user_id,
         include_placed_outcomes=include_placed,
         admin_sent_only=admin_sent_only,
+        intake_method=intake_method,
     )
     return LeadTableIdsResponse(**result)
 
@@ -691,6 +697,27 @@ def bulk_assign_lead_table_rows(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return LeadTableBulkAssignResponse(**result)
+
+
+@router.post("/table/set-target-pool", response_model=LeadTableSetTargetPoolResponse)
+def set_target_pool_rows(
+    payload: LeadTableSetTargetPoolRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(require_admin),
+):
+    """Admin: move leads into Hyperstore / Targeted Distributor / Targeted Client pools."""
+    if not payload.lead_ids:
+        raise HTTPException(400, "Select at least one lead")
+    try:
+        result = leads_module.set_target_pool(
+            db,
+            lead_ids=payload.lead_ids,
+            source=payload.source,
+            intake_method=payload.intake_method,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return LeadTableSetTargetPoolResponse(**result)
 
 
 @router.post(

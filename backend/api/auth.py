@@ -223,3 +223,26 @@ def delete_user(
         status = 404 if detail == "User not found" else 400
         raise HTTPException(status_code=status, detail=detail) from exc
     return Response(status_code=204)
+
+
+@router.post("/impersonate/{user_id}", response_model=LoginResponse)
+def impersonate_user(
+    user_id: int,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    admin: AppUser = Depends(require_admin),
+) -> Any:
+    """Admin opens the dashboard as another active user (same data scope as that user)."""
+    if admin.id == user_id:
+        raise HTTPException(status_code=400, detail="Already signed in as this user")
+    target = db.get(AppUser, user_id)
+    if not target or not target.is_active:
+        raise HTTPException(status_code=404, detail="User not found")
+    session = auth_module.create_session(db, target)
+    secure = _request_wants_secure_cookie(request)
+    response.set_cookie(
+        value=session.token,
+        **auth_module.session_cookie_kwargs(secure=secure),
+    )
+    return LoginResponse(token=session.token, user=_to_user_read(target))

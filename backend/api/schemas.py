@@ -474,6 +474,8 @@ class LeadTableRowRead(BaseModel):
     city: Optional[str] = None
     address: Optional[str] = None
     remarks: Optional[str] = None
+    remarks_03: Optional[str] = None
+    remarks_04: Optional[str] = None
     remarks_history: Optional[list] = None
     call_remarks: Optional[str] = None
     assigned_to: str = "unassigned"
@@ -513,6 +515,8 @@ class LeadTableRowUpdate(BaseModel):
     city: Optional[str] = None
     address: Optional[str] = None
     remarks: Optional[str] = None
+    remarks_03: Optional[str] = None
+    remarks_04: Optional[str] = None
     assigned_to: Optional[str] = None
     assigned_to_user_id: Optional[int] = None
     contact_id: Optional[int] = None
@@ -593,6 +597,20 @@ class LeadTableSectionCountsResponse(BaseModel):
     not_received_call_clients: int
     master: int = 0
     by_assignee: dict[str, int] = Field(default_factory=dict)
+    hyperstore_targeted: int = 0
+    targeted_distributor: int = 0
+    targeted_client: int = 0
+
+
+class LeadTableSetTargetPoolRequest(BaseModel):
+    lead_ids: list[int]
+    source: str = Field(min_length=1)
+    intake_method: str = "discover"
+
+
+class LeadTableSetTargetPoolResponse(BaseModel):
+    updated_count: int
+    updated_ids: list[int] = Field(default_factory=list)
 
 
 class LeadTableInterestedClientsMembershipRequest(BaseModel):
@@ -1003,6 +1021,13 @@ class CallHistoryListResponse(BaseModel):
     rows: list[CallHistoryItem]
 
 
+class DialablePhoneOption(BaseModel):
+    index: int
+    label: str
+    phone: str
+    contact_id: Optional[int] = None
+
+
 class DialableLeadRow(BaseModel):
     id: int
     company_name: str
@@ -1014,6 +1039,7 @@ class DialableLeadRow(BaseModel):
     contact_id: Optional[int] = None
     contact_name: Optional[str] = None
     contact_phone: Optional[str] = None
+    phones: list[DialablePhoneOption] = Field(default_factory=list)
 
 
 class DialableCountryNow(BaseModel):

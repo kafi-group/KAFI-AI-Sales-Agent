@@ -859,22 +859,70 @@ def update_call_notes(db: Session, *, interaction_id: int, notes: str) -> dict:
 
 
 def _contact_has_dialable_phone(contact: Contact) -> bool:
-    phone = (contact.phone or "").strip()
-    if phone:
-        return True
-    primary = (contact.primary_phone or "").strip()
-    if primary:
-        return True
-    secondary = (contact.secondary_mobile or "").strip()
-    return bool(secondary)
+    for value in (
+        contact.phone,
+        contact.primary_phone,
+        contact.secondary_mobile,
+        contact.secondary_phone,
+    ):
+        if (value or "").strip():
+            return True
+    return False
 
 
 def _dial_phone_for_contact(contact: Contact) -> str | None:
-    for value in (contact.phone, contact.primary_phone, contact.secondary_mobile):
-        cleaned = (value or "").strip()
-        if cleaned:
-            return cleaned
-    return None
+    options = _dial_phone_options_for_contact(contact)
+    return options[0]["phone"] if options else None
+
+
+def _dial_phone_options_for_contact(contact: Contact) -> list[dict[str, object]]:
+    """Numbered dial options for one contact (deduped)."""
+    seen: set[str] = set()
+    options: list[dict[str, object]] = []
+    field_labels = (
+        ("phone", "Main"),
+        ("primary_phone", "Primary"),
+        ("secondary_mobile", "Mobile 2"),
+        ("secondary_phone", "Phone 2"),
+    )
+    for field, label in field_labels:
+        raw = (getattr(contact, field, None) or "").strip()
+        if not raw:
+            continue
+        normalized = normalize_e164(raw) or raw
+        key = "".join(ch for ch in normalized if ch.isdigit())
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        options.append(
+            {
+                "index": len(options) + 1,
+                "label": label,
+                "phone": raw,
+                "contact_id": contact.id,
+            }
+        )
+    return options
+
+
+def _dial_phone_options_for_buyer(db: Session, buyer_id: int) -> list[dict[str, object]]:
+    """All dialable numbers for a lead across contacts."""
+    contacts = (
+        db.query(Contact)
+        .filter(Contact.buyer_id == buyer_id)
+        .order_by(Contact.id.asc())
+        .all()
+    )
+    seen: set[str] = set()
+    options: list[dict[str, object]] = []
+    for contact in contacts:
+        for opt in _dial_phone_options_for_contact(contact):
+            key = "".join(ch for ch in str(opt["phone"]) if ch.isdigit())
+            if key in seen:
+                continue
+            seen.add(key)
+            options.append({**opt, "index": len(options) + 1})
+    return options
 
 
 def list_dialable_leads(
@@ -982,7 +1030,9 @@ def list_dialable_leads(
     rows: list[dict[str, object]] = []
     for buyer_id, company_name, country_val, _created_at in page_rows:
         contact = phone_by_buyer.get(buyer_id)
+        phone_options = _dial_phone_options_for_buyer(db, buyer_id)
         timing = get_call_recommendation(country_val)
+        primary_phone = phone_options[0]["phone"] if phone_options else None
         rows.append(
             {
                 "id": buyer_id,
@@ -992,9 +1042,12 @@ def list_dialable_leads(
                 "call_local_time": timing["call_local_time"],
                 "call_timezone": timing["call_timezone"],
                 "call_reason": timing["call_reason"],
-                "contact_id": contact.id if contact else None,
+                "contact_id": (
+                    phone_options[0].get("contact_id") if phone_options else (contact.id if contact else None)
+                ),
                 "contact_name": contact.full_name if contact else None,
-                "contact_phone": _dial_phone_for_contact(contact) if contact else None,
+                "contact_phone": primary_phone,
+                "phones": phone_options,
             }
         )
 

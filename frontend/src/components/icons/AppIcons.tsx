@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { IndexIconKey } from "../../data/indexSections";
-import { LogoOutlook, LogoTwilio, LogoWhatsApp } from "./BrandLogos";
+import { LogoOutlook, LogoTwilio, LogoWhatsApp, LogoLinkedIn } from "./BrandLogos";
 
 export type IconSize = "xs" | "sm" | "md" | "lg";
 
@@ -492,6 +492,8 @@ export function NavIcon({
   if (navId === "interested_clients") return <IconFollowUp {...props} />;
   if (navId === "not_interested_clients") return <IconXCircle {...props} />;
   if (navId === "not_received_call_clients") return <IconPhoneMissed {...props} />;
+  if (navId === "hyperstore_targeted" || navId === "targeted_distributor" || navId === "targeted_client")
+    return <IconSearch {...props} />;
   if (navId.startsWith("assigned:")) return <IconUser {...props} />;
   if (navId === "inbox") return <LogoOutlook size={size} />;
   if (navId === "sent") return <IconSend {...props} />;
@@ -501,6 +503,7 @@ export function NavIcon({
   if (navId === "activity") return <IconMailStack {...props} />;
   if (navId === "email-templates") return <IconTemplate {...props} />;
   if (navId === "personalized-emails") return <IconSparkles {...props} />;
+  if (navId.startsWith("label-linkedin:")) return <LogoLinkedIn size={size} />;
   if (navId.startsWith("label:")) return <IconTag {...props} />;
   if (navId === "mail") return <LogoOutlook size={size} />;
   if (navId === "calls") return <LogoTwilio size={size} />;

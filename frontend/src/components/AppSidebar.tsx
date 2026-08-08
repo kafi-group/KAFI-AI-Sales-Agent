@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { useAuth } from "../auth/AuthContext";
+import { client, type AppUser } from "../api/client";
 import {
   IconBell,
   IconChevronDown,
@@ -37,7 +39,23 @@ export type LeadsTableSection =
   | "sales_interested_clients"
   | "not_interested_clients"
   | "not_received_call_clients"
+  | "hyperstore_targeted"
+  | "targeted_distributor"
+  | "targeted_client"
   | `assigned:${number}`;
+
+export const TARGETED_POOL_EXCLUDE =
+  "old_clients,hyperstore_targeted,targeted_distributor,targeted_client";
+
+export function isTargetedPoolSection(
+  section: LeadsTableSection,
+): section is "hyperstore_targeted" | "targeted_distributor" | "targeted_client" {
+  return (
+    section === "hyperstore_targeted" ||
+    section === "targeted_distributor" ||
+    section === "targeted_client"
+  );
+}
 
 export function isAssignedLeadsSection(
   section: string,
@@ -60,7 +78,8 @@ export type MailSection =
   | "activity"
   | "email-templates"
   | "personalized-emails"
-  | `label:${number}`;
+  | `label:${number}`
+  | `label-linkedin:${number}`;
 
 export type WhatsAppSection = "whatsapp-inbox" | "whatsapp-templates" | "whatsapp-activity";
 
@@ -98,6 +117,14 @@ export type NavItem =
       count: number;
       alert?: boolean;
       openMailer: true;
+    }
+  | {
+      id: "sales-assistant";
+      label: string;
+      count: number;
+      alert?: boolean;
+      children?: NavChild[];
+      openSalesAssistant: true;
     };
 
 interface AppSidebarProps {
@@ -113,6 +140,8 @@ interface AppSidebarProps {
   onSelectWhatsAppSection?: (section: WhatsAppSection) => void;
   /** Open Vercel mailer (same tab) with session exchange. */
   onOpenMailer?: () => void;
+  /** Open floating sales assistant panel (code required). */
+  onOpenSalesAssistant?: () => void;
   userLabel?: string;
   userRole?: string;
   /** Mobile drawer open state (< lg). Ignored on desktop. */
@@ -134,6 +163,7 @@ export function AppSidebar({
   onSelectMailSection,
   onSelectWhatsAppSection,
   onOpenMailer,
+  onOpenSalesAssistant,
   userLabel,
   userRole,
   mobileOpen = false,
@@ -141,6 +171,31 @@ export function AppSidebar({
   desktopOpen = true,
   onToggleDesktop,
 }: AppSidebarProps) {
+  const {
+    isAdmin,
+    impersonating,
+    impersonatorLabel,
+    switchToUser,
+    switchBackToAdmin,
+  } = useAuth();
+  const [switchMenuOpen, setSwitchMenuOpen] = useState(false);
+  const [switchUsers, setSwitchUsers] = useState<AppUser[]>([]);
+  const [switchBusy, setSwitchBusy] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isAdmin || impersonating) {
+      setSwitchUsers([]);
+      return;
+    }
+    client
+      .listUsers()
+      .then((rows) =>
+        setSwitchUsers(rows.filter((u) => u.is_active && u.role !== "admin")),
+      )
+      .catch(() => setSwitchUsers([]));
+  }, [isAdmin, impersonating]);
+
   const [leadsMenuOpen, setLeadsMenuOpen] = useState(activeTab === "table");
   const [mailMenuOpen, setMailMenuOpen] = useState(
     activeTab === "inbox" ||
@@ -270,6 +325,24 @@ export function AppSidebar({
                 </button>
               );
             }
+            if ("openSalesAssistant" in item && item.openSalesAssistant) {
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    onOpenSalesAssistant?.();
+                    closeMobile();
+                  }}
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-left transition text-slate-300 hover:bg-slate-800 hover:text-slate-100 group"
+                >
+                  <span className="flex items-center gap-2.5 truncate min-w-0">
+                    <NavIcon navId="chatbot" className={navIconClass(false)} />
+                    <span className="truncate">{item.label}</span>
+                  </span>
+                </button>
+              );
+            }
             if ("external" in item) {
               return (
                 <button
@@ -379,6 +452,7 @@ export function AppSidebar({
                         closeMobile();
                         return;
                       }
+                      if ("openSalesAssistant" in item) return;
                       onSelectTab(item.id);
                       closeMobile();
                     }}
@@ -506,16 +580,79 @@ export function AppSidebar({
         </nav>
 
         {(userLabel || userRole) && (
-          <div className="px-3 py-4 border-t border-slate-800 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="px-3 py-4 border-t border-slate-800 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-2">
+            {impersonating && impersonatorLabel ? (
+              <div className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-100">
+                Viewing as <span className="font-medium">{userLabel}</span>
+              </div>
+            ) : null}
             <div className="px-3 py-2 rounded-lg bg-slate-900/80 border border-slate-800 flex items-start gap-2.5">
               <IconUser size="sm" className="text-slate-500 mt-0.5 shrink-0" />
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="text-sm text-slate-200 truncate">{userLabel}</p>
                 {userRole && (
                   <p className="text-xs text-slate-500 mt-0.5 capitalize">{userRole}</p>
                 )}
               </div>
+              {isAdmin ? (
+                <button
+                  type="button"
+                  title={impersonating ? "Return to admin" : "Switch user"}
+                  aria-label={impersonating ? "Return to admin" : "Switch user"}
+                  disabled={switchBusy}
+                  onClick={() => {
+                    if (impersonating) {
+                      setSwitchBusy(true);
+                      setSwitchError(null);
+                      void switchBackToAdmin().catch((e) => {
+                        setSwitchError(
+                          e instanceof Error ? e.message : "Could not switch back",
+                        );
+                        setSwitchBusy(false);
+                      });
+                      return;
+                    }
+                    setSwitchMenuOpen((open) => !open);
+                  }}
+                  className="shrink-0 rounded-lg p-1.5 text-emerald-400 hover:bg-emerald-500/15 hover:text-emerald-300 disabled:opacity-50"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+                    <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
+                  </svg>
+                </button>
+              ) : null}
             </div>
+            {switchError ? (
+              <p className="px-3 text-xs text-red-300">{switchError}</p>
+            ) : null}
+            {isAdmin && switchMenuOpen && !impersonating ? (
+              <div className="rounded-lg border border-slate-800 bg-slate-900/90 overflow-hidden max-h-48 overflow-y-auto">
+                {switchUsers.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-slate-500">No other users</p>
+                ) : (
+                  switchUsers.map((u) => (
+                    <button
+                      key={u.id}
+                      type="button"
+                      disabled={switchBusy}
+                      onClick={() => {
+                        setSwitchBusy(true);
+                        setSwitchError(null);
+                        void switchToUser(u.id).catch((e) => {
+                          setSwitchError(
+                            e instanceof Error ? e.message : "Could not switch user",
+                          );
+                          setSwitchBusy(false);
+                        });
+                      }}
+                      className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-800 hover:text-white disabled:opacity-50"
+                    >
+                      {u.full_name || u.username}
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : null}
           </div>
         )}
         </div>

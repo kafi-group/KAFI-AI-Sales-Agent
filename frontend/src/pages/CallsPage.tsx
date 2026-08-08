@@ -5,9 +5,11 @@ import {
   type CallHistoryItem,
   type DialableCountryNow,
   type DialableLeadRow,
+  type DialablePhoneOption,
 } from "../api/client";
 import { CallLeadButton } from "../components/CallLeadButton";
 import { CallManualDialer } from "../components/CallManualDialer";
+import { CallPhonePicker } from "../components/CallPhonePicker";
 import { CallRemarksForm } from "../components/CallRemarksForm";
 import { CallRecordingPanel } from "../components/CallRecordingPanel";
 import { CallRecommendationBadge } from "../components/CallRecommendationBadge";
@@ -80,6 +82,10 @@ export function CallsPage({ onError, onSelectLead, onCallFollowUpSaved }: CallsP
   const [countryFilter, setCountryFilter] = useState<string>("");
   const [validNowFilter, setValidNowFilter] = useState<ValidNowFilter>("");
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<number>>(new Set());
+  const [phonePicker, setPhonePicker] = useState<{
+    lead: DialableLeadRow;
+    phones: DialablePhoneOption[];
+  } | null>(null);
   const callQueue = useCallQueue();
   const pollRef = useRef<number | null>(null);
 
@@ -246,17 +252,40 @@ export function CallsPage({ onError, onSelectLead, onCallFollowUpSaved }: CallsP
   function startBulkCall() {
     const leads = dialableLeads
       .filter((l) => selectedLeadIds.has(l.id))
-      .map((l) => ({
-        leadId: l.id,
-        companyName: l.company_name ?? String(l.id),
-        contactName: l.contact_name ?? null,
-        phone: l.contact_phone ?? "",
-        country: l.country ?? null,
-        contactId: l.contact_id ?? undefined,
-      }));
+      .map((l) => {
+        const phones = l.phones?.length ? l.phones : [];
+        const primary = phones[0];
+        return {
+          leadId: l.id,
+          companyName: l.company_name ?? String(l.id),
+          contactName: l.contact_name ?? null,
+          phone: primary?.phone ?? l.contact_phone ?? "",
+          country: l.country ?? null,
+          contactId: primary?.contact_id ?? l.contact_id ?? undefined,
+        };
+      })
+      .filter((l) => l.phone.trim());
     if (!leads.length) return;
     clearSelection();
     callQueue.start(leads);
+  }
+
+  function openPhonePicker(lead: DialableLeadRow) {
+    const phones =
+      lead.phones && lead.phones.length > 0
+        ? lead.phones
+        : lead.contact_phone
+          ? [
+              {
+                index: 1,
+                label: "Main",
+                phone: lead.contact_phone,
+                contact_id: lead.contact_id,
+              },
+            ]
+          : [];
+    if (phones.length <= 1) return;
+    setPhonePicker({ lead, phones });
   }
 
   function applyCountryFilter(next: string) {
@@ -526,16 +555,38 @@ TWILIO_WEBHOOK_BASE_URL=https://abc123.ngrok-free.app`}
                         />
                       </div>
                     </button>
-                    <CallLeadButton
-                      leadId={lead.id}
-                      phone={lead.contact_phone}
-                      compact
-                      onError={onError}
-                      onSuccess={(result) => {
-                        setNotice(result.message ?? "Connected — speak through your browser.");
-                        void loadData({ silent: true });
-                      }}
-                    />
+                    {(lead.phones && lead.phones.length > 1) || (!lead.phones?.length && !lead.contact_phone) ? null : (
+                      <CallLeadButton
+                        leadId={lead.id}
+                        phone={
+                          (lead.phones && lead.phones.length === 1
+                            ? lead.phones[0].phone
+                            : lead.contact_phone) ?? undefined
+                        }
+                        contactId={
+                          lead.phones && lead.phones.length === 1
+                            ? lead.phones[0].contact_id ?? undefined
+                            : lead.contact_id ?? undefined
+                        }
+                        compact
+                        onError={onError}
+                        onSuccess={(result) => {
+                          setNotice(result.message ?? "Connected — speak through your browser.");
+                          void loadData({ silent: true });
+                        }}
+                      />
+                    )}
+                    {lead.phones && lead.phones.length > 1 ? (
+                      <button
+                        type="button"
+                        onClick={() => openPhonePicker(lead)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-sky-600 hover:bg-sky-500 text-white"
+                        title={`Choose from ${lead.phones.length} numbers`}
+                      >
+                        <IconPhone size="xs" />
+                        Call ({lead.phones.length})
+                      </button>
+                    ) : null}
                   </div>
                 ))
               )}
@@ -736,6 +787,15 @@ TWILIO_WEBHOOK_BASE_URL=https://abc123.ngrok-free.app`}
         They see your Twilio number as caller ID. Calls are recorded automatically — play, download,
         and read closed captions (CC) in the call detail panel after the call ends.
       </p>
+      {phonePicker ? (
+        <CallPhonePicker
+          leadId={phonePicker.lead.id}
+          companyName={phonePicker.lead.company_name ?? `Lead #${phonePicker.lead.id}`}
+          phones={phonePicker.phones}
+          onClose={() => setPhonePicker(null)}
+          onError={onError}
+        />
+      ) : null}
     </section>
   );
 }
