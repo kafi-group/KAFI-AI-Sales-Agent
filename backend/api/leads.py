@@ -43,6 +43,10 @@ from api.schemas import (
     LeadTableSectionCountsResponse,
     LeadTableSetTargetPoolRequest,
     LeadTableSetTargetPoolResponse,
+    LeadTablePopulateTargetPoolRequest,
+    LeadTablePopulateTargetPoolResponse,
+    LeadTableRemoveFromTargetPoolRequest,
+    LeadTableRemoveFromTargetPoolResponse,
     ProductInterestEmailRequest,
     QuotationEligibleLeadRead,
     InterestedFollowUpAckRead,
@@ -718,6 +722,39 @@ def set_target_pool_rows(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return LeadTableSetTargetPoolResponse(**result)
+
+
+@router.post("/table/populate-target-pool", response_model=LeadTablePopulateTargetPoolResponse)
+def populate_target_pool_rows(
+    payload: LeadTablePopulateTargetPoolRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(require_admin),
+):
+    """Admin: intelligently fill a targeted pool from Old clients or New search leads."""
+    try:
+        result = leads_module.populate_target_pool_intelligent(
+            db,
+            pool=payload.pool,
+            from_source=payload.from_source,
+            limit=payload.limit,
+            min_score=payload.min_score,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return LeadTablePopulateTargetPoolResponse(**result)
+
+
+@router.post("/table/remove-from-target-pool", response_model=LeadTableRemoveFromTargetPoolResponse)
+def remove_from_target_pool_rows(
+    payload: LeadTableRemoveFromTargetPoolRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(require_admin),
+):
+    """Admin: move leads out of a targeted pool (does not delete the lead)."""
+    if not payload.lead_ids:
+        raise HTTPException(400, "Select at least one lead")
+    result = leads_module.remove_from_target_pool(db, lead_ids=payload.lead_ids)
+    return LeadTableRemoveFromTargetPoolResponse(**result)
 
 
 @router.post(

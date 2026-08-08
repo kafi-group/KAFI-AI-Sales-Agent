@@ -55,6 +55,18 @@ def list_personalized_followups(
     return pf_module.list_drafts(db, viewer=user, status=status, limit=limit)
 
 
+@router.get("/by-interaction/{interaction_id}")
+def get_personalized_followup_by_interaction(
+    interaction_id: int,
+    db: Session = Depends(get_db),
+    _user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    draft = pf_module.get_draft_for_interaction(db, interaction_id=interaction_id)
+    if not draft:
+        raise HTTPException(404, "No call confirmation draft for this interaction")
+    return draft
+
+
 @router.get("/{draft_id}")
 def get_personalized_followup(
     draft_id: int,

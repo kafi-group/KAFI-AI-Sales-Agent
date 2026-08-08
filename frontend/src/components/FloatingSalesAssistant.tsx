@@ -9,8 +9,8 @@ import type { IndexAction } from "../data/indexSections";
 
 const STORAGE_KEY = "kafi_sales_assistant_code";
 export const OPEN_SALES_ASSISTANT_EVENT = "kafi:open-sales-assistant";
-const FAB_SIZE = 52;
-const PANEL_WIDTH = 340;
+const FAB_SIZE = 56;
+const PANEL_WIDTH = 520;
 /** Keep above Windows taskbar and the dialpad FAB. */
 const FAB_OFFSET = { left: 16, bottom: 88 };
 
@@ -147,13 +147,13 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
         bottom: open ? FAB_OFFSET.bottom + FAB_SIZE + 12 : FAB_OFFSET.bottom,
         width: PANEL_WIDTH,
         maxWidth: "calc(100vw - 32px)",
-        maxHeight: "min(520px, calc(100dvh - 96px))",
+        maxHeight: "min(640px, calc(100dvh - 96px))",
       }}
     >
       <div className="flex items-center justify-between gap-2 border-b border-slate-800 px-3 py-2.5">
         <div>
-          <p className="text-sm font-semibold text-violet-200">Sales assistant</p>
-          <p className="text-[11px] text-slate-500">Calls · activity · navigation</p>
+          <p className="text-base font-semibold text-violet-200">Sales assistant</p>
+          <p className="text-xs text-slate-500">Calls · activity · navigation</p>
         </div>
         <button
           type="button"
@@ -166,7 +166,7 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
 
       {!unlocked ? (
         <div className="flex flex-col gap-3 p-4">
-          <p className="text-sm text-slate-300">Enter access code to open the assistant.</p>
+          <p className="text-base text-slate-300">Enter access code to open the assistant.</p>
           {llmEnabled === false && (
             <p className="text-xs text-amber-400/90">
               AI replies need <code className="text-amber-200/90">SALES_ASSISTANT_GEMINI_API_KEY</code> on
@@ -187,7 +187,7 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
               if (e.key === "Enter") void tryUnlock();
             }}
             placeholder="Access code"
-            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500"
+            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-base text-slate-100 outline-none focus:border-violet-500"
           />
           <button
             type="button"
@@ -200,9 +200,9 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
         </div>
       ) : (
         <>
-          <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3 min-h-[220px]">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-[260px]">
             {messages.length === 0 && (
-              <p className="text-sm text-slate-500">
+              <p className="text-base text-slate-500 leading-relaxed">
                 Try: “How many calls today?”, “What did Usman do?”, “Open WhatsApp”.
               </p>
             )}
@@ -212,7 +212,7 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
                 className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`max-w-[90%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap ${
+                  className={`max-w-[92%] rounded-xl px-4 py-2.5 text-base leading-relaxed whitespace-pre-wrap ${
                     msg.role === "user"
                       ? "bg-violet-700/80 text-white"
                       : "bg-slate-800 text-slate-100 border border-slate-700"
@@ -227,10 +227,10 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
               </div>
             ))}
           </div>
-          <div className="border-t border-slate-800 p-3 flex gap-2">
+          <div className="border-t border-slate-800 p-4 flex gap-2">
             <textarea
               ref={inputRef}
-              rows={2}
+              rows={3}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -240,13 +240,13 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
                 }
               }}
               placeholder="Ask or say where to go…"
-              className="flex-1 resize-none rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500"
+              className="flex-1 resize-none rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-base text-slate-100 outline-none focus:border-violet-500"
             />
             <button
               type="button"
               disabled={sending || !input.trim()}
               onClick={() => void sendMessage()}
-              className="self-end rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+              className="self-end rounded-lg bg-violet-600 px-4 py-2.5 text-base font-medium text-white disabled:opacity-50"
             >
               Send
             </button>

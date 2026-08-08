@@ -1,0 +1,22 @@
+# Railway all-in-one: build Vite frontend into backend/static, then run FastAPI.
+# Requires Railway service root directory = backend (repo cloned fully so ../frontend exists).
+
+[phases.setup]
+nixPkgs = ["nodejs_24", "python311"]
+
+[phases.install]
+dependsOn = ["setup"]
+cmds = [
+  "pip install -r requirements.txt",
+  "cd ../frontend && npm ci",
+]
+
+[phases.build]
+dependsOn = ["install"]
+cmds = [
+  "cd ../frontend && npm run build",
+  "rm -rf static && mkdir -p static && cp -r ../frontend/dist/* static/",
+]
+
+[start]
+cmd = "python -c \"from db.migrate import run_migrations; run_migrations()\" && KAFI_SKIP_LIFESPAN_MIGRATE=1 uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1"

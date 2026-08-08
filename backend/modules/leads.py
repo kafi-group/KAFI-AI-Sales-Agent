@@ -2002,3 +2002,180 @@ def set_target_pool(
         )
 
     return {"updated_count": len(updated_ids), "updated_ids": updated_ids}
+
+
+_POOL_MATCH_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "hyperstore_targeted": (
+        "hypermarket",
+        "supermarket",
+        "hyper store",
+        "hyperstore",
+        "retail chain",
+        "grocery chain",
+        "grocery store",
+        "carrefour",
+        "lulu",
+        "walmart",
+        "tesco",
+        "aldi",
+        "mart",
+        "super store",
+        "superstore",
+    ),
+    "targeted_distributor": (
+        "distributor",
+        "distribution",
+        "wholesale",
+        "wholesaler",
+        "trading",
+        "trader",
+        "importer",
+        "import",
+        "logistics",
+        "supply chain",
+        "stockist",
+        "dealer",
+    ),
+    "targeted_client": (
+        "importer",
+        "import",
+        "buyer",
+        "client",
+        "food service",
+        "horeca",
+        "restaurant",
+        "hotel",
+        "catering",
+        "retail",
+        "trading",
+    ),
+}
+
+
+def _buyer_match_blob(buyer: Buyer) -> str:
+    role = buyer.market_role.value if buyer.market_role else ""
+    parts = [
+        buyer.company_name or "",
+        buyer.industry or "",
+        buyer.product_interest or "",
+        buyer.remarks or "",
+        buyer.city or "",
+        buyer.country or "",
+        role,
+    ]
+    return " ".join(p.strip() for p in parts if p).lower()
+
+
+def _score_pool_match(blob: str, pool: str) -> int:
+    keywords = _POOL_MATCH_KEYWORDS.get(pool, ())
+    return sum(1 for kw in keywords if kw in blob)
+
+
+def populate_target_pool_intelligent(
+    db: Session,
+    *,
+    pool: str,
+    from_source: str,
+    limit: int = 50,
+    min_score: int = 1,
+) -> dict[str, object]:
+    """Move best-matching leads from Old clients or New search into a targeted pool."""
+    from sqlalchemy import or_
+
+    from modules.audit import log_action
+
+    pool_key = pool.strip().lower()
+    if pool_key not in TARGETED_POOL_SOURCES:
+        raise ValueError(f"Invalid targeted pool source: {pool}")
+    origin = from_source.strip().lower()
+    if origin not in {"old_clients", "discover"}:
+        raise ValueError("from_source must be old_clients or discover")
+
+    intake_method = "upload" if origin == "old_clients" else "discover"
+    limit = max(1, min(int(limit or 50), 200))
+
+    q = db.query(Buyer).filter(Buyer.source != pool_key)
+    if origin == "old_clients":
+        q = q.filter(sa_func.lower(sa_func.coalesce(Buyer.source, "")) == "old_clients")
+    else:
+        q = q.filter(
+            or_(
+                Buyer.source.is_(None),
+                ~sa_func.lower(sa_func.coalesce(Buyer.source, "")).in_(
+                    ["old_clients", *sorted(TARGETED_POOL_SOURCES)]
+                ),
+            )
+        )
+
+    candidates = q.order_by(Buyer.updated_at.desc()).limit(800).all()
+    scored: list[tuple[Buyer, int]] = []
+    for buyer in candidates:
+        score = _score_pool_match(_buyer_match_blob(buyer), pool_key)
+        if score >= min_score:
+            scored.append((buyer, score))
+    scored.sort(key=lambda item: (-item[1], item[0].id))
+
+    lead_ids = [buyer.id for buyer, _ in scored[:limit]]
+    if not lead_ids:
+        return {
+            "updated_count": 0,
+            "updated_ids": [],
+            "scanned": len(candidates),
+            "from_source": origin,
+            "pool": pool_key,
+        }
+
+    result = set_target_pool(
+        db,
+        lead_ids=lead_ids,
+        source=pool_key,
+        intake_method=intake_method,
+    )
+    log_action(
+        db,
+        entity_type="buyer",
+        entity_id=0,
+        action="populate_target_pool",
+        details={
+            "pool": pool_key,
+            "from_source": origin,
+            "scanned": len(candidates),
+            "matched": len(lead_ids),
+        },
+    )
+    return {
+        **result,
+        "scanned": len(candidates),
+        "from_source": origin,
+        "pool": pool_key,
+    }
+
+
+def remove_from_target_pool(db: Session, *, lead_ids: list[int]) -> dict[str, object]:
+    """Move leads out of a targeted pool back to Old clients or New search lead."""
+    from modules.audit import log_action
+
+    restored_ids: list[int] = []
+    for lead_id in lead_ids:
+        buyer = buyers_module.get_buyer(db, lead_id)
+        if not buyer or not is_targeted_pool_source(buyer.source):
+            continue
+        if (buyer.intake_method or "").lower() == "upload":
+            buyer.source = "old_clients"
+        else:
+            buyer.source = "manual"
+        buyer.intake_method = None
+        restored_ids.append(lead_id)
+
+    if restored_ids:
+        invalidate_section_counts_cache()
+        db.commit()
+        log_action(
+            db,
+            entity_type="buyer",
+            entity_id=0,
+            action="remove_from_target_pool",
+            details={"lead_ids": restored_ids},
+        )
+
+    return {"updated_count": len(restored_ids), "updated_ids": restored_ids}

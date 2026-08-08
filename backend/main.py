@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI
@@ -342,3 +343,12 @@ def health():
         "whatsapp_configured": whatsapp_client.is_configured,
         "whatsapp_webhook_configured": whatsapp_client.webhook_configured,
     }
+
+
+# Serve the Vite SPA from backend/static when present (Railway all-in-one deploy).
+# API routes under /api are registered above; StaticFiles html=True handles client routing.
+_static_dir = Path(__file__).resolve().parent / "static"
+if _static_dir.is_dir() and (_static_dir / "index.html").is_file():
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=str(_static_dir), html=True), name="spa")

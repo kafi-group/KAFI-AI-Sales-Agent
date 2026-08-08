@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { client, type ChatMessage } from "../api/client";
+import { CreateLeadForm } from "../components/CreateLeadForm";
 import { capitalizeFirstLetter } from "../utils/spelling";
+import { parseBrandAssistantLead } from "../utils/parseBrandAssistantLead";
 
 interface ChatbotPageProps {
   onError: (msg: string) => void;
@@ -66,7 +68,13 @@ function UserAvatar() {
   );
 }
 
-function MessageBubble({ msg }: { msg: UIMessage }) {
+function MessageBubble({
+  msg,
+  onAddLead,
+}: {
+  msg: UIMessage;
+  onAddLead?: (content: string) => void;
+}) {
   const isUser = msg.role === "user";
 
   return (
@@ -100,8 +108,17 @@ function MessageBubble({ msg }: { msg: UIMessage }) {
           )}
         </div>
         {!isUser && msg.provider && !msg.loading && (
-          <div className="flex items-center gap-2 pl-1">
+          <div className="flex flex-wrap items-center gap-2 pl-1">
             <ProviderBadge provider={msg.provider} />
+            {onAddLead && msg.content.trim().length > 40 ? (
+              <button
+                type="button"
+                onClick={() => onAddLead(msg.content)}
+                className="text-xs px-2.5 py-1 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20"
+              >
+                Add new lead
+              </button>
+            ) : null}
           </div>
         )}
       </div>
@@ -120,6 +137,10 @@ export function ChatbotPage({ onError }: ChatbotPageProps) {
     openai: boolean;
     anthropic: boolean;
   } | null>(null);
+  const [leadDraft, setLeadDraft] = useState<ReturnType<typeof parseBrandAssistantLead> | null>(
+    null,
+  );
+  const [leadNotice, setLeadNotice] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -281,10 +302,41 @@ export function ChatbotPage({ onError }: ChatbotPageProps) {
         onDrop={handleDrop}
       >
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} />
+          <MessageBubble
+            key={msg.id}
+            msg={msg}
+            onAddLead={
+              msg.role === "assistant" && !msg.loading && msg.id !== "welcome"
+                ? (content) => setLeadDraft(parseBrandAssistantLead(content))
+                : undefined
+            }
+          />
         ))}
         <div ref={messagesEndRef} />
       </div>
+
+      {leadDraft ? (
+        <div className="border-t border-slate-800 pt-4">
+          {leadNotice ? (
+            <p className="mb-3 text-sm text-emerald-300">{leadNotice}</p>
+          ) : null}
+          <CreateLeadForm
+            title="Add lead from Brand assistant"
+            source="manual"
+            initialValues={leadDraft}
+            onCancel={() => {
+              setLeadDraft(null);
+              setLeadNotice(null);
+            }}
+            onError={onError}
+            onSuccess={(id) => {
+              setLeadDraft(null);
+              setLeadNotice(`Lead #${id} created — open Master table or New search lead to review.`);
+              window.setTimeout(() => setLeadNotice(null), 6000);
+            }}
+          />
+        </div>
+      ) : null}
 
       {/* Input area */}
       <div className="border-t border-slate-800 pt-4 flex flex-col gap-3">

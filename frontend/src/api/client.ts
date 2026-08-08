@@ -1715,6 +1715,33 @@ export const client = {
         }),
       },
     ),
+  populateTargetPool: (
+    pool: string,
+    fromSource: "old_clients" | "discover",
+    limit = 50,
+  ) =>
+    request<{
+      updated_count: number;
+      updated_ids: number[];
+      scanned: number;
+      from_source: string;
+      pool: string;
+    }>("/leads/table/populate-target-pool", {
+      method: "POST",
+      body: JSON.stringify({
+        pool,
+        from_source: fromSource,
+        limit,
+      }),
+    }),
+  removeFromTargetPool: (leadIds: number[]) =>
+    request<{ updated_count: number; updated_ids: number[] }>(
+      "/leads/table/remove-from-target-pool",
+      {
+        method: "POST",
+        body: JSON.stringify({ lead_ids: leadIds }),
+      },
+    ),
   setInterestedClientsMembership: (leadIds: number[], inList: boolean) =>
     request<{ updated_count: number; updated_ids: number[] }>(
       "/leads/table/interested-clients-membership",
@@ -2266,6 +2293,10 @@ export const client = {
   },
   getPersonalizedFollowup: (id: number) =>
     request<PersonalizedFollowupDraft>(`/personalized-followups/${id}`),
+  getPersonalizedFollowupByInteraction: (interactionId: number) =>
+    request<PersonalizedFollowupDraft>(
+      `/personalized-followups/by-interaction/${interactionId}`,
+    ),
   updatePersonalizedFollowup: (
     id: number,
     data: Partial<{ subject: string; email_body: string; whatsapp_body: string }>,

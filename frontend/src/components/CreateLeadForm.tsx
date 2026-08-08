@@ -22,6 +22,8 @@ interface CreateLeadFormProps {
   /** Buyer source so the lead appears in the right table section (e.g. old_clients). */
   source?: string;
   title?: string;
+  /** Pre-fill from Brand assistant or other sources. */
+  initialValues?: Partial<typeof emptyForm> & { address?: string };
 }
 
 const emptyForm = {
@@ -43,8 +45,13 @@ export function CreateLeadForm({
   onOpenExisting,
   source = "manual",
   title = "Add new lead",
+  initialValues,
 }: CreateLeadFormProps) {
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState({
+    ...emptyForm,
+    ...initialValues,
+    website_prefix: initialValues?.website_prefix ?? ("https://" as WebsitePrefix),
+  });
   const [submitting, setSubmitting] = useState(false);
   const [existingMatch, setExistingMatch] = useState<CompanyNameSuggestion | null>(
     null,
@@ -104,6 +111,10 @@ export function CreateLeadForm({
         industry: industry || undefined,
         source,
       });
+
+      if (initialValues?.address?.trim()) {
+        await client.updateLeadTableRow(lead.id, { address: initialValues.address.trim() });
+      }
 
       if (contactName) {
         await client.createContact({

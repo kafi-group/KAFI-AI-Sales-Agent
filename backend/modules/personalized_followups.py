@@ -17,7 +17,9 @@ from db.models import (
 )
 from modules.channel_sync import derive_whatsapp_from_email, sync_whatsapp_with_email
 
-ELIGIBLE_OUTCOMES = frozenset({"interested", "follow_up"})
+ELIGIBLE_OUTCOMES = frozenset(
+    {"interested", "follow_up", "not_interested", "not_received_call"}
+)
 ACTIVE_STATUSES = frozenset({"awaiting_transcript", "generating", "ready", "failed"})
 
 
@@ -85,10 +87,8 @@ def ensure_draft_for_call(
     user_id: int | None,
     generate_now: bool = True,
 ) -> PersonalizedFollowupDraft | None:
-    """Create or refresh a personalized draft when outcome is interested / follow_up."""
-    outcome = (call_outcome or "").strip().lower()
-    if outcome not in ELIGIBLE_OUTCOMES:
-        return None
+    """Create or refresh a personalized draft after any completed call with remarks/outcome."""
+    outcome = (call_outcome or "").strip().lower() or "follow_up"
 
     interaction = db.get(Interaction, interaction_id)
     if not interaction:
@@ -173,12 +173,13 @@ def generate_draft_content(db: Session, draft_id: int) -> PersonalizedFollowupDr
     excerpt = source[:4000]
     draft.transcript_excerpt = excerpt[:2000]
 
-    fallback_subject = f"Following up — Kafi Commodities & {company}"
+    fallback_subject = f"Following our call — Kafi Commodities & {company}"
     fallback_email = (
         f"Dear {contact_name},\n\n"
-        f"Thank you for our call today regarding {company}. "
-        f"Happy to continue on the points we discussed and share ESSENCE specs or pricing if useful.\n\n"
-        f"What would be a convenient next step for you?\n\n"
+        f"Thank you for speaking with us today. As per our phone conversation, this message "
+        f"confirms the points we discussed regarding {company}.\n\n"
+        f"We remain at your service for ESSENCE product specifications, samples, or pricing "
+        f"whenever convenient for you.\n\n"
         f"Best regards,\nKafi Commodities Export Team"
     )
 
@@ -192,7 +193,7 @@ def generate_draft_content(db: Session, draft_id: int) -> PersonalizedFollowupDr
             from modules.llm_client import with_email_reply_standards
 
             prompt = with_email_reply_standards(
-                f"""You write a short, professional B2B follow-up after a sales call for Kafi Commodities (ESSENCE foods exporter from Pakistan).
+                f"""You write a short, gentle call-confirmation message for Kafi Commodities (ESSENCE foods exporter from Pakistan).
 
 Call outcome: {outcome_label}
 Company: {company}
@@ -206,13 +207,14 @@ Call transcript / remarks:
 
 Return JSON only with keys:
 - subject: email subject line (max 90 chars)
-- email_body: polite email, about 80–120 words, reference 1–3 concrete points from the call, no invented prices or commitments
+- email_body: polite confirmation of the phone call, about 60–100 words, reference 1–2 concrete points from the call, no invented prices or commitments
 
 Rules:
-- Concise, specific, and related only to THIS conversation — no long product essays unless they asked on the call.
+- Start by confirming the phone conversation ("As per our call today…").
+- Concise, warm, professional — suitable for both email and WhatsApp.
 - Do not invent product quantities, prices, or meeting times not in the source.
-- Sign email as Kafi Commodities Export Team.
-- This email body will also be sent on WhatsApp unchanged (same information on both channels). Write one message that works for both.
+- Sign as Kafi Commodities Export Team.
+- This email body will also be sent on WhatsApp unchanged.
 """
             )
             data = llm_client.generate_json(
@@ -317,6 +319,22 @@ def list_drafts(
         "pending_count": int(ready_q.count() or 0),
         "rows": [draft_to_dict(db, row) for row in rows],
     }
+
+
+def get_draft_for_interaction(
+    db: Session,
+    *,
+    interaction_id: int,
+) -> dict[str, Any] | None:
+    draft = (
+        db.query(PersonalizedFollowupDraft)
+        .filter(PersonalizedFollowupDraft.interaction_id == interaction_id)
+        .order_by(PersonalizedFollowupDraft.created_at.desc())
+        .first()
+    )
+    if not draft:
+        return None
+    return draft_to_dict(db, draft)
 
 
 def update_draft(

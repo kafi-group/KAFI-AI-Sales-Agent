@@ -759,6 +759,8 @@ export function LeadsTablePage({
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [intakeMethodFilter, setIntakeMethodFilter] = useState<"all" | "upload" | "discover">("all");
   const [movingToPool, setMovingToPool] = useState(false);
+  const [populatingPool, setPopulatingPool] = useState(false);
+  const [removingFromPool, setRemovingFromPool] = useState(false);
   const [showCreateLead, setShowCreateLead] = useState(false);
   const [bulkEmailNotice, setBulkEmailNotice] = useState<string | null>(null);
   const [deduping, setDeduping] = useState(false);
@@ -1454,6 +1456,66 @@ export function LeadsTablePage({
       onError(e instanceof Error ? e.message : "Failed to move leads to targeted pool");
     } finally {
       setMovingToPool(false);
+    }
+  }
+
+  async function populateTargetPoolFrom(
+    fromSource: "old_clients" | "discover",
+  ) {
+    if (!isAdmin || !isTargetedPool || populatingPool) return;
+    const label = fromSource === "old_clients" ? "Old clients" : "New search leads";
+    const confirmed = window.confirm(
+      `Intelligently add up to 50 matching leads from ${label} into this targeted pool? Existing rows stay — only new matches are added.`,
+    );
+    if (!confirmed) return;
+
+    setPopulatingPool(true);
+    setSaveNotice(null);
+    try {
+      const result = await client.populateTargetPool(section, fromSource, 50);
+      await loadTable();
+      await loadSectionCounts();
+      setSaveNotice(
+        result.updated_count > 0
+          ? `Added ${result.updated_count} lead${result.updated_count === 1 ? "" : "s"} from ${label} (scanned ${result.scanned}).`
+          : `No new matches found in ${label} for this pool (scanned ${result.scanned}).`,
+      );
+      window.setTimeout(() => setSaveNotice(null), 6000);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to populate targeted pool");
+    } finally {
+      setPopulatingPool(false);
+    }
+  }
+
+  async function removeSelectedFromTargetPool() {
+    if (!isAdmin || !isTargetedPool || selected.size === 0 || removingFromPool) return;
+    const count = selected.size;
+    const confirmed = window.confirm(
+      `Remove ${count} lead${count === 1 ? "" : "s"} from this targeted pool? They will return to Old clients or New search lead — not deleted.`,
+    );
+    if (!confirmed) return;
+
+    setRemovingFromPool(true);
+    setSaveNotice(null);
+    try {
+      const result = await client.removeFromTargetPool([...selected]);
+      const removed = new Set(result.updated_ids);
+      if (removed.size > 0) {
+        setRows((prev) => prev.filter((row) => !removed.has(row.id)));
+        setTotal((prev) => Math.max(0, prev - removed.size));
+        setFilteredCount((prev) => Math.max(0, prev - removed.size));
+        clearSelection();
+      }
+      await loadSectionCounts();
+      setSaveNotice(
+        `Removed ${result.updated_count} lead${result.updated_count === 1 ? "" : "s"} from this pool.`,
+      );
+      window.setTimeout(() => setSaveNotice(null), 5000);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to remove leads from pool");
+    } finally {
+      setRemovingFromPool(false);
     }
   }
 
@@ -2233,30 +2295,62 @@ export function LeadsTablePage({
             {sectionDescription(section, assigneeUsername, isAdmin)}
           </p>
           {isTargetedPool ? (
-            <div className="mt-3 inline-flex rounded-lg border border-slate-700 bg-slate-900/80 p-0.5 text-xs">
-              {(
-                [
-                  ["all", "All leads"],
-                  ["upload", "Uploaded data"],
-                  ["discover", "AI / search leads"],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => {
-                    setIntakeMethodFilter(value);
-                    setPage(1);
-                  }}
-                  className={`px-3 py-1.5 rounded-md transition ${
-                    intakeMethodFilter === value
-                      ? "bg-emerald-600 text-white"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="mt-3 space-y-2">
+              <div className="inline-flex rounded-lg border border-slate-700 bg-slate-900/80 p-0.5 text-xs">
+                {(
+                  [
+                    ["all", "All leads"],
+                    ["upload", "Uploaded data"],
+                    ["discover", "AI / search leads"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      setIntakeMethodFilter(value);
+                      setPage(1);
+                    }}
+                    className={`px-3 py-1.5 rounded-md transition ${
+                      intakeMethodFilter === value
+                        ? "bg-emerald-600 text-white"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {isAdmin ? (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={populatingPool || bulkOnboarding || editMode}
+                    onClick={() => void populateTargetPoolFrom("old_clients")}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 disabled:opacity-50"
+                  >
+                    {populatingPool ? "Populating…" : "Populate from Old clients"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={populatingPool || bulkOnboarding || editMode}
+                    onClick={() => void populateTargetPoolFrom("discover")}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 disabled:opacity-50"
+                  >
+                    {populatingPool ? "Populating…" : "Populate from New search leads"}
+                  </button>
+                  {selected.size > 0 ? (
+                    <button
+                      type="button"
+                      disabled={removingFromPool || bulkOnboarding || editMode}
+                      onClick={() => void removeSelectedFromTargetPool()}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
+                    >
+                      {removingFromPool ? "Removing…" : `Remove from pool (${selected.size})`}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
           <p className="text-sm text-slate-500 mt-1">

@@ -613,6 +613,30 @@ class LeadTableSetTargetPoolResponse(BaseModel):
     updated_ids: list[int] = Field(default_factory=list)
 
 
+class LeadTablePopulateTargetPoolRequest(BaseModel):
+    pool: str = Field(min_length=1)
+    from_source: str = Field(description="old_clients or discover")
+    limit: int = Field(default=50, ge=1, le=200)
+    min_score: int = Field(default=1, ge=1, le=10)
+
+
+class LeadTablePopulateTargetPoolResponse(BaseModel):
+    updated_count: int
+    updated_ids: list[int] = Field(default_factory=list)
+    scanned: int = 0
+    from_source: str
+    pool: str
+
+
+class LeadTableRemoveFromTargetPoolRequest(BaseModel):
+    lead_ids: list[int]
+
+
+class LeadTableRemoveFromTargetPoolResponse(BaseModel):
+    updated_count: int
+    updated_ids: list[int] = Field(default_factory=list)
+
+
 class LeadTableInterestedClientsMembershipRequest(BaseModel):
     lead_ids: list[int]
     in_list: bool = True

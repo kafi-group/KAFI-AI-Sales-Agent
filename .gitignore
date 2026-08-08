@@ -29,6 +29,7 @@ backend/credentials.json
 # Node / frontend
 frontend/node_modules/
 frontend/dist/
+backend/static/
 
 # OS
 .DS_Store
