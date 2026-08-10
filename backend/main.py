@@ -271,6 +271,7 @@ app.add_middleware(
 
 
 app.include_router(agent_bridge.router, prefix="/api")
+app.include_router(agent_bridge.webhook_router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
 app.include_router(compliance.router, prefix="/api")
