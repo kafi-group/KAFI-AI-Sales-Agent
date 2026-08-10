@@ -232,8 +232,8 @@ function useCallQueueController(): CallQueueState {
     bindInteraction(idx, interactionId);
     clearPendingFollowUp();
 
-    // Already collecting remarks (End call pressed) or paused — keep index.
-    if (statusRef.current === "between" || statusRef.current === "paused") {
+    // Already collecting remarks (End call pressed) — keep index.
+    if (statusRef.current === "between") {
       return;
     }
     if (statusRef.current === "running") {
