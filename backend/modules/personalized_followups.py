@@ -27,6 +27,32 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _sanitize_no_attachment_language(subject: str, body: str) -> tuple[str, str]:
+    """Strip attachment wording — post-call sends have no files attached."""
+    import re
+
+    attachment_phrases = re.compile(
+        r"(?i)\b("
+        r"please find (?:the )?attach(?:ed|ment)|"
+        r"find attach(?:ed|ment)|"
+        r"see attach(?:ed|ment)|"
+        r"attach(?:ed|ment) (?:is|are|herewith|below|for your reference)|"
+        r"as attach(?:ed|ment)|"
+        r"enclosed (?:is|are|please find)"
+        r")\b[^.\n]*[.\n]?"
+    )
+
+    cleaned_body = attachment_phrases.sub("", body or "").strip()
+    cleaned_body = re.sub(r"\n{3,}", "\n\n", cleaned_body)
+    cleaned_subject = re.sub(
+        r"(?i)\b(?:attached|attachment|enclosed)\b",
+        "",
+        subject or "",
+    ).strip()
+    cleaned_subject = re.sub(r"\s{2,}", " ", cleaned_subject)
+    return cleaned_subject or subject, cleaned_body or body
+
+
 def _is_admin(user: AppUser) -> bool:
     role = user.role.value if isinstance(user.role, AppUserRole) else str(user.role)
     return role == AppUserRole.admin.value
@@ -217,6 +243,7 @@ Rules:
 - NEVER repeat rude language, swearing, insults, or aggressive tone from the transcript — even if the operator used them. Summarize only the business substance (products, quantities, next steps) in polished export-sales language.
 - If the transcript is empty, unclear, or only contains frustration, write a neutral polite confirmation that thanks them for the call and offers ESSENCE product information — do not mention conflict or tone.
 - Do not invent product quantities, prices, or meeting times not in the source.
+- NEVER mention attachments, enclosed files, "please find attached", or "see attached" — this message is sent as plain text with no files.
 - Sign as Kafi Commodities Export Team.
 - This email body will also be sent on WhatsApp unchanged.
 """
@@ -233,6 +260,8 @@ Rules:
             email_body = (data.get("email_body") or email_body).strip() or email_body
     except Exception as exc:  # noqa: BLE001
         draft.generation_error = f"Used fallback draft ({exc})"
+
+    subject, email_body = _sanitize_no_attachment_language(subject, email_body)
 
     # Email is source of truth — WhatsApp always mirrors the same information.
     whatsapp_body = derive_whatsapp_from_email(email_body)

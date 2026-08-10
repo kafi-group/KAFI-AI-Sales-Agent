@@ -56,6 +56,11 @@ export async function POST(req: NextRequest) {
       send_mode?: "individual" | "bulk";
       /** When false, skip Email Activity per-message row (bulk summary only). */
       record_activity?: boolean;
+      attachments?: Array<{
+        filename: string;
+        content: string;
+        contentType?: string;
+      }>;
     };
     try {
       body = await req.json();
@@ -141,6 +146,7 @@ export async function POST(req: NextRequest) {
       subject,
       body: sendBody,
       html: asHtml,
+      attachments: Array.isArray(body.attachments) ? body.attachments : undefined,
     });
 
     if (recordActivity) {

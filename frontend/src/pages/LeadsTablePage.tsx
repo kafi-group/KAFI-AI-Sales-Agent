@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { CountrySelect } from "../components/CountrySelect";
+import { SearchableSelect, stringOptions } from "../components/SearchableSelect";
 import type {
   LeadsTableSection,
 } from "../components/AppSidebar";
@@ -63,6 +64,22 @@ import {
 } from "../hooks/useColumnVisibility";
 import { exportLeadsTableCsv } from "../utils/exportCsv";
 import { UNASSIGNED } from "../utils/leadAssignees";
+
+const SORT_FILTER_OPTIONS = [
+  { value: "recent", label: "Recently added" },
+  { value: "oldest", label: "Oldest first" },
+  { value: "company_name", label: "Company name" },
+  { value: "country", label: "Country" },
+  { value: "latest_score", label: "AI company grading" },
+  { value: "market_role", label: "Market role" },
+];
+
+const CALL_RECOMMENDED_OPTIONS = [
+  { value: "", label: "Any time" },
+  { value: "yes", label: "Call now" },
+  { value: "no", label: "Not now" },
+  { value: "unknown", label: "Unknown" },
+];
 import {
   autocorrectLeadDraft,
   autocorrectText,
@@ -1355,7 +1372,7 @@ export function LeadsTablePage({
   }
 
   async function bulkAssignSelected(rawValue: string) {
-    if (!canBulkAssign || !rawValue || selected.size === 0 || bulkAssigning) {
+    if (!canBulkAssign || !rawValue || bulkAssigning) {
       setBulkAssignValue("");
       return;
     }
@@ -1366,6 +1383,24 @@ export function LeadsTablePage({
       return;
     }
 
+    let ids = [...selected];
+    if (ids.length === 0) {
+      if (filteredCount === 0) {
+        setBulkAssignValue("");
+        return;
+      }
+      setBulkAssigning(true);
+      try {
+        const result = await client.listLeadsTableIds(tableQueryParams);
+        ids = result.ids;
+      } catch (e) {
+        onError(e instanceof Error ? e.message : "Failed to load matching leads");
+        setBulkAssignValue("");
+        setBulkAssigning(false);
+        return;
+      }
+    }
+
     const label =
       assignedToUserId == null
         ? "Unassigned"
@@ -1373,21 +1408,23 @@ export function LeadsTablePage({
           assigneeOptions.find((o) => o.value === String(assignedToUserId))?.username ||
           "selected user";
 
-    const count = selected.size;
+    const count = ids.length;
+    const usingFilter = selected.size === 0;
     const confirmed = window.confirm(
       assignedToUserId == null
-        ? `Unassign ${count} selected lead${count === 1 ? "" : "s"}?`
-        : `Assign ${count} selected lead${count === 1 ? "" : "s"} to ${label}?`,
+        ? `Unassign ${count} lead${count === 1 ? "" : "s"}${usingFilter ? " matching current filters" : ""}?`
+        : `Assign ${count} lead${count === 1 ? "" : "s"}${usingFilter ? " matching current filters" : ""} to ${label}?`,
     );
     if (!confirmed) {
       setBulkAssignValue("");
+      if (usingFilter) setBulkAssigning(false);
       return;
     }
 
     setBulkAssigning(true);
     setSaveNotice(null);
     try {
-      const result = await client.bulkAssignLeadTableRows([...selected], assignedToUserId);
+      const result = await client.bulkAssignLeadTableRows(ids, assignedToUserId);
       const movedIds = new Set(result.assigned_ids);
       if (movedIds.size > 0) {
         setRows((prev) => prev.filter((row) => !movedIds.has(row.id)));
@@ -2868,52 +2905,33 @@ export function LeadsTablePage({
         >
           {useClientsFilters ? (
             <>
-              <label className="block text-xs text-slate-400">
-                Sort by
-                <select
-                  value={sortSelectValue()}
-                  onChange={(e) => applySortSelect(e.target.value)}
-                  className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
-                >
-                  <option value="recent">Recently added</option>
-                  <option value="oldest">Oldest first</option>
-                  <option value="company_name">Company name</option>
-                  <option value="country">Country</option>
-                  <option value="latest_score">AI company grading</option>
-                </select>
-              </label>
+              <SearchableSelect
+                label="Sort by"
+                value={sortSelectValue()}
+                onChange={applySortSelect}
+                options={SORT_FILTER_OPTIONS.filter((o) => o.value !== "market_role")}
+                placeholder="Search sort options…"
+              />
 
-              <label className="block text-xs text-slate-400">
-                Business type
-                <select
-                  value={industry}
-                  onChange={(e) => setIndustry(e.target.value)}
-                  className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
-                >
-                  <option value="">All types</option>
-                  {(filters?.industries ?? []).map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SearchableSelect
+                label="Business type"
+                value={industry}
+                onChange={setIndustry}
+                options={stringOptions(filters?.industries ?? [])}
+                allowEmpty
+                emptyLabel="All types"
+                placeholder="Search business types…"
+              />
 
-              <label className="block text-xs text-slate-400">
-                Excel / file grading
-                <select
-                  value={companyGrading}
-                  onChange={(e) => setCompanyGrading(e.target.value)}
-                  className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
-                >
-                  <option value="">All gradings</option>
-                  {(filters?.company_gradings ?? []).map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SearchableSelect
+                label="Excel / file grading"
+                value={companyGrading}
+                onChange={setCompanyGrading}
+                options={stringOptions(filters?.company_gradings ?? [])}
+                allowEmpty
+                emptyLabel="All gradings"
+                placeholder="Search gradings…"
+              />
 
               <CountrySelect
                 label="Country"
@@ -2923,51 +2941,33 @@ export function LeadsTablePage({
                 emptyLabel="All countries"
               />
 
-              <label className="block text-xs text-slate-400">
-                Call?
-                <select
-                  value={callRecommended}
-                  onChange={(e) => setCallRecommended(e.target.value)}
-                  className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
-                >
-                  <option value="">Any time</option>
-                  <option value="yes">Call now</option>
-                  <option value="no">Not now</option>
-                  <option value="unknown">Unknown</option>
-                </select>
-              </label>
+              <SearchableSelect
+                label="Call?"
+                value={callRecommended}
+                onChange={setCallRecommended}
+                options={CALL_RECOMMENDED_OPTIONS}
+                placeholder="Search…"
+              />
 
-              <label className="block text-xs text-slate-400">
-                Product
-                <select
-                  value={productInterest}
-                  onChange={(e) => setProductInterest(e.target.value)}
-                  className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
-                >
-                  <option value="">All products</option>
-                  {(filters?.products ?? []).map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SearchableSelect
+                label="Product"
+                value={productInterest}
+                onChange={setProductInterest}
+                options={stringOptions(filters?.products ?? [])}
+                allowEmpty
+                emptyLabel="All products"
+                placeholder="Search products…"
+              />
 
-              <label className="block text-xs text-slate-400">
-                City
-                <select
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
-                >
-                  <option value="">All cities</option>
-                  {(filters?.cities ?? []).map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SearchableSelect
+                label="City"
+                value={city}
+                onChange={setCity}
+                options={stringOptions(filters?.cities ?? [])}
+                allowEmpty
+                emptyLabel="All cities"
+                placeholder="Search cities…"
+              />
 
               <label className="block text-xs text-slate-400 sm:col-span-2">
                 Search
@@ -2980,100 +2980,78 @@ export function LeadsTablePage({
               </label>
 
               {canBulkAssign && (
-                <label className="block text-xs text-slate-400">
-                  Assign to
-                  <select
-                    value={bulkAssignValue}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setBulkAssignValue(next);
-                      void bulkAssignSelected(next);
-                    }}
-                    disabled={
-                      selected.size === 0 ||
-                      bulkAssigning ||
-                      deletingSelected ||
-                      editMode ||
-                      assigneeOptions.length === 0
-                    }
-                    className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200 disabled:opacity-50"
-                  >
-                    <option value="">
-                      {selected.size === 0
-                        ? "Select leads first…"
-                        : bulkAssigning
-                          ? "Assigning…"
-                          : `Assign ${selected.size} selected…`}
-                    </option>
-                    <option value={UNASSIGNED}>Unassigned</option>
-                    {assigneeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.username || option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <SearchableSelect
+                  label="Assign to"
+                  value={bulkAssignValue}
+                  onChange={(next) => {
+                    setBulkAssignValue(next);
+                    void bulkAssignSelected(next);
+                  }}
+                  disabled={
+                    (selected.size === 0 && filteredCount === 0) ||
+                    bulkAssigning ||
+                    deletingSelected ||
+                    editMode ||
+                    assigneeOptions.length === 0
+                  }
+                  options={[
+                    {
+                      value: UNASSIGNED,
+                      label: "Unassigned (remove assignee)",
+                    },
+                    ...assigneeOptions.map((option) => ({
+                      value: option.value,
+                      label: option.username || option.label,
+                    })),
+                  ]}
+                  allowEmpty
+                  emptyLabel={
+                    bulkAssigning
+                      ? "Assigning…"
+                      : selected.size > 0
+                        ? `Assign ${selected.size} selected…`
+                        : filteredCount > 0
+                          ? `Assign all ${filteredCount} matching (filtered)…`
+                          : "Filter or select leads first…"
+                  }
+                  placeholder="Search team members…"
+                />
               )}
             </>
           ) : (
             <>
-              <label className="block text-xs text-slate-400">
-                Sort by
-                <select
-                  value={sortSelectValue()}
-                  onChange={(e) => applySortSelect(e.target.value)}
-                  className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
-                >
-                  <option value="recent">Recently added</option>
-                  <option value="oldest">Oldest first</option>
-                  <option value="company_name">Company name</option>
-                  <option value="country">Country</option>
-                  <option value="latest_score">AI company grading</option>
-                  <option value="market_role">Market role</option>
-                </select>
-              </label>
+              <SearchableSelect
+                label="Sort by"
+                value={sortSelectValue()}
+                onChange={applySortSelect}
+                options={SORT_FILTER_OPTIONS}
+                placeholder="Search sort options…"
+              />
 
-              <label className="block text-xs text-slate-400">
-                AI company grading
-                <select
-                  value={score}
-                  onChange={(e) => setScore(e.target.value)}
-                  className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
-                >
-                  <option value="">All grades</option>
-                  {(filters?.scores ?? ["AAA", "AA", "A", "Unscored"]).map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SearchableSelect
+                label="AI company grading"
+                value={score}
+                onChange={setScore}
+                options={stringOptions(filters?.scores ?? ["AAA", "AA", "A", "Unscored"])}
+                allowEmpty
+                emptyLabel="All grades"
+                placeholder="Search grades…"
+              />
 
-              <label className="block text-xs text-slate-400">
-                Market role
-                <select
-                  value={marketRole}
-                  onChange={(e) => setMarketRole(e.target.value)}
-                  className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
-                >
-                  <option value="">All roles</option>
-                  {(filters?.market_roles ?? ["consumer", "producer", "hybrid", "unknown"]).map(
-                    (option) => (
-                      <option key={option} value={option}>
-                        {option === "consumer"
-                          ? "Importer"
-                          : option === "producer"
-                            ? "Exporter"
-                            : option === "hybrid"
-                              ? "Hybrid"
-                              : option === "unknown"
-                                ? "Unclassified"
-                                : option.charAt(0).toUpperCase() + option.slice(1)}
-                      </option>
-                    ),
-                  )}
-                </select>
-              </label>
+              <SearchableSelect
+                label="Market role"
+                value={marketRole}
+                onChange={setMarketRole}
+                options={[
+                  { value: "consumer", label: "Importer" },
+                  { value: "producer", label: "Exporter" },
+                  { value: "hybrid", label: "Hybrid" },
+                  { value: "unknown", label: "Unclassified" },
+                ]}
+                allowEmpty
+                emptyLabel="All roles"
+                placeholder="Search roles…"
+              />
 
               <CountrySelect
                 label="Country"
@@ -3094,39 +3072,42 @@ export function LeadsTablePage({
               </label>
 
               {canBulkAssign && (
-                <label className="block text-xs text-slate-400">
-                  Assign to
-                  <select
-                    value={bulkAssignValue}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setBulkAssignValue(next);
-                      void bulkAssignSelected(next);
-                    }}
-                    disabled={
-                      selected.size === 0 ||
-                      bulkAssigning ||
-                      deletingSelected ||
-                      editMode ||
-                      assigneeOptions.length === 0
-                    }
-                    className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200 disabled:opacity-50"
-                  >
-                    <option value="">
-                      {selected.size === 0
-                        ? "Select leads first…"
-                        : bulkAssigning
-                          ? "Assigning…"
-                          : `Assign ${selected.size} selected…`}
-                    </option>
-                    <option value={UNASSIGNED}>Unassigned</option>
-                    {assigneeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.username || option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <SearchableSelect
+                  label="Assign to"
+                  value={bulkAssignValue}
+                  onChange={(next) => {
+                    setBulkAssignValue(next);
+                    void bulkAssignSelected(next);
+                  }}
+                  disabled={
+                    (selected.size === 0 && filteredCount === 0) ||
+                    bulkAssigning ||
+                    deletingSelected ||
+                    editMode ||
+                    assigneeOptions.length === 0
+                  }
+                  options={[
+                    {
+                      value: UNASSIGNED,
+                      label: "Unassigned (remove assignee)",
+                    },
+                    ...assigneeOptions.map((option) => ({
+                      value: option.value,
+                      label: option.username || option.label,
+                    })),
+                  ]}
+                  allowEmpty
+                  emptyLabel={
+                    bulkAssigning
+                      ? "Assigning…"
+                      : selected.size > 0
+                        ? `Assign ${selected.size} selected…`
+                        : filteredCount > 0
+                          ? `Assign all ${filteredCount} matching (filtered)…`
+                          : "Filter or select leads first…"
+                  }
+                  placeholder="Search team members…"
+                />
               )}
             </>
           )}

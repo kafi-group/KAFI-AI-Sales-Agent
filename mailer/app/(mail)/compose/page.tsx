@@ -29,9 +29,39 @@ function ComposeInner() {
   const [writeMode, setWriteMode] = useState<ComposeWriteMode>("free");
   const [sending, setSending] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [attachments, setAttachments] = useState<
+    Array<{ filename: string; content: string; contentType: string }>
+  >([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const draftId = params.get("draft_id");
+
+  async function addAttachments(files: FileList | null) {
+    if (!files?.length) return;
+    const next: Array<{ filename: string; content: string; contentType: string }> = [];
+    for (const file of Array.from(files)) {
+      const content = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result || "");
+          const base64 = result.includes(",") ? result.split(",")[1] : result;
+          resolve(base64);
+        };
+        reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+        reader.readAsDataURL(file);
+      });
+      next.push({
+        filename: file.name,
+        content,
+        contentType: file.type || "application/octet-stream",
+      });
+    }
+    setAttachments((prev) => [...prev, ...next]);
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }
 
   async function saveDraft() {
     setSaving(true);
@@ -79,6 +109,7 @@ function ComposeInner() {
           subject: subject.trim(),
           body,
           html: true,
+          attachments: attachments.length ? attachments : undefined,
         }),
       });
       const data = await res.json();
@@ -176,6 +207,27 @@ function ComposeInner() {
 
       <label>Subject</label>
       <input value={subject} onChange={(e) => setSubject(e.target.value)} />
+      <label>Attachments</label>
+      <input
+        type="file"
+        multiple
+        onChange={(e) => {
+          void addAttachments(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      {attachments.length > 0 && (
+        <ul className="small muted">
+          {attachments.map((file, index) => (
+            <li key={`${file.filename}-${index}`}>
+              {file.filename}{" "}
+              <button type="button" className="linkish" onClick={() => removeAttachment(index)}>
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <label>Body</label>
       <EmailBodyEditor value={body} onChange={setBody} rows={14} />
       <div className="detail-actions">

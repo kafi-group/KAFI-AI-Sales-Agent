@@ -106,6 +106,11 @@ export async function sendSmtp(options: {
   subject: string;
   body: string;
   html?: boolean;
+  attachments?: Array<{
+    filename: string;
+    content: string;
+    contentType?: string;
+  }>;
 }): Promise<{ ok: boolean; message: string }> {
   const creds = resolveMailbox(options.username, options.mailboxEmail);
   if (!creds) {
@@ -142,6 +147,14 @@ export async function sendSmtp(options: {
   const bcc = normalizeAddrList(options.bcc);
 
   try {
+    const mailAttachments = (options.attachments || [])
+      .filter((item) => item.filename && item.content)
+      .map((item) => ({
+        filename: item.filename,
+        content: Buffer.from(item.content, "base64"),
+        contentType: item.contentType || undefined,
+      }));
+
     await transporter.sendMail({
       from,
       to: options.to,
@@ -151,6 +164,7 @@ export async function sendSmtp(options: {
       text: htmlToPlain(options.body),
       html: options.html ? toHtmlBody(options.body) : undefined,
       replyTo: creds.email,
+      ...(mailAttachments.length ? { attachments: mailAttachments } : {}),
     });
     return { ok: true, message: "sent" };
   } catch (err) {
