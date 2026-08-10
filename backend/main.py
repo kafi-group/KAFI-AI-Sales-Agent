@@ -194,7 +194,7 @@ _PUBLIC_API_PATHS = {
     "/api/mailer/report-activity",
     "/api/mailer/append-sent",
 }
-_PUBLIC_API_PREFIXES = ("/api/webhooks/", "/api/track/")
+_PUBLIC_API_PREFIXES = ("/api/webhooks/", "/api/track/", "/api/agent-bridge/")
 
 
 @app.middleware("http")
