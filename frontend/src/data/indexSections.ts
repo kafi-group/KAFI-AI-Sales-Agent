@@ -422,7 +422,7 @@ export function visibleIndexSections(
   return INDEX_SECTIONS.filter((section) => !section.adminOnly || isAdmin).map(
     (section) => {
       let items = section.items.filter((item) => !item.adminOnly || isAdmin);
-      if (section.number === 2 && isAdmin && assignees.length > 0) {
+      if (section.number === 2 && assignees.length > 0) {
         items = [...items, ...assigneeIndexItems(assignees)];
       }
       return { ...section, items };

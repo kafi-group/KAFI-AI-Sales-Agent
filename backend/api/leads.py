@@ -82,8 +82,13 @@ def _is_admin(user: AppUser) -> bool:
 
 
 def _assignee_scope(user: AppUser) -> int | None:
-    """Non-admins only see leads assigned to them; admins see all."""
+    """Personal follow-up scope — non-admins only see their own assigned leads."""
     return None if _is_admin(user) else user.id
+
+
+def _team_read_scope(_user: AppUser) -> int | None:
+    """Shared read scope for team-visible feeds (client history, etc.)."""
+    return None
 
 
 def _table_assignment_filters(
@@ -101,15 +106,13 @@ def _table_assignment_filters(
     Returns
     -------
     assigned_to_user_id
-        Exact assignee filter. Sales users always get themselves. Admins use
-        this for "Leads Sent To {user}".
+        Exact assignee filter for "Leads Sent To {user}" sections.
     unassigned_only
-        Admin pool sections — hide anything already sent to a sales user.
+        Pool sections — hide leads already sent to a sales user.
     include_placed_outcomes
         Whether call-outcome sections should include already-placed leads.
     pool_for_user_id
-        Legacy shared-pool flag. Always None now — sales users no longer see
-        unassigned admin leads.
+        Legacy shared-pool flag. Always None.
     admin_sent_only
         True for admin "Leads Sent To" — exclude the user's self-imports.
     """
@@ -339,7 +342,7 @@ def list_client_history(
 
     return client_history_module.list_client_history_feed(
         db,
-        assigned_to_user_id=_assignee_scope(user),
+        assigned_to_user_id=_team_read_scope(user),
         buyer_id=buyer_id,
         search=search,
         page=page,
