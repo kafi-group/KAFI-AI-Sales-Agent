@@ -176,10 +176,15 @@ function useCallQueueController(): CallQueueState {
     [bindInteraction, enterRemarksStep, hangUp, placeCall],
   );
 
-  // Natural / End-call hang-up → remarks for CURRENT lead only.
+  // Natural / End-call hang-up → remarks for CURRENT lead only (bulk queue).
+  // When status is idle, a single (non-bulk) call ended — leave pendingFollowUp
+  // for PostCallRemarksModal; do NOT clear it here (that caused instant modal flash).
   useEffect(() => {
     if (!pendingFollowUp) return;
-    if (statusRef.current === "idle" || statusRef.current === "completed") {
+    if (statusRef.current === "idle") {
+      return;
+    }
+    if (statusRef.current === "completed") {
       clearPendingFollowUp();
       return;
     }
