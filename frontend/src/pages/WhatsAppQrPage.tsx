@@ -1,10 +1,27 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { client } from "../api/client";
 import { ActionButton } from "../components/ui/ActionButton";
 import { IconRefresh, IconWhatsApp } from "../components/icons/AppIcons";
 
 interface WhatsAppQrPageProps {
   onError: (message: string) => void;
+}
+
+function qrImageFromPayload(qr: Record<string, unknown> | null): string | null {
+  if (!qr) return null;
+  const candidates = [qr.qrDataUrl, qr.dataUrl, qr.qr];
+  for (const value of candidates) {
+    if (typeof value !== "string" || !value.trim()) continue;
+    if (value.startsWith("data:")) return value;
+    return `data:image/png;base64,${value}`;
+  }
+  return null;
+}
+
+function isConnectedStatus(st: Record<string, unknown> | null): boolean {
+  if (!st) return false;
+  if (Boolean(st.connected)) return true;
+  return String(st.status ?? "").toLowerCase() === "connected";
 }
 
 export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
@@ -14,8 +31,14 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
   const [toPhone, setToPhone] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [pairing, setPairing] = useState(false);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const connected = isConnectedStatus(status);
+  const statusLabel = String(status?.status ?? (connected ? "connected" : "disconnected"));
+  const qrPending = statusLabel.toLowerCase() === "qr-pending";
+  const qrImage = qrImageFromPayload(qr);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -26,15 +49,17 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
       ]);
       setStatus(st);
       setSessionId(session.session_id);
-      if (st.connected || String(st.status ?? "").toLowerCase() === "connected") {
+
+      if (isConnectedStatus(st)) {
         setQr(null);
-      } else {
-        try {
-          const qrData = await client.getWhatsAppPersonalQr();
-          setQr(qrData);
-        } catch {
-          setQr(null);
-        }
+        return;
+      }
+
+      try {
+        const qrData = await client.getWhatsAppPersonalQr();
+        setQr(qrData);
+      } catch {
+        setQr(null);
       }
     } catch (e) {
       onError(e instanceof Error ? e.message : "Could not load WhatsApp Personal status");
@@ -45,9 +70,33 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 15_000);
-    return () => window.clearInterval(timer);
   }, [refresh]);
+
+  const pollMs = useMemo(() => {
+    if (connected) return 15_000;
+    if (qrPending || !qrImage) return 3_000;
+    return 8_000;
+  }, [connected, qrPending, qrImage]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => void refresh(), pollMs);
+    return () => window.clearInterval(timer);
+  }, [pollMs, refresh]);
+
+  async function handlePair() {
+    setPairing(true);
+    setNotice(null);
+    try {
+      const qrData = await client.pairWhatsAppPersonal();
+      setQr(qrData);
+      setStatus((prev) => ({ ...(prev ?? {}), connected: false, status: "qr-pending" }));
+      setNotice("Scan this QR with WhatsApp → Linked devices on your phone.");
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Could not generate QR code");
+    } finally {
+      setPairing(false);
+    }
+  }
 
   async function handleDisconnect() {
     if (!window.confirm("Disconnect personal WhatsApp on this device? You can scan a new QR after.")) {
@@ -56,7 +105,8 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
     setLoading(true);
     try {
       await client.disconnectWhatsAppPersonal();
-      setNotice("Disconnected — scan a new QR to link your phone.");
+      setNotice("Disconnected — tap Generate QR code to link your phone.");
+      setQr(null);
       await refresh();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Disconnect failed");
@@ -78,15 +128,6 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
       setSending(false);
     }
   }
-
-  const connected =
-    Boolean(status?.connected) ||
-    String(status?.status ?? "").toLowerCase() === "connected";
-  const qrImage =
-    (typeof qr?.qr === "string" && qr.qr) ||
-    (typeof qr?.qrDataUrl === "string" && qr.qrDataUrl) ||
-    (typeof qr?.dataUrl === "string" && qr.dataUrl) ||
-    null;
 
   return (
     <section className="space-y-4 max-w-2xl">
@@ -110,7 +151,7 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
       ) : null}
 
       <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-5 space-y-4">
-        {loading ? (
+        {loading && !qrImage ? (
           <p className="text-sm text-slate-500">Loading…</p>
         ) : connected ? (
           <div className="space-y-2">
@@ -130,24 +171,47 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
         ) : (
           <div className="space-y-3">
             <p className="text-sm text-amber-200">
-              Not connected. Open WhatsApp on your phone → Linked devices → scan this QR.
+              {qrPending
+                ? "Waiting for scan — open WhatsApp on your phone → Linked devices → Link a device."
+                : "Not connected yet. Generate a QR code, then scan it from your phone."}
             </p>
             {qrImage ? (
               <img
-                src={qrImage.startsWith("data:") ? qrImage : `data:image/png;base64,${qrImage}`}
+                src={qrImage}
                 alt="WhatsApp QR code"
-                className="mx-auto w-56 h-56 rounded-lg bg-white p-2"
+                className="mx-auto w-64 h-64 rounded-lg bg-white p-3"
               />
             ) : (
-              <p className="text-xs text-slate-500">
-                QR not available yet — ensure WHATSAPP_BRIDGE_URL and WHATSAPP_BRIDGE_SECRET are
-                set on Railway (Sales Agent bridge, separate from bank-recon-demo).
-              </p>
+              <ActionButton
+                icon={IconWhatsApp}
+                variant="primary"
+                size="md"
+                disabled={pairing}
+                onClick={() => void handlePair()}
+                title="Generate QR code"
+              >
+                {pairing ? "Generating QR…" : "Generate QR code"}
+              </ActionButton>
             )}
+            {qrImage ? (
+              <ActionButton
+                icon={IconRefresh}
+                variant="ghost"
+                size="md"
+                disabled={pairing}
+                onClick={() => void handlePair()}
+                title="Refresh QR code"
+              >
+                {pairing ? "Refreshing…" : "Refresh QR code"}
+              </ActionButton>
+            ) : null}
           </div>
         )}
 
         <div className="border-t border-slate-800 pt-4 space-y-3">
+          <p className="text-xs text-slate-400">
+            Status: <span className="text-slate-300">{statusLabel}</span>
+          </p>
           <p className="text-xs text-slate-400">Quick send (personal WhatsApp)</p>
           <input
             value={toPhone}

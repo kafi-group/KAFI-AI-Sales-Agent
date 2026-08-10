@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 import httpx
@@ -31,11 +32,33 @@ def _base_url() -> str:
 
 
 def _normalize_status(data: dict[str, Any]) -> dict[str, Any]:
-    """Bridge returns {status: 'connected'} — normalize to {connected: bool} for the UI."""
+    """Bridge uses status: connected | qr-pending | disconnected — normalize for UI."""
     if "connected" not in data:
         raw = str(data.get("status") or "").strip().lower()
-        data["connected"] = raw in {"connected", "open", "ready"}
+        if raw in {"qr-pending", "disconnected", "close", "closed", "logged_out"}:
+            data["connected"] = False
+        else:
+            data["connected"] = raw in {"connected", "open", "ready"}
     return data
+
+
+def _png_qr_payload(session: str, content: bytes) -> dict[str, Any]:
+    b64 = base64.b64encode(content).decode("ascii")
+    return {
+        "session": session,
+        "connected": False,
+        "status": "qr-pending",
+        "qr": b64,
+        "qrDataUrl": f"data:image/png;base64,{b64}",
+    }
+
+
+def _response_is_png(resp: httpx.Response) -> bool:
+    content_type = (resp.headers.get("content-type") or "").lower()
+    if "image/" in content_type:
+        return True
+    body = resp.content or b""
+    return len(body) >= 4 and body[:4] == b"\x89PNG"
 
 
 def bridge_status(user_id: int) -> dict[str, Any]:
@@ -78,9 +101,20 @@ def bridge_qr(user_id: int) -> dict[str, Any]:
                 return _normalize_status({**body, "status": "connected", "qr": None})
             return {**body, "session": session, "connected": False, "qr": None}
         resp.raise_for_status()
-        data = resp.json() if resp.content else {}
+        if _response_is_png(resp):
+            return _png_qr_payload(session, resp.content)
+        try:
+            data = resp.json()
+        except Exception:  # noqa: BLE001
+            if resp.content:
+                return _png_qr_payload(session, resp.content)
+            return {"session": session, "connected": False, "qr": None}
         if isinstance(data, dict):
             data.setdefault("session", session)
+            qr_val = data.get("qr") or data.get("qrDataUrl") or data.get("dataUrl")
+            if isinstance(qr_val, str) and qr_val and not str(qr_val).startswith("data:"):
+                if qr_val.startswith("iVBOR") or qr_val.startswith("/9j"):
+                    data["qrDataUrl"] = f"data:image/png;base64,{qr_val}"
             return _normalize_status(data)
         return {"session": session, "connected": False, "qr": None}
 

@@ -44,6 +44,18 @@ def whatsapp_personal_session(user: AppUser = Depends(get_current_user)) -> dict
     return {"session_id": bridge.bridge_session_id(user.id)}
 
 
+@router.post("/pair")
+def whatsapp_personal_pair(user: AppUser = Depends(get_current_user)) -> Any:
+    """Reset session and return a fresh QR code for scanning."""
+    try:
+        bridge.bridge_disconnect(user.id)
+        return bridge.bridge_qr(user.id)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"Could not start WhatsApp pairing: {exc}") from exc
+
+
 @router.post("/disconnect")
 def whatsapp_personal_disconnect(user: AppUser = Depends(get_current_user)) -> Any:
     try:

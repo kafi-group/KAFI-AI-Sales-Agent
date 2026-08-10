@@ -2250,6 +2250,8 @@ export const client = {
     request<{ session_id: string }>("/whatsapp-personal/session"),
   disconnectWhatsAppPersonal: () =>
     request<Record<string, unknown>>("/whatsapp-personal/disconnect", { method: "POST" }),
+  pairWhatsAppPersonal: () =>
+    request<Record<string, unknown>>("/whatsapp-personal/pair", { method: "POST" }),
   sendWhatsAppPersonal: (payload: { to_phone: string; message: string }) =>
     request<Record<string, unknown>>("/whatsapp-personal/send", {
       method: "POST",
