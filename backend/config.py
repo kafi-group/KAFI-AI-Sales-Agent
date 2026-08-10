@@ -190,6 +190,11 @@ class Settings(BaseSettings):
     bulk_whatsapp_message_delay_seconds: float = 2.0
     bulk_whatsapp_max_per_request: int = 250
 
+    # Baileys personal WhatsApp bridge (per-user QR) — separate session namespace from bank-recon.
+    whatsapp_bridge_url: str | None = None
+    whatsapp_bridge_secret: str | None = None
+    whatsapp_bridge_session_prefix: str = "kafi-sales-agent"
+
     # DB connection pool — sized for concurrent CRM polls + one background job
     # on a single Railway worker. Raise via DB_POOL_SIZE / DB_MAX_OVERFLOW only
     # after confirming Supabase/session-pooler headroom.

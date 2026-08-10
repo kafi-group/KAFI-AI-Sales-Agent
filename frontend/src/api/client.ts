@@ -276,6 +276,28 @@ export interface InboxMessageDetail extends InboxMessageSummary {
   attachments: InboxAttachment[];
 }
 
+export interface InboxThreadListResponse {
+  items: InboxThreadSummary[];
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+}
+
+export interface InboxMessageListResponse {
+  items: InboxMessageSummary[];
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+}
+
+export interface InboxMailAiQueryResponse {
+  answer: string;
+  suggested_threads: InboxThreadSummary[];
+  unread_count: number;
+}
+
 export interface InboxThreadSummary {
   thread_id: string;
   subject: string;
@@ -725,8 +747,10 @@ export interface PersonalizedFollowupDraft {
   generation_error: string | null;
   email_send_status: string | null;
   whatsapp_send_status: string | null;
+  whatsapp_personal_send_status?: string | null;
   email_send_message: string | null;
   whatsapp_send_message: string | null;
+  whatsapp_personal_send_message?: string | null;
   sent_at: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -739,7 +763,7 @@ export interface PersonalizedFollowupListResponse {
 }
 
 export interface PersonalizedFollowupSendPayload {
-  channels?: "email" | "whatsapp" | "both";
+  channels?: string;
   template_name?: string;
   template_language?: string;
   template_variables?: string[];
@@ -758,6 +782,7 @@ export interface MailLabel {
   name: string;
   color: string;
   match_query?: string | null;
+  match_keyword?: string | null;
   count: number;
 }
 
@@ -2151,12 +2176,19 @@ export const client = {
   clearInboxCutoff: () =>
     request<{ showing_since: string | null }>("/inbox/clear-cutoff", { method: "POST" }),
   getInboxUnreadCount: () => request<{ count: number }>("/inbox/unread-count"),
-  listInboxThreads: (params: { limit?: number; unread_only?: boolean } = {}) => {
+  listInboxThreads: (params: {
+    limit?: number;
+    offset?: number;
+    unread_only?: boolean;
+    q?: string;
+  } = {}) => {
     const search = new URLSearchParams();
     if (params.limit) search.set("limit", String(params.limit));
+    if (params.offset) search.set("offset", String(params.offset));
     if (params.unread_only) search.set("unread_only", "true");
+    if (params.q) search.set("q", params.q);
     const query = search.toString();
-    return request<InboxThreadSummary[]>(`/inbox/threads${query ? `?${query}` : ""}`);
+    return request<InboxThreadListResponse>(`/inbox/threads${query ? `?${query}` : ""}`);
   },
   getInboxThread: (threadId: string) =>
     request<InboxThreadDetail>(`/inbox/threads/${encodeURIComponent(threadId)}`),
@@ -2179,15 +2211,48 @@ export const client = {
       body: JSON.stringify(payload),
     }),
   listInboxMessages: (
-    params: { limit?: number; unread_only?: boolean; folder?: MailFolderKey | string } = {},
+    params: {
+      limit?: number;
+      offset?: number;
+      unread_only?: boolean;
+      folder?: MailFolderKey | string;
+      q?: string;
+    } = {},
   ) => {
     const search = new URLSearchParams();
     if (params.limit) search.set("limit", String(params.limit));
+    if (params.offset) search.set("offset", String(params.offset));
     if (params.unread_only) search.set("unread_only", "true");
     if (params.folder) search.set("folder", params.folder);
+    if (params.q) search.set("q", params.q);
     const query = search.toString();
-    return request<InboxMessageSummary[]>(`/inbox/messages${query ? `?${query}` : ""}`);
+    return request<InboxMessageListResponse>(`/inbox/messages${query ? `?${query}` : ""}`);
   },
+  searchInboxMail: (payload: {
+    query: string;
+    scope: string;
+    limit?: number;
+    offset?: number;
+  }) =>
+    request<InboxMessageListResponse>("/inbox/search", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  queryInboxMailAi: (payload: { question: string; unread_only?: boolean }) =>
+    request<InboxMailAiQueryResponse>("/inbox/ai-query", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getWhatsAppPersonalStatus: () =>
+    request<Record<string, unknown>>("/whatsapp-personal/status"),
+  getWhatsAppPersonalQr: () => request<Record<string, unknown>>("/whatsapp-personal/qr"),
+  getWhatsAppPersonalSession: () =>
+    request<{ session_id: string }>("/whatsapp-personal/session"),
+  sendWhatsAppPersonal: (payload: { to_phone: string; message: string }) =>
+    request<Record<string, unknown>>("/whatsapp-personal/send", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   getInboxMessage: (uid: string, folder = "INBOX") =>
     request<InboxMessageDetail>(
       `/inbox/messages/${encodeURIComponent(uid)}?folder=${encodeURIComponent(folder)}`,
@@ -2232,7 +2297,12 @@ export const client = {
     }),
 
   listMailLabels: () => request<MailLabel[]>("/inbox/labels"),
-  createMailLabel: (data: { name: string; color?: string; match_query?: string | null }) =>
+  createMailLabel: (data: {
+    name: string;
+    color?: string;
+    match_query?: string | null;
+    match_keyword?: string | null;
+  }) =>
     request<MailLabel>("/inbox/labels", {
       method: "POST",
       body: JSON.stringify(data),

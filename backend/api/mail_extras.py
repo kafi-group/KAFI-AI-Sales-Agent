@@ -22,6 +22,7 @@ class MailLabelRead(BaseModel):
     name: str
     color: str
     match_query: Optional[str] = None
+    match_keyword: Optional[str] = None
     count: int = 0
 
     model_config = {"from_attributes": True}
@@ -30,7 +31,16 @@ class MailLabelRead(BaseModel):
 class MailLabelCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     color: str = Field(default="#34d399", max_length=32)
-    match_query: Optional[str] = Field(default=None, max_length=255)
+    match_query: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        description="Domain or full email — routes by sender/recipient address only",
+    )
+    match_keyword: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        description="Keyword — routes when found in subject, preview, or body",
+    )
 
 
 class MailLabelAssignRequest(BaseModel):
@@ -75,13 +85,14 @@ def list_mail_labels(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> Any:
-    counts = labels_module.label_counts(db, user.id)
+    counts = labels_module.label_display_counts(db, user)
     return [
         MailLabelRead(
             id=label.id,
             name=label.name,
             color=label.color,
             match_query=label.match_query,
+            match_keyword=label.match_keyword,
             count=counts.get(label.id, 0),
         )
         for label in labels_module.list_labels(db, user.id)
@@ -101,6 +112,7 @@ def create_mail_label(
             name=body.name,
             color=body.color,
             match_query=body.match_query,
+            match_keyword=body.match_keyword,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -109,6 +121,7 @@ def create_mail_label(
         name=label.name,
         color=label.color,
         match_query=label.match_query,
+        match_keyword=label.match_keyword,
         count=0,
     )
 

@@ -479,7 +479,9 @@ class OutlookClient:
         folder_key: str = "inbox",
         *,
         limit: int = 50,
+        offset: int = 0,
         unread_only: bool = False,
+        search_text: str | None = None,
     ) -> list[dict[str, Any]]:
         key = (folder_key or "inbox").strip().lower()
         if key not in FOLDER_KEYS:
@@ -492,13 +494,15 @@ class OutlookClient:
                 if not imap_name:
                     return []
                 # Sent/Trash/Archive ignore the "new mail only" cutoff so history stays visible.
-                apply_cutoff = key == "inbox"
+                apply_cutoff = key == "inbox" and not search_text
                 summaries = self._fetch_folder(
                     mailbox,
                     imap_name,
                     limit=limit,
+                    offset=offset,
                     unread_only=unread_only,
                     since_date=None if apply_cutoff else datetime(2000, 1, 1).date(),
+                    search_text=search_text,
                 )
             finally:
                 try:
@@ -506,7 +510,7 @@ class OutlookClient:
                 except Exception:  # noqa: BLE001
                     pass
 
-        if key == "inbox":
+        if key == "inbox" and not search_text:
             summaries = [m for m in summaries if message_is_after_cutoff(m.get("date"))]
         return summaries[:limit]
 
@@ -689,9 +693,11 @@ class OutlookClient:
         folder: str,
         *,
         limit: int,
+        offset: int = 0,
         unread_only: bool = False,
         since_date=None,
         headers_only: bool = True,
+        search_text: str | None = None,
     ) -> list[dict[str, Any]]:
         from imap_tools import AND
 
@@ -705,7 +711,18 @@ class OutlookClient:
         if since_date is None and has_active_cutoff():
             since_date = get_inbox_since().date()
 
-        if unread_only and since_date is not None:
+        text = (search_text or "").strip()
+        if text:
+            text_criteria = AND(text=text)
+            if unread_only and since_date is not None:
+                criteria = AND(text=text, date_gte=since_date, seen=False)
+            elif unread_only:
+                criteria = AND(text=text, seen=False)
+            elif since_date is not None:
+                criteria = AND(text=text, date_gte=since_date)
+            else:
+                criteria = text_criteria
+        elif unread_only and since_date is not None:
             criteria = AND(date_gte=since_date, seen=False)
         elif unread_only:
             criteria = AND(seen=False)
@@ -714,7 +731,7 @@ class OutlookClient:
         else:
             criteria = AND(all=True)
 
-        fetch_limit = max(1, limit)
+        fetch_limit = max(1, int(limit) + max(0, int(offset)))
 
         def _run(fetch_criteria):
             return list(
@@ -733,23 +750,38 @@ class OutlookClient:
         except Exception:  # noqa: BLE001
             # Some servers reject ALL; fall back to a wide date window.
             try:
-                fallback = (
-                    AND(date_gte=datetime(2000, 1, 1).date(), seen=False)
-                    if unread_only
-                    else AND(date_gte=datetime(2000, 1, 1).date())
-                )
+                if text:
+                    fallback = AND(text=text, date_gte=datetime(2000, 1, 1).date())
+                else:
+                    fallback = (
+                        AND(date_gte=datetime(2000, 1, 1).date(), seen=False)
+                        if unread_only
+                        else AND(date_gte=datetime(2000, 1, 1).date())
+                    )
                 messages = _run(fallback)
             except Exception:  # noqa: BLE001
                 return []
         if headers_only:
-            return [self._summarize(m, folder=folder) for m in messages]
-        return [self._detail_from_msg(m, folder=folder) for m in messages]
+            rows = [self._summarize(m, folder=folder) for m in messages]
+        else:
+            rows = [self._detail_from_msg(m, folder=folder) for m in messages]
+        start = max(0, int(offset))
+        end = start + max(1, int(limit))
+        return rows[start:end]
 
-    def list_messages(self, *, limit: int = 25, unread_only: bool = False) -> list[dict[str, Any]]:
-        cache_key = f"list_messages:{limit}:{int(unread_only)}"
-        cached = _list_cache_get(cache_key)
-        if cached is not None:
-            return cached[:limit]
+    def list_messages(
+        self,
+        *,
+        limit: int = 25,
+        offset: int = 0,
+        unread_only: bool = False,
+        search_text: str | None = None,
+    ) -> list[dict[str, Any]]:
+        cache_key = f"list_messages:{limit}:{offset}:{int(unread_only)}:{search_text or ''}"
+        if not search_text:
+            cached = _list_cache_get(cache_key)
+            if cached is not None:
+                return cached[:limit]
 
         with _imap_lock():
             mailbox = self._mailbox("INBOX")
@@ -758,18 +790,22 @@ class OutlookClient:
                     mailbox,
                     "INBOX",
                     limit=limit,
+                    offset=offset,
                     unread_only=unread_only,
                     headers_only=True,
+                    search_text=search_text,
                 )
             finally:
                 try:
                     mailbox.logout()
                 except Exception:  # noqa: BLE001
                     pass
-        filtered = [m for m in summaries if message_is_after_cutoff(m.get("date"))]
-        result = filtered[:limit]
-        _list_cache_set(cache_key, result)
-        return result
+        if not search_text:
+            filtered = [m for m in summaries if message_is_after_cutoff(m.get("date"))]
+            result = filtered[:limit]
+            _list_cache_set(cache_key, result)
+            return result
+        return [m for m in summaries if message_is_after_cutoff(m.get("date"))][:limit]
 
     def list_inbox_for_query_scan(self, *, limit: int = 10) -> list[dict[str, Any]]:
         """Fresh INBOX pull for New Lead scan — no cache, latest N read+unread, full bodies."""
@@ -794,21 +830,32 @@ class OutlookClient:
         return filtered[:fetch_limit]
 
     def list_conversation_messages(
-        self, *, limit: int = 50, unread_only: bool = False
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        unread_only: bool = False,
+        search_text: str | None = None,
     ) -> list[dict[str, Any]]:
         """Inbox + Sent message headers for conversation threading (no full bodies)."""
         import time
 
-        cache_key = f"list_conversation:{limit}:{int(unread_only)}"
-        cached = _list_cache_get(cache_key)
-        if cached is not None:
-            return cached
+        if search_text:
+            offset = 0
+
+        cache_key = f"list_conversation:{limit}:{offset}:{int(unread_only)}:{search_text or ''}"
+        if not search_text:
+            cached = _list_cache_get(cache_key)
+            if cached is not None:
+                return cached
 
         # Reuse a fresh full-scan cache when a smaller limit is requested.
         now = time.monotonic()
         conv = _CONV_SUMMARY_CACHE.get(_account_cache_key()) or {}
         if (
             not unread_only
+            and not search_text
+            and offset == 0
             and conv.get("data") is not None
             and int(conv.get("limit") or 0) >= limit
             and now - float(conv.get("at") or 0) < _CONV_SUMMARY_TTL_SEC
@@ -820,25 +867,29 @@ class OutlookClient:
         with _imap_lock():
             mailbox = self._mailbox("INBOX")
             try:
-                per_folder = max(limit, 1)
+                per_folder = max(limit + offset, limit, 1)
+                per_folder = min(per_folder, 500)
                 inbox = self._fetch_folder(
                     mailbox,
                     "INBOX",
                     limit=per_folder,
+                    offset=0 if search_text else 0,
                     unread_only=unread_only,
                     headers_only=True,
+                    search_text=search_text,
                 )
                 sent: list[dict[str, Any]] = []
-                # Unread-only applies to inbox; still include sent for thread context.
-                sent_folder = self._resolve_sent_folder(mailbox)
-                if sent_folder:
-                    sent = self._fetch_folder(
-                        mailbox,
-                        sent_folder,
-                        limit=per_folder,
-                        unread_only=False,
-                        headers_only=True,
-                    )
+                if not search_text:
+                    sent_folder = self._resolve_sent_folder(mailbox)
+                    if sent_folder:
+                        sent = self._fetch_folder(
+                            mailbox,
+                            sent_folder,
+                            limit=per_folder,
+                            offset=0,
+                            unread_only=False,
+                            headers_only=True,
+                        )
             finally:
                 try:
                     mailbox.logout()
@@ -858,8 +909,13 @@ class OutlookClient:
                 seen_ids.add(mid)
             unique.append(msg)
 
+        if not search_text and offset:
+            unique = unique[offset:]
+        elif not search_text:
+            unique = unique[: per_folder]
+
         _list_cache_set(cache_key, unique)
-        if not unread_only:
+        if not unread_only and not search_text and offset == 0:
             _CONV_SUMMARY_CACHE[_account_cache_key()] = {
                 "at": time.monotonic(),
                 "limit": limit,

@@ -9,38 +9,43 @@ import {
   type InboxThreadSummary,
   type MailComposeDraft,
   type MailLabel,
-  type MailLabelMessageKey,
 } from "../api/client";
 import {
   isMailLabelSection,
   mailLabelIdFromSection,
   type MailSection,
 } from "../components/AppSidebar";
+import { CreateLabelModal } from "../components/CreateLabelModal";
 import { ComposeMailModal } from "../components/ComposeMailModal";
 import {
   EmailBodyEditor,
   emailBodyHasContent,
 } from "../components/EmailBodyEditor";
 import { capitalizeFirstLetter } from "../utils/spelling";
-import { ActionButton } from "../components/ui/ActionButton";
+import { ActionButton, IconButton } from "../components/ui/ActionButton";
 import {
   IconArchive,
-  IconFilter,
+  IconChevronRight,
   IconInbox,
   IconPlus,
   IconRefresh,
   IconReply,
+  IconSearch,
   IconSend,
   IconSparkles,
   IconTag,
   IconTrash,
   IconX,
 } from "../components/icons/AppIcons";
-import { alertNewInboxMessage, unlockNotificationAudio } from "../utils/notify";
 import {
   buildReplyRecipients,
   hasReplyAllTargets,
 } from "../utils/replyRecipients";
+import {
+  labelRoutingSummary,
+  messageMatchesLabelKeys,
+  messageMatchesLabelRules,
+} from "../lib/mailLabelRules";
 
 interface InboxPageProps {
   section: MailSection;
@@ -53,9 +58,12 @@ interface InboxPageProps {
     archive: number;
   }) => void;
   onMailExtrasChange?: () => void;
+  onSelectMailSection?: (section: MailSection) => void;
   /** Open Vercel mailer compose (mailer-pied). */
   onOpenMailerCompose?: () => void;
 }
+
+const PAGE_SIZE = 50;
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return "";
@@ -124,126 +132,6 @@ function emptyListMessage(section: MailSection): string {
   if (section === "drafts") return "No drafts.";
   if (isMailLabelSection(section)) return "No messages in this label.";
   return "No conversations.";
-}
-
-function normSubject(subject: string | null | undefined): string {
-  if (!subject) return "";
-  return subject
-    .replace(/^(re|fw|fwd)\s*:\s*/i, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-}
-
-function messageMatchesLabelKeys(
-  message: InboxMessageSummary,
-  keys: MailLabelMessageKey[],
-): boolean {
-  const uid = String(message.uid);
-  const folder = (message.folder || "inbox").toLowerCase();
-  const subjectKey = normSubject(message.subject);
-  const from = (message.from_email || "").trim().toLowerCase();
-  for (const key of keys) {
-    if (String(key.message_uid) === uid && key.folder.toLowerCase() === folder) {
-      return true;
-    }
-    if (key.subject_key && subjectKey && key.subject_key === subjectKey) return true;
-    if (key.from_email && from && key.from_email.toLowerCase() === from) return true;
-  }
-  return false;
-}
-
-function normalizeMatchQuery(raw: string | null | undefined): string {
-  if (!raw) return "";
-  let text = raw.trim().toLowerCase();
-  if (!text) return "";
-  // Multi-word name → first meaningful token (e.g. "LinkedIn jobs" → linkedin)
-  if (!text.includes("://") && !text.includes("/") && text.includes(" ")) {
-    const part =
-      text
-        .split(/[\s/_-]+/)
-        .map((p) => p.replace(/^www\./, "").trim())
-        .find((p) => p.length >= 3) || "";
-    return part;
-  }
-  text = text.replace(/^https?:\/\//i, "");
-  text = text.replace(/^www\./i, "");
-  text = text.split("/")[0]?.split("?")[0] || text;
-  return text.trim();
-}
-
-/** Tokens that route mail into a label (match_query and/or label name). */
-function labelMatchTokens(label: Pick<MailLabel, "name" | "match_query">): string[] {
-  const tokens: string[] = [];
-  const primary = normalizeMatchQuery(label.match_query) || normalizeMatchQuery(label.name);
-  if (primary) {
-    tokens.push(primary);
-    if (primary.includes(".")) {
-      const base = primary.split(".")[0]?.trim() || "";
-      if (base.length >= 3 && !tokens.includes(base)) tokens.push(base);
-    }
-  }
-  for (const part of (label.name || "").toLowerCase().split(/[\s/_-]+/)) {
-    const cleaned = part.replace(/^www\./, "").trim();
-    if (cleaned.length >= 3 && !cleaned.includes(".") && !tokens.includes(cleaned)) {
-      tokens.push(cleaned);
-    }
-  }
-  return tokens;
-}
-
-function emailMatchesQuery(email: string | null | undefined, query: string): boolean {
-  if (!query || !email) return false;
-  const value = email.trim().toLowerCase();
-  const domain = value.includes("@") ? value.split("@").pop() || "" : value;
-  if (!domain) return false;
-  if (domain === query) return true;
-  if (domain.endsWith(`.${query}`)) return true;
-  if (domain.includes(query)) return true;
-  if (value.includes(query)) return true;
-  return false;
-}
-
-function textMatchesQuery(text: string | null | undefined, query: string): boolean {
-  if (!query || !text) return false;
-  return text.toLowerCase().includes(query);
-}
-
-function messageMatchesDomainLabel(
-  message: Pick<
-    InboxMessageSummary,
-    "from_email" | "to" | "subject" | "preview"
-  > & {
-    from_name?: string | null;
-    body_text?: string | null;
-  },
-  label: MailLabel,
-): boolean {
-  const tokens = labelMatchTokens(label);
-  if (!tokens.length) return false;
-  for (const query of tokens) {
-    if (emailMatchesQuery(message.from_email, query)) return true;
-    if ((message.to || []).some((addr) => emailMatchesQuery(addr, query))) return true;
-    if (textMatchesQuery(message.from_name, query)) return true;
-    if (textMatchesQuery(message.subject, query)) return true;
-    if (textMatchesQuery(message.preview, query)) return true;
-    if (textMatchesQuery(message.body_text, query)) return true;
-  }
-  return false;
-}
-
-function threadMatchesAnyDomainLabel(thread: InboxThreadSummary, labels: MailLabel[]): boolean {
-  return labels.some((label) => {
-    const tokens = labelMatchTokens(label);
-    if (!tokens.length) return false;
-    return tokens.some((query) => {
-      if (emailMatchesQuery(thread.latest_from_email, query)) return true;
-      if ((thread.participants || []).some((p) => emailMatchesQuery(p, query))) return true;
-      if (textMatchesQuery(thread.subject, query)) return true;
-      if (textMatchesQuery(thread.latest_preview, query)) return true;
-      return false;
-    });
-  });
 }
 
 function messageListLabel(message: InboxMessageSummary, section: MailSection): string {
@@ -325,6 +213,7 @@ export function InboxPage({
   onUnreadChange,
   onFolderCountsChange,
   onMailExtrasChange,
+  onSelectMailSection,
   onOpenMailerCompose,
 }: InboxPageProps) {
   const [status, setStatus] = useState<InboxStatus | null>(null);
@@ -355,14 +244,28 @@ export function InboxPage({
   const [drafts, setDrafts] = useState<MailComposeDraft[]>([]);
   const [labels, setLabels] = useState<MailLabel[]>([]);
   const [messageLabels, setMessageLabels] = useState<MailLabel[]>([]);
-  const [newLabelName, setNewLabelName] = useState("");
-  const [newLabelDomain, setNewLabelDomain] = useState("");
   const [creatingLabel, setCreatingLabel] = useState(false);
+  const [deletingLabel, setDeletingLabel] = useState(false);
   const [labelMenuOpen, setLabelMenuOpen] = useState(false);
   const [assigningLabel, setAssigningLabel] = useState(false);
+  const [showLabelModal, setShowLabelModal] = useState(false);
+  const [threadPage, setThreadPage] = useState(1);
+  const [threadTotal, setThreadTotal] = useState(0);
+  const [threadHasMore, setThreadHasMore] = useState(false);
+  const [messagePage, setMessagePage] = useState(1);
+  const [messageTotal, setMessageTotal] = useState(0);
+  const [messageHasMore, setMessageHasMore] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchScope, setSearchScope] = useState("inbox");
+  const [searchActive, setSearchActive] = useState(false);
+  const [mailAiOpen, setMailAiOpen] = useState(false);
+  const [mailAiQuestion, setMailAiQuestion] = useState("");
+  const [mailAiAnswer, setMailAiAnswer] = useState<string | null>(null);
+  const [mailAiLoading, setMailAiLoading] = useState(false);
 
   const pollTimerRef = useRef<number | null>(null);
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
+  const mailAiPanelRef = useRef<HTMLDivElement | null>(null);
   const onErrorRef = useRef(onError);
   const onUnreadChangeRef = useRef(onUnreadChange);
   const onFolderCountsChangeRef = useRef(onFolderCountsChange);
@@ -383,6 +286,11 @@ export function InboxPage({
     section === "archive" ||
     isLabelView;
   const isThreadView = section === "inbox" && !isLabelView;
+
+  useEffect(() => {
+    if (!mailAiOpen) return;
+    mailAiPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [mailAiOpen]);
 
   const refreshFolderCounts = useCallback(async () => {
     if (!onFolderCountsChangeRef.current) return;
@@ -499,11 +407,16 @@ export function InboxPage({
         }
 
         if (section === "inbox") {
-          const rows = await client.listInboxThreads({ limit: 80, unread_only: unreadOnly });
+          const offset = (threadPage - 1) * PAGE_SIZE;
+          const result = await client.listInboxThreads({
+            limit: PAGE_SIZE,
+            offset,
+            unread_only: unreadOnly,
+          });
           if (generation !== loadGenerationRef.current) return;
-          // Domain/URL labels route matching mail out of Inbox into that label only.
-          const visible = rows.filter((thread) => !threadMatchesAnyDomainLabel(thread, labelRows));
-          setThreads(visible);
+          setThreads(result.items);
+          setThreadTotal(result.total);
+          setThreadHasMore(result.has_more);
           setMessages([]);
           setDrafts([]);
         } else if (isMailLabelSection(section)) {
@@ -520,8 +433,8 @@ export function InboxPage({
             client.listInboxMessages({ limit: 40, folder: "sent" }),
           ]);
           if (generation !== loadGenerationRef.current) return;
-          const combined = [...inboxRows, ...sentRows].filter((m) => {
-            if (activeLabel && messageMatchesDomainLabel(m, activeLabel)) return true;
+          const combined = [...inboxRows.items, ...sentRows.items].filter((m) => {
+            if (activeLabel && messageMatchesLabelRules(m, activeLabel)) return true;
             return messageMatchesLabelKeys(m, keys);
           });
           setMessages(combined);
@@ -532,13 +445,17 @@ export function InboxPage({
           section === "trash" ||
           section === "archive"
         ) {
-          const rows = await client.listInboxMessages({
-            limit: 40,
+          const offset = (messagePage - 1) * PAGE_SIZE;
+          const result = await client.listInboxMessages({
+            limit: PAGE_SIZE,
+            offset,
             unread_only: unreadOnly && section !== "sent",
             folder: section,
           });
           if (generation !== loadGenerationRef.current) return;
-          setMessages(rows);
+          setMessages(result.items);
+          setMessageTotal(result.total);
+          setMessageHasMore(result.has_more);
           setThreads([]);
           setDrafts([]);
         } else {
@@ -558,13 +475,16 @@ export function InboxPage({
         }
       }
     },
-    [refreshFolderCounts, section, unreadOnly],
+    [messagePage, refreshFolderCounts, section, threadPage, unreadOnly],
   );
 
   useEffect(() => {
     clearSelection();
     setNotice(null);
     setUnreadOnly(false);
+    setThreadPage(1);
+    setMessagePage(1);
+    setSearchActive(false);
   }, [clearSelection, section]);
 
   useEffect(() => {
@@ -853,17 +773,6 @@ export function InboxPage({
     }
   }
 
-  async function resetCutoff() {
-    try {
-      const { showing_since } = await client.resetInboxCutoff();
-      setNotice(`Only showing mail received after ${new Date(showing_since).toLocaleString()}.`);
-      clearSelection();
-      await loadList();
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to reset inbox cutoff");
-    }
-  }
-
   async function showAllMail() {
     try {
       await client.clearInboxCutoff();
@@ -908,21 +817,30 @@ export function InboxPage({
     );
   }
 
-  async function createLabel() {
-    const name = newLabelName.trim();
+  async function createLabelFromModal(payload: {
+    name: string;
+    domain: string;
+    keyword: string;
+  }) {
+    const { name, domain, keyword } = payload;
     if (!name) return;
+    if (!domain && !keyword) {
+      onError("Enter a domain or keyword — label name alone does not route mail.");
+      return;
+    }
     setCreatingLabel(true);
     try {
-      const matchHint = newLabelDomain.trim() || name;
       await client.createMailLabel({
         name,
-        // Domain optional — label name alone (e.g. LinkedIn) also routes matching mail.
-        match_query: newLabelDomain.trim() || name,
+        match_query: domain || null,
+        match_keyword: keyword || null,
       });
-      setNewLabelName("");
-      setNewLabelDomain("");
+      setShowLabelModal(false);
+      const parts: string[] = [];
+      if (domain) parts.push(`domain/email “${domain}”`);
+      if (keyword) parts.push(`keyword “${keyword}”`);
       setNotice(
-        `Label “${name}” created — mail mentioning “${matchHint}” (from, subject, or preview) goes there instead of Inbox.`,
+        `Label “${name}” created — mail matching ${parts.join(" or ")} will leave Inbox.`,
       );
       onMailExtrasChangeRef.current?.();
       await loadList({ silent: true });
@@ -930,6 +848,75 @@ export function InboxPage({
       onError(e instanceof Error ? e.message : "Failed to create label");
     } finally {
       setCreatingLabel(false);
+    }
+  }
+
+  async function runMailSearch() {
+    const q = searchQuery.trim();
+    if (!q) return;
+    setLoading(true);
+    try {
+      const result = await client.searchInboxMail({
+        query: q,
+        scope: searchScope,
+        limit: PAGE_SIZE,
+        offset: 0,
+      });
+      setSearchActive(true);
+      setThreads([]);
+      setMessages(result.items);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Search failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function runMailAi(unreadOnly = false) {
+    const question = mailAiQuestion.trim();
+    if (!question) return;
+    setMailAiLoading(true);
+    setMailAiAnswer(null);
+    try {
+      const result = await client.queryInboxMailAi({ question, unread_only: unreadOnly });
+      setMailAiAnswer(result.answer);
+      if (result.suggested_threads?.length && section === "inbox") {
+        setThreads(result.suggested_threads);
+        setSearchActive(false);
+      }
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Mail assistant could not answer");
+    } finally {
+      setMailAiLoading(false);
+    }
+  }
+
+  async function deleteCurrentLabel() {
+    if (labelId == null) return;
+    const active = labels.find((l) => l.id === labelId);
+    const name = active?.name || "this label";
+    const countHint =
+      messages.length > 0
+        ? `${messages.length} message${messages.length === 1 ? "" : "s"} in this label will return to Inbox. `
+        : "";
+    if (
+      !window.confirm(
+        `Delete label “${name}”? ${countHint}No emails will be removed from the mailbox — only the label and its grouping.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingLabel(true);
+    try {
+      await client.deleteMailLabel(labelId);
+      setNotice(`Label “${name}” deleted — matching mail will show in Inbox again.`);
+      clearSelection();
+      onMailExtrasChangeRef.current?.();
+      onSelectMailSection?.("inbox");
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to delete label");
+    } finally {
+      setDeletingLabel(false);
     }
   }
 
@@ -996,13 +983,48 @@ export function InboxPage({
           </h2>
           <p className="text-sm text-slate-500 mt-1">
             {sectionDescription(section, status?.email)}
-            {section === "inbox" && status ? ` · ${status.unread_count} unread` : ""}
+            {section === "inbox" && status ? (
+              <>
+                {" · "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMailAiOpen(true);
+                    if (!mailAiQuestion) {
+                      setMailAiQuestion("What are the most important unread emails?");
+                    }
+                  }}
+                  className="text-emerald-400 hover:text-emerald-300 underline decoration-dotted"
+                  title="Ask AI about unread mail"
+                >
+                  {status.unread_count} unread — ask AI
+                </button>
+              </>
+            ) : null}
           </p>
+          {section === "inbox" && !searchActive && !loading && threads.length > 0 ? (
+            <p className="text-xs text-slate-500 mt-1">
+              Page {threadPage} · showing {(threadPage - 1) * PAGE_SIZE + 1}–
+              {(threadPage - 1) * PAGE_SIZE + threads.length} of ~{threadTotal} in mailbox
+            </p>
+          ) : null}
+          {!isThreadView && !isDraftsView && !searchActive && !loading && messages.length > 0 && messageTotal > 0 ? (
+            <p className="text-xs text-slate-500 mt-1">
+              Page {messagePage} · showing {(messagePage - 1) * PAGE_SIZE + 1}–
+              {(messagePage - 1) * PAGE_SIZE + messages.length} of ~{messageTotal}
+            </p>
+          ) : null}
           {isLabelView && labels.find((l) => l.id === labelId) ? (
             <p className="text-xs text-emerald-400/90 mt-1">
-              Auto-routing:{" "}
-              {labelMatchTokens(labels.find((l) => l.id === labelId)!).join(", ") ||
-                labels.find((l) => l.id === labelId)?.name}
+              Routing:{" "}
+              {(() => {
+                const active = labels.find((l) => l.id === labelId)!;
+                const { domain, keyword } = labelRoutingSummary(active);
+                const parts: string[] = [];
+                if (domain) parts.push(`domain/email ${domain}`);
+                if (keyword) parts.push(`keyword ${keyword}`);
+                return parts.join(" · ") || "manual assignments only";
+              })()}
             </p>
           ) : null}
           {section === "inbox" && status?.showing_since && (
@@ -1019,6 +1041,19 @@ export function InboxPage({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          {isLabelView && labelId != null ? (
+            <ActionButton
+              icon={IconTrash}
+              variant="ghost"
+              size="md"
+              disabled={deletingLabel}
+              onClick={() => void deleteCurrentLabel()}
+              title="Delete label — emails return to Inbox"
+              className="text-rose-300 hover:text-rose-200 border border-rose-500/30"
+            >
+              {deletingLabel ? "Deleting…" : "Delete label"}
+            </ActionButton>
+          ) : null}
           <ActionButton
             icon={IconPlus}
             variant="primary"
@@ -1037,38 +1072,14 @@ export function InboxPage({
           >
             Compose
           </ActionButton>
-          <form
-            className="flex flex-wrap items-center gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void createLabel();
-            }}
+          <ActionButton
+            icon={IconTag}
+            size="md"
+            onClick={() => setShowLabelModal(true)}
+            title="Create label"
           >
-            <input
-              type="text"
-              value={newLabelName}
-              onChange={(e) => setNewLabelName(e.target.value)}
-              placeholder="Label name"
-              className="w-32 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-sm text-slate-100 placeholder:text-slate-600"
-            />
-            <input
-              type="text"
-              value={newLabelDomain}
-              onChange={(e) => setNewLabelDomain(e.target.value)}
-              placeholder="Keyword / domain (optional)"
-              title="e.g. linkedin or linkedin.com — leave blank to use the label name"
-              className="w-44 sm:w-52 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-sm text-slate-100 placeholder:text-slate-600"
-            />
-            <ActionButton
-              icon={IconTag}
-              type="submit"
-              size="md"
-              disabled={creatingLabel || !newLabelName.trim()}
-              title="Create label — matching mail leaves Inbox"
-            >
-              {creatingLabel ? "…" : "Create label"}
-            </ActionButton>
-          </form>
+            Create label
+          </ActionButton>
           {section === "trash" && (
             <ActionButton
               icon={IconTrash}
@@ -1079,16 +1090,6 @@ export function InboxPage({
               title="Empty Trash"
             >
               {emptyingTrash ? "Emptying…" : "Empty Trash"}
-            </ActionButton>
-          )}
-          {section === "inbox" && (
-            <ActionButton
-              icon={IconFilter}
-              size="md"
-              onClick={() => void resetCutoff()}
-              title="Hide mail received before right now"
-            >
-              New mail only
             </ActionButton>
           )}
           {isFolderMail && section !== "sent" && !isDraftsView && (
@@ -1102,28 +1103,117 @@ export function InboxPage({
               Unread only
             </label>
           )}
-          <ActionButton
+          <IconButton
             icon={IconRefresh}
+            label="Refresh"
             size="md"
             onClick={() => void loadList()}
-            title="Refresh"
-          >
-            Refresh
-          </ActionButton>
-          {section === "inbox" && (
-            <button
-              type="button"
-              onClick={() => {
-                unlockNotificationAudio();
-                alertNewInboxMessage({ from: "Test sender", subject: "Test alert" });
-              }}
-              className="px-3 py-2 rounded-lg bg-amber-900/40 hover:bg-amber-900/60 border border-amber-700/50 text-amber-100 text-sm"
-            >
-              Test alert
-            </button>
-          )}
+          />
         </div>
       </div>
+
+      {isFolderMail && !isDraftsView ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={searchScope}
+              onChange={(e) => setSearchScope(e.target.value)}
+              className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-sm text-slate-200"
+              aria-label="Search scope"
+            >
+              <option value="inbox">Inbox</option>
+              <option value="sent">Sent</option>
+              <option value="archive">Archive</option>
+              <option value="trash">Trash</option>
+              <option value="all">All mail</option>
+              {labels.map((label) => (
+                <option key={label.id} value={`label:${label.id}`}>
+                  Label: {label.name}
+                </option>
+              ))}
+            </select>
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void runMailSearch();
+              }}
+              placeholder="Search mail…"
+              className="flex-1 min-w-[12rem] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+            />
+            <ActionButton icon={IconSearch} size="md" onClick={() => void runMailSearch()}>
+              Search
+            </ActionButton>
+            {searchActive ? (
+              <ActionButton
+                icon={IconX}
+                variant="ghost"
+                size="md"
+                onClick={() => {
+                  setSearchActive(false);
+                  void loadList();
+                }}
+              >
+                Clear
+              </ActionButton>
+            ) : null}
+          </div>
+          <div
+            ref={mailAiPanelRef}
+            className={`rounded-xl border bg-slate-950/50 p-3 space-y-2 ${
+              mailAiOpen ? "border-emerald-500/40 ring-1 ring-emerald-500/20" : "border-slate-800"
+            }`}
+          >
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <IconSparkles size="sm" className="text-emerald-400" />
+              Mail assistant — ask about important unread, queries, or new leads
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <input
+                value={mailAiQuestion}
+                onChange={(e) => setMailAiQuestion(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void runMailAi(false);
+                }}
+                placeholder="e.g. Any important unread emails from finance?"
+                className="flex-1 min-w-[14rem] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+              />
+              <ActionButton
+                icon={IconSparkles}
+                size="md"
+                disabled={mailAiLoading || !mailAiQuestion.trim()}
+                onClick={() => void runMailAi(false)}
+              >
+                {mailAiLoading ? "…" : "Ask"}
+              </ActionButton>
+              <ActionButton
+                icon={IconInbox}
+                size="md"
+                variant="ghost"
+                disabled={mailAiLoading}
+                onClick={() => {
+                  setMailAiOpen(true);
+                  setMailAiQuestion("Summarize my most important unread emails.");
+                  void runMailAi(true);
+                }}
+              >
+                Unread focus
+              </ActionButton>
+            </div>
+            {mailAiAnswer ? (
+              <p className="text-sm text-slate-300 whitespace-pre-wrap">{mailAiAnswer}</p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      <CreateLabelModal
+        open={showLabelModal}
+        onClose={() => setShowLabelModal(false)}
+        onCreate={createLabelFromModal}
+        creating={creatingLabel}
+      />
 
       {notice && !showReplyForm && !showCompose && (
         <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-sm">
@@ -1298,6 +1388,54 @@ export function InboxPage({
               })
             )}
           </div>
+          {isThreadView && !searchActive && (threadPage > 1 || threadHasMore) ? (
+            <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-slate-800 bg-slate-950/60">
+              <ActionButton
+                icon={IconChevronRight}
+                iconClassName="rotate-180"
+                size="md"
+                variant="ghost"
+                disabled={threadPage <= 1 || loading}
+                onClick={() => setThreadPage((p) => Math.max(1, p - 1))}
+              >
+                Prev
+              </ActionButton>
+              <span className="text-xs text-slate-500 tabular-nums">Page {threadPage}</span>
+              <ActionButton
+                icon={IconChevronRight}
+                size="md"
+                variant="ghost"
+                disabled={!threadHasMore || loading}
+                onClick={() => setThreadPage((p) => p + 1)}
+              >
+                Next
+              </ActionButton>
+            </div>
+          ) : null}
+          {!isThreadView && !isDraftsView && !searchActive && (messagePage > 1 || messageHasMore) ? (
+            <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-slate-800 bg-slate-950/60">
+              <ActionButton
+                icon={IconChevronRight}
+                iconClassName="rotate-180"
+                size="md"
+                variant="ghost"
+                disabled={messagePage <= 1 || loading}
+                onClick={() => setMessagePage((p) => Math.max(1, p - 1))}
+              >
+                Prev
+              </ActionButton>
+              <span className="text-xs text-slate-500 tabular-nums">Page {messagePage}</span>
+              <ActionButton
+                icon={IconChevronRight}
+                size="md"
+                variant="ghost"
+                disabled={!messageHasMore || loading}
+                onClick={() => setMessagePage((p) => p + 1)}
+              >
+                Next
+              </ActionButton>
+            </div>
+          ) : null}
         </div>
 
         <div

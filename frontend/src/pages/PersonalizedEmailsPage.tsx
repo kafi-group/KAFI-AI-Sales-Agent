@@ -26,7 +26,7 @@ interface PersonalizedEmailsPageProps {
   embedded?: boolean;
 }
 
-type SendChannel = "email" | "whatsapp" | "both";
+type SendChannel = "email" | "whatsapp" | "whatsapp_personal" | "all";
 
 const STATUS_LABELS: Record<string, string> = {
   awaiting_transcript: "Waiting for captions",
@@ -76,7 +76,7 @@ export function PersonalizedEmailsPage({
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
   const [templateId, setTemplateId] = useState("");
   const [variables, setVariables] = useState<string[]>([]);
-  const [pendingWaChannel, setPendingWaChannel] = useState<"whatsapp" | "both" | null>(null);
+  const [pendingWaChannel, setPendingWaChannel] = useState<SendChannel | null>(null);
 
   const selected = rows.find((r) => r.id === selectedId) ?? null;
 
@@ -196,8 +196,9 @@ export function PersonalizedEmailsPage({
 
     const labels: Record<SendChannel, string> = {
       email: "Send this message via email?",
-      whatsapp: "Send this message via WhatsApp?",
-      both: "Send this message via email and WhatsApp?",
+      whatsapp: "Send via Meta Business WhatsApp?",
+      whatsapp_personal: "Send via your personal WhatsApp (QR session)?",
+      all: "Send via email, Meta WhatsApp, and personal WhatsApp?",
     };
     if (!templateOpts && !window.confirm(labels[channels])) return;
 
@@ -243,7 +244,7 @@ export function PersonalizedEmailsPage({
       const message = e instanceof Error ? e.message : "Failed to send";
       if (channels !== "email" && /template/i.test(message)) {
         setNeedsTemplate(true);
-        setPendingWaChannel(channels === "both" ? "both" : "whatsapp");
+        setPendingWaChannel(channels === "all" ? "all" : "whatsapp");
         setNotice(
           "Outside the 24h WhatsApp window — select an approved template to send.",
         );
@@ -284,6 +285,7 @@ export function PersonalizedEmailsPage({
 
   const emailAlreadySent = channelSent(selected?.email_send_status);
   const waAlreadySent = selected?.whatsapp_send_status === "sent";
+  const waPersonalAlreadySent = selected?.whatsapp_personal_send_status === "sent";
   const canEdit = selected?.status !== "sent" || needsTemplate;
   const showSendActions =
     selected &&
@@ -564,26 +566,42 @@ export function PersonalizedEmailsPage({
                         selected.status === "generating" ||
                         !selected.contact_phone
                       }
-                      title="Send WhatsApp only"
+                      title="Send via Meta Business WhatsApp (templates / 24h window)"
                     >
-                      {sending === "whatsapp" ? "Sending…" : "Send WhatsApp"}
+                      {sending === "whatsapp" ? "Sending…" : "WhatsApp Meta"}
                     </ActionButton>
                   )}
-                  {!emailAlreadySent && !waAlreadySent && (
+                  {!waPersonalAlreadySent && (
+                    <ActionButton
+                      icon={IconWhatsApp}
+                      size="md"
+                      onClick={() => void handleSend("whatsapp_personal")}
+                      disabled={
+                        !!sending ||
+                        !emailBody.trim() ||
+                        selected.status === "generating" ||
+                        !selected.contact_phone
+                      }
+                      title="Send from your personal WhatsApp (scan QR in WhatsApp QR module)"
+                    >
+                      {sending === "whatsapp_personal" ? "Sending…" : "WhatsApp Personal"}
+                    </ActionButton>
+                  )}
+                  {!emailAlreadySent && !waAlreadySent && !waPersonalAlreadySent && (
                     <ActionButton
                       icon={IconSend}
                       variant="primary"
                       size="md"
-                      onClick={() => void handleSend("both")}
+                      onClick={() => void handleSend("all")}
                       disabled={
                         !!sending ||
                         !subject.trim() ||
                         !emailBody.trim() ||
                         selected.status === "generating"
                       }
-                      title="Send email and WhatsApp"
+                      title="Send email + Meta WhatsApp + Personal WhatsApp"
                     >
-                      {sending === "both" ? "Sending…" : "Send both"}
+                      {sending === "all" ? "Sending…" : "Send all 3"}
                     </ActionButton>
                   )}
                   {selected.status !== "sent" && (

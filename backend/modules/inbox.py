@@ -155,8 +155,10 @@ def list_messages(
     user: AppUser,
     *,
     limit: int = 25,
+    offset: int = 0,
     unread_only: bool = False,
     folder: str = "inbox",
+    search_text: str | None = None,
 ) -> list[dict[str, Any]]:
     account = resolve_user_mailbox(user)
     if not account:
@@ -166,12 +168,112 @@ def list_messages(
         raise ValueError(f"Unknown folder: {folder}")
     with use_mailbox(account, user_id=user.id):
         if key == "inbox":
-            messages = outlook_client.list_messages(limit=limit, unread_only=unread_only)
+            messages = outlook_client.list_messages(
+                limit=limit,
+                offset=offset,
+                unread_only=unread_only,
+                search_text=search_text,
+            )
         else:
             messages = outlook_client.list_folder_messages(
-                key, limit=limit, unread_only=unread_only
+                key,
+                limit=limit,
+                offset=offset,
+                unread_only=unread_only,
+                search_text=search_text,
             )
         return [{**message, "provider": _mailbox_provider()} for message in messages]
+
+
+def search_mail(
+    user: AppUser,
+    *,
+    query: str,
+    scope: str,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    text = (query or "").strip()
+    if not text:
+        raise ValueError("Search query is required")
+    scope_key = (scope or "inbox").strip().lower()
+    if scope_key == "all":
+        combined: list[dict[str, Any]] = []
+        for folder in ("inbox", "sent", "archive", "trash"):
+            combined.extend(
+                list_messages(
+                    user,
+                    limit=limit,
+                    offset=0,
+                    folder=folder,
+                    search_text=text,
+                )
+            )
+        combined.sort(key=lambda m: m.get("date") or "", reverse=True)
+        page = combined[offset : offset + limit]
+        return {
+            "items": page,
+            "total": len(combined),
+            "offset": offset,
+            "limit": limit,
+            "has_more": len(combined) > offset + limit,
+        }
+    if scope_key.startswith("label:"):
+        label_id = int(scope_key.split(":", 1)[1])
+        from db.models import MailLabel
+        from db.session import SessionLocal
+        from modules import mail_labels as labels_module
+
+        db = SessionLocal()
+        try:
+            label = (
+                db.query(MailLabel)
+                .filter(MailLabel.id == label_id, MailLabel.user_id == user.id)
+                .first()
+            )
+            if not label:
+                raise ValueError("Label not found")
+            inbox_rows = list_messages(user, limit=200, folder="inbox", search_text=text)
+            sent_rows = list_messages(user, limit=80, folder="sent", search_text=text)
+            matched = [
+                m
+                for m in inbox_rows + sent_rows
+                if labels_module.message_matches_label_rules(
+                    from_email=m.get("from_email"),
+                    to_addrs=m.get("to") or [],
+                    from_name=m.get("from_name"),
+                    subject=m.get("subject"),
+                    preview=m.get("preview"),
+                    body_text=m.get("body_text"),
+                    label=label,
+                )
+            ]
+            page = matched[offset : offset + limit]
+            return {
+                "items": page,
+                "total": len(matched),
+                "offset": offset,
+                "limit": limit,
+                "has_more": len(matched) > offset + limit,
+            }
+        finally:
+            db.close()
+    if scope_key not in FOLDER_KEYS:
+        raise ValueError(f"Unknown search scope: {scope}")
+    items = list_messages(
+        user,
+        limit=limit,
+        offset=offset,
+        folder=scope_key,
+        search_text=text,
+    )
+    return {
+        "items": items,
+        "total": len(items) + offset if len(items) >= limit else offset + len(items),
+        "offset": offset,
+        "limit": limit,
+        "has_more": len(items) >= limit,
+    }
 
 
 def list_inbox_for_query_scan(user: AppUser, *, limit: int = 10) -> list[dict[str, Any]]:
@@ -321,22 +423,56 @@ def _strip_thread_internals(thread: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_threads(
-    user: AppUser, *, limit: int = 40, unread_only: bool = False
-) -> list[dict[str, Any]]:
+    user: AppUser,
+    *,
+    limit: int = 40,
+    offset: int = 0,
+    unread_only: bool = False,
+    search_text: str | None = None,
+) -> dict[str, Any]:
     account = resolve_user_mailbox(user)
     if not account:
-        return []
-    fetch_limit = max(limit * 2, 60)
+        return {"items": [], "total": 0, "offset": offset, "limit": limit, "has_more": False}
+    window = min(max((offset + limit) * 3, 100), 500)
     with use_mailbox(account, user_id=user.id):
         raw = outlook_client.list_conversation_messages(
-            limit=fetch_limit,
+            limit=window,
+            offset=0,
             unread_only=unread_only,
+            search_text=search_text,
         )
         stamped = [{**m, "provider": _mailbox_provider()} for m in raw]
         threads = group_messages_into_threads(stamped, mailbox_email=account.email)
         if unread_only:
             threads = [t for t in threads if t.get("unread_count", 0) > 0]
-        return [_strip_thread_internals(t) for t in threads[:limit]]
+        from modules import mail_labels as labels_module
+        from db.session import SessionLocal
+
+        db = SessionLocal()
+        try:
+            labels = labels_module.list_labels(db, user.id)
+            visible = [
+                t
+                for t in threads
+                if not labels_module.thread_matches_label_rules(t, labels)
+            ]
+        finally:
+            db.close()
+        total_estimate = len(visible)
+        if not search_text:
+            try:
+                counts = outlook_client.folder_counts(limit=100)
+                total_estimate = int(counts.get("inbox", {}).get("count") or total_estimate)
+            except Exception:  # noqa: BLE001
+                pass
+        page = [_strip_thread_internals(t) for t in visible[offset : offset + limit]]
+        return {
+            "items": page,
+            "total": total_estimate,
+            "offset": offset,
+            "limit": limit,
+            "has_more": len(visible) > offset + limit or window < total_estimate,
+        }
 
 
 def get_thread(

@@ -1183,6 +1183,43 @@ class InboxThreadSummary(BaseModel):
     provider: Optional[str] = None
 
 
+class InboxThreadListResponse(BaseModel):
+    items: list[InboxThreadSummary] = Field(default_factory=list)
+    total: int = 0
+    offset: int = 0
+    limit: int = 50
+    has_more: bool = False
+
+
+class InboxMessageListResponse(BaseModel):
+    items: list[InboxMessageSummary] = Field(default_factory=list)
+    total: int = 0
+    offset: int = 0
+    limit: int = 50
+    has_more: bool = False
+
+
+class InboxMailSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=200)
+    scope: str = Field(
+        default="inbox",
+        description="inbox | sent | trash | archive | all | label:<id>",
+    )
+    limit: int = Field(default=50, ge=1, le=100)
+    offset: int = Field(default=0, ge=0)
+
+
+class InboxMailAiQueryRequest(BaseModel):
+    question: str = Field(min_length=2, max_length=500)
+    unread_only: bool = False
+
+
+class InboxMailAiQueryResponse(BaseModel):
+    answer: str
+    suggested_threads: list[InboxThreadSummary] = Field(default_factory=list)
+    unread_count: int = 0
+
+
 class InboxThreadDetail(InboxThreadSummary):
     messages: list[InboxMessageDetail] = Field(default_factory=list)
 

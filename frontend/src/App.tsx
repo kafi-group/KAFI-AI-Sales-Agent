@@ -13,12 +13,14 @@ import {
   AppSidebar,
   assignedUserIdFromSection,
   isAssignedLeadsSection,
+  mailLabelIdFromSection,
   type LeadsTableSection,
   type MailSection,
   type NavItem,
   type Tab,
   type WhatsAppSection,
 } from "./components/AppSidebar";
+import { mailLabelSectionId } from "./lib/mailLabelRules";
 import { InboxAlertToasts } from "./components/InboxAlertToasts";
 import { WhatsAppAlertToasts } from "./components/WhatsAppAlertToasts";
 import { InterestedFollowUpAlertToasts } from "./components/InterestedFollowUpAlertToasts";
@@ -29,6 +31,7 @@ import { EmailActivityPage } from "./pages/EmailActivityPage";
 import { EmailTemplatesPage } from "./pages/EmailTemplatesPage";
 import { WhatsAppTemplatesPage } from "./pages/WhatsAppTemplatesPage";
 import { WhatsAppInboxPage } from "./pages/WhatsAppInboxPage";
+import { WhatsAppQrPage } from "./pages/WhatsAppQrPage";
 import { BuyerProfile } from "./pages/BuyerProfile";
 import { CallsPage } from "./pages/CallsPage";
 import { InboxPage } from "./pages/InboxPage";
@@ -279,6 +282,30 @@ function DashboardApp() {
     }
   }, []);
 
+  const handleDeleteMailLabel = useCallback(
+    async (labelId: number) => {
+      const label = mailLabels.find((row) => row.id === labelId);
+      const name = label?.name || "this label";
+      if (
+        !window.confirm(
+          `Delete label “${name}”? No emails will be removed from the mailbox — only the label and its grouping.`,
+        )
+      ) {
+        return;
+      }
+      try {
+        await client.deleteMailLabel(labelId);
+        if (mailLabelIdFromSection(mailSection) === labelId) {
+          setMailSection("inbox");
+        }
+        await loadMailExtras();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to delete label");
+      }
+    },
+    [loadMailExtras, mailLabels, mailSection, setError],
+  );
+
   const pollInbox = useCallback(() => {
     client
       .getInboxStatus()
@@ -299,7 +326,8 @@ function DashboardApp() {
           return;
         }
 
-        return client.listInboxMessages({ limit: 15 }).then((messages) => {
+        return client.listInboxMessages({ limit: 15 }).then((result) => {
+          const messages = result.items;
           const currentUids = new Set(messages.map((m) => m.uid));
           const seen = seenMessageUidsRef.current;
 
@@ -854,6 +882,7 @@ function DashboardApp() {
   const navItems: NavItem[] = [
     { id: "indexes", label: "Indexes", count: 0 },
     { id: "user-manual", label: "User Manual", count: 0 },
+    { id: "whatsapp-qr", label: "WhatsApp QR", count: 0 },
     {
       id: "whatsapp-inbox",
       label: "WhatsApp",
@@ -909,14 +938,11 @@ function DashboardApp() {
           label: "Email templates",
           count: emailTemplateCount,
         },
-        ...mailLabels.map((label) => {
-          const isLinkedIn = /linkedin/i.test(label.name);
-          return {
-            id: (isLinkedIn ? `label-linkedin:${label.id}` : `label:${label.id}`) as MailSection,
-            label: label.name,
-            count: label.count,
-          };
-        }),
+        ...mailLabels.map((label) => ({
+          id: mailLabelSectionId(label),
+          label: label.name,
+          count: label.count,
+        })),
       ],
     },
     {
@@ -991,6 +1017,7 @@ function DashboardApp() {
           onSelectTab={handleSelectTab}
           onSelectTableSection={handleSelectTableSection}
           onSelectMailSection={handleSelectMailSection}
+          onDeleteMailLabel={(labelId) => void handleDeleteMailLabel(labelId)}
           onSelectWhatsAppSection={handleSelectWhatsAppSection}
           onOpenMailer={() => void openMailerApp()}
           onOpenSalesAssistant={() => {
@@ -1036,11 +1063,11 @@ function DashboardApp() {
             />
           </header>
 
-          <div className="hidden lg:flex sticky top-0 z-30 justify-between items-center gap-2 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur px-4 sm:px-6 lg:px-8 py-2.5">
+          <div className="hidden lg:flex sticky top-0 z-30 items-center gap-2 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur px-4 sm:px-6 lg:px-8 py-2.5">
             <button
               type="button"
               onClick={toggleSidebar}
-              className="rounded-lg p-2 text-slate-300 hover:bg-slate-800 hover:text-slate-100"
+              className="shrink-0 rounded-lg p-2 text-slate-300 hover:bg-slate-800 hover:text-slate-100"
               aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"}
               title={sidebarOpen ? "Close sidebar" : "Open sidebar"}
             >
@@ -1048,6 +1075,13 @@ function DashboardApp() {
                 <path d="M4 7h16M4 12h16M4 17h16" />
               </svg>
             </button>
+            {error ? (
+              <p className="flex-1 min-w-0 text-xs sm:text-sm text-red-200 truncate px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/30">
+                {error}
+              </p>
+            ) : (
+              <div className="flex-1" />
+            )}
             <AppTopActions
               onRefresh={refreshAll}
               onLogout={() => void logout()}
@@ -1063,11 +1097,11 @@ function DashboardApp() {
 
           <main className="w-full max-w-none min-w-0 mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8">
             <CallInitBanner />
-            {error && (
-              <div className="mb-7 p-4 rounded-lg bg-red-500/10 border border-red-500/30 text-red-200 text-sm">
-                {sanitizeUserFacingError(error)}
+            {error ? (
+              <div className="lg:hidden mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-200 text-sm">
+                {error}
               </div>
-            )}
+            ) : null}
 
             {tab === "indexes" && (
               <IndexesPage
@@ -1112,6 +1146,7 @@ function DashboardApp() {
                 onUnreadChange={setWhatsappActivityUnread}
               />
             )}
+            {tab === "whatsapp-qr" && <WhatsAppQrPage onError={setError} />}
             {tab === "whatsapp-inbox" && (
               <WhatsAppInboxPage
                 onError={setError}
@@ -1162,6 +1197,7 @@ function DashboardApp() {
                 onUnreadChange={setInboxUnread}
                 onFolderCountsChange={handleMailCountsChange}
                 onMailExtrasChange={() => void loadMailExtras()}
+                onSelectMailSection={handleSelectMailSection}
                 onOpenMailerCompose={() => void openMailerApp("/compose")}
               />
             )}

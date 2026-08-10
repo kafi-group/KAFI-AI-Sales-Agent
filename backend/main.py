@@ -25,6 +25,7 @@ from api import (
     scheduler,
     track,
     whatsapp,
+    whatsapp_personal,
 )
 from config import settings
 from modules.auth import ensure_default_admin
@@ -287,6 +288,7 @@ app.include_router(chatbot.router, prefix="/api")
 app.include_router(sales_assistant.router, prefix="/api")
 app.include_router(kpi.router, prefix="/api")
 app.include_router(whatsapp.router, prefix="/api")
+app.include_router(whatsapp_personal.router, prefix="/api")
 app.include_router(whatsapp.webhooks_router, prefix="/api")
 app.include_router(ai_mode.router, prefix="/api")
 

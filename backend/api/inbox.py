@@ -19,13 +19,19 @@ from api.schemas import (
     InboxReplyResponse,
     InboxStatus,
     InboxThreadDetail,
+    InboxThreadListResponse,
     InboxThreadMoveRequest,
     InboxThreadSummary,
+    InboxMailAiQueryRequest,
+    InboxMailAiQueryResponse,
+    InboxMailSearchRequest,
+    InboxMessageListResponse,
     InboxUnreadCount,
 )
 from db.models import AppUser
 from modules import inbox as inbox_module
 from modules import inbox_assistant as inbox_assistant_module
+from modules import inbox_mail_ai as inbox_mail_ai_module
 from modules.mailbox_accounts import hosts_enabled, resolve_user_mailbox
 
 router = APIRouter(prefix="/inbox", tags=["inbox"])
@@ -78,15 +84,24 @@ def clear_inbox_cutoff(user: AppUser = Depends(get_current_user_released)):
     return inbox_module.clear_cutoff(user)
 
 
-@router.get("/threads", response_model=list[InboxThreadSummary])
+@router.get("/threads", response_model=InboxThreadListResponse)
 def list_inbox_threads(
-    limit: int = Query(default=30, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     unread_only: bool = Query(default=False),
+    q: str | None = Query(default=None, max_length=200),
     user: AppUser = Depends(get_current_user_released),
 ):
     _guard_configured(user)
     try:
-        return inbox_module.list_threads(user, limit=limit, unread_only=unread_only)
+        result = inbox_module.list_threads(
+            user,
+            limit=limit,
+            offset=offset,
+            unread_only=unread_only,
+            search_text=q,
+        )
+        return result
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, _inbox_error_message(exc)) from exc
 
@@ -263,11 +278,13 @@ def analyze_inbox_message(
     return result
 
 
-@router.get("/messages", response_model=list[InboxMessageSummary])
+@router.get("/messages", response_model=InboxMessageListResponse)
 def list_inbox_messages(
-    limit: int = Query(default=25, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     unread_only: bool = Query(default=False),
     folder: str = Query(default="inbox", description="Logical folder: inbox|sent|trash|archive"),
+    q: str | None = Query(default=None, max_length=200),
     user: AppUser = Depends(get_current_user_released),
 ):
     _guard_configured(user)
@@ -275,11 +292,67 @@ def list_inbox_messages(
     if key not in _VALID_FOLDERS:
         raise HTTPException(400, f"folder must be one of: {', '.join(sorted(_VALID_FOLDERS))}")
     try:
-        return inbox_module.list_messages(
-            user, limit=limit, unread_only=unread_only, folder=key
+        items = inbox_module.list_messages(
+            user,
+            limit=limit,
+            offset=offset,
+            unread_only=unread_only,
+            folder=key,
+            search_text=q,
+        )
+        total = len(items)
+        if not q:
+            folders = inbox_module.list_folders(user)
+            for row in folders.get("folders") or []:
+                if row.get("key") == key:
+                    total = int(row.get("count") or total)
+                    break
+        return {
+            "items": items,
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "has_more": len(items) >= limit,
+        }
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, _inbox_error_message(exc)) from exc
+
+
+@router.post("/search", response_model=InboxMessageListResponse)
+def search_inbox_mail(
+    payload: InboxMailSearchRequest,
+    user: AppUser = Depends(get_current_user_released),
+):
+    _guard_configured(user)
+    scope = (payload.scope or "inbox").strip().lower()
+    try:
+        return inbox_module.search_mail(
+            user,
+            query=payload.query,
+            scope=scope,
+            limit=payload.limit,
+            offset=payload.offset,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, _inbox_error_message(exc)) from exc
+
+
+@router.post("/ai-query", response_model=InboxMailAiQueryResponse)
+def inbox_ai_query(
+    payload: InboxMailAiQueryRequest,
+    user: AppUser = Depends(get_current_user_released),
+):
+    _guard_configured(user)
+    try:
+        return inbox_mail_ai_module.query_mailbox(
+            user,
+            question=payload.question,
+            unread_only=payload.unread_only,
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, _inbox_error_message(exc)) from exc
 

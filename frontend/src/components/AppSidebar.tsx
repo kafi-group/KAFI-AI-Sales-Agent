@@ -6,13 +6,16 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconExternal,
+  IconTrash,
   IconUser,
   NavIcon,
 } from "./icons/AppIcons";
+import { mailLabelIdFromNavId } from "../lib/mailLabelRules";
 
 export type Tab =
   | "indexes"
   | "user-manual"
+  | "whatsapp-qr"
   | "activity"
   | "email-templates"
   | "personalized-emails"
@@ -83,13 +86,15 @@ export type MailSection =
 
 export type WhatsAppSection = "whatsapp-inbox" | "whatsapp-templates" | "whatsapp-activity";
 
-export function isMailLabelSection(section: string): section is `label:${number}` {
-  return /^label:\d+$/.test(section);
+export function isMailLabelSection(
+  section: string,
+): section is `label:${number}` | `label-linkedin:${number}` {
+  return /^label(?:-linkedin)?:\d+$/.test(section);
 }
 
 export function mailLabelIdFromSection(section: MailSection): number | null {
   if (!isMailLabelSection(section)) return null;
-  const id = Number(section.slice("label:".length));
+  const id = Number(section.replace(/^label(?:-linkedin)?:/, ""));
   return Number.isFinite(id) ? id : null;
 }
 
@@ -137,6 +142,7 @@ interface AppSidebarProps {
   onSelectTab: (tab: Tab) => void;
   onSelectTableSection?: (section: LeadsTableSection) => void;
   onSelectMailSection?: (section: MailSection) => void;
+  onDeleteMailLabel?: (labelId: number) => void;
   onSelectWhatsAppSection?: (section: WhatsAppSection) => void;
   /** Open Vercel mailer (same tab) with session exchange. */
   onOpenMailer?: () => void;
@@ -161,6 +167,7 @@ export function AppSidebar({
   onSelectTab,
   onSelectTableSection,
   onSelectMailSection,
+  onDeleteMailLabel,
   onSelectWhatsAppSection,
   onOpenMailer,
   onOpenSalesAssistant,
@@ -521,55 +528,80 @@ export function AppSidebar({
                   <div className="ml-3 pl-2 border-l border-slate-700 space-y-0.5">
                     {item.children.map((child) => {
                       const childActive = isActive && activeChildId === child.id;
+                      const mailLabelId = isMailParent ? mailLabelIdFromNavId(child.id) : null;
                       return (
-                        <button
+                        <div
                           key={child.id}
-                          type="button"
-                          onClick={() => {
-                            if (isTableParent) {
-                              setLeadsMenuOpen(true);
-                              onSelectTab("table");
-                              onSelectTableSection?.(child.id as LeadsTableSection);
-                            } else if (isMailParent) {
-                              setMailMenuOpen(true);
-                              onSelectMailSection?.(child.id as MailSection);
-                            } else if (isWhatsAppParent) {
-                              setWhatsappMenuOpen(true);
-                              onSelectWhatsAppSection?.(child.id as WhatsAppSection);
-                            }
-                            closeMobile();
-                          }}
-                          className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm text-left transition group ${
-                            childActive
-                              ? "bg-emerald-600 text-white shadow-sm shadow-emerald-900/30"
-                              : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                          className={`group/label flex items-center gap-0.5 rounded-lg ${
+                            childActive ? "bg-emerald-600 shadow-sm shadow-emerald-900/30" : ""
                           }`}
                         >
-                          <span className="flex items-center gap-2.5 truncate min-w-0">
-                            <NavIcon
-                              navId={child.id}
-                              className={
-                                childActive
-                                  ? "text-white"
-                                  : navIconClass(false)
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isTableParent) {
+                                setLeadsMenuOpen(true);
+                                onSelectTab("table");
+                                onSelectTableSection?.(child.id as LeadsTableSection);
+                              } else if (isMailParent) {
+                                setMailMenuOpen(true);
+                                onSelectMailSection?.(child.id as MailSection);
+                              } else if (isWhatsAppParent) {
+                                setWhatsappMenuOpen(true);
+                                onSelectWhatsAppSection?.(child.id as WhatsAppSection);
                               }
-                            />
-                            <span className="truncate">{child.label}</span>
-                          </span>
-                          {child.count > 0 ? (
-                            <span
-                              className={`shrink-0 text-xs tabular-nums px-1.5 py-0.5 rounded min-w-[1.25rem] text-center ${
+                              closeMobile();
+                            }}
+                            className={`flex-1 min-w-0 flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm text-left transition ${
+                              childActive
+                                ? "text-white"
+                                : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                            }`}
+                          >
+                            <span className="flex items-center gap-2.5 truncate min-w-0">
+                              <NavIcon
+                                navId={child.id}
+                                className={
+                                  childActive
+                                    ? "text-white"
+                                    : navIconClass(false)
+                                }
+                              />
+                              <span className="truncate">{child.label}</span>
+                            </span>
+                            {child.count > 0 ? (
+                              <span
+                                className={`shrink-0 text-xs tabular-nums px-1.5 py-0.5 rounded min-w-[1.25rem] text-center ${
+                                  childActive
+                                    ? "bg-emerald-500/30 text-emerald-50"
+                                    : child.id === "whatsapp-inbox"
+                                      ? "bg-emerald-500 text-white font-semibold"
+                                      : "bg-slate-800/80 text-slate-300"
+                                }`}
+                              >
+                                {child.count}
+                              </span>
+                            ) : null}
+                          </button>
+                          {mailLabelId != null && onDeleteMailLabel ? (
+                            <button
+                              type="button"
+                              title={`Delete label “${child.label}”`}
+                              aria-label={`Delete label ${child.label}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onDeleteMailLabel(mailLabelId);
+                              }}
+                              className={`shrink-0 mr-1 rounded-md p-1.5 transition opacity-0 group-hover/label:opacity-100 focus:opacity-100 ${
                                 childActive
-                                  ? "bg-emerald-500/30 text-emerald-50"
-                                  : child.id === "whatsapp-inbox"
-                                    ? "bg-emerald-500 text-white font-semibold"
-                                    : "bg-slate-800/80 text-slate-300"
+                                  ? "text-emerald-100 hover:bg-emerald-500/30"
+                                  : "text-slate-500 hover:bg-slate-800 hover:text-rose-300"
                               }`}
                             >
-                              {child.count}
-                            </span>
+                              <IconTrash size="sm" />
+                            </button>
                           ) : null}
-                        </button>
+                        </div>
                       );
                     })}
                   </div>

@@ -71,8 +71,10 @@ def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, An
         "generation_error": draft.generation_error,
         "email_send_status": draft.email_send_status,
         "whatsapp_send_status": draft.whatsapp_send_status,
+        "whatsapp_personal_send_status": draft.whatsapp_personal_send_status,
         "email_send_message": draft.email_send_message,
         "whatsapp_send_message": draft.whatsapp_send_message,
+        "whatsapp_personal_send_message": draft.whatsapp_personal_send_message,
         "sent_at": draft.sent_at.isoformat() if draft.sent_at else None,
         "created_at": draft.created_at.isoformat() if draft.created_at else None,
         "updated_at": draft.updated_at.isoformat() if draft.updated_at else None,
@@ -389,26 +391,34 @@ def send_draft(
         channel_set = {"email", "whatsapp"}
     elif isinstance(channels, str):
         key = channels.strip().lower()
-        if key in {"both", "all", "email+whatsapp", "email_whatsapp"}:
+        if key in {"all", "all_three", "everything", "email_whatsapp_personal"}:
+            channel_set = {"email", "whatsapp", "whatsapp_personal"}
+        elif key in {"both", "all", "email+whatsapp", "email_whatsapp"}:
             channel_set = {"email", "whatsapp"}
-        elif key in {"email", "whatsapp"}:
+        elif key in {"email", "whatsapp", "whatsapp_personal"}:
             channel_set = {key}
         else:
-            raise ValueError("channels must be 'email', 'whatsapp', or 'both'")
+            raise ValueError(
+                "channels must be 'email', 'whatsapp', 'whatsapp_personal', 'both', or 'all'"
+            )
     else:
         channel_set = {str(c).strip().lower() for c in channels if str(c).strip()}
-        channel_set &= {"email", "whatsapp"}
+        channel_set &= {"email", "whatsapp", "whatsapp_personal"}
         if not channel_set:
-            raise ValueError("Select at least one channel: email or whatsapp")
+            raise ValueError("Select at least one channel")
 
     send_email = "email" in channel_set
     send_whatsapp = "whatsapp" in channel_set
+    send_whatsapp_personal = "whatsapp_personal" in channel_set
 
     email_already_ok = (draft.email_send_status or "") in {"sent", "queued"}
     wa_already_ok = draft.whatsapp_send_status == "sent"
+    wa_personal_already_ok = draft.whatsapp_personal_send_status == "sent"
 
     if draft.status == "sent" and (
-        (not send_email or email_already_ok) and (not send_whatsapp or wa_already_ok)
+        (not send_email or email_already_ok)
+        and (not send_whatsapp or wa_already_ok)
+        and (not send_whatsapp_personal or wa_personal_already_ok)
     ):
         raise ValueError("This follow-up was already sent on the selected channel(s)")
 
@@ -417,15 +427,19 @@ def send_draft(
         send_email = False
     if send_whatsapp and wa_already_ok:
         send_whatsapp = False
-    if not send_email and not send_whatsapp:
+    if send_whatsapp_personal and wa_personal_already_ok:
+        send_whatsapp_personal = False
+    if not send_email and not send_whatsapp and not send_whatsapp_personal:
         raise ValueError("Selected channel(s) were already sent")
 
     body_text = (draft.email_body or "").strip()
     if send_email:
         if not (draft.subject or "").strip() or not body_text:
             raise ValueError("Subject and email body are required before sending email")
-    elif send_whatsapp and not body_text and not (template_name or "").strip():
-        raise ValueError("Message body is required before sending WhatsApp")
+    if send_whatsapp and not body_text and not (template_name or "").strip():
+        raise ValueError("Message body is required before sending WhatsApp (Meta)")
+    if send_whatsapp_personal and not body_text:
+        raise ValueError("Message body is required before sending WhatsApp Personal")
 
     # Final sync: free-text WhatsApp carries the same information as the email.
     draft.whatsapp_body = derive_whatsapp_from_email(draft.email_body or "")
@@ -438,6 +452,8 @@ def send_draft(
     email_message = draft.email_send_message
     wa_status = draft.whatsapp_send_status
     wa_message = draft.whatsapp_send_message
+    wa_personal_status = draft.whatsapp_personal_send_status
+    wa_personal_message = draft.whatsapp_personal_send_message
     email_interaction_id = draft.email_interaction_id
     wa_interaction_id = draft.whatsapp_interaction_id
 
@@ -499,23 +515,55 @@ def send_draft(
             wa_status = "error"
             wa_message = str(exc)
 
+    # WhatsApp Personal (Baileys bridge — rep's scanned phone)
+    if send_whatsapp_personal:
+        try:
+            from integrations import whatsapp_bridge_client as bridge
+
+            contact = db.get(Contact, draft.contact_id) if draft.contact_id else None
+            phone = (contact.phone or contact.wa_id or "").strip() if contact else ""
+            if not phone:
+                raise ValueError("Contact has no phone number for WhatsApp Personal")
+            status = bridge.bridge_status(user.id)
+            if not status.get("connected"):
+                raise ValueError(
+                    "Personal WhatsApp is not connected. Open WhatsApp QR and scan your phone."
+                )
+            bridge.bridge_send(
+                user.id,
+                to_phone=phone,
+                message=(draft.whatsapp_body or draft.email_body or "").strip(),
+            )
+            wa_personal_status = "sent"
+            wa_personal_message = "Sent via personal WhatsApp"
+        except Exception as exc:  # noqa: BLE001
+            wa_personal_status = "error"
+            wa_personal_message = str(exc)
+
     draft.email_interaction_id = email_interaction_id
     draft.whatsapp_interaction_id = wa_interaction_id
     draft.email_send_status = email_status
     draft.whatsapp_send_status = wa_status
+    draft.whatsapp_personal_send_status = wa_personal_status
     draft.email_send_message = email_message
     draft.whatsapp_send_message = wa_message
+    draft.whatsapp_personal_send_message = wa_personal_message
 
     email_ok = (email_status or "") in {"sent", "queued"}
     wa_ok = wa_status == "sent"
+    wa_personal_ok = wa_personal_status == "sent"
 
     requested_email = "email" in channel_set
     requested_wa = "whatsapp" in channel_set
+    requested_wa_personal = "whatsapp_personal" in channel_set
     email_done = (not requested_email) or email_ok
     wa_done = (not requested_wa) or wa_ok
+    wa_personal_done = (not requested_wa_personal) or wa_personal_ok
 
-    if (requested_email and email_ok) or (requested_wa and wa_ok):
-        if email_done and wa_done:
+    if (requested_email and email_ok) or (requested_wa and wa_ok) or (
+        requested_wa_personal and wa_personal_ok
+    ):
+        if email_done and wa_done and wa_personal_done:
             draft.status = "sent"
             draft.sent_at = draft.sent_at or _utcnow()
             draft.generation_error = None
@@ -526,7 +574,9 @@ def send_draft(
             if requested_email and not email_ok:
                 draft.generation_error = email_message or "Email send failed"
             elif requested_wa and not wa_ok:
-                draft.generation_error = wa_message or "WhatsApp send failed"
+                draft.generation_error = wa_message or "WhatsApp (Meta) send failed"
+            elif requested_wa_personal and not wa_personal_ok:
+                draft.generation_error = wa_personal_message or "WhatsApp Personal send failed"
             else:
                 draft.generation_error = None
     else:

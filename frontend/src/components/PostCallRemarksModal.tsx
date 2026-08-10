@@ -68,7 +68,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     }
   }
 
-  async function sendDraft(channels: "email" | "whatsapp" | "both") {
+  async function sendDraft(channels: "email" | "whatsapp" | "whatsapp_personal" | "all") {
     if (!draft) return;
     setSendingChannel(channels);
     try {
@@ -177,15 +177,23 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                     onClick={() => void sendDraft("whatsapp")}
                     className="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-3 py-2 text-sm font-medium"
                   >
-                    {sendingChannel === "whatsapp" ? "Sending…" : "Send WhatsApp"}
+                    {sendingChannel === "whatsapp" ? "Sending…" : "WhatsApp Meta"}
                   </button>
                   <button
                     type="button"
                     disabled={Boolean(sendingChannel)}
-                    onClick={() => void sendDraft("both")}
+                    onClick={() => void sendDraft("whatsapp_personal")}
+                    className="rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 px-3 py-2 text-sm font-medium"
+                  >
+                    {sendingChannel === "whatsapp_personal" ? "Sending…" : "WhatsApp Personal"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={Boolean(sendingChannel)}
+                    onClick={() => void sendDraft("all")}
                     className="rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-50 px-3 py-2 text-sm font-medium"
                   >
-                    {sendingChannel === "both" ? "Sending…" : "Send both"}
+                    {sendingChannel === "all" ? "Sending…" : "Send all 3"}
                   </button>
                 </div>
               </div>

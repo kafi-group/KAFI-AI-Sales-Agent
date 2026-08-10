@@ -480,8 +480,10 @@ class PersonalizedFollowupDraft(Base):
     whatsapp_interaction_id: Mapped[Optional[int]] = mapped_column(Integer)
     email_send_status: Mapped[Optional[str]] = mapped_column(String(40))
     whatsapp_send_status: Mapped[Optional[str]] = mapped_column(String(40))
+    whatsapp_personal_send_status: Mapped[Optional[str]] = mapped_column(String(40))
     email_send_message: Mapped[Optional[str]] = mapped_column(Text)
     whatsapp_send_message: Mapped[Optional[str]] = mapped_column(Text)
+    whatsapp_personal_send_message: Mapped[Optional[str]] = mapped_column(Text)
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -599,8 +601,10 @@ class MailLabel(Base):
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     color: Mapped[str] = mapped_column(String(32), nullable=False, default="#34d399")
-    # Domain, URL, or keyword — messages matching this are routed to the label (hidden from Inbox).
+    # Domain or full email — messages from matching addresses route here (not subject text).
     match_query: Mapped[Optional[str]] = mapped_column(String(255))
+    # Keyword — matches subject / preview / body / sender name only (not label name).
+    match_keyword: Mapped[Optional[str]] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -1,5 +1,5 @@
 import { LogoWhatsApp } from "./icons/BrandLogos";
-import { IconBell, IconMail, IconRefresh, IconSignOut } from "./icons/AppIcons";
+import { IconBell, IconExternal, IconMail, IconRefresh, IconSignOut } from "./icons/AppIcons";
 import { ThemeToggle } from "./ThemeToggle";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -45,6 +45,13 @@ function formatBadge(count: number): string {
   if (count <= 0) return "";
   if (count > 99) return "99+";
   return String(count);
+}
+
+const WHATSAPP_WEB_URL = "https://web.whatsapp.com";
+
+function openWhatsAppWeb() {
+  unlockNotificationAudio();
+  window.open(WHATSAPP_WEB_URL, "_blank", "noopener,noreferrer");
 }
 
 export function AppTopActions({
@@ -108,15 +115,31 @@ export function AppTopActions({
       <button
         type="button"
         className={iconBtn}
+        title="WhatsApp Web — opens in your browser (scan QR there if not linked)"
+        aria-label="Open WhatsApp Web in browser"
+        onClick={openWhatsAppWeb}
+      >
+        <span className="relative inline-flex">
+          <LogoWhatsApp size="sm" />
+          <IconExternal
+            size="xs"
+            className="absolute -bottom-1 -right-1 text-slate-400 bg-slate-900 rounded-sm"
+          />
+        </span>
+      </button>
+
+      <button
+        type="button"
+        className={iconBtn}
         title={
           whatsappUnread > 0
-            ? `WhatsApp — ${whatsappUnread} unread`
-            : "WhatsApp inbox"
+            ? `WhatsApp Business inbox — ${whatsappUnread} unread`
+            : "WhatsApp Business inbox"
         }
         aria-label={
           whatsappUnread > 0
-            ? `WhatsApp, ${whatsappUnread} unread`
-            : "WhatsApp inbox"
+            ? `WhatsApp Business inbox, ${whatsappUnread} unread`
+            : "WhatsApp Business inbox"
         }
         onClick={() => {
           unlockNotificationAudio();
