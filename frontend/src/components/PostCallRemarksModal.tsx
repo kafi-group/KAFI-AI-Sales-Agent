@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { client, type PersonalizedFollowupDraft } from "../api/client";
+import { useCallQueueOptional } from "../hooks/useCallQueue";
 import { useTwilioVoice } from "../hooks/useTwilioVoice";
 import { type CallOutcome, callOutcomeSectionHint } from "../utils/callOutcomes";
 import { autocorrectText } from "../utils/spelling";
@@ -15,6 +16,11 @@ interface PostCallRemarksModalProps {
 
 export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalProps) {
   const { pendingFollowUp, clearPendingFollowUp, bulkModeActive } = useTwilioVoice();
+  const callQueue = useCallQueueOptional();
+  const bulkOwnsFollowUp =
+    bulkModeActive &&
+    callQueue != null &&
+    (callQueue.status === "running" || callQueue.status === "between");
   const [remarks, setRemarks] = useState("");
   const [outcome, setOutcome] = useState<CallOutcome | "">("");
   const [saving, setSaving] = useState(false);
@@ -31,7 +37,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     setStep("remarks");
   }, [pendingFollowUp]);
 
-  if (!pendingFollowUp || bulkModeActive) return null;
+  if (!pendingFollowUp || bulkOwnsFollowUp) return null;
 
   async function loadDraft(interactionId: number, attempt = 0) {
     setDraftLoading(true);

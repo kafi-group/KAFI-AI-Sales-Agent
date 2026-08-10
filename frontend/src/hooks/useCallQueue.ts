@@ -176,16 +176,38 @@ function useCallQueueController(): CallQueueState {
     [bindInteraction, enterRemarksStep, hangUp, placeCall],
   );
 
+  /** Drop stale bulk-queue UI after bulk finished/paused; keep single-call follow-up. */
+  const resetStaleQueueShell = useCallback(() => {
+    if (statusRef.current !== "completed" && statusRef.current !== "paused") return;
+    dialGenerationRef.current += 1;
+    queueRef.current = [];
+    resultsRef.current = [];
+    handledInteractionIdsRef.current = new Set();
+    setQueue([]);
+    setResults([]);
+    syncIndex(0);
+    syncStatus("idle");
+    clearRemarksFields();
+    setSavingRemarks(false);
+    setBulkModeActive(false);
+  }, [
+    clearRemarksFields,
+    setBulkModeActive,
+    syncIndex,
+    syncStatus,
+  ]);
+
   // Natural / End-call hang-up → remarks for CURRENT lead only (bulk queue).
-  // When status is idle, a single (non-bulk) call ended — leave pendingFollowUp
-  // for PostCallRemarksModal; do NOT clear it here (that caused instant modal flash).
+  // When status is idle/completed/paused, a single call ended — PostCallRemarksModal
+  // handles follow-up; never clear pendingFollowUp here (caused instant modal flash).
   useEffect(() => {
     if (!pendingFollowUp) return;
-    if (statusRef.current === "idle") {
-      return;
-    }
-    if (statusRef.current === "completed") {
-      clearPendingFollowUp();
+    if (
+      statusRef.current === "idle" ||
+      statusRef.current === "completed" ||
+      statusRef.current === "paused"
+    ) {
+      resetStaleQueueShell();
       return;
     }
 
