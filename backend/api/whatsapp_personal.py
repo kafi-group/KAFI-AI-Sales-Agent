@@ -44,6 +44,16 @@ def whatsapp_personal_session(user: AppUser = Depends(get_current_user)) -> dict
     return {"session_id": bridge.bridge_session_id(user.id)}
 
 
+@router.post("/disconnect")
+def whatsapp_personal_disconnect(user: AppUser = Depends(get_current_user)) -> Any:
+    try:
+        return bridge.bridge_disconnect(user.id)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"Could not disconnect WhatsApp bridge: {exc}") from exc
+
+
 @router.post("/send")
 def whatsapp_personal_send(
     body: WhatsAppPersonalSendRequest,

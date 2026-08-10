@@ -22,8 +22,6 @@ def _format_thread_line(thread: dict[str, Any], index: int) -> str:
 
 
 def query_mailbox(user: AppUser, *, question: str, unread_only: bool = False) -> dict[str, Any]:
-    from modules.ai_mode_llm import generate_with_query_keys
-
     status = inbox_module.status(user)
     unread_count = int(status.get("unread_count") or 0)
     thread_page = inbox_module.list_threads(

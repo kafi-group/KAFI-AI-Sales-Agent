@@ -26,11 +26,15 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
       ]);
       setStatus(st);
       setSessionId(session.session_id);
-      if (st.connected) {
+      if (st.connected || String(st.status ?? "").toLowerCase() === "connected") {
         setQr(null);
       } else {
-        const qrData = await client.getWhatsAppPersonalQr();
-        setQr(qrData);
+        try {
+          const qrData = await client.getWhatsAppPersonalQr();
+          setQr(qrData);
+        } catch {
+          setQr(null);
+        }
       }
     } catch (e) {
       onError(e instanceof Error ? e.message : "Could not load WhatsApp Personal status");
@@ -44,6 +48,22 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
     const timer = window.setInterval(() => void refresh(), 15_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  async function handleDisconnect() {
+    if (!window.confirm("Disconnect personal WhatsApp on this device? You can scan a new QR after.")) {
+      return;
+    }
+    setLoading(true);
+    try {
+      await client.disconnectWhatsAppPersonal();
+      setNotice("Disconnected — scan a new QR to link your phone.");
+      await refresh();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Disconnect failed");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function handleSend() {
     setSending(true);
@@ -59,7 +79,9 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
     }
   }
 
-  const connected = Boolean(status?.connected);
+  const connected =
+    Boolean(status?.connected) ||
+    String(status?.status ?? "").toLowerCase() === "connected";
   const qrImage =
     (typeof qr?.qr === "string" && qr.qr) ||
     (typeof qr?.qrDataUrl === "string" && qr.qrDataUrl) ||
@@ -91,9 +113,20 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
         {loading ? (
           <p className="text-sm text-slate-500">Loading…</p>
         ) : connected ? (
-          <p className="text-sm text-emerald-300">
-            Connected — messages send from your scanned personal WhatsApp number.
-          </p>
+          <div className="space-y-2">
+            <p className="text-sm text-emerald-300">
+              Connected — messages send from your scanned personal WhatsApp number.
+            </p>
+            <ActionButton
+              icon={IconRefresh}
+              variant="ghost"
+              size="md"
+              onClick={() => void handleDisconnect()}
+              title="Disconnect and scan another phone"
+            >
+              Disconnect / scan new QR
+            </ActionButton>
+          </div>
         ) : (
           <div className="space-y-3">
             <p className="text-sm text-amber-200">

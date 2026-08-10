@@ -354,7 +354,7 @@ def inbox_ai_query(
             unread_only=payload.unread_only,
         )
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(502, _inbox_error_message(exc)) from exc
+        raise HTTPException(502, f"Mail assistant error: {exc}") from exc
 
 
 @router.get("/messages/{uid}", response_model=InboxMessageDetail)
