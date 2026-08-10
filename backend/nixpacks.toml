@@ -4,7 +4,7 @@ providers = ["python", "node"]
 [phases.build]
 dependsOn = ["install"]
 cmds = [
-  "if [ -f ../frontend/package.json ]; then cd ../frontend && npm run build && rm -rf ../backend/static && mkdir -p ../backend/static && cp -r dist/* ../backend/static/; elif [ ! -f static/index.html ]; then echo 'Missing frontend source and backend/static/index.html' && exit 1; else echo 'Using pre-built backend/static'; fi",
+  "if [ -f static/index.html ]; then echo 'Using pre-built backend/static'; elif [ -f ../frontend/package.json ]; then cd ../frontend && npm run build && rm -rf ../backend/static && mkdir -p ../backend/static && cp -r dist/* ../backend/static/; else echo 'API-only deploy — SPA served from Vercel'; fi",
 ]
 
 [start]
