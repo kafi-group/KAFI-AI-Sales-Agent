@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from config import settings
 from db.models import AppUser, AppUserRole
 from db.session import SessionLocal, get_db
 from modules import auth as auth_module
@@ -16,6 +17,7 @@ __all__ = [
     "get_current_user",
     "get_current_user_released",
     "require_admin",
+    "verify_agent_bridge_secret",
 ]
 
 
@@ -99,3 +101,15 @@ def require_admin(user: AppUser = Depends(get_current_user)) -> AppUser:
     if role != AppUserRole.admin.value:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+def verify_agent_bridge_secret(
+    x_bridge_secret: str | None = Header(default=None, alias="x-bridge-secret"),
+) -> None:
+    """Shared secret for bank-recon / PA read-only dashboard bridge."""
+    expected = (settings.agent_bridge_secret or "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="Agent bridge is not configured")
+    provided = (x_bridge_secret or "").strip()
+    if not provided or provided != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")

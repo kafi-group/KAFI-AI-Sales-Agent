@@ -195,6 +195,9 @@ class Settings(BaseSettings):
     whatsapp_bridge_secret: str | None = None
     whatsapp_bridge_session_prefix: str = "kafi-sales-agent"
 
+    # Read-only dashboard bridge for bank-recon / PA (x-bridge-secret header).
+    agent_bridge_secret: str | None = None
+
     # DB connection pool — sized for concurrent CRM polls + one background job
     # on a single Railway worker. Raise via DB_POOL_SIZE / DB_MAX_OVERFLOW only
     # after confirming Supabase/session-pooler headroom.
