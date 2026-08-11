@@ -1742,7 +1742,7 @@ export const client = {
     ),
   populateTargetPool: (
     pool: string,
-    fromSource: "old_clients" | "discover",
+    fromSource: "old_clients" | "discover" | "discover_leads",
     limit = 50,
   ) =>
     request<{

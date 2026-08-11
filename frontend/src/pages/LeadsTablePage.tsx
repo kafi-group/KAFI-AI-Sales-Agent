@@ -517,13 +517,13 @@ function sectionDescription(
     return "Overview of every lead in the system — including leads sent to Asim, Usman, Sadia, or any other user.";
   }
   if (section === "hyperstore_targeted") {
-    return "Hyperstore targeted list — import a spreadsheet (upload) or move leads from New search lead (AI / web discovery). Use the toggle to filter by source.";
+    return "Hyperstore targeted list — import a spreadsheet (Uploaded data) or use Fetch on the AI / search leads tab to pull matches from Discover Leads.";
   }
   if (section === "targeted_distributor") {
-    return "Targeted distributors — import XLS/XLSX or feed from discovered search leads. Toggle between uploaded rows and AI-searched rows.";
+    return "Targeted distributors — import XLS/XLSX (Uploaded data) or use Fetch on the AI / search leads tab to pull matches from Discover Leads.";
   }
   if (section === "targeted_client") {
-    return "Targeted clients — import XLS/XLSX or feed from discovered search leads. Toggle between uploaded rows and AI-searched rows.";
+    return "Targeted clients — import XLS/XLSX (Uploaded data) or use Fetch on the AI / search leads tab to pull matches from Discover Leads.";
   }
   if (section === "old_clients") {
     return isAdmin
@@ -1497,12 +1497,19 @@ export function LeadsTablePage({
   }
 
   async function populateTargetPoolFrom(
-    fromSource: "old_clients" | "discover",
+    fromSource: "old_clients" | "discover" | "discover_leads",
   ) {
     if (!isAdmin || !isTargetedPool || populatingPool) return;
-    const label = fromSource === "old_clients" ? "Old clients" : "New search leads";
+    const label =
+      fromSource === "old_clients"
+        ? "Old clients"
+        : fromSource === "discover_leads"
+          ? "Discover Leads"
+          : "New search leads";
     const confirmed = window.confirm(
-      `Intelligently add up to 50 matching leads from ${label} into this targeted pool? Existing rows stay — only new matches are added.`,
+      fromSource === "discover_leads"
+        ? `Fetch up to 50 matching leads from Discover Leads into ${sectionTitle(section, assigneeUsername, isAdmin)}? Existing rows stay — only new matches are added as AI / search leads.`
+        : `Intelligently add up to 50 matching leads from ${label} into this targeted pool? Existing rows stay — only new matches are added.`,
     );
     if (!confirmed) return;
 
@@ -1514,8 +1521,12 @@ export function LeadsTablePage({
       await loadSectionCounts();
       setSaveNotice(
         result.updated_count > 0
-          ? `Added ${result.updated_count} lead${result.updated_count === 1 ? "" : "s"} from ${label} (scanned ${result.scanned}).`
-          : `No new matches found in ${label} for this pool (scanned ${result.scanned}).`,
+          ? fromSource === "discover_leads"
+            ? `Fetched ${result.updated_count} lead${result.updated_count === 1 ? "" : "s"} from Discover Leads (scanned ${result.scanned}).`
+            : `Added ${result.updated_count} lead${result.updated_count === 1 ? "" : "s"} from ${label} (scanned ${result.scanned}).`
+          : fromSource === "discover_leads"
+            ? `No new matches in Discover Leads for this pool (scanned ${result.scanned}).`
+            : `No new matches found in ${label} for this pool (scanned ${result.scanned}).`,
       );
       window.setTimeout(() => setSaveNotice(null), 6000);
     } catch (e) {
@@ -1523,6 +1534,14 @@ export function LeadsTablePage({
     } finally {
       setPopulatingPool(false);
     }
+  }
+
+  async function fetchDiscoverLeadsIntoPool() {
+    if (intakeMethodFilter !== "discover") {
+      setIntakeMethodFilter("discover");
+      setPage(1);
+    }
+    await populateTargetPoolFrom("discover_leads");
   }
 
   async function removeSelectedFromTargetPool() {
@@ -2368,14 +2387,6 @@ export function LeadsTablePage({
                   >
                     {populatingPool ? "Populating…" : "Populate from Old clients"}
                   </button>
-                  <button
-                    type="button"
-                    disabled={populatingPool || bulkOnboarding || editMode}
-                    onClick={() => void populateTargetPoolFrom("discover")}
-                    className="text-xs px-3 py-1.5 rounded-lg border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 disabled:opacity-50"
-                  >
-                    {populatingPool ? "Populating…" : "Populate from New search leads"}
-                  </button>
                   {selected.size > 0 ? (
                     <button
                       type="button"
@@ -2968,6 +2979,22 @@ export function LeadsTablePage({
                 emptyLabel="All cities"
                 placeholder="Search cities…"
               />
+
+              {isTargetedPool && intakeMethodFilter === "discover" && isAdmin ? (
+                <div className="flex flex-col justify-end">
+                  <span className="block text-xs text-slate-400 mb-1">Discover Leads</span>
+                  <button
+                    type="button"
+                    disabled={populatingPool || bulkOnboarding || editMode}
+                    onClick={() => void fetchDiscoverLeadsIntoPool()}
+                    className="w-full rounded-lg border border-violet-500/50 bg-violet-500/15 px-3 py-2 text-sm font-medium text-violet-100 hover:bg-violet-500/25 disabled:opacity-50 inline-flex items-center justify-center gap-2 min-h-[42px]"
+                    title="Fetch matching leads from Discover Leads into this list (AI / search rows)"
+                  >
+                    <IconSearch className="h-4 w-4 shrink-0" />
+                    {populatingPool ? "Fetching…" : "Fetch"}
+                  </button>
+                </div>
+              ) : null}
 
               <label className="block text-xs text-slate-400 sm:col-span-2">
                 Search

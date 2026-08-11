@@ -28,6 +28,10 @@ TARGETED_POOL_SOURCES = frozenset(
 TARGETED_POOL_EXCLUDE = ",".join(
     ["old_clients", *sorted(TARGETED_POOL_SOURCES)]
 )
+# Buyers imported via Discover Leads (web search, enrichment, CSV in discover tab).
+DISCOVER_LEAD_SOURCES = frozenset(
+    {"discovery", "web_search", "website_links", "manual", "csv"}
+)
 
 
 def is_targeted_pool_source(source: str | None) -> bool:
@@ -2088,15 +2092,34 @@ def populate_target_pool_intelligent(
     if pool_key not in TARGETED_POOL_SOURCES:
         raise ValueError(f"Invalid targeted pool source: {pool}")
     origin = from_source.strip().lower()
-    if origin not in {"old_clients", "discover"}:
-        raise ValueError("from_source must be old_clients or discover")
+    if origin not in {"old_clients", "discover", "discover_leads"}:
+        raise ValueError("from_source must be old_clients, discover, or discover_leads")
 
     intake_method = "upload" if origin == "old_clients" else "discover"
     limit = max(1, min(int(limit or 50), 200))
 
-    q = db.query(Buyer).filter(Buyer.source != pool_key)
+    q = db.query(Buyer).filter(
+        ~sa_func.lower(sa_func.coalesce(Buyer.source, "")).in_(
+            sorted(TARGETED_POOL_SOURCES)
+        )
+    )
+    if pool_key in TARGETED_POOL_SOURCES:
+        q = q.filter(sa_func.lower(sa_func.coalesce(Buyer.source, "")) != pool_key)
+
     if origin == "old_clients":
         q = q.filter(sa_func.lower(sa_func.coalesce(Buyer.source, "")) == "old_clients")
+    elif origin == "discover_leads":
+        q = q.filter(
+            sa_func.lower(sa_func.coalesce(Buyer.source, "")) != "old_clients",
+        ).filter(
+            or_(
+                sa_func.lower(sa_func.coalesce(Buyer.source, "")).in_(
+                    list(DISCOVER_LEAD_SOURCES)
+                ),
+                Buyer.source.is_(None),
+                sa_func.lower(sa_func.coalesce(Buyer.source, "")) == "",
+            )
+        )
     else:
         q = q.filter(
             or_(

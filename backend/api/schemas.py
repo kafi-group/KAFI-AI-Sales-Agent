@@ -615,7 +615,7 @@ class LeadTableSetTargetPoolResponse(BaseModel):
 
 class LeadTablePopulateTargetPoolRequest(BaseModel):
     pool: str = Field(min_length=1)
-    from_source: str = Field(description="old_clients or discover")
+    from_source: str = Field(description="old_clients, discover, or discover_leads")
     limit: int = Field(default=50, ge=1, le=200)
     min_score: int = Field(default=1, ge=1, le=10)
 
