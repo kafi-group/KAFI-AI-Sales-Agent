@@ -5,7 +5,6 @@ const ACCEPT = ".csv,.xlsx,.xls,.xlsm,.tsv,.zip,.rar";
 const FILE_FILTER = /\.(csv|xlsx|xls|xlsm|tsv|zip|rar)$/i;
 const POLL_MS = 800;
 const MAX_POLL_FAILURES = 8;
-const UPLOAD_TIMEOUT_MS = 600_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -98,7 +97,7 @@ export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
     return extra > 0 ? `${sourceFiles.length} files — ${names.join(", ")} +${extra} more` : `${sourceFiles.length} files — ${names.join(", ")}`;
   }, [sourceFiles]);
 
-  function addFiles(incoming: File[]) {
+  function addFiles(incoming: FileList | File[]) {
     const allowed = pickAllowedFiles(incoming);
     if (allowed.length === 0) {
       onError("No Excel, CSV, ZIP, or RAR files found in that selection.");
