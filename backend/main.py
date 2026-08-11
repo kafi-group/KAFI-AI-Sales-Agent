@@ -193,6 +193,7 @@ _PUBLIC_API_PATHS = {
     # Mailer SMTP routes report activity / Sent APPEND with handoff JWT (no session cookie).
     "/api/mailer/report-activity",
     "/api/mailer/append-sent",
+    "/api/mailer/prepare-tracked-body",
 }
 _PUBLIC_API_PREFIXES = ("/api/webhooks/", "/api/track/", "/api/agent-bridge/")
 
@@ -347,6 +348,18 @@ def health():
         "twilio_validate_webhooks": bool(settings.twilio_validate_webhooks),
         "whatsapp_configured": whatsapp_client.is_configured,
         "whatsapp_webhook_configured": whatsapp_client.webhook_configured,
+        "email_tracking": _email_tracking_health(),
+    }
+
+
+def _email_tracking_health() -> dict:
+    from modules.email_tracking import public_api_base
+
+    base = public_api_base()
+    return {
+        "enabled": bool(base),
+        "base_url": base,
+        "pixel_path": "/api/track/email-open/{token}.gif",
     }
 
 

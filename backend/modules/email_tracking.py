@@ -32,25 +32,35 @@ def _track_secret() -> bytes:
     return raw.encode("utf-8")
 
 
+def _normalize_public_base(raw: str) -> str | None:
+    """Normalize env host to https origin without a trailing /api segment."""
+    value = (raw or "").strip().rstrip("/")
+    if not value:
+        return None
+    lower = value.lower()
+    if lower.endswith("/api"):
+        value = value[:-4].rstrip("/")
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    return f"https://{value}"
+
+
 def public_api_base() -> str | None:
     """Public HTTPS origin of this API — required for open-tracking pixels.
 
-    Order: PUBLIC_API_BASE_URL → TWILIO_WEBHOOK_BASE_URL → Railway public domain.
+    Order: TWILIO_WEBHOOK_BASE_URL (live Railway host) → PUBLIC_API_BASE_URL →
+    Railway auto domains. Stale PUBLIC_API_* values must not override a working Twilio URL.
     """
     candidates = [
-        (settings.public_api_base_url or "").strip(),
         (settings.twilio_webhook_base_url or "").strip(),
+        (settings.public_api_base_url or "").strip(),
         (os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "").strip(),
         (os.environ.get("RAILWAY_STATIC_URL") or "").strip(),
     ]
     for raw in candidates:
-        if not raw:
-            continue
-        base = raw.rstrip("/")
-        if base.startswith("http://") or base.startswith("https://"):
+        base = _normalize_public_base(raw)
+        if base:
             return base
-        # Railway often provides host only (xxx.up.railway.app)
-        return f"https://{base}"
     return None
 
 

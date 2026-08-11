@@ -714,6 +714,8 @@ class EmailActivityInsights(BaseModel):
     since: str | None = None
     until: str | None = None
     tracking_enabled: bool = False
+    tracking_base_url: str | None = None
+    tracking_pixel_path: str | None = None
     totals: EmailActivityModeStats
     individual: EmailActivityModeStats
     bulk: EmailActivityModeStats

@@ -589,11 +589,15 @@ def insights_stats(
 
     from modules.email_tracking import public_api_base
 
+    tracking_base = public_api_base()
+
     return {
         "period_days": period_days,
         "since": since.isoformat() if since else None,
         "until": until.isoformat() if until else None,
-        "tracking_enabled": bool(public_api_base()),
+        "tracking_enabled": bool(tracking_base),
+        "tracking_base_url": tracking_base,
+        "tracking_pixel_path": "/api/track/email-open/{token}.gif",
         "totals": {
             "attempted": total_attempted,
             "sent": total_sent,

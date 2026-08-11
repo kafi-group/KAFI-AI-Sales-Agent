@@ -902,6 +902,8 @@ export interface EmailActivityInsights {
   since: string | null;
   until?: string | null;
   tracking_enabled: boolean;
+  tracking_base_url?: string | null;
+  tracking_pixel_path?: string | null;
   totals: EmailActivityModeStats;
   individual: EmailActivityModeStats;
   bulk: EmailActivityModeStats;

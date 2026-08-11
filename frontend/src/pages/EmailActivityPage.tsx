@@ -485,14 +485,23 @@ export function EmailActivityPage({
                 </p>
               ) : !insights.tracking_enabled ? (
                 <p className="text-xs text-amber-200/80 border border-amber-500/20 bg-amber-500/10 rounded-lg px-3 py-2">
-                  Open tracking needs a public API URL (`PUBLIC_API_BASE_URL`). Opens will stay at
-                  0 until emails are sent with that configured on the live backend.
+                  Open tracking needs a public API URL on Railway (`PUBLIC_API_BASE_URL` or
+                  `TWILIO_WEBHOOK_BASE_URL`). Opens will stay at 0 until that is configured.
                 </p>
               ) : (
                 <p className="text-xs text-slate-500">
                   Opens count when the recipient loads the tracking pixel in an HTML email. If
                   images stay blocked (common in Gmail until “Display images”), the open will not
-                  register. New sends inject a pixel when the API public URL is configured.
+                  register.
+                  {insights.tracking_base_url ? (
+                    <>
+                      {" "}
+                      Pixel host:{" "}
+                      <span className="text-slate-400 font-mono">{insights.tracking_base_url}</span>
+                      . Only emails sent after tracking was fixed will count opens — send a new test
+                      and allow images.
+                    </>
+                  ) : null}
                 </p>
               )}
             </>
