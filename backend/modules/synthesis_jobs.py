@@ -92,7 +92,7 @@ def start_synthesis_job(
     uploads: list[tuple[str | None, bytes]],
     *,
     baseline_uploads: list[tuple[str | None, bytes]] | None = None,
-    check_db: bool = True,
+    check_db: bool = False,
 ) -> str:
     job_id = uuid.uuid4().hex
     with _lock:

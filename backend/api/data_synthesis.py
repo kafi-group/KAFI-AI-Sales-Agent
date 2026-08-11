@@ -22,7 +22,7 @@ router = APIRouter(prefix="/data-synthesis", tags=["data-synthesis"])
 async def start_data_synthesis(
     files: list[UploadFile] = File(...),
     baseline: UploadFile | None = File(None),
-    check_db: bool = True,
+    check_db: bool = False,
     user: AppUser = Depends(require_admin),
 ):
     """Upload one or more XLS/CSV files and start a background synthesis job."""

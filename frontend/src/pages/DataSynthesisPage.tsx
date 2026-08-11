@@ -102,7 +102,7 @@ export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
     setJobStatus(null);
     setJobId(null);
     try {
-      const start = await client.startDataSynthesis(sourceFiles, { checkDb: true });
+      const start = await client.startDataSynthesis(sourceFiles);
       setJobId(start.job_id);
       const finalStatus = await pollJob(start.job_id);
       if (finalStatus.status === "failed") {

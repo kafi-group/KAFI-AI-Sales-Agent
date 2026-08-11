@@ -119,6 +119,116 @@ MASTER_FIELDS = [
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
 PHONE_DIGITS_RE = re.compile(r"\d{8,15}")
+PERSON_PREFIX = re.compile(r"^(mr\.?|mrs\.?|ms\.?|miss|dr\.?|prof\.?|shaikh|sheikh)\s+", re.I)
+
+# Column widths for readable Excel export (matches MASTER_HEADERS order).
+EXPORT_COLUMN_WIDTHS = (
+    8, 28, 18, 14, 14, 22, 16, 16, 16, 16, 28, 28, 14, 14, 14, 32, 24,
+)
+
+
+def _looks_like_person_name(text: str) -> bool:
+    """Heuristic: 'Mr. Ali Khan' belongs in Contact Person, not Company Name."""
+    s = (text or "").strip()
+    if not s or len(s) < 3:
+        return False
+    if COMPANYISH.search(s) or EMAIL_RE.search(s) or _phone_digits(s):
+        return False
+    if PERSON_PREFIX.search(s):
+        return True
+    words = [word for word in re.split(r"\s+", s) if word]
+    if not (2 <= len(words) <= 4):
+        return False
+    if re.search(r"\d", s):
+        return False
+    business_words = {
+        "trading",
+        "foods",
+        "distributor",
+        "distributors",
+        "import",
+        "export",
+        "company",
+        "co",
+        "ltd",
+        "limited",
+        "group",
+        "center",
+        "centre",
+        "store",
+        "market",
+        "hyper",
+        "mall",
+    }
+    lower_words = [word.lower().strip(".,&") for word in words]
+    if any(word in business_words for word in lower_words):
+        return False
+    # Title-case personal names (incl. "Shakeel T.")
+    return all(re.match(r"^[A-Z][A-Za-z.'-]*\.?$", word) for word in words)
+
+
+def _looks_like_company_name(text: str) -> bool:
+    s = (text or "").strip()
+    if not s or len(s) < 3:
+        return False
+    if COMPANYISH.search(s):
+        return True
+    if EMAIL_RE.search(s) or _phone_digits(s):
+        return False
+    if PERSON_PREFIX.search(s):
+        return False
+    words = [word for word in re.split(r"\s+", s) if word]
+    business_words = {
+        "trading",
+        "traders",
+        "stores",
+        "store",
+        "agency",
+        "agencies",
+        "group",
+        "llc",
+        "ltd",
+        "limited",
+        "co",
+        "holdings",
+        "holding",
+        "enterprises",
+        "enterprise",
+        "commercial",
+        "international",
+        "logistics",
+        "distributor",
+        "distributors",
+        "foods",
+        "mills",
+        "jewel",
+        "jewels",
+    }
+    lower_words = [word.lower().strip(".,&") for word in words]
+    if any(word in business_words for word in lower_words):
+        return True
+    # e.g. MASAD AL HATMI, GOLDEN FALCON INTERNATIONAL TRADE LLC
+    if len(words) >= 2 and s.isupper():
+        return True
+    return False
+
+
+def _rebalance_person_company(row: dict[str, str]) -> dict[str, str]:
+    company = clean_text(row.get("company_name") or "")
+    contact = clean_text(row.get("contact_person") or "")
+
+    if company and contact and _normalize_name(company) == _normalize_name(contact):
+        row["contact_person"] = ""
+        contact = ""
+
+    if contact and not company and _looks_like_company_name(contact):
+        row["company_name"] = contact
+        row["contact_person"] = ""
+    elif company and not contact and _looks_like_person_name(company):
+        row["contact_person"] = company
+        row["company_name"] = ""
+
+    return row
 
 
 def _normalize_header(field: str) -> str:
@@ -230,15 +340,16 @@ def clean_master_row(row: dict[str, str]) -> dict[str, str]:
     elif reason == "dash_placeholder":
         cleaned["company_name"] = ""
 
-    # Misplaced contact in company when another company column exists is handled at map time.
+    company = clean_text(cleaned.get("company_name") or "")
+    contact = clean_text(cleaned.get("contact_person") or "")
+    if company and not contact and _looks_like_person_name(company):
+        cleaned["contact_person"] = company
+        cleaned["company_name"] = ""
+
     for key in MASTER_FIELDS:
         cleaned[key] = _clean_scalar(cleaned.get(key))
 
-    # Fix common header typo from legacy sheets
-    if cleaned.get("business_type") and not cleaned.get("company_name"):
-        pass
-
-    return cleaned
+    return _rebalance_person_company(cleaned)
 
 
 def _header_map(fieldnames: list[str]) -> dict[str, str | None]:
@@ -267,6 +378,14 @@ def _header_map(fieldnames: list[str]) -> dict[str, str | None]:
     )
     name_col = col("name", "full_name", "person", "contact", "contact_name", "contact_person")
     number_col = col("number", "no", "mobile", "phone", "tel", "contact_number", "whatsapp")
+    email_only_col = col(
+        "primary_email",
+        "email",
+        "e_mail",
+        "e-mail",
+        "mail",
+        "contact_email",
+    )
     company_col = col(
         "company_name",
         "company",
@@ -282,6 +401,9 @@ def _header_map(fieldnames: list[str]) -> dict[str, str | None]:
     )
     if not company_col and name_col and number_col:
         # Phone + name only — name is almost always the contact person.
+        company_col = None
+    elif not company_col and name_col and email_only_col and not number_col:
+        # Name + Email sheets — name is contact person; company stays empty unless mapped.
         company_col = None
     elif not company_col and name_col:
         company_col = name_col
@@ -612,6 +734,15 @@ def load_existing_keys_from_db(db) -> set[str]:
 
 
 def export_master_xlsx(rows: list[dict[str, str]]) -> bytes:
+    sorted_rows = sorted(
+        rows,
+        key=lambda row: (
+            (row.get("company_name") or row.get("contact_person") or "").strip().lower(),
+            (row.get("contact_person") or "").strip().lower(),
+            (row.get("primary_email") or "").strip().lower(),
+        ),
+    )
+
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Master Contacts"
@@ -619,12 +750,15 @@ def export_master_xlsx(rows: list[dict[str, str]]) -> bytes:
     sheet.append(MASTER_HEADERS)
     for cell in sheet[1]:
         cell.font = bold
+    for col_idx, width in enumerate(EXPORT_COLUMN_WIDTHS, start=1):
+        col_letter = sheet.cell(row=1, column=col_idx).column_letter
+        sheet.column_dimensions[col_letter].width = width
+    sheet.freeze_panes = "A2"
 
-    for index, row in enumerate(rows, start=1):
-        serial = row.get("serial") or str(index)
+    for index, row in enumerate(sorted_rows, start=1):
         sheet.append(
             [
-                serial,
+                str(index),
                 row.get("company_name", ""),
                 row.get("business_type", ""),
                 row.get("company_grading", ""),
