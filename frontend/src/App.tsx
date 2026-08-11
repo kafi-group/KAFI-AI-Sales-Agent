@@ -39,6 +39,7 @@ import { AiModePage } from "./pages/AiModePage";
 import { IndexesPage } from "./pages/IndexesPage";
 import { UserManualPage } from "./pages/UserManualPage";
 import { LeadsPage } from "./pages/LeadsPage";
+import { DataSynthesisPage } from "./pages/DataSynthesisPage";
 import { LeadsTablePage } from "./pages/LeadsTablePage";
 import { ClientHistoryPage } from "./pages/ClientHistoryPage";
 import { ChatbotPage } from "./pages/ChatbotPage";
@@ -908,6 +909,7 @@ function DashboardApp() {
       ],
     },
     { id: "leads" as const, label: "Discover Leads", count: discoverLeadsCount },
+    ...(isAdmin ? [{ id: "data-synthesis" as const, label: "Data Synthesis", count: 0 }] : []),
     {
       id: "table",
       label: "Master table",
@@ -1170,6 +1172,9 @@ function DashboardApp() {
                 onSelectLead={handleSelectLead}
                 onTotalChange={setDiscoverLeadsCount}
               />
+            )}
+            {tab === "data-synthesis" && isAdmin && (
+              <DataSynthesisPage onError={setError} />
             )}
             {tab === "table" && selectedLeadId !== null && (
               <BuyerProfile

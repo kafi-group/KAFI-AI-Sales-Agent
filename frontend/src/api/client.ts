@@ -130,6 +130,7 @@ function timeoutForPath(path: string): number {
     path.startsWith("/leads/table") ||
     path.startsWith("/leads/discover") ||
     path.startsWith("/leads/import-jobs") ||
+    path.startsWith("/data-synthesis") ||
     path.startsWith("/inbox") ||
     path.startsWith("/email") ||
     path.startsWith("/calls")
@@ -1165,6 +1166,32 @@ export interface ImportJobStatus {
   elapsed_seconds: number;
 }
 
+export interface SynthesisJobStart {
+  job_id: string;
+  file_count: number;
+}
+
+export interface SynthesisJobStatus {
+  job_id: string;
+  status: string;
+  phase?: string;
+  phase_label: string;
+  total: number;
+  processed: number;
+  percent: number;
+  raw_rows: number;
+  output_rows: number;
+  merged_duplicates: number;
+  skipped_existing: number;
+  sheets_processed: number;
+  files_processed: number;
+  current_company: string | null;
+  messages: string[];
+  error: string | null;
+  output_filename: string | null;
+  elapsed_seconds: number;
+}
+
 export interface LeadTableDedupeResponse {
   removed_count: number;
   kept_count: number;
@@ -1942,6 +1969,44 @@ export const client = {
 
   getLeadsImportJob: (jobId: string) =>
     request<ImportJobStatus>(`/leads/import-jobs/${jobId}`),
+
+  startDataSynthesis: async (
+    files: File[],
+    options?: { baseline?: File | null; checkDb?: boolean },
+  ) => {
+    const form = new FormData();
+    for (const file of files) {
+      form.append("files", file);
+    }
+    if (options?.baseline) {
+      form.append("baseline", options.baseline);
+    }
+    const params = new URLSearchParams();
+    if (options?.checkDb === false) {
+      params.set("check_db", "false");
+    }
+    const query = params.toString();
+    const res = await fetch(
+      `${API_BASE}/data-synthesis/start${query ? `?${query}` : ""}`,
+      {
+        method: "POST",
+        body: form,
+        headers: authHeaders(),
+        credentials: "include",
+      },
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(parseErrorDetail(text, res.statusText));
+    }
+    return res.json() as Promise<SynthesisJobStart>;
+  },
+
+  getSynthesisJob: (jobId: string) =>
+    request<SynthesisJobStatus>(`/data-synthesis/jobs/${jobId}`),
+
+  synthesisDownloadUrl: (jobId: string) =>
+    `${API_BASE}/data-synthesis/jobs/${jobId}/download`,
 
   getCrossSell: (leadId: number) =>
     request<CrossSellRecommendation[]>(`/leads/${leadId}/cross-sell`),

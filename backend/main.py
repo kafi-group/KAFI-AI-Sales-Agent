@@ -12,6 +12,7 @@ from api import (
     calls,
     chatbot,
     compliance,
+    data_synthesis,
     email_activity,
     email_attachments,
     email_templates,
@@ -275,6 +276,7 @@ app.include_router(agent_bridge.router, prefix="/api")
 app.include_router(agent_bridge.webhook_router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
+app.include_router(data_synthesis.router, prefix="/api")
 app.include_router(compliance.router, prefix="/api")
 app.include_router(interactions.router, prefix="/api")
 app.include_router(email_activity.router, prefix="/api")

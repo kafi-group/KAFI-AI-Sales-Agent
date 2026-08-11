@@ -23,6 +23,7 @@ export type Tab =
   | "whatsapp-activity"
   | "whatsapp-inbox"
   | "leads"
+  | "data-synthesis"
   | "table"
   | "master-table"
   | "inbox"

@@ -962,6 +962,32 @@ class ImportJobStatusResponse(BaseModel):
     elapsed_seconds: float = 0.0
 
 
+class SynthesisJobStartResponse(BaseModel):
+    job_id: str
+    file_count: int
+
+
+class SynthesisJobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    phase: str = ""
+    phase_label: str = ""
+    total: int = 0
+    processed: int = 0
+    percent: int = 0
+    raw_rows: int = 0
+    output_rows: int = 0
+    merged_duplicates: int = 0
+    skipped_existing: int = 0
+    sheets_processed: int = 0
+    files_processed: int = 0
+    current_company: Optional[str] = None
+    messages: list[str] = Field(default_factory=list)
+    error: Optional[str] = None
+    output_filename: Optional[str] = None
+    elapsed_seconds: float = 0.0
+
+
 class CallConfigRead(BaseModel):
     configured: bool
     webhooks_ready: bool
