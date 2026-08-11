@@ -965,6 +965,7 @@ class ImportJobStatusResponse(BaseModel):
 class SynthesisJobStartResponse(BaseModel):
     job_id: str
     file_count: int
+    upload_count: int = 0
 
 
 class SynthesisJobStatusResponse(BaseModel):

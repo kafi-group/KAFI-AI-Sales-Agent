@@ -93,6 +93,7 @@ def start_synthesis_job(
     *,
     baseline_uploads: list[tuple[str | None, bytes]] | None = None,
     check_db: bool = False,
+    expand_messages: list[str] | None = None,
 ) -> str:
     job_id = uuid.uuid4().hex
     with _lock:
@@ -110,7 +111,7 @@ def start_synthesis_job(
             "sheets_processed": 0,
             "files_processed": 0,
             "current_company": None,
-            "messages": [],
+            "messages": list(expand_messages or []),
             "error": None,
             "output_filename": None,
             "output_path": None,
@@ -196,7 +197,7 @@ def _run_synthesis(
                         "skipped_existing": result.skipped_existing,
                         "sheets_processed": result.sheets_processed,
                         "files_processed": result.files_processed,
-                        "messages": result.messages,
+                        "messages": list(job.get("messages") or []) + result.messages,
                         "output_filename": output_filename,
                         "output_path": str(output_path),
                         "_finished_mono": finished,

@@ -101,6 +101,8 @@ function messageForHttpError(status: number, text: string, statusText: string): 
 const FETCH_TIMEOUT_MS = 30_000;
 const AUTH_FETCH_TIMEOUT_MS = 20_000;
 const HEAVY_FETCH_TIMEOUT_MS = 60_000;
+/** Large folder / ZIP uploads to Data Synthesis. */
+const SYNTHESIS_UPLOAD_TIMEOUT_MS = 600_000;
 /** Research / onboard: enrichment + website fetch + scoring often exceeds 30s. */
 const LEAD_ONBOARD_TIMEOUT_MS = 90_000;
 const RETRY_BACKOFF_MS = [600, 1_800, 3_500] as const;
@@ -125,6 +127,9 @@ function timeoutForPath(path: string): number {
   }
   if (/^\/leads\/\d+\/(onboard|research|score)(\?|$)/.test(path)) {
     return LEAD_ONBOARD_TIMEOUT_MS;
+  }
+  if (path.startsWith("/data-synthesis/start")) {
+    return SYNTHESIS_UPLOAD_TIMEOUT_MS;
   }
   if (
     path.startsWith("/leads/table") ||
@@ -1169,6 +1174,7 @@ export interface ImportJobStatus {
 export interface SynthesisJobStart {
   job_id: string;
   file_count: number;
+  upload_count?: number;
 }
 
 export interface SynthesisJobStatus {
@@ -1986,15 +1992,23 @@ export const client = {
       params.set("check_db", "false");
     }
     const query = params.toString();
-    const res = await fetch(
-      `${API_BASE}/data-synthesis/start${query ? `?${query}` : ""}`,
-      {
-        method: "POST",
-        body: form,
-        headers: authHeaders(),
-        credentials: "include",
-      },
-    );
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), SYNTHESIS_UPLOAD_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(
+        `${API_BASE}/data-synthesis/start${query ? `?${query}` : ""}`,
+        {
+          method: "POST",
+          body: form,
+          headers: authHeaders(),
+          credentials: "include",
+          signal: controller.signal,
+        },
+      );
+    } finally {
+      window.clearTimeout(timer);
+    }
     if (!res.ok) {
       const text = await res.text();
       throw new Error(parseErrorDetail(text, res.statusText));

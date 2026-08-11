@@ -1,6 +1,9 @@
 # Let Nixpacks auto-install Python deps; add Node only for Git builds of the SPA.
 providers = ["python", "node"]
 
+[phases.setup]
+aptPkgs = ["unrar"]
+
 [phases.build]
 dependsOn = ["install"]
 cmds = [

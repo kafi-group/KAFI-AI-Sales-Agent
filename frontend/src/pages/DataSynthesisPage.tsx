@@ -1,12 +1,34 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { client, type SynthesisJobStatus } from "../api/client";
 
-const ACCEPT = ".csv,.xlsx,.xls,.xlsm,.tsv";
+const ACCEPT = ".csv,.xlsx,.xls,.xlsm,.tsv,.zip,.rar";
+const FILE_FILTER = /\.(csv|xlsx|xls|xlsm|tsv|zip|rar)$/i;
 const POLL_MS = 800;
 const MAX_POLL_FAILURES = 8;
+const UPLOAD_TIMEOUT_MS = 600_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function fileKey(file: File): string {
+  const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+  return rel || file.name;
+}
+
+function pickAllowedFiles(files: FileList | File[]): File[] {
+  return Array.from(files).filter((file) => FILE_FILTER.test(file.name));
+}
+
+function mergeFiles(existing: File[], incoming: File[]): File[] {
+  const map = new Map<string, File>();
+  for (const file of existing) {
+    map.set(fileKey(file), file);
+  }
+  for (const file of incoming) {
+    map.set(fileKey(file), file);
+  }
+  return Array.from(map.values());
 }
 
 function formatElapsed(seconds: number): string {
@@ -65,13 +87,25 @@ export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
   const [running, setRunning] = useState(false);
   const [jobStatus, setJobStatus] = useState<SynthesisJobStatus | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const sourceSummary = useMemo(() => {
     if (sourceFiles.length === 0) return null;
-    const names = sourceFiles.map((file) => file.name).slice(0, 3);
-    const extra = sourceFiles.length > 3 ? ` +${sourceFiles.length - 3} more` : "";
-    return `${sourceFiles.length} file(s): ${names.join(", ")}${extra}`;
+    if (sourceFiles.length === 1) return sourceFiles[0].name;
+    const names = sourceFiles.map((file) => file.name).slice(0, 2);
+    const extra = sourceFiles.length - 2;
+    return extra > 0 ? `${sourceFiles.length} files — ${names.join(", ")} +${extra} more` : `${sourceFiles.length} files — ${names.join(", ")}`;
   }, [sourceFiles]);
+
+  function addFiles(incoming: File[]) {
+    const allowed = pickAllowedFiles(incoming);
+    if (allowed.length === 0) {
+      onError("No Excel, CSV, ZIP, or RAR files found in that selection.");
+      return;
+    }
+    setSourceFiles((prev) => mergeFiles(prev, allowed));
+  }
 
   async function pollJob(id: string): Promise<SynthesisJobStatus> {
     let failures = 0;
@@ -95,7 +129,7 @@ export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
 
   async function handleStart() {
     if (sourceFiles.length === 0) {
-      onError("Select at least one Excel file.");
+      onError("Select at least one Excel file, folder, ZIP, or RAR.");
       return;
     }
     setRunning(true);
@@ -120,6 +154,12 @@ export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
     window.open(client.synthesisDownloadUrl(jobId), "_blank", "noopener,noreferrer");
   }
 
+  function clearSelection() {
+    setSourceFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (folderInputRef.current) folderInputRef.current.value = "";
+  }
+
   return (
     <div className="space-y-6 max-w-xl">
       <div>
@@ -129,18 +169,67 @@ export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
         </p>
       </div>
 
-      <label className="block rounded-lg border border-slate-700 bg-slate-900/50 p-4 space-y-3">
-        <span className="text-sm font-medium text-slate-200">Select 1 or more excel file(s).</span>
+      <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-4 space-y-3">
+        <p className="text-sm font-medium text-slate-200">
+          Select 1 or more excel file(s), a folder, or ZIP/RAR (50+ files OK).
+        </p>
+
         <input
+          ref={fileInputRef}
           type="file"
           accept={ACCEPT}
           multiple
           disabled={running}
-          className="block w-full text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-violet-600 file:px-3 file:py-1.5 file:text-sm file:text-white hover:file:bg-violet-500"
-          onChange={(e) => setSourceFiles(Array.from(e.target.files ?? []))}
+          className="hidden"
+          onChange={(e) => {
+            addFiles(e.target.files ?? []);
+            e.target.value = "";
+          }}
         />
+        <input
+          ref={folderInputRef}
+          type="file"
+          accept={ACCEPT}
+          multiple
+          disabled={running}
+          className="hidden"
+          {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+          onChange={(e) => {
+            addFiles(e.target.files ?? []);
+            e.target.value = "";
+          }}
+        />
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={running}
+            onClick={() => fileInputRef.current?.click()}
+            className="rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50"
+          >
+            Choose files
+          </button>
+          <button
+            type="button"
+            disabled={running}
+            onClick={() => folderInputRef.current?.click()}
+            className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700 disabled:opacity-50"
+          >
+            Choose folder
+          </button>
+          {sourceFiles.length > 0 && !running && (
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="rounded-lg px-3 py-2 text-sm text-slate-400 hover:text-slate-200"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
         {sourceSummary && <p className="text-xs text-slate-500">{sourceSummary}</p>}
-      </label>
+      </div>
 
       <div className="flex flex-wrap items-center gap-3">
         <button

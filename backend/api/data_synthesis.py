@@ -14,8 +14,11 @@ from api.schemas import (
 )
 from db.models import AppUser
 from modules.file_to_csv import SUPPORTED_UPLOAD_EXTENSIONS
+from modules.upload_expand import ARCHIVE_EXTENSIONS, expand_data_synthesis_uploads
 
 router = APIRouter(prefix="/data-synthesis", tags=["data-synthesis"])
+
+_ALLOWED_UPLOAD_EXT = SUPPORTED_UPLOAD_EXTENSIONS | ARCHIVE_EXTENSIONS
 
 
 @router.post("/start", response_model=SynthesisJobStartResponse)
@@ -25,25 +28,30 @@ async def start_data_synthesis(
     check_db: bool = False,
     user: AppUser = Depends(require_admin),
 ):
-    """Upload one or more XLS/CSV files and start a background synthesis job."""
+    """Upload spreadsheets, folders (multi-part), ZIP, or RAR — start synthesis job."""
     from modules import synthesis_jobs
 
     if not files:
-        raise HTTPException(400, "Upload at least one spreadsheet file.")
+        raise HTTPException(400, "Select at least one Excel file, folder, ZIP, or RAR.")
 
-    uploads: list[tuple[str | None, bytes]] = []
+    raw_uploads: list[tuple[str | None, bytes]] = []
     for upload in files:
         raw = await upload.read()
         if not raw:
             continue
         ext = Path((upload.filename or "").strip()).suffix.lower()
-        if ext and ext not in SUPPORTED_UPLOAD_EXTENSIONS:
-            supported = ", ".join(sorted(SUPPORTED_UPLOAD_EXTENSIONS))
+        if ext and ext not in _ALLOWED_UPLOAD_EXT:
+            supported = ", ".join(sorted(_ALLOWED_UPLOAD_EXT))
             raise HTTPException(400, f"Unsupported file {upload.filename!r}. Use: {supported}")
-        uploads.append((upload.filename, raw))
+        raw_uploads.append((upload.filename, raw))
 
-    if not uploads:
+    if not raw_uploads:
         raise HTTPException(400, "All uploaded files were empty.")
+
+    try:
+        uploads, expand_messages = expand_data_synthesis_uploads(raw_uploads)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     baseline_uploads: list[tuple[str | None, bytes]] | None = None
     if baseline is not None:
@@ -55,8 +63,13 @@ async def start_data_synthesis(
         uploads,
         baseline_uploads=baseline_uploads,
         check_db=check_db,
+        expand_messages=expand_messages,
     )
-    return SynthesisJobStartResponse(job_id=job_id, file_count=len(uploads))
+    return SynthesisJobStartResponse(
+        job_id=job_id,
+        file_count=len(uploads),
+        upload_count=len(raw_uploads),
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=SynthesisJobStatusResponse)
