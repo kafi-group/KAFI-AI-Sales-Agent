@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { COUNTRIES, findCountry } from "../data/countries";
-import { buildE164, formatDialCode, parsePhoneForDialpad } from "../data/countryDialCodes";
+import { buildE164, formatDialCode, getDialCode, parsePhoneForDialpad } from "../data/countryDialCodes";
 import { useTwilioVoiceOptional } from "../hooks/useTwilioVoice";
 import { subscribeFloatingDialpadNumber } from "../utils/dialpadEvents";
 
@@ -92,11 +92,15 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
   const filteredCountries = useMemo(() => {
     const q = countryQuery.trim().toLowerCase();
     if (!q) return COUNTRIES;
-    return COUNTRIES.filter(
-      (country) =>
+    const digits = q.replace(/^\+/, "");
+    return COUNTRIES.filter((country) => {
+      const dial = getDialCode(country.code);
+      return (
         country.name.toLowerCase().includes(q) ||
-        country.code.toLowerCase().includes(q),
-    );
+        country.code.toLowerCase().includes(q) ||
+        (dial && dial.includes(digits))
+      );
+    });
   }, [countryQuery]);
 
   useEffect(() => {
