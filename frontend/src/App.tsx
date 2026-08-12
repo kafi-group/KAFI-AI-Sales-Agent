@@ -27,6 +27,7 @@ import { InterestedFollowUpAlertToasts } from "./components/InterestedFollowUpAl
 import { QuotationMeetingAlertToasts } from "./components/QuotationMeetingAlertToasts";
 import { InterestedClientsActivityToasts } from "./components/InterestedClientsActivityToasts";
 import { AppTopActions } from "./components/AppTopActions";
+import { APP_BRAND_NAME } from "./brand";
 import { EmailActivityPage } from "./pages/EmailActivityPage";
 import { EmailTemplatesPage } from "./pages/EmailTemplatesPage";
 import { WhatsAppTemplatesPage } from "./pages/WhatsAppTemplatesPage";
@@ -1052,7 +1053,7 @@ function DashboardApp() {
               </svg>
             </button>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-slate-100 truncate">Kafi Sales Agent</p>
+              <p className="text-sm font-medium text-slate-100 truncate">{APP_BRAND_NAME}</p>
               <p className="text-[11px] text-slate-500 truncate capitalize">
                 {user?.full_name || user?.username || "Signed in"}
               </p>

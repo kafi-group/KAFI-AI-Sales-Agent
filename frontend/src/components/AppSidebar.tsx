@@ -11,6 +11,7 @@ import {
   NavIcon,
 } from "./icons/AppIcons";
 import { mailLabelIdFromNavId } from "../lib/mailLabelRules";
+import { AppBrand } from "./AppBrand";
 
 export type Tab =
   | "indexes"
@@ -293,13 +294,7 @@ export function AppSidebar({
           }`}
         >
         <div className="px-5 py-5 sm:py-6 border-b border-slate-800 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Sales Agent</p>
-            <h1 className="mt-1 text-lg font-semibold tracking-tight text-slate-100">
-              <span className="text-slate-500 font-normal">by </span>Izaan Bin Mujeeb
-            </h1>
-            <p className="mt-2 text-xs text-slate-500 leading-relaxed">Kafi Commodities</p>
-          </div>
+          <AppBrand variant="sidebar" className="flex-1" />
           <button
             type="button"
             onClick={closeSidebar}

@@ -34,7 +34,7 @@ export default function LoginPage() {
     <div className="wrap">
       <div className="card" style={{ maxWidth: 420, margin: "4rem auto" }}>
         <h1>Kafi Mail</h1>
-        <p className="muted">Sign in with your Sales Agent account</p>
+        <p className="muted">Sign in with your Smart Sales Agent account</p>
         <form onSubmit={(e) => void onSubmit(e)}>
           <label>Username</label>
           <input

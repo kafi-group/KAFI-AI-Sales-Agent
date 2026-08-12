@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { client } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { AppBrand } from "../components/AppBrand";
 
 const ADMIN_USERNAME = "admin";
 
@@ -49,10 +50,10 @@ export function LoginPage() {
         <ThemeToggle compact />
       </div>
       <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/80 p-6 sm:p-8 shadow-xl shadow-black/30">
-        <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Sales Agent</p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-100">
+        <AppBrand variant="login" />
+        <h2 className="mt-6 text-xl font-semibold tracking-tight text-slate-100">
           {mode === "admin" ? "Admin sign in" : "User sign in"}
-        </h1>
+        </h2>
         <p className="mt-2 text-sm text-slate-400">
           {mode === "admin"
             ? "Enter the admin password to open the full dashboard."
