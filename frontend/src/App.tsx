@@ -686,7 +686,7 @@ function DashboardApp() {
       }
       window.location.href = url.toString();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not open Vercel mailer");
+      setError(e instanceof Error ? e.message : "Could not open Bulk Email Sender");
     }
   }
 
@@ -823,7 +823,7 @@ function DashboardApp() {
   const clientSectionNavChildren = [
     {
       id: "master" as const,
-      label: "Master table",
+      label: "Master Table",
       count: tableCounts.master ?? 0,
     },
     {
@@ -858,7 +858,7 @@ function DashboardApp() {
     },
     {
       id: "hyperstore_targeted" as const,
-      label: "Hyperstore Targeted clients",
+      label: "Hyperstore Target",
       count: tableCounts.hyperstore_targeted ?? 0,
     },
     {
@@ -908,11 +908,11 @@ function DashboardApp() {
         },
       ],
     },
-    { id: "leads" as const, label: "Discover Leads", count: discoverLeadsCount },
-    ...(isAdmin ? [{ id: "data-synthesis" as const, label: "Data Synthesis", count: 0 }] : []),
+    { id: "leads" as const, label: "Searched by AI", count: discoverLeadsCount },
+    ...(isAdmin ? [{ id: "data-synthesis" as const, label: "Smart Data Clean & Merge", count: 0 }] : []),
     {
       id: "table",
-      label: "Master table",
+      label: "Master Table",
       count: tableCounts.master ?? 0,
       children: [
         ...clientSectionNavChildren,
@@ -921,7 +921,7 @@ function DashboardApp() {
     },
     {
       id: "inbox",
-      label: "Mail",
+      label: "Emails",
       count: 0,
       alert: inboxUnread > 0,
       children: [
@@ -949,22 +949,22 @@ function DashboardApp() {
     },
     {
       id: "mail",
-      label: "Vercel mailer",
+      label: "Bulk Email Sender",
       count: 0,
       openMailer: true,
     },
-    { id: "calls", label: "Calls", count: 0 },
+    { id: "calls", label: "Call Center", count: 0 },
     { id: "client-history", label: "Client History", count: 0 },
     {
       id: "quotation-agent",
-      label: "Quotation agent",
+      label: "CNF or FOB",
       count: 0,
       external: QUOTATION_AGENT_URL,
     },
-    { id: "chatbot", label: "Brand assistant", count: 0 },
+    { id: "chatbot", label: "AI Chatbot", count: 0 },
     {
       id: "sales-assistant",
-      label: "Sales assistant",
+      label: "FAQ",
       count: 0,
       openSalesAssistant: true,
     },
@@ -974,7 +974,7 @@ function DashboardApp() {
       count: personalizedEmailCount,
       alert: personalizedEmailCount > 0,
     },
-    { id: "kpi", label: "KPI Generation", count: 0 },
+    { id: "kpi", label: "KPI", count: 0 },
     ...(isAdmin ? [{ id: "users" as const, label: "Users", count: 0 }] : []),
     ...(isAdmin ? [{ id: "settings" as const, label: "Settings", count: 0 }] : []),
   ];

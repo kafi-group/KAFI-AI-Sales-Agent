@@ -1187,8 +1187,8 @@ def count_leads_table_sections(
     (expensive) row-building pipeline five times on every table view.
 
     Admin (assigned_to_user_id=None, pool_for_user_id=None): all / old_clients
-    exclude assigned leads. by_assignee maps user_id string → total leads sent
-    to that user.
+    counts. old_clients badge = all buyers with source old_clients (assigned +
+    unassigned). by_assignee maps user_id string → total leads sent to that user.
 
     Sales user (assigned_to_user_id=user.id): only leads assigned to them.
     by_assignee is empty — that nav is admin-only.
@@ -1287,9 +1287,9 @@ def _compute_section_counts(
         all_count = len(other_ids - placed_ids)
         old_count = len(old_client_ids - placed_ids)
     elif assigned_to_user_id is None:
-        # Admin pool: only unassigned rows.
+        # Admin: New search lead pool stays unassigned-only; Old clients = all rows.
         all_count = len(unassigned_other_ids - placed_ids)
-        old_count = len(unassigned_old_ids - placed_ids)
+        old_count = len(old_client_ids)
     else:
         all_count = len(other_ids - placed_ids)
         old_count = len(old_client_ids - placed_ids)
@@ -2011,48 +2011,55 @@ def set_target_pool(
 _POOL_MATCH_KEYWORDS: dict[str, tuple[str, ...]] = {
     "hyperstore_targeted": (
         "hypermarket",
-        "supermarket",
+        "hypermarkets",
+        "hyper market",
+        "hyper mart",
+        "hypermart",
         "hyper store",
         "hyperstore",
+        "multinational mart",
+        "multi national mart",
+        "multi-national mart",
+        "supermarket",
+        "super market",
+        "super store",
+        "superstore",
         "retail chain",
         "grocery chain",
         "grocery store",
+        "10+ branches",
+        "10 branches",
+        "multiple branches",
+        "multi branch",
         "carrefour",
         "lulu",
         "walmart",
         "tesco",
         "aldi",
-        "mart",
-        "super store",
-        "superstore",
     ),
     "targeted_distributor": (
         "distributor",
+        "distributors",
         "distribution",
+        "distributing",
         "wholesale",
         "wholesaler",
-        "trading",
-        "trader",
-        "importer",
-        "import",
-        "logistics",
-        "supply chain",
+        "wholesaling",
         "stockist",
         "dealer",
-    ),
-    "targeted_client": (
+        "import export",
         "importer",
-        "import",
-        "buyer",
-        "client",
-        "food service",
-        "horeca",
-        "restaurant",
-        "hotel",
-        "catering",
-        "retail",
-        "trading",
+        "importing",
+        "exporter",
+        "exporting",
+        "trading company",
+        "trading co",
+        "general trading",
+        "logistics",
+        "supply chain",
     ),
+    # Targeted Client is manual-only — no keyword auto-match.
+    "targeted_client": (),
 }
 
 
@@ -2091,6 +2098,10 @@ def populate_target_pool_intelligent(
     pool_key = pool.strip().lower()
     if pool_key not in TARGETED_POOL_SOURCES:
         raise ValueError(f"Invalid targeted pool source: {pool}")
+    if pool_key == "targeted_client":
+        raise ValueError(
+            "Targeted Client is manual only — select rows and use Add to Targeted Client."
+        )
     origin = from_source.strip().lower()
     if origin not in {"old_clients", "discover", "discover_leads"}:
         raise ValueError("from_source must be old_clients, discover, or discover_leads")
@@ -2171,6 +2182,65 @@ def populate_target_pool_intelligent(
         "scanned": len(candidates),
         "from_source": origin,
         "pool": pool_key,
+    }
+
+
+def classify_target_pools_from_old_clients(
+    db: Session,
+    *,
+    limit_per_pool: int = 5000,
+) -> dict[str, object]:
+    """Move Old clients into Hyperstore / Distributor pools by keyword match."""
+    from modules.audit import log_action
+
+    limit_per_pool = max(1, min(int(limit_per_pool or 5000), 10000))
+    buyers = _section_buyers_query(db, source="old_clients").all()
+    hyper_ids: list[int] = []
+    dist_ids: list[int] = []
+    scanned = 0
+
+    for buyer in buyers:
+        scanned += 1
+        blob = _buyer_match_blob(buyer)
+        hyper_score = _score_pool_match(blob, "hyperstore_targeted")
+        dist_score = _score_pool_match(blob, "targeted_distributor")
+        if hyper_score <= 0 and dist_score <= 0:
+            continue
+        if hyper_score >= dist_score and hyper_score > 0:
+            hyper_ids.append(buyer.id)
+        elif dist_score > 0:
+            dist_ids.append(buyer.id)
+
+    hyper_ids = hyper_ids[:limit_per_pool]
+    dist_ids = dist_ids[:limit_per_pool]
+
+    hyper_result = (
+        set_target_pool(db, lead_ids=hyper_ids, source="hyperstore_targeted", intake_method="upload")
+        if hyper_ids
+        else {"updated_count": 0, "updated_ids": []}
+    )
+    dist_result = (
+        set_target_pool(db, lead_ids=dist_ids, source="targeted_distributor", intake_method="upload")
+        if dist_ids
+        else {"updated_count": 0, "updated_ids": []}
+    )
+
+    log_action(
+        db,
+        entity_type="buyer",
+        entity_id=0,
+        action="classify_target_pools_from_old_clients",
+        details={
+            "scanned": scanned,
+            "hyperstore_moved": hyper_result.get("updated_count", 0),
+            "distributor_moved": dist_result.get("updated_count", 0),
+        },
+    )
+
+    return {
+        "scanned": scanned,
+        "hyperstore_targeted": hyper_result,
+        "targeted_distributor": dist_result,
     }
 
 

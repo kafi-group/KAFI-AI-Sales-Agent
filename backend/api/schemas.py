@@ -637,6 +637,16 @@ class LeadTableRemoveFromTargetPoolResponse(BaseModel):
     updated_ids: list[int] = Field(default_factory=list)
 
 
+class LeadTableClassifyTargetPoolsRequest(BaseModel):
+    limit_per_pool: int = Field(default=5000, ge=1, le=10000)
+
+
+class LeadTableClassifyTargetPoolsResponse(BaseModel):
+    scanned: int
+    hyperstore_targeted: dict[str, object] = Field(default_factory=dict)
+    targeted_distributor: dict[str, object] = Field(default_factory=dict)
+
+
 class LeadTableInterestedClientsMembershipRequest(BaseModel):
     lead_ids: list[int]
     in_list: bool = True
@@ -902,6 +912,25 @@ class LeadTableCompanyCleanResponse(BaseModel):
     by_rule: dict[str, int] = Field(default_factory=dict)
     dry_run: bool
     samples: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PostImportCleanSummary(BaseModel):
+    emails_fixed: int = 0
+    company_fields_fixed: int = 0
+    names_fixed: int = 0
+    junk_rows_removed: int = 0
+    empty_rows_removed: int = 0
+    duplicates_removed: int = 0
+
+
+class PostImportCleanResponse(BaseModel):
+    summary: PostImportCleanSummary
+    emails: dict[str, Any] = Field(default_factory=dict)
+    company_fields: dict[str, Any] = Field(default_factory=dict)
+    names: dict[str, Any] = Field(default_factory=dict)
+    junk_removed: dict[str, Any] = Field(default_factory=dict)
+    sparse_removed: dict[str, Any] = Field(default_factory=dict)
+    dedupe: dict[str, Any] = Field(default_factory=dict)
 
 
 class LeadTableBulkDeleteRequest(BaseModel):

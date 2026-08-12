@@ -26,6 +26,7 @@ from api.schemas import (
     LeadScoreRead,
     LeadTableCleanupResponse,
     LeadTableCompanyCleanResponse,
+    PostImportCleanResponse,
     LeadTableNameRepairResponse,
     LeadTableDedupeResponse,
     RemoveOldClientOverlapsResponse,
@@ -47,6 +48,8 @@ from api.schemas import (
     LeadTablePopulateTargetPoolResponse,
     LeadTableRemoveFromTargetPoolRequest,
     LeadTableRemoveFromTargetPoolResponse,
+    LeadTableClassifyTargetPoolsRequest,
+    LeadTableClassifyTargetPoolsResponse,
     ProductInterestEmailRequest,
     QuotationEligibleLeadRead,
     InterestedFollowUpAckRead,
@@ -131,7 +134,10 @@ def _table_assignment_filters(
             None,
             True,
         )
-    # Pool sections (New search lead / Old clients): hide assigned leads.
+    # Old clients: show every old_clients row (assigned + unassigned).
+    if (source or "").strip().lower() == "old_clients":
+        return None, False, False, None, False
+    # Other pool sections (New search lead): hide assigned leads.
     unassigned_only = not placed_section
     return None, unassigned_only, False, None, False
 
@@ -751,6 +757,23 @@ def remove_from_target_pool_rows(
 
 
 @router.post(
+    "/table/classify-target-pools",
+    response_model=LeadTableClassifyTargetPoolsResponse,
+)
+def classify_target_pools_from_old_clients(
+    payload: LeadTableClassifyTargetPoolsRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(require_admin),
+):
+    """Admin: scan Old clients and move keyword matches into Hyperstore / Distributor pools."""
+    result = leads_module.classify_target_pools_from_old_clients(
+        db,
+        limit_per_pool=payload.limit_per_pool,
+    )
+    return LeadTableClassifyTargetPoolsResponse(**result)
+
+
+@router.post(
     "/table/interested-clients-membership",
     response_model=LeadTableInterestedClientsMembershipResponse,
 )
@@ -927,6 +950,34 @@ def clean_company_fields(
         limit=limit,
     )
     return LeadTableCompanyCleanResponse(**result)
+
+
+@router.post("/table/post-import-clean", response_model=PostImportCleanResponse)
+def post_import_clean(
+    source: str | None = None,
+    exclude_source: str | None = None,
+    assigned_to_user_id: int | None = None,
+    master: bool = False,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """After Old clients upload: fix emails, company fields, names, junk, dedupe."""
+    from modules.post_import_old_clients import run_post_import_clean
+
+    assignee_id, unassigned_only = _maintenance_assignee_scope(
+        user,
+        assigned_to_user_id=assigned_to_user_id,
+        master=master,
+    )
+    effective_source = source if source is not None else "old_clients"
+    result = run_post_import_clean(
+        db,
+        source=effective_source,
+        exclude_source=exclude_source,
+        assigned_to_user_id=assignee_id,
+        unassigned_only=unassigned_only,
+    )
+    return PostImportCleanResponse(**result)
 
 
 @router.get("/discover/regions", response_model=DiscoveryRegionsResponse)

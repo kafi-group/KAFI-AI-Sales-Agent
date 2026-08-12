@@ -101,7 +101,7 @@ function messageForHttpError(status: number, text: string, statusText: string): 
 const FETCH_TIMEOUT_MS = 30_000;
 const AUTH_FETCH_TIMEOUT_MS = 20_000;
 const HEAVY_FETCH_TIMEOUT_MS = 60_000;
-/** Large folder / ZIP uploads to Data Synthesis. */
+/** Large folder / ZIP uploads to Smart Data Clean & Merge. */
 const SYNTHESIS_UPLOAD_TIMEOUT_MS = 600_000;
 /** Research / onboard: enrichment + website fetch + scoring often exceeds 30s. */
 const LEAD_ONBOARD_TIMEOUT_MS = 90_000;
@@ -1244,6 +1244,25 @@ export interface LeadTableCompanyCleanResponse {
   samples: Array<Record<string, unknown>>;
 }
 
+export interface PostImportCleanSummary {
+  emails_fixed: number;
+  company_fields_fixed: number;
+  names_fixed: number;
+  junk_rows_removed: number;
+  empty_rows_removed: number;
+  duplicates_removed: number;
+}
+
+export interface PostImportCleanResponse {
+  summary: PostImportCleanSummary;
+  emails: Record<string, unknown>;
+  company_fields: Record<string, unknown>;
+  names: Record<string, unknown>;
+  junk_removed: Record<string, unknown>;
+  sparse_removed: Record<string, unknown>;
+  dedupe: Record<string, unknown>;
+}
+
 export interface LeadTableSectionCountsResponse {
   all: number;
   old_clients: number;
@@ -1802,6 +1821,15 @@ export const client = {
         body: JSON.stringify({ lead_ids: leadIds }),
       },
     ),
+  classifyTargetPoolsFromOldClients: (limitPerPool = 5000) =>
+    request<{
+      scanned: number;
+      hyperstore_targeted: { updated_count: number; updated_ids: number[] };
+      targeted_distributor: { updated_count: number; updated_ids: number[] };
+    }>("/leads/table/classify-target-pools", {
+      method: "POST",
+      body: JSON.stringify({ limit_per_pool: limitPerPool }),
+    }),
   setInterestedClientsMembership: (leadIds: number[], inList: boolean) =>
     request<{ updated_count: number; updated_ids: number[] }>(
       "/leads/table/interested-clients-membership",
@@ -1878,6 +1906,20 @@ export const client = {
     return request<LeadTableCompanyCleanResponse>(
       `/leads/table/clean-company-fields${query ? `?${query}` : ""}`,
       { method: "POST" },
+    );
+  },
+  postImportClean: (params: LeadTableSectionScope = {}) => {
+    const search = new URLSearchParams();
+    if (params.source) search.set("source", params.source);
+    if (params.exclude_source) search.set("exclude_source", params.exclude_source);
+    if (params.assigned_to_user_id != null) {
+      search.set("assigned_to_user_id", String(params.assigned_to_user_id));
+    }
+    if (params.master) search.set("master", "true");
+    const query = search.toString();
+    return request<PostImportCleanResponse>(
+      `/leads/table/post-import-clean${query ? `?${query}` : ""}`,
+      { method: "POST", timeoutMs: 600_000 },
     );
   },
   createLead: (data: LeadCreate) =>

@@ -493,9 +493,9 @@ function sectionTitle(
   assigneeUsername?: string | null,
   isAdmin = true,
 ): string {
-  if (section === "master") return "Master table";
+  if (section === "master") return "Master Table";
   if (section === "old_clients") return isAdmin ? "Old clients" : "Clients";
-  if (section === "hyperstore_targeted") return "Hyperstore Targeted clients";
+  if (section === "hyperstore_targeted") return "Hyperstore Target";
   if (section === "targeted_distributor") return "Targeted Distributors";
   if (section === "targeted_client") return "Targeted Client";
   if (section === "interested_clients") return "Follow up clients";
@@ -517,17 +517,17 @@ function sectionDescription(
     return "Overview of every lead in the system — including leads sent to Asim, Usman, Sadia, or any other user.";
   }
   if (section === "hyperstore_targeted") {
-    return "Hyperstore targeted list — import a spreadsheet (Uploaded data) or use Fetch on the AI / search leads tab to pull matches from Discover Leads.";
+    return "Hypermarkets and multi-branch retailers (10+ branches) — auto-classified from Old clients by name keywords, or add manually from any table.";
   }
   if (section === "targeted_distributor") {
-    return "Targeted distributors — import XLS/XLSX (Uploaded data) or use Fetch on the AI / search leads tab to pull matches from Discover Leads.";
+    return "Distributors and wholesalers — auto-classified from Old clients (distributor, distribution, wholesale, etc.) or add manually from any table.";
   }
   if (section === "targeted_client") {
-    return "Targeted clients — import XLS/XLSX (Uploaded data) or use Fetch on the AI / search leads tab to pull matches from Discover Leads.";
+    return "Hand-picked priority clients — use Add to Targeted Client on any table row selection. No auto keyword matching.";
   }
   if (section === "old_clients") {
     return isAdmin
-      ? "Past clients from your spreadsheet only. Kept separate from Discover Leads / Scrapped Leads — companies here are never mixed into new discoveries."
+      ? "All past clients from your spreadsheet — assigned and unassigned. Kept separate from Discover Leads — companies here are never mixed into new discoveries."
       : "Your client list from imports and past relationships. Import a spreadsheet to add clients — only you can see rows assigned to you.";
   }
   if (section === "interested_clients") {
@@ -546,6 +546,24 @@ function sectionDescription(
     return `Only leads an admin sent to ${assigneeUsername || "this user"}. Their own spreadsheet imports stay on their account and do not appear here.`;
   }
   return "New discoveries from Discover Leads (and spreadsheet imports into this section). Does not include Old clients or targeted pool lists.";
+}
+
+function targetPoolIntakeMethod(section: LeadsTableSection): "upload" | "discover" {
+  if (section === "old_clients" || section === "master") return "upload";
+  if (section === "all") return "discover";
+  if (isTargetedPoolSection(section)) return "upload";
+  return "discover";
+}
+
+function targetPoolLabels(): Record<
+  "hyperstore_targeted" | "targeted_distributor" | "targeted_client",
+  string
+> {
+  return {
+    hyperstore_targeted: "Hyperstore Target",
+    targeted_distributor: "Targeted Distributors",
+    targeted_client: "Targeted Client",
+  };
 }
 
 function sectionEmptyMessage(section: LeadsTableSection): string | null {
@@ -778,6 +796,7 @@ export function LeadsTablePage({
   const [movingToPool, setMovingToPool] = useState(false);
   const [populatingPool, setPopulatingPool] = useState(false);
   const [removingFromPool, setRemovingFromPool] = useState(false);
+  const [classifyingPools, setClassifyingPools] = useState(false);
   const [showCreateLead, setShowCreateLead] = useState(false);
   const [bulkEmailNotice, setBulkEmailNotice] = useState<string | null>(null);
   const [deduping, setDeduping] = useState(false);
@@ -1462,21 +1481,18 @@ export function LeadsTablePage({
     pool: "hyperstore_targeted" | "targeted_distributor" | "targeted_client",
   ) {
     if (!isAdmin || selected.size === 0 || movingToPool) return;
-    const labels: Record<typeof pool, string> = {
-      hyperstore_targeted: "Hyperstore Targeted clients",
-      targeted_distributor: "Targeted Distributors",
-      targeted_client: "Targeted Client",
-    };
+    const labels = targetPoolLabels();
     const count = selected.size;
+    const intake = targetPoolIntakeMethod(section);
     const confirmed = window.confirm(
-      `Move ${count} selected lead${count === 1 ? "" : "s"} to ${labels[pool]}? They will be tagged as AI / search leads.`,
+      `Move ${count} selected lead${count === 1 ? "" : "s"} to ${labels[pool]}?`,
     );
     if (!confirmed) return;
 
     setMovingToPool(true);
     setSaveNotice(null);
     try {
-      const result = await client.setTargetPool([...selected], pool, "discover");
+      const result = await client.setTargetPool([...selected], pool, intake);
       const movedIds = new Set(result.updated_ids);
       if (movedIds.size > 0) {
         setRows((prev) => prev.filter((row) => !movedIds.has(row.id)));
@@ -1500,6 +1516,7 @@ export function LeadsTablePage({
     fromSource: "old_clients" | "discover" | "discover_leads",
   ) {
     if (!isAdmin || !isTargetedPool || populatingPool) return;
+    if (section === "targeted_client") return;
     const label =
       fromSource === "old_clients"
         ? "Old clients"
@@ -1542,6 +1559,35 @@ export function LeadsTablePage({
       setPage(1);
     }
     await populateTargetPoolFrom("discover_leads");
+  }
+
+  async function classifyHyperstoreAndDistributors() {
+    if (!isAdmin || !isOldClients || classifyingPools) return;
+    const confirmed = window.confirm(
+      "Scan all Old clients and move keyword matches into Hyperstore Target and Targeted Distributors?\n\n" +
+        "Hyperstore: hypermarket, hyper mart, hyperstore, multinational mart, etc.\n" +
+        "Distributor: distributor, distribution, wholesale, importer, etc.\n\n" +
+        "Targeted Client is never auto-filled — add those manually from any table.",
+    );
+    if (!confirmed) return;
+
+    setClassifyingPools(true);
+    setSaveNotice(null);
+    try {
+      const result = await client.classifyTargetPoolsFromOldClients();
+      await loadTable();
+      await loadSectionCounts();
+      const hyper = result.hyperstore_targeted?.updated_count ?? 0;
+      const dist = result.targeted_distributor?.updated_count ?? 0;
+      setSaveNotice(
+        `Classified ${result.scanned} Old clients — ${hyper} → Hyperstore Target, ${dist} → Targeted Distributors.`,
+      );
+      window.setTimeout(() => setSaveNotice(null), 8000);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to classify target pools");
+    } finally {
+      setClassifyingPools(false);
+    }
   }
 
   async function removeSelectedFromTargetPool() {
@@ -1907,6 +1953,49 @@ export function LeadsTablePage({
     setBulkResults(results);
     clearSelection();
     await loadTable();
+  }
+
+  async function runPostImportClean(opts?: { afterImport?: boolean }) {
+    if (!isOldClients) return;
+    if (!opts?.afterImport) {
+      const confirmed = window.confirm(
+        "Run full post-import clean on Old clients?\n\n" +
+          "• Fix email apostrophes\n" +
+          "• Clean company / address / email fields\n" +
+          "• Fix location-as-company names\n" +
+          "• Remove Unnamed junk and empty rows\n" +
+          "• Deduplicate within Old clients only\n\n" +
+          "Existing rows in other Master Table sections are not touched.\n\n" +
+          "Continue?",
+      );
+      if (!confirmed) return;
+    }
+
+    setDeduping(true);
+    setSaveNotice(null);
+    setActionProgress({
+      title: opts?.afterImport ? "Cleaning imported Old clients" : "Post-import clean",
+      mode: "indeterminate",
+      detail: "Fixing emails, names, junk rows, and duplicates…",
+      startedAt: Date.now(),
+      accent: "sky",
+    });
+    try {
+      const result = await client.postImportClean(sectionTableScope(section));
+      await loadTable();
+      await loadSectionCounts();
+      const s = result.summary;
+      setSaveNotice(
+        `Post-import clean — emails ${s.emails_fixed}, company fields ${s.company_fields_fixed}, ` +
+          `names ${s.names_fixed}, junk removed ${s.junk_rows_removed}, empty removed ${s.empty_rows_removed}, ` +
+          `duplicates removed ${s.duplicates_removed}`,
+      );
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Post-import clean failed");
+    } finally {
+      setActionProgress(null);
+      setDeduping(false);
+    }
   }
 
   async function cleanOldClientCompanyFields() {
@@ -2379,14 +2468,16 @@ export function LeadsTablePage({
               </div>
               {isAdmin ? (
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={populatingPool || bulkOnboarding || editMode}
-                    onClick={() => void populateTargetPoolFrom("old_clients")}
-                    className="text-xs px-3 py-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 disabled:opacity-50"
-                  >
-                    {populatingPool ? "Populating…" : "Populate from Old clients"}
-                  </button>
+                  {section !== "targeted_client" ? (
+                    <button
+                      type="button"
+                      disabled={populatingPool || bulkOnboarding || editMode}
+                      onClick={() => void populateTargetPoolFrom("old_clients")}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 disabled:opacity-50"
+                    >
+                      {populatingPool ? "Populating…" : "Populate from Old clients"}
+                    </button>
+                  ) : null}
                   {selected.size > 0 ? (
                     <button
                       type="button"
@@ -2468,32 +2559,38 @@ export function LeadsTablePage({
               Clear
             </ActionButton>
           )}
-          {isAdmin && section === "all" && selected.size > 0 ? (
+          {isAdmin && selected.size > 0 ? (
             <>
-              <ActionButton
-                icon={IconSearch}
-                onClick={() => void moveSelectedToTargetPool("hyperstore_targeted")}
-                disabled={movingToPool || bulkOnboarding || editMode}
-                title="Move to Hyperstore Targeted clients"
-              >
-                {movingToPool ? "Moving…" : "→ Hyperstore"}
-              </ActionButton>
-              <ActionButton
-                icon={IconSearch}
-                onClick={() => void moveSelectedToTargetPool("targeted_distributor")}
-                disabled={movingToPool || bulkOnboarding || editMode}
-                title="Move to Targeted Distributors"
-              >
-                → Distributors
-              </ActionButton>
-              <ActionButton
-                icon={IconSearch}
-                onClick={() => void moveSelectedToTargetPool("targeted_client")}
-                disabled={movingToPool || bulkOnboarding || editMode}
-                title="Move to Targeted Client"
-              >
-                → Targeted Client
-              </ActionButton>
+              {section !== "hyperstore_targeted" ? (
+                <ActionButton
+                  icon={IconSearch}
+                  onClick={() => void moveSelectedToTargetPool("hyperstore_targeted")}
+                  disabled={movingToPool || bulkOnboarding || editMode}
+                  title="Add to Hyperstore Target"
+                >
+                  {movingToPool ? "Moving…" : "→ Hyperstore"}
+                </ActionButton>
+              ) : null}
+              {section !== "targeted_distributor" ? (
+                <ActionButton
+                  icon={IconSearch}
+                  onClick={() => void moveSelectedToTargetPool("targeted_distributor")}
+                  disabled={movingToPool || bulkOnboarding || editMode}
+                  title="Add to Targeted Distributors"
+                >
+                  → Distributors
+                </ActionButton>
+              ) : null}
+              {section !== "targeted_client" ? (
+                <ActionButton
+                  icon={IconSearch}
+                  onClick={() => void moveSelectedToTargetPool("targeted_client")}
+                  disabled={movingToPool || bulkOnboarding || editMode}
+                  title="Add to Targeted Client"
+                >
+                  → Targeted Client
+                </ActionButton>
+              ) : null}
             </>
           ) : null}
           <ActionButton
@@ -2642,6 +2739,24 @@ export function LeadsTablePage({
                 : "Deleting…"
               : `Delete (${selected.size})`}
           </ActionButton>
+          {isOldClients && isAdmin && (
+            <ActionButton
+              icon={IconSearch}
+              variant="emerald"
+              onClick={() => void classifyHyperstoreAndDistributors()}
+              disabled={
+                classifyingPools ||
+                deduping ||
+                rows.length === 0 ||
+                loading ||
+                bulkOnboarding ||
+                deletingSelected
+              }
+              title="Scan Old clients for hypermarket / distributor keywords and move matches into target pools"
+            >
+              {classifyingPools ? "Classifying…" : "Classify pools"}
+            </ActionButton>
+          )}
           {isOldClients && (
             <ActionButton
               icon={IconTrash}
@@ -2659,6 +2774,27 @@ export function LeadsTablePage({
               {deduping && actionProgress?.title.includes("empty")
                 ? "Cleaning…"
                 : "Remove empty"}
+            </ActionButton>
+          )}
+          {isOldClients && (
+            <ActionButton
+              icon={IconSparkles}
+              variant="violet"
+              onClick={() => void runPostImportClean()}
+              disabled={
+                deduping ||
+                rows.length === 0 ||
+                loading ||
+                bulkOnboarding ||
+                deletingSelected
+              }
+              title="Full post-import clean: emails, company fields, names, junk, dedupe"
+            >
+              {deduping &&
+              (actionProgress?.title.includes("Post-import") ||
+                actionProgress?.title.includes("Cleaning imported"))
+                ? "Full clean…"
+                : "Full clean"}
             </ActionButton>
           )}
           {isOldClients && (
@@ -2982,13 +3118,13 @@ export function LeadsTablePage({
 
               {isTargetedPool && intakeMethodFilter === "discover" && isAdmin ? (
                 <div className="flex flex-col justify-end">
-                  <span className="block text-xs text-slate-400 mb-1">Discover Leads</span>
+                  <span className="block text-xs text-slate-400 mb-1">Searched by AI</span>
                   <button
                     type="button"
                     disabled={populatingPool || bulkOnboarding || editMode}
                     onClick={() => void fetchDiscoverLeadsIntoPool()}
                     className="w-full rounded-lg border border-violet-500/50 bg-violet-500/15 px-3 py-2 text-sm font-medium text-violet-100 hover:bg-violet-500/25 disabled:opacity-50 inline-flex items-center justify-center gap-2 min-h-[42px]"
-                    title="Fetch matching leads from Discover Leads into this list (AI / search rows)"
+                    title="Fetch matching leads from Searched by AI into this list (AI / search rows)"
                   >
                     <IconSearch className="h-4 w-4 shrink-0" />
                     {populatingPool ? "Fetching…" : "Fetch"}
@@ -4188,11 +4324,14 @@ export function LeadsTablePage({
         <LeadsTableCsvImport
           onClose={() => setShowCsvImport(false)}
           onImported={() => {
-            // Show newest imported rows on the section that was just targeted.
             clearFilters();
             setPage(1);
             setSortBy("created_at");
             setSortDir("desc");
+            if (isOldClients) {
+              void runPostImportClean({ afterImport: true });
+              return;
+            }
             void loadTable();
             void loadSectionCounts();
             setSaveNotice("Import finished — table refreshed to show the newest rows.");
