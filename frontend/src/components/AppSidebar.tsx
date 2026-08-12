@@ -8,6 +8,7 @@ import {
   IconExternal,
   IconTrash,
   IconUser,
+  AdminUserIcon,
   NavIcon,
 } from "./icons/AppIcons";
 import { mailLabelIdFromNavId } from "../lib/mailLabelRules";
@@ -475,6 +476,7 @@ export function AppSidebar({
                       )}
                       <NavIcon
                         navId={item.id}
+                        label={item.label}
                         className={navIconClass(parentHighlighted, isExpandableParent && isActive)}
                       />
                       <span className="truncate">{item.label}</span>
@@ -558,6 +560,7 @@ export function AppSidebar({
                             <span className="flex items-center gap-2.5 truncate min-w-0">
                               <NavIcon
                                 navId={child.id}
+                                label={child.label}
                                 className={
                                   childActive
                                     ? "text-white"
@@ -616,7 +619,11 @@ export function AppSidebar({
               </div>
             ) : null}
             <div className="px-3 py-2 rounded-lg bg-slate-900/80 border border-slate-800 flex items-start gap-2.5">
-              <IconUser size="sm" className="text-slate-500 mt-0.5 shrink-0" />
+              {isAdmin ? (
+                <AdminUserIcon className="mt-0.5" />
+              ) : (
+                <IconUser size="sm" className="text-slate-500 mt-0.5 shrink-0" />
+              )}
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-slate-200 truncate">{userLabel}</p>
                 {userRole && (

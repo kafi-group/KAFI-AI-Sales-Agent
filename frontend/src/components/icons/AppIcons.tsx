@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { IndexIconKey } from "../../data/indexSections";
 import { LogoOutlook, LogoTwilio, LogoWhatsApp, LogoLinkedIn } from "./BrandLogos";
+import { adminIcon, resolveNavIconSrc } from "./navIconImages";
 
 export type IconSize = "xs" | "sm" | "md" | "lg";
 
@@ -547,15 +548,57 @@ function labelTagIconClass(navId: string, className: string): string {
   return LABEL_TAG_PALETTE[Number.isFinite(id) ? id % LABEL_TAG_PALETTE.length : 0];
 }
 
+function NavImageIcon({
+  src,
+  size = "sm",
+  className = "",
+}: {
+  src: string;
+  size?: IconSize;
+  className?: string;
+}) {
+  return (
+    <img
+      src={src}
+      alt=""
+      aria-hidden
+      className={`${SIZE_CLASS[size]} shrink-0 object-contain ${className}`}
+    />
+  );
+}
+
+/** Sidebar footer avatar — crops the provided admin artwork to the circular badge. */
+export function AdminUserIcon({ className = "" }: { className?: string }) {
+  return (
+    <div
+      className={`h-8 w-8 shrink-0 overflow-hidden rounded-full ${className}`}
+      aria-hidden
+    >
+      <img
+        src={adminIcon}
+        alt=""
+        className="h-8 w-auto max-w-none object-left"
+      />
+    </div>
+  );
+}
+
 export function NavIcon({
   navId,
+  label,
   size = "sm",
   className = "text-slate-400",
 }: {
   navId: string;
+  label?: string;
   size?: IconSize;
   className?: string;
 }) {
+  const imageSrc = resolveNavIconSrc(navId, label);
+  if (imageSrc) {
+    return <NavImageIcon src={imageSrc} size={size} className={className} />;
+  }
+
   const props = { size, className };
 
   if (navId === "indexes") return <IconList {...props} />;
