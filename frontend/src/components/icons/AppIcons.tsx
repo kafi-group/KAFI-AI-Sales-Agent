@@ -46,6 +46,51 @@ export function IconBook({ size, className }: IconProps) {
   );
 }
 
+/** Open book — User Manual. */
+export function IconBookOpen({ size, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M12 7v14" />
+      <path d="M3 6a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v14a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3V6z" />
+      <path d="M21 6a3 3 0 0 0-3-3h-6a3 3 0 0 0-3 3v14a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3V6z" />
+    </Svg>
+  );
+}
+
+/** Closed book — FAQ. */
+export function IconBookClosed({ size, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      <path d="M8 7h8M8 11h8M8 15h5" />
+    </Svg>
+  );
+}
+
+/** Gearbox — Settings. */
+export function IconGear({ size, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7z" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </Svg>
+  );
+}
+
+/** Cargo ship — CNF / FOB incoterms tool. */
+export function IconShip({ size, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M2 18h20" />
+      <path d="M4 18l3-8h10l3 8" />
+      <path d="M7 10l2-4h6l2 4" />
+      <path d="M12 6V3" />
+      <path d="M8 18v2M12 18v2M16 18v2" />
+    </Svg>
+  );
+}
+
 export function IconList({ size, className }: IconProps) {
   return (
     <Svg size={size} className={className}>
@@ -479,7 +524,8 @@ export function NavIcon({
   const props = { size, className };
 
   if (navId === "indexes") return <IconList {...props} />;
-  if (navId === "user-manual") return <IconBook {...props} />;
+  if (navId === "user-manual")
+    return <IconBookOpen size={size} className="text-amber-400" />;
   if (navId === "whatsapp-templates") return <IconTemplate {...props} />;
   if (navId === "whatsapp-activity") return <IconActivity {...props} />;
   if (navId === "whatsapp-inbox" || navId.startsWith("whatsapp"))
@@ -493,8 +539,10 @@ export function NavIcon({
       </span>
     );
   }
-  if (navId === "table" || navId === "master" || navId === "all")
-    return <IconTable {...props} />;
+  if (navId === "table" || navId === "all")
+    return <IconTable size={size} className="text-emerald-400" />;
+  if (navId === "master")
+    return <IconTable size={size} className="text-emerald-400" />;
   if (navId === "old_clients") return <IconUsers {...props} />;
   if (navId === "incomplete_archives") return <IconArchive {...props} />;
   if (navId === "sales_interested_clients") return <IconHeart {...props} />;
@@ -516,14 +564,18 @@ export function NavIcon({
   if (navId.startsWith("label:")) return <IconTag {...props} />;
   if (navId === "mail") return <LogoOutlook size={size} />;
   if (navId === "calls") return <LogoTwilio size={size} />;
-  if (navId === "client-history") return <IconCalendar {...props} />;
-  if (navId === "quotation-agent") return <IconQuote {...props} />;
+  if (navId === "client-history")
+    return <IconCalendar size={size} className="text-sky-400" />;
+  if (navId === "quotation-agent")
+    return <IconShip size={size} className="text-cyan-400" />;
   if (navId === "chatbot") return <IconRobot {...props} />;
-  if (navId === "sales-assistant") return <IconBook {...props} />;
+  if (navId === "sales-assistant")
+    return <IconBookClosed size={size} className="text-violet-400" />;
   if (navId === "ai-mode") return <IconSparkles {...props} />;
   if (navId === "kpi") return <IconChart {...props} />;
   if (navId === "users") return <IconUser {...props} />;
-  if (navId === "settings") return <IconSettings {...props} />;
+  if (navId === "settings")
+    return <IconGear size={size} className="text-orange-400" />;
 
   return <LogoOutlook size={size} />;
 }
