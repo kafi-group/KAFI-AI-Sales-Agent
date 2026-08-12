@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyHandoff } from "@/lib/handoff";
+import { personalizeEmailText } from "@/lib/personalizeEmail";
 import { prepareTrackedBody } from "@/lib/prepareTrackedBody";
+import { resolveMergeContext } from "@/lib/resolveMergeContext";
 import { reportMailerActivity } from "@/lib/reportActivity";
 import { sendSmtp, smtpBodyHasContent } from "@/lib/smtp";
 import { appendMailerSentCopy } from "@/lib/syncSent";
@@ -53,6 +55,8 @@ export async function POST(req: NextRequest) {
       html?: boolean;
       buyer_id?: number;
       company_name?: string;
+      contact_name?: string;
+      designation?: string;
       send_mode?: "individual" | "bulk";
       /** When false, skip Email Activity per-message row (bulk summary only). */
       record_activity?: boolean;
@@ -120,6 +124,18 @@ export async function POST(req: NextRequest) {
         ? body.buyer_id
         : undefined;
     const companyName = (body.company_name || "").trim() || undefined;
+    const contactName = (body.contact_name || "").trim() || undefined;
+    const designation = (body.designation || "").trim() || undefined;
+
+    const mergeLead = await resolveMergeContext(authToken || "", {
+      buyer_id: buyerId,
+      to_email: to,
+      company_name: companyName,
+      contact_name: contactName,
+      designation,
+    });
+    const personalizedSubject = personalizeEmailText(subject, mergeLead);
+    const personalizedBody = personalizeEmailText(text, mergeLead);
 
     const cc = (body.cc || "").trim() || undefined;
     const bcc = (body.bcc || "").trim() || undefined;
@@ -129,12 +145,12 @@ export async function POST(req: NextRequest) {
       token: handoffToken || undefined,
       authToken: authToken || undefined,
       to,
-      subject,
-      body: text,
+      subject: personalizedSubject,
+      body: personalizedBody,
       buyer_id: buyerId,
       send_mode: sendMode,
     });
-    const sendBody = tracked.body || text;
+    const sendBody = tracked.body || personalizedBody;
     const asHtml = tracked.html || body.html !== false;
 
     const sent = await sendSmtp({
@@ -143,7 +159,7 @@ export async function POST(req: NextRequest) {
       to,
       cc,
       bcc,
-      subject,
+      subject: personalizedSubject,
       body: sendBody,
       html: asHtml,
       attachments: Array.isArray(body.attachments) ? body.attachments : undefined,
@@ -156,8 +172,8 @@ export async function POST(req: NextRequest) {
         kind: "send_result",
         ok: sent.ok,
         to_email: to,
-        subject,
-        company_name: companyName,
+        subject: personalizedSubject,
+        company_name: mergeLead.company_name || companyName,
         buyer_id: buyerId,
         interaction_id: tracked.interaction_id || undefined,
         error_message: sent.ok ? undefined : sent.message,

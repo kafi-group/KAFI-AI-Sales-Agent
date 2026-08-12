@@ -4,14 +4,24 @@ export type PersonalizeLead = {
   company_name?: string | null;
   contact_name?: string | null;
   contact_email?: string | null;
+  designation?: string | null;
   country?: string | null;
   industry?: string | null;
 };
 
 const FIELD_ALIASES: Record<string, Array<keyof PersonalizeLead | string>> = {
   company_name: ["company_name", "company name", "company"],
-  contact_name: ["contact_name", "contact name", "contact", "name"],
+  contact_name: [
+    "contact_name",
+    "contact name",
+    "contact",
+    "client name",
+    "client_name",
+    "client",
+    "name",
+  ],
   contact_email: ["contact_email", "contact email", "email"],
+  designation: ["designation", "title", "job title", "job_title"],
   country: ["country"],
   industry: ["industry"],
 };
@@ -26,6 +36,9 @@ function fieldValue(lead: PersonalizeLead, key: string): string {
   }
   if (k === "contact_email") {
     return (lead.contact_email || "").trim();
+  }
+  if (k === "designation") {
+    return (lead.designation || "").trim();
   }
   return String(lead[k] ?? "").trim();
 }

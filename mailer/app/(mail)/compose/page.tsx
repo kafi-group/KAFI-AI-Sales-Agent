@@ -35,6 +35,21 @@ function ComposeInner() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const draftId = params.get("draft_id");
+  const buyerIdParam = params.get("buyer_id");
+  const buyerId =
+    buyerIdParam && /^\d+$/.test(buyerIdParam) ? Number(buyerIdParam) : undefined;
+  const mergeCompany = params.get("company_name") || "";
+  const mergeContact = params.get("contact_name") || "";
+  const mergeDesignation = params.get("designation") || "";
+
+  const aiContextHint = [
+    mergeContact ? `Contact name: ${mergeContact}` : "",
+    mergeCompany ? `Company: ${mergeCompany}` : "",
+    mergeDesignation ? `Designation: ${mergeDesignation}` : "",
+    "Use [Contact Name] and [Company Name] placeholders — they are filled automatically on send.",
+  ]
+    .filter(Boolean)
+    .join(". ");
 
   async function addAttachments(files: FileList | null) {
     if (!files?.length) return;
@@ -109,6 +124,10 @@ function ComposeInner() {
           subject: subject.trim(),
           body,
           html: true,
+          buyer_id: buyerId,
+          company_name: mergeCompany.trim() || undefined,
+          contact_name: mergeContact.trim() || undefined,
+          designation: mergeDesignation.trim() || undefined,
           attachments: attachments.length ? attachments : undefined,
         }),
       });
@@ -152,6 +171,7 @@ function ComposeInner() {
         mode={writeMode}
         onModeChange={setWriteMode}
         toHint={to}
+        contextHint={aiContextHint || undefined}
         subject={subject}
         body={body}
         onDraft={(draft) => {
@@ -161,6 +181,23 @@ function ComposeInner() {
         onNotice={setNotice}
         onError={setError}
       />
+
+      {(mergeCompany || mergeContact) && (
+        <p className="muted small">
+          Merge fields on send:{" "}
+          {mergeContact ? (
+            <>
+              contact <strong>{mergeContact}</strong>
+            </>
+          ) : null}
+          {mergeCompany ? (
+            <>
+              {mergeContact ? " · " : ""}
+              company <strong>{mergeCompany}</strong>
+            </>
+          ) : null}
+        </p>
+      )}
 
       <div className="compose-to-row">
         <label className="compose-to-label">To</label>

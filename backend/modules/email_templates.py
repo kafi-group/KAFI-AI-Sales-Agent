@@ -24,10 +24,10 @@ SUPPORTED_PLACEHOLDERS = [
 # Bracket/brace aliases → canonical key (case/spacing insensitive).
 _PLACEHOLDER_ALIASES: dict[str, tuple[str, ...]] = {
     "company_name": ("company_name", "company name", "company"),
-    "contact_name": ("contact_name", "contact name", "contact", "name"),
+    "contact_name": ("contact_name", "contact name", "contact", "client name", "client_name", "client", "name"),
     "country": ("country",),
     "industry": ("industry",),
-    "designation": ("designation", "title"),
+    "designation": ("designation", "title", "job title", "job_title"),
     "website_url": ("website_url", "website url", "website"),
     "email": ("email", "contact_email", "contact email"),
 }

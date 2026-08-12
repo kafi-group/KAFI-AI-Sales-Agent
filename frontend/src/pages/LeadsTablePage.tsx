@@ -3498,7 +3498,7 @@ export function LeadsTablePage({
               commitDraftField={commitDraftField}
               openWhatsAppCompose={openWhatsAppCompose}
             />
-          ) : isOldClients || isCallOutcomeSection ? (
+          ) : isOldClients || isIncompleteArchives || isCallOutcomeSection ? (
             <table
               className={`w-full text-sm border-collapse ${
                 canScheduleFollowUp ? "min-w-[2800px]" : "min-w-[2600px]"
