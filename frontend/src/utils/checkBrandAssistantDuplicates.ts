@@ -51,7 +51,7 @@ export async function summarizeBrandAssistantDuplicates(
       if (search.length >= 3) {
         const result = await client.listLeadsTable({
           master: true,
-          search,
+          q: search,
           page_size: 10,
         });
         for (const row of result.rows) {
