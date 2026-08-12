@@ -198,6 +198,51 @@ def merge_duplicate_into_keeper(
     return {"merged_fields": merged, "keeper_id": keeper.id, "loser_id": loser.id}
 
 
+def should_route_to_incomplete_archives(buyer: Buyer, contact: Contact | None) -> bool:
+    """Route only fragmentary rows — not normal leads missing a website or extra phone."""
+    if not has_salvage_data(buyer, contact):
+        return False
+
+    name = _clean(buyer.company_name).lower()
+    has_real_name = bool(name and name not in JUNK_COMPANY_NAMES and len(name) >= 3)
+
+    # Real company name is enough — missing website/phone/email alone is not "incomplete".
+    if has_real_name:
+        return False
+
+    # Salvageable fragment without a usable company name (phone-only, product-only, etc.).
+    return True
+
+
+def is_fragmentary_import_row(raw: dict[str, Any]) -> bool:
+    """Same rules as should_route_to_incomplete_archives, applied to CSV/import dicts."""
+    name = _clean(raw.get("company_name") or "").lower()
+    has_real_name = bool(name and name not in JUNK_COMPANY_NAMES and len(name) >= 3)
+    if has_real_name:
+        return False
+
+    from modules.field_clean import email_dedupe_key, phone_dedupe_key
+
+    def _has_phone(*keys: str) -> bool:
+        return any(phone_dedupe_key(str(raw.get(key) or "")) for key in keys)
+
+    def _has_email(*keys: str) -> bool:
+        return any(email_dedupe_key(str(raw.get(key) or "")) for key in keys)
+
+    has_contact = _has_phone("phone", "primary_phone", "secondary_phone", "secondary_mobile") or _has_email(
+        "email", "secondary_email", "contact_email"
+    )
+    has_product = bool(_clean(raw.get("product_interest") or ""))
+    has_remarks = bool(
+        _clean(raw.get("remarks") or "")
+        or _clean(raw.get("remarks_03") or "")
+        or _clean(raw.get("remarks_04") or "")
+    )
+    has_industry = bool(_clean(raw.get("industry") or ""))
+
+    return bool(has_contact or has_product or has_remarks or has_industry)
+
+
 def completeness_summary(db: Session, buyer: Buyer) -> dict[str, Any]:
     contact = primary_contact(db, buyer.id)
     score = buyers_module.buyer_data_score(db, buyer)

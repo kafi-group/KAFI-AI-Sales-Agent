@@ -18,6 +18,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font
 from openpyxl.utils.exceptions import InvalidFileException
 
+from modules.field_clean import email_dedupe_key, normalize_email_or_empty
 from modules.file_to_csv import SUPPORTED_UPLOAD_EXTENSIONS, _resolve_extension, convert_upload_to_csv
 from modules.lead_discovery import _dedupe_domain, _normalize_name, parse_csv_candidates
 
@@ -254,10 +255,7 @@ def _phone_digits(value: str) -> str | None:
 
 
 def _email_key(value: str) -> str | None:
-    match = EMAIL_RE.search((value or "").strip())
-    if not match:
-        return None
-    return match.group(0).lower()
+    return email_dedupe_key(value)
 
 
 def _domain_key(value: str) -> str | None:
@@ -348,6 +346,9 @@ def clean_master_row(row: dict[str, str]) -> dict[str, str]:
 
     for key in MASTER_FIELDS:
         cleaned[key] = _clean_scalar(cleaned.get(key))
+
+    for email_field in ("primary_email", "secondary_email"):
+        cleaned[email_field] = normalize_email_or_empty(cleaned.get(email_field))
 
     return _rebalance_person_company(cleaned)
 

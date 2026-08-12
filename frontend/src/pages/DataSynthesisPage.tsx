@@ -162,9 +162,13 @@ export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
   return (
     <div className="space-y-6 max-w-xl">
       <div>
-        <h2 className="text-lg font-semibold text-slate-100">Data Synthesis</h2>
+        <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+          <span aria-hidden>🧩</span>
+          Smart Data Clean & Merge
+        </h2>
         <p className="mt-1 text-sm text-slate-400">
-          Upload excel file(s) and download updated and sorted excel file.
+          Upload Excel/CSV files — emails, phones, and company fields are cleaned automatically,
+          duplicates are merged or skipped, then download a sorted master file.
         </p>
       </div>
 
@@ -181,7 +185,7 @@ export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
           disabled={running}
           className="hidden"
           onChange={(e) => {
-            addFiles(e.target.files ?? []);
+            if (e.target.files?.length) addFiles(e.target.files);
             e.target.value = "";
           }}
         />
@@ -194,7 +198,7 @@ export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
           className="hidden"
           {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
           onChange={(e) => {
-            addFiles(e.target.files ?? []);
+            if (e.target.files?.length) addFiles(e.target.files);
             e.target.value = "";
           }}
         />

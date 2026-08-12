@@ -3234,7 +3234,13 @@ def parse_csv_candidates(
         country = csv_value(row, country_col)
         industry = csv_value(row, industry_col)
         contact_name = csv_value(row, contact_col) or None
-        email = csv_value(row, email_col)
+        email_raw = csv_value(row, email_col)
+        email_clean = ""
+        if email_raw:
+            from modules.field_clean import normalize_email_or_empty
+
+            email_clean = normalize_email_or_empty(email_raw)
+        email = email_clean
         phone = csv_value(row, phone_col)
         linkedin = csv_value(row, linkedin_col)
         facebook = csv_value(row, facebook_col)
@@ -3242,7 +3248,12 @@ def parse_csv_candidates(
         secondary_mobile = csv_value(row, secondary_mobile_col) or None
         primary_phone = csv_value(row, primary_phone_col) or None
         secondary_phone = csv_value(row, secondary_phone_col) or None
-        secondary_email = csv_value(row, secondary_email_col) or None
+        secondary_email_raw = csv_value(row, secondary_email_col) or None
+        secondary_email = secondary_email_raw
+        if secondary_email_raw:
+            from modules.field_clean import normalize_email_or_empty
+
+            secondary_email = normalize_email_or_empty(secondary_email_raw) or None
         candidates.append(
             DiscoveryCandidate(
                 candidate_id=str(uuid.uuid4()),
@@ -3275,6 +3286,40 @@ def parse_csv_candidates(
             )
         )
     return candidates
+
+
+def _normalize_import_contact_fields(raw: dict[str, Any]) -> dict[str, Any]:
+    from modules.field_clean import normalize_email_or_empty
+
+    for key in ("email", "secondary_email", "contact_email"):
+        val = raw.get(key)
+        if val is None:
+            continue
+        text = str(val).strip()
+        if not text or text == _NOT_FOUND:
+            continue
+        cleaned = normalize_email_or_empty(text)
+        raw[key] = cleaned if cleaned else _NOT_FOUND
+    return raw
+
+
+def _import_contact_duplicate_keys(raw: dict[str, Any]) -> list[tuple[str, str]]:
+    from modules.field_clean import email_dedupe_key, phone_dedupe_key
+
+    keys: list[tuple[str, str]] = []
+    for field in ("email", "secondary_email", "contact_email"):
+        val = raw.get(field)
+        if val and str(val).strip() not in {"", _NOT_FOUND}:
+            email_key = email_dedupe_key(str(val))
+            if email_key:
+                keys.append(("email", email_key))
+    for field in ("phone", "primary_phone", "secondary_phone", "secondary_mobile", "contact_phone"):
+        val = raw.get(field)
+        if val and str(val).strip() not in {"", _NOT_FOUND}:
+            phone_key = phone_dedupe_key(str(val))
+            if phone_key:
+                keys.append(("phone", phone_key))
+    return keys
 
 
 def _field_or_not_found(raw: dict[str, Any], *keys: str) -> str:
@@ -3501,7 +3546,7 @@ def import_candidates(
     scope = _import_scope_for_source(batch_source)
     # Sales imports: only collide with that user's own assigned rows.
     # Admin imports (assigned_to_user_id=None): section-wide dedupe as before.
-    by_name, by_domain, existing_scores = buyers_module.build_buyer_lookup_index(
+    by_name, by_domain, existing_scores, by_email, by_phone = buyers_module.build_buyer_lookup_index(
         db,
         **scope,
         assigned_to_user_id=assigned_to_user_id,
@@ -3628,6 +3673,7 @@ def import_candidates(
 
     try:
         for row_index, raw in enumerate(candidates):
+            raw = _normalize_import_contact_fields(dict(raw))
             name = (raw.get("company_name") or "").strip()
             _report_progress(row_index, name or "(unnamed)")
 
@@ -3663,11 +3709,21 @@ def import_candidates(
                 raw["company_name"] = ""
                 name = ""
 
+            if skip_enrichment and batch_source_norm in {
+                "old_clients",
+                "hyperstore_targeted",
+                "targeted_distributor",
+                "targeted_client",
+            }:
+                from modules.incomplete_archives import is_fragmentary_import_row
+
+                if is_fragmentary_import_row(raw):
+                    raw["source"] = "incomplete_archives"
+
             name_key = _normalize_name(name) if name else ""
             domain = _dedupe_domain(raw.get("website_url"))
 
             # Block cross-section duplicates (e.g. discovery matching an old client).
-            # Blank names never match on name — only domain when present.
             if (name_key and name_key in other_names) or (
                 domain and domain in other_domains
             ):
@@ -3685,6 +3741,14 @@ def import_candidates(
             existing = (by_name.get(name_key) if name_key else None) or (
                 by_domain.get(domain) if domain else None
             )
+            if existing is None:
+                for kind, contact_key in _import_contact_duplicate_keys(raw):
+                    if kind == "email":
+                        existing = by_email.get(contact_key)
+                    else:
+                        existing = by_phone.get(contact_key)
+                    if existing is not None:
+                        break
             if existing is not None:
                 should_replace = False
                 if replace_duplicates:
@@ -3800,6 +3864,11 @@ def import_candidates(
             if domain:
                 existing_domains.add(domain)
                 by_domain[domain] = buyer
+            for kind, contact_key in _import_contact_duplicate_keys(raw):
+                if kind == "email":
+                    by_email[contact_key] = buyer
+                else:
+                    by_phone[contact_key] = buyer
             existing_scores[buyer.id] = _import_data_score(raw)
             created.append(buyer)
             if persist_each_row:
@@ -3957,6 +4026,12 @@ def import_candidates(
         reason = (item.get("reason") or "Skipped").strip() or "Skipped"
         skip_reason_counts[reason] = skip_reason_counts.get(reason, 0) + 1
 
+    auto_clean: dict[str, Any] | None = None
+    if skip_enrichment and created:
+        from modules.post_import_old_clients import clean_contacts_for_buyer_ids
+
+        auto_clean = clean_contacts_for_buyer_ids(db, [buyer.id for buyer in created])
+
     return {
         "created_count": len(created),
         "skipped_count": len(skipped),
@@ -3966,4 +4041,5 @@ def import_candidates(
         "replaced": replaced,
         "onboard_results": onboard_results,
         "skip_reason_counts": skip_reason_counts,
+        "auto_clean": auto_clean,
     }

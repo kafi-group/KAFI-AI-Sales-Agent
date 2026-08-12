@@ -151,7 +151,7 @@ function isRetryableStatus(status: number): boolean {
 
 function networkErrorMessage(isTimeout: boolean): string {
   if (isTimeout) {
-    return "The API is taking too long to respond. Railway may be warming up or busy — wait a few seconds and try again.";
+    return "Internet slow, wait a few seconds and refresh again.";
   }
   return "Cannot reach the API right now. Check your connection, then refresh. If this keeps happening, Railway may be restarting.";
 }

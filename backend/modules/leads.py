@@ -1796,8 +1796,9 @@ def cleanup_sparse_csv_leads(
         has_salvage_data,
         is_incomplete_archives_source,
         merge_duplicate_into_keeper,
-        relocate_buyer_to_incomplete_archives,
         primary_contact,
+        relocate_buyer_to_incomplete_archives,
+        should_route_to_incomplete_archives,
     )
 
     relocated: list[dict[str, object]] = []
@@ -1830,10 +1831,8 @@ def cleanup_sparse_csv_leads(
     for buyer in candidates:
         if is_incomplete_archives_source(buyer.source):
             continue
-        if not buyers_module.is_sparse_buyer(db, buyer):
-            continue
         contact = primary_contact(db, buyer.id)
-        if not has_salvage_data(buyer, contact):
+        if not should_route_to_incomplete_archives(buyer, contact):
             continue
         if relocate_buyer_to_incomplete_archives(
             db, buyer.id, reason="sparse_import", commit=False

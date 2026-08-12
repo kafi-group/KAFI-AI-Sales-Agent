@@ -5,46 +5,28 @@ then dedupe — without touching other Master Table sections.
 """
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from db.models import Buyer, Contact
 from modules.audit import log_action
-from modules.buyers import buyer_data_score
-from modules import buyers as buyers_module
+from modules.field_clean import normalize_email
+from modules.incomplete_archives import (
+    is_incomplete_archives_source,
+    primary_contact,
+    relocate_buyer_to_incomplete_archives,
+    should_route_to_incomplete_archives,
+)
 from modules.leads import (
     _apply_lead_table_scope,
     cleanup_sparse_csv_leads,
     dedupe_leads_table,
 )
 
-EMAIL_WRAP_QUOTES = re.compile(r"^['\"`]+|['\"`]+$")
-EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.\w+", re.I)
-ZW = re.compile(r"[\u200b\u200c\u200d\ufeff]")
-JUNK_NAMES = frozenset({"", "unnamed", "unknown", "n/a", "na", "-", "---"})
-
-
-def _clean_scalar(value: object | None) -> str:
-    if value is None:
-        return ""
-    text = ZW.sub("", str(value)).replace("\n", " ").strip()
-    if re.fullmatch(r"\d+\.0+", text):
-        return text.split(".", 1)[0]
-    return text
-
 
 def _normalize_email(value: str) -> tuple[str, bool]:
-    raw = _clean_scalar(value)
-    if not raw or raw in {"-", "—", "N/A", "n/a"}:
-        return "", raw != value
-    stripped = EMAIL_WRAP_QUOTES.sub("", raw).strip().strip("'\"`")
-    match = EMAIL_RE.search(stripped)
-    if not match:
-        return "", raw != value
-    email = match.group(0).lower()
-    return email, email != raw.strip().lower()
+    return normalize_email(value)
 
 
 def clean_contact_emails(
@@ -110,14 +92,7 @@ def remove_junk_old_client_rows(
     assigned_to_user_id: int | None = None,
     unassigned_only: bool = False,
 ) -> dict[str, Any]:
-    """Move Unnamed / sparse rows to Incomplete Data from Archives — never delete salvage rows."""
-    from modules.incomplete_archives import (
-        has_salvage_data,
-        is_incomplete_archives_source,
-        primary_contact,
-        relocate_buyer_to_incomplete_archives,
-    )
-
+    """Move fragmentary rows to Incomplete Data from Archives — never delete salvage rows."""
     buyers = _apply_lead_table_scope(
         db.query(Buyer),
         source=source,
@@ -130,25 +105,53 @@ def remove_junk_old_client_rows(
     for buyer in buyers:
         if is_incomplete_archives_source(buyer.source):
             continue
-        name_key = _clean_scalar(buyer.company_name).lower()
         contact = primary_contact(db, buyer.id)
-        sparse_name = name_key in JUNK_NAMES or not name_key
-        if not sparse_name and buyers_module.buyer_data_score(db, buyer) >= 12:
-            continue
-        if sparse_name and not has_salvage_data(buyer, contact):
-            continue
-        if not sparse_name and not buyers_module.is_sparse_buyer(db, buyer):
+        if not should_route_to_incomplete_archives(buyer, contact):
             continue
         if relocate_buyer_to_incomplete_archives(
-            db, buyer.id, reason="junk_or_sparse_name", commit=False
+            db, buyer.id, reason="fragmentary_import", commit=False
         ):
-            relocated.append(
-                {"id": buyer.id, "company_name": buyer.company_name, "sparse_name": sparse_name}
-            )
+            relocated.append({"id": buyer.id, "company_name": buyer.company_name})
 
     if relocated:
         db.commit()
     return {"removed_count": 0, "relocated_count": len(relocated), "relocated": relocated[:40]}
+
+
+def clean_contacts_for_buyer_ids(db: Session, buyer_ids: list[int]) -> dict[str, Any]:
+    """Normalize emails on specific imported rows (fast post-upload pass)."""
+    if not buyer_ids:
+        return {"scanned": 0, "changed": 0, "samples": []}
+    scanned = 0
+    changed = 0
+    samples: list[dict[str, Any]] = []
+    for buyer_id in buyer_ids:
+        contacts = (
+            db.query(Contact)
+            .filter(Contact.buyer_id == buyer_id)
+            .order_by(Contact.id.asc())
+            .all()
+        )
+        if not contacts:
+            continue
+        contact = contacts[0]
+        scanned += 1
+        row_changed = False
+        for field in ("email", "secondary_email"):
+            before = getattr(contact, field) or ""
+            after, fixed = normalize_email(before)
+            if fixed:
+                setattr(contact, field, after or None)
+                row_changed = True
+                if len(samples) < 20:
+                    samples.append(
+                        {"buyer_id": buyer_id, "field": field, "before": before, "after": after}
+                    )
+        if row_changed:
+            changed += 1
+    if changed:
+        db.commit()
+    return {"scanned": scanned, "changed": changed, "samples": samples}
 
 
 def run_post_import_clean(

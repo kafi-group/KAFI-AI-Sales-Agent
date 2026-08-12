@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from sqlalchemy.orm import Session
 
 import re
@@ -175,14 +177,23 @@ def build_buyer_lookup_index(
     source: str | None = None,
     exclude_source: str | None = None,
     assigned_to_user_id: int | None = None,
-) -> tuple[dict[str, Buyer], dict[str, Buyer], dict[int, int]]:
-    """One scoped load for import dedupe: name→buyer, domain→buyer, id→data score.
+) -> tuple[
+    dict[str, Buyer],
+    dict[str, Buyer],
+    dict[int, int],
+    dict[str, Buyer],
+    dict[str, Buyer],
+]:
+    """One scoped load for import dedupe: name, domain, email, phone → buyer.
 
     When ``assigned_to_user_id`` is set (sales-user import), only that user's
     assigned rows count as duplicates — admin/other users' clients are ignored.
     When None (admin import), dedupe is section-wide as before.
     """
     from sqlalchemy import func as sa_func
+
+    from db.models import Contact
+    from modules.field_clean import email_dedupe_key, phone_dedupe_key
 
     excluded = {
         part.strip().lower()
@@ -200,8 +211,16 @@ def build_buyer_lookup_index(
         query = query.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
 
     buyers = query.all()
+    buyer_ids = [buyer.id for buyer in buyers]
+    contacts_by_buyer: dict[int, list[Contact]] = defaultdict(list)
+    if buyer_ids:
+        for contact in db.query(Contact).filter(Contact.buyer_id.in_(buyer_ids)).all():
+            contacts_by_buyer[contact.buyer_id].append(contact)
+
     by_name: dict[str, Buyer] = {}
     by_domain: dict[str, Buyer] = {}
+    by_email: dict[str, Buyer] = {}
+    by_phone: dict[str, Buyer] = {}
     for buyer in buyers:
         name_key = normalize_buyer_key(buyer.company_name)
         if name_key and name_key not in by_name:
@@ -209,9 +228,18 @@ def build_buyer_lookup_index(
         domain = buyer_website_domain(buyer.website_url)
         if domain and domain not in by_domain:
             by_domain[domain] = buyer
+        for contact in contacts_by_buyer.get(buyer.id, []):
+            for field in ("email", "secondary_email"):
+                email_key = email_dedupe_key(getattr(contact, field, None))
+                if email_key and email_key not in by_email:
+                    by_email[email_key] = buyer
+            for field in ("phone", "primary_phone", "secondary_phone", "secondary_mobile"):
+                phone_key = phone_dedupe_key(getattr(contact, field, None))
+                if phone_key and phone_key not in by_phone:
+                    by_phone[phone_key] = buyer
 
     scores = preload_buyer_data_scores(db, buyers)
-    return by_name, by_domain, scores
+    return by_name, by_domain, scores, by_email, by_phone
 
 
 def find_buyer_by_name_or_domain(
@@ -223,7 +251,7 @@ def find_buyer_by_name_or_domain(
     exclude_source: str | None = None,
     assigned_to_user_id: int | None = None,
 ) -> Buyer | None:
-    by_name, by_domain, _ = build_buyer_lookup_index(
+    by_name, by_domain, _, _, _ = build_buyer_lookup_index(
         db,
         source=source,
         exclude_source=exclude_source,
