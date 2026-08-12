@@ -629,3 +629,27 @@ select.template-select {
     linear-gradient(currentColor, currentColor) 100% 70% / 85% 2px no-repeat,
     linear-gradient(currentColor, currentColor) 100% 95% / 55% 2px no-repeat;
 }
+
+.bulk-progress {
+  margin-top: 1rem;
+}
+
+.bulk-progress-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+.bulk-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+  overflow: hidden;
+}
+
+.bulk-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), #38bdf8);
+  transition: width 0.25s ease;
+}

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyHandoff } from "@/lib/handoff";
+import { personalizeEmailText } from "@/lib/personalizeEmail";
 import { reportMailerActivity } from "@/lib/reportActivity";
 import { sendSmtp, sleep } from "@/lib/smtp";
 import { appendMailerSentCopy } from "@/lib/syncSent";
@@ -15,10 +16,7 @@ type Lead = {
 };
 
 function renderTemplate(template: string, lead: Lead): string {
-  return template
-    .replaceAll("{{company_name}}", lead.company_name || "")
-    .replaceAll("{{contact_name}}", lead.contact_name || lead.company_name || "")
-    .replaceAll("{{contact_email}}", lead.contact_email || "");
+  return personalizeEmailText(template, lead);
 }
 
 function jsonError(error: string, status: number) {

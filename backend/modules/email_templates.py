@@ -21,9 +21,30 @@ SUPPORTED_PLACEHOLDERS = [
     "email",
 ]
 
+# Bracket/brace aliases → canonical key (case/spacing insensitive).
+_PLACEHOLDER_ALIASES: dict[str, tuple[str, ...]] = {
+    "company_name": ("company_name", "company name", "company"),
+    "contact_name": ("contact_name", "contact name", "contact", "name"),
+    "country": ("country",),
+    "industry": ("industry",),
+    "designation": ("designation", "title"),
+    "website_url": ("website_url", "website url", "website"),
+    "email": ("email", "contact_email", "contact email"),
+}
+
+
+def _normalize_placeholder_key(raw: str) -> str | None:
+    key = (raw or "").strip().lower().replace("_", " ")
+    key = re.sub(r"\s+", " ", key)
+    for canonical, aliases in _PLACEHOLDER_ALIASES.items():
+        for alias in aliases:
+            if key == alias.replace("_", " "):
+                return canonical
+    return None
+
 
 def render_template_text(text: str, *, buyer: Buyer, contact: Contact) -> str:
-    """Replace [placeholder] tokens with buyer/contact values (case-insensitive)."""
+    """Replace [placeholder] and {{placeholder}} tokens (incl. [Company Name])."""
     values = {
         "company_name": buyer.company_name or "",
         "contact_name": contact.full_name or "Sir/Madam",
@@ -33,9 +54,21 @@ def render_template_text(text: str, *, buyer: Buyer, contact: Contact) -> str:
         "website_url": buyer.website_url or "",
         "email": contact.email or "",
     }
-    rendered = text
-    for key, value in values.items():
-        rendered = re.sub(rf"\[{re.escape(key)}\]", value, rendered, flags=re.IGNORECASE)
+
+    def _replace_brace(match: re.Match[str]) -> str:
+        canonical = _normalize_placeholder_key(match.group(1))
+        if not canonical:
+            return match.group(0)
+        return values.get(canonical, "")
+
+    def _replace_bracket(match: re.Match[str]) -> str:
+        canonical = _normalize_placeholder_key(match.group(1))
+        if not canonical:
+            return match.group(0)
+        return values.get(canonical, "")
+
+    rendered = re.sub(r"\{\{\s*([^}]+?)\s*\}\}", _replace_brace, text or "")
+    rendered = re.sub(r"\[([^\]]+)\]", _replace_bracket, rendered)
     return rendered
 
 

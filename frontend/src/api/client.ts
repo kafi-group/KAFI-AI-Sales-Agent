@@ -745,6 +745,8 @@ export interface PersonalizedFollowupDraft {
   contact_phone: string | null;
   created_by_user_id: number | null;
   call_outcome: string;
+  call_context?: string | null;
+  call_context_label?: string | null;
   status: string;
   subject: string | null;
   email_body: string | null;

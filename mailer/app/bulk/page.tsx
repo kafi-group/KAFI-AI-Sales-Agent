@@ -14,6 +14,7 @@ import {
   EmailBodyEditor,
   emailBodyHasContent,
 } from "@/components/EmailBodyEditor";
+import { personalizeEmailText } from "@/lib/personalizeEmail";
 
 type Lead = {
   buyer_id: number;
@@ -89,6 +90,7 @@ function BulkInner() {
   const [messageDelay, setMessageDelay] = useState(2);
   const [batchPause, setBatchPause] = useState(45);
   const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0, current: "" });
   const [log, setLog] = useState<string[]>([]);
   const [templateId, setTemplateId] = useState("");
   const [writeMode, setWriteMode] = useState<ComposeWriteMode>("free");
@@ -130,6 +132,7 @@ function BulkInner() {
     }
     setRunning(true);
     setLog([]);
+    setProgress({ done: 0, total: leads.length, current: "" });
     const batches = chunk(leads, Math.max(1, Math.min(15, batchSize)));
     let sentTotal = 0;
     let failTotal = 0;
@@ -154,27 +157,22 @@ function BulkInner() {
         // and so every response is small JSON we can parse reliably.
         for (let i = 0; i < batch.length; i++) {
           const lead = batch[i];
+          setProgress({
+            done: sentTotal + failTotal,
+            total: leads.length,
+            current: lead.contact_email,
+          });
           try {
+            const personalizedSubject = personalizeEmailText(subject, lead);
+            const personalizedBody = personalizeEmailText(body, lead);
             const res = await fetch("/api/send", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 token,
                 to: lead.contact_email,
-                subject: subject
-                  .replaceAll("{{company_name}}", lead.company_name || "")
-                  .replaceAll(
-                    "{{contact_name}}",
-                    lead.contact_name || lead.company_name || "",
-                  )
-                  .replaceAll("{{contact_email}}", lead.contact_email || ""),
-                body: body
-                  .replaceAll("{{company_name}}", lead.company_name || "")
-                  .replaceAll(
-                    "{{contact_name}}",
-                    lead.contact_name || lead.company_name || "",
-                  )
-                  .replaceAll("{{contact_email}}", lead.contact_email || ""),
+                subject: personalizedSubject,
+                body: personalizedBody,
                 html: true,
                 buyer_id: lead.buyer_id,
                 company_name: lead.company_name,
@@ -192,6 +190,11 @@ function BulkInner() {
                 `FAIL  ${lead.contact_email}  Server returned non-JSON (${res.status}): ${raw.slice(0, 180)}`,
               );
               failTotal += 1;
+              setProgress({
+                done: sentTotal + failTotal,
+                total: leads.length,
+                current: "",
+              });
               continue;
             }
             if (!res.ok || data.ok === false) {
@@ -203,11 +206,21 @@ function BulkInner() {
               pushLog(`OK  ${lead.contact_email}`);
               sentTotal += 1;
             }
+            setProgress({
+              done: sentTotal + failTotal,
+              total: leads.length,
+              current: "",
+            });
           } catch (e) {
             pushLog(
               `FAIL  ${lead.contact_email}  ${e instanceof Error ? e.message : String(e)}`,
             );
             failTotal += 1;
+            setProgress({
+              done: sentTotal + failTotal,
+              total: leads.length,
+              current: "",
+            });
           }
           if (i < batch.length - 1 && messageDelay > 0) {
             await sleep(messageDelay * 1000);
@@ -234,6 +247,7 @@ function BulkInner() {
     }
 
     pushLog(`Done. Sent ${sentTotal}, failed ${failTotal}.`);
+    setProgress({ done: leads.length, total: leads.length, current: "" });
     setRunning(false);
   }
 
@@ -265,9 +279,9 @@ function BulkInner() {
           )}
         </div>
         <p className="muted">
-          Sends via SMTP on Vercel. Placeholders:{" "}
-          <code>{"{{company_name}}"}</code>, <code>{"{{contact_name}}"}</code>,{" "}
-          <code>{"{{contact_email}}"}</code>
+          Sends via SMTP on Vercel. Each recipient gets their own company name — use{" "}
+          <code>[Company Name]</code>, <code>[company_name]</code>, or{" "}
+          <code>{"{{company_name}}"}</code> (same for contact name / email).
         </p>
         <div className="chips">
           <span className="chip">From: {preview?.mailbox_email || "—"}</span>
@@ -352,8 +366,27 @@ function BulkInner() {
           disabled={running || !leads.length || !emailBodyHasContent(body)}
           onClick={() => void runSend()}
         >
-          {running ? "Sending…" : `Send ${leads.length} email${leads.length === 1 ? "" : "s"}`}
+          {running
+            ? `Sending ${progress.done}/${progress.total}…`
+            : `Send ${leads.length} email${leads.length === 1 ? "" : "s"}`}
         </button>
+
+        {running && progress.total > 0 && (
+          <div className="bulk-progress" aria-live="polite">
+            <div className="bulk-progress-label">
+              Personalizing & sending — {progress.done} of {progress.total}
+              {progress.current ? ` · ${progress.current}` : ""}
+            </div>
+            <div className="bulk-progress-track">
+              <div
+                className="bulk-progress-bar"
+                style={{
+                  width: `${Math.min(100, Math.round((progress.done / progress.total) * 100))}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
 
         {log.length > 0 && (
           <div className="log">

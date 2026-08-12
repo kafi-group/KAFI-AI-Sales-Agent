@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,26 @@ ELIGIBLE_OUTCOMES = frozenset(
     {"interested", "follow_up", "not_interested", "not_received_call"}
 )
 ACTIVE_STATUSES = frozenset({"awaiting_transcript", "generating", "ready", "failed"})
+
+FollowupContext = Literal[
+    "live_conversation",
+    "voicemail_or_no_answer",
+    "negative_call",
+    "not_interested",
+    "brief_or_unclear",
+]
+
+VOICEMAIL_LINE = re.compile(
+    r"(?i)^\s*(voicemail|voice mail|answering machine|no answer|did not answer|"
+    r"unreachable|not reachable|no pickup|went to voicemail)\s*$"
+)
+VOICEMAIL_IN_TEXT = re.compile(
+    r"(?i)\b(voicemail|voice mail|answering machine|left (?:a )?message|"
+    r"could not connect|unable to reach|no one answered|went straight to voicemail)\b"
+)
+PROFANITY_HINT = re.compile(
+    r"(?i)\b(fuck|shit|damn|bitch|asshole|idiot|stupid|bullshit|piss off|get lost)\b"
+)
 
 
 def _utcnow() -> datetime:
@@ -74,9 +95,277 @@ def _transcript_text(interaction: Interaction) -> str | None:
     return text or None
 
 
+def _notes_indicate_voicemail(notes: str) -> bool:
+    """True when remarks explicitly tag Voicemail (not No voicemail)."""
+    for line in (notes or "").splitlines():
+        key = line.strip().lower()
+        if key == "voicemail":
+            return True
+        if key == "no voicemail":
+            return False
+    return False
+
+
+def classify_call_followup_context(
+    *,
+    call_outcome: str | None,
+    notes: str,
+    transcript: str | None,
+) -> FollowupContext:
+    """Decide which follow-up tone to use — never assume a live chat on voicemail."""
+    outcome = (call_outcome or "").strip().lower()
+    notes_text = (notes or "").strip()
+    transcript_text = (transcript or "").strip()
+    combined = f"{notes_text}\n{transcript_text}"
+
+    if outcome == "not_interested":
+        return "not_interested"
+
+    if outcome == "not_received_call" or _notes_indicate_voicemail(notes_text):
+        return "voicemail_or_no_answer"
+
+    if VOICEMAIL_IN_TEXT.search(combined) and len(transcript_text) < 120:
+        return "voicemail_or_no_answer"
+
+    for line in notes_text.splitlines():
+        if VOICEMAIL_LINE.match(line.strip()):
+            return "voicemail_or_no_answer"
+
+    if transcript_text and PROFANITY_HINT.search(transcript_text):
+        return "negative_call"
+
+    if len(transcript_text) >= 80:
+        return "live_conversation"
+
+    if outcome in {"interested", "follow_up"} and len(notes_text) >= 30:
+        return "live_conversation"
+
+    if not transcript_text and not notes_text:
+        return "brief_or_unclear"
+
+    if len(transcript_text) < 40 and not notes_text:
+        return "voicemail_or_no_answer"
+
+    return "brief_or_unclear"
+
+
+def _context_label(context: FollowupContext) -> str:
+    return {
+        "live_conversation": "Live phone conversation",
+        "voicemail_or_no_answer": "Voicemail / could not connect",
+        "negative_call": "Difficult call — stay professional",
+        "not_interested": "Not interested",
+        "brief_or_unclear": "Brief or unclear call",
+    }[context]
+
+
+def _fallback_followup_message(
+    *,
+    call_context: FollowupContext,
+    company: str,
+    contact_name: str,
+    country: str,
+) -> tuple[str, str]:
+    market = country or "your market"
+    if call_context == "voicemail_or_no_answer":
+        return (
+            f"Following up — Kafi Commodities & {company}",
+            (
+                f"Dear {contact_name},\n\n"
+                f"We tried reaching you by phone today regarding {company} but were unable to "
+                f"connect. We would be glad to introduce Kafi Commodities and our ESSENCE range "
+                f"(rice, spices, sauces, pickles, Himalayan salt, and related products) for "
+                f"{market}.\n\n"
+                f"Please reply with a convenient time to call back, or let us know if email or "
+                f"WhatsApp works better for you.\n\n"
+                f"Best regards,\nKafi Commodities Export Team"
+            ),
+        )
+    if call_context == "negative_call":
+        return (
+            f"Following up — Kafi Commodities & {company}",
+            (
+                f"Dear {contact_name},\n\n"
+                f"Thank you for taking our call today. We appreciate your time and would like to "
+                f"keep the conversation focused on how Kafi Commodities can support {company} "
+                f"with ESSENCE food exports from Pakistan.\n\n"
+                f"If useful, we can share product categories and specifications at your "
+                f"convenience — with no obligation.\n\n"
+                f"Best regards,\nKafi Commodities Export Team"
+            ),
+        )
+    if call_context == "not_interested":
+        return (
+            "Thank you — Kafi Commodities",
+            (
+                f"Dear {contact_name},\n\n"
+                f"Thank you for your time on our call today. We understand {company} may not be "
+                f"looking to proceed at the moment.\n\n"
+                f"Should your requirements change, we remain available for ESSENCE product "
+                f"information from Kafi Commodities.\n\n"
+                f"Best regards,\nKafi Commodities Export Team"
+            ),
+        )
+    if call_context == "brief_or_unclear":
+        return (
+            f"Following up — Kafi Commodities & {company}",
+            (
+                f"Dear {contact_name},\n\n"
+                f"We attempted to connect with {company} by phone today. We would welcome a "
+                f"brief conversation about ESSENCE exports from Kafi Commodities when "
+                f"convenient.\n\n"
+                f"Please let us know a suitable time to reach you.\n\n"
+                f"Best regards,\nKafi Commodities Export Team"
+            ),
+        )
+    return (
+        f"Following our call — Kafi Commodities & {company}",
+        (
+            f"Dear {contact_name},\n\n"
+            f"Thank you for speaking with us today. As discussed, this message confirms our "
+            f"conversation regarding {company} and Kafi Commodities' ESSENCE product range.\n\n"
+            f"We remain at your service for specifications, samples, or pricing whenever "
+            f"convenient for you.\n\n"
+            f"Best regards,\nKafi Commodities Export Team"
+        ),
+    )
+
+
+def _llm_system_for_context(call_context: FollowupContext) -> str:
+    base = (
+        "You write concise follow-up emails for Kafi Commodities (Pakistan food exporter). "
+        "Always professional — never echo profanity, insults, or aggressive language from "
+        "call captions. Return JSON only. One message is used for both email and WhatsApp."
+    )
+    if call_context == "voicemail_or_no_answer":
+        return (
+            base
+            + " The rep did NOT speak with a live buyer — do not claim a conversation happened."
+        )
+    return base
+
+
+def _llm_prompt_for_context(
+    *,
+    call_context: FollowupContext,
+    context_label: str,
+    outcome_label: str,
+    company: str,
+    contact_name: str,
+    country: str,
+    excerpt: str,
+) -> str:
+    shared_rules = """
+Return JSON only with keys:
+- subject: email subject line (max 90 chars)
+- email_body: about 60–100 words, warm and professional
+
+Rules:
+- Do not invent product quantities, prices, or meeting times not in the source.
+- NEVER mention attachments or enclosed files — plain text only.
+- Sign as Kafi Commodities Export Team.
+- Same body will be sent on WhatsApp.
+"""
+    if call_context == "live_conversation":
+        return f"""Write a call-confirmation follow-up for Kafi Commodities.
+
+Context: {context_label}
+Call outcome: {outcome_label}
+Company: {company}
+Contact: {contact_name}
+Country: {country or "unknown"}
+
+Call transcript / remarks:
+---
+{excerpt}
+---
+
+- Start by confirming the phone conversation ("As per our call today…" or similar).
+- Reference 1–2 concrete business points from the transcript (products, market, next steps).
+- NEVER repeat rude language from the transcript — summarize business substance only.
+{shared_rules}"""
+
+    if call_context == "voicemail_or_no_answer":
+        return f"""Write a follow-up for Kafi Commodities after a MISSED call (voicemail / no answer).
+
+Context: {context_label}
+Call outcome: {outcome_label}
+Company: {company}
+Contact: {contact_name}
+Country: {country or "unknown"}
+
+Rep notes / system transcript (may be voicemail greeting only):
+---
+{excerpt}
+---
+
+CRITICAL: No live conversation took place. Do NOT write "as per our call", "pleasure connecting",
+"as discussed", or imply the buyer answered.
+
+Instead:
+- Say we tried to reach them by phone today but could not connect.
+- Briefly mention ESSENCE exports (rice, spices, sauces, pickles, salt).
+- Invite them to reply with a convenient time or preferred channel.
+{shared_rules}"""
+
+    if call_context == "negative_call":
+        return f"""Write a diplomatic follow-up after a difficult phone call.
+
+Context: {context_label}
+Company: {company}
+Contact: {contact_name}
+
+Transcript / remarks:
+---
+{excerpt}
+---
+
+- Stay calm and professional; do not reference conflict, swearing, or tone.
+- Focus on how Kafi can support their business with ESSENCE products.
+- Do not claim specific agreements unless clearly stated in the transcript.
+{shared_rules}"""
+
+    if call_context == "not_interested":
+        return f"""Write a polite closing note after the buyer indicated they are not interested.
+
+Company: {company}
+Contact: {contact_name}
+
+Remarks:
+---
+{excerpt}
+---
+
+- Thank them for their time; leave the door open without pressure.
+{shared_rules}"""
+
+    return f"""Write a cautious follow-up when the call was brief or unclear.
+
+Context: {context_label}
+Company: {company}
+Contact: {contact_name}
+
+Source:
+---
+{excerpt}
+---
+
+- Do NOT assume a full conversation happened.
+- Say we attempted to connect and invite them to suggest a better time.
+{shared_rules}"""
+
+
 def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, Any]:
     buyer = db.get(Buyer, draft.buyer_id)
     contact = db.get(Contact, draft.contact_id) if draft.contact_id else None
+    interaction = db.get(Interaction, draft.interaction_id)
+    notes = _call_notes(interaction) if interaction else ""
+    transcript = _transcript_text(interaction) if interaction else None
+    call_context = classify_call_followup_context(
+        call_outcome=draft.call_outcome,
+        notes=notes,
+        transcript=transcript,
+    )
     return {
         "id": draft.id,
         "interaction_id": draft.interaction_id,
@@ -89,6 +378,8 @@ def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, An
         "contact_phone": (contact.phone or contact.wa_id) if contact else None,
         "created_by_user_id": draft.created_by_user_id,
         "call_outcome": draft.call_outcome,
+        "call_context": call_context,
+        "call_context_label": _context_label(call_context),
         "status": draft.status,
         "subject": draft.subject,
         "email_body": draft.email_body,
@@ -197,18 +488,22 @@ def generate_draft_content(db: Session, draft_id: int) -> PersonalizedFollowupDr
         "Client is Interested" if draft.call_outcome == "interested" else "Follow up"
     )
 
+    call_context = classify_call_followup_context(
+        call_outcome=draft.call_outcome,
+        notes=notes,
+        transcript=transcript,
+    )
+    context_label = _context_label(call_context)
+
     source = transcript or notes
     excerpt = source[:4000]
     draft.transcript_excerpt = excerpt[:2000]
 
-    fallback_subject = f"Following our call — Kafi Commodities & {company}"
-    fallback_email = (
-        f"Dear {contact_name},\n\n"
-        f"Thank you for speaking with us today. As per our phone conversation, this message "
-        f"confirms the points we discussed regarding {company}.\n\n"
-        f"We remain at your service for ESSENCE product specifications, samples, or pricing "
-        f"whenever convenient for you.\n\n"
-        f"Best regards,\nKafi Commodities Export Team"
+    fallback_subject, fallback_email = _fallback_followup_message(
+        call_context=call_context,
+        company=company,
+        contact_name=contact_name,
+        country=country,
     )
 
     subject = fallback_subject
@@ -220,44 +515,25 @@ def generate_draft_content(db: Session, draft_id: int) -> PersonalizedFollowupDr
         if llm_client.enabled:
             from modules.llm_client import with_email_reply_standards
 
-            prompt = with_email_reply_standards(
-                f"""You write a short, gentle call-confirmation message for Kafi Commodities (ESSENCE foods exporter from Pakistan).
-
-Call outcome: {outcome_label}
-Company: {company}
-Contact: {contact_name}
-Country: {country or "unknown"}
-
-Call transcript / remarks:
----
-{excerpt}
----
-
-Return JSON only with keys:
-- subject: email subject line (max 90 chars)
-- email_body: polite confirmation of the phone call, about 60–100 words, reference 1–2 concrete points from the call, no invented prices or commitments
-
-Rules:
-- Start by confirming the phone conversation ("As per our call today…").
-- Concise, warm, professional — suitable for both email and WhatsApp.
-- NEVER repeat rude language, swearing, insults, or aggressive tone from the transcript — even if the operator used them. Summarize only the business substance (products, quantities, next steps) in polished export-sales language.
-- If the transcript is empty, unclear, or only contains frustration, write a neutral polite confirmation that thanks them for the call and offers ESSENCE product information — do not mention conflict or tone.
-- Do not invent product quantities, prices, or meeting times not in the source.
-- NEVER mention attachments, enclosed files, "please find attached", or "see attached" — this message is sent as plain text with no files.
-- Sign as Kafi Commodities Export Team.
-- This email body will also be sent on WhatsApp unchanged.
-"""
-            )
+            prompt = with_email_reply_standards(_llm_prompt_for_context(
+                call_context=call_context,
+                context_label=context_label,
+                outcome_label=outcome_label,
+                company=company,
+                contact_name=contact_name,
+                country=country,
+                excerpt=excerpt,
+            ))
             data = llm_client.generate_json(
                 prompt,
-                system=(
-                    "You write concise inquiry-specific follow-up emails for Kafi Commodities. "
-                    "Always professional and diplomatic — never echo profanity or negativity from call captions. "
-                    "Return JSON only. One message will be used for both email and WhatsApp."
-                ),
+                system=_llm_system_for_context(call_context),
             )
             subject = (data.get("subject") or subject).strip()[:500] or subject
             email_body = (data.get("email_body") or email_body).strip() or email_body
+            # Safety net: never send "as per our call" on voicemail drafts.
+            if call_context in {"voicemail_or_no_answer", "brief_or_unclear"}:
+                if re.search(r"(?i)as per our (call|conversation|discussion)", email_body):
+                    subject, email_body = fallback_subject, fallback_email
     except Exception as exc:  # noqa: BLE001
         draft.generation_error = f"Used fallback draft ({exc})"
 
@@ -466,6 +742,26 @@ def send_draft(
     if send_email:
         if not (draft.subject or "").strip() or not body_text:
             raise ValueError("Subject and email body are required before sending email")
+
+    interaction = db.get(Interaction, draft.interaction_id)
+    notes = _call_notes(interaction) if interaction else ""
+    transcript = _transcript_text(interaction) if interaction else None
+    call_context = classify_call_followup_context(
+        call_outcome=draft.call_outcome,
+        notes=notes,
+        transcript=transcript,
+    )
+    if body_text and call_context in {"voicemail_or_no_answer", "brief_or_unclear"}:
+        if re.search(r"(?i)\b(as per our (call|conversation|discussion)|following our call|thank you for speaking with us today)\b", body_text):
+            raise ValueError(
+                "This draft assumes a live phone conversation, but the call was voicemail or "
+                "could not connect. Edit the message or click Regenerate before sending."
+            )
+    if body_text and call_context == "negative_call":
+        if PROFANITY_HINT.search(body_text):
+            raise ValueError(
+                "Remove any quoted profanity from the draft before sending — keep the tone professional."
+            )
     if send_whatsapp and not body_text and not (template_name or "").strip():
         raise ValueError("Message body is required before sending WhatsApp (Meta)")
     if send_whatsapp_personal and not body_text:

@@ -40,7 +40,29 @@ const STATUS_LABELS: Record<string, string> = {
 const OUTCOME_LABELS: Record<string, string> = {
   interested: "Interested",
   follow_up: "Follow up",
+  not_interested: "Not interested",
+  not_received_call: "No answer / voicemail",
 };
+
+const CALL_CONTEXT_CLASS: Record<string, string> = {
+  live_conversation: "bg-sky-500/15 text-sky-200 border-sky-500/30",
+  voicemail_or_no_answer: "bg-amber-500/15 text-amber-200 border-amber-500/30",
+  negative_call: "bg-rose-500/15 text-rose-200 border-rose-500/30",
+  not_interested: "bg-slate-700/60 text-slate-300 border-slate-600",
+  brief_or_unclear: "bg-amber-500/15 text-amber-200 border-amber-500/30",
+};
+
+function contextClass(context: string | null | undefined): string {
+  if (!context) return "bg-slate-800 text-slate-400 border-slate-700";
+  return CALL_CONTEXT_CLASS[context] || "bg-slate-800 text-slate-400 border-slate-700";
+}
+
+function draftAssumesLiveCall(body: string | null | undefined): boolean {
+  if (!body) return false;
+  return /\b(as per our (call|conversation|discussion)|following our call|thank you for speaking with us today)\b/i.test(
+    body,
+  );
+}
 
 function statusClass(status: string): string {
   if (status === "ready") return "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
@@ -372,6 +394,7 @@ export function PersonalizedEmailsPage({
                   </div>
                   <p className="mt-1 text-xs text-slate-500 truncate">
                     {OUTCOME_LABELS[row.call_outcome] || row.call_outcome}
+                    {row.call_context_label ? ` · ${row.call_context_label}` : ""}
                     {row.contact_name ? ` · ${row.contact_name}` : ""}
                   </p>
                 </button>
@@ -393,12 +416,37 @@ export function PersonalizedEmailsPage({
                     {selected.country ? ` · ${selected.country}` : ""}
                   </p>
                 </div>
-                <span
-                  className={`text-xs px-2 py-1 rounded border ${statusClass(selected.status)}`}
-                >
-                  {STATUS_LABELS[selected.status] || selected.status}
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`text-xs px-2 py-1 rounded border ${statusClass(selected.status)}`}
+                  >
+                    {STATUS_LABELS[selected.status] || selected.status}
+                  </span>
+                  {selected.call_context_label ? (
+                    <span
+                      className={`text-xs px-2 py-1 rounded border ${contextClass(selected.call_context)}`}
+                    >
+                      {selected.call_context_label}
+                    </span>
+                  ) : null}
+                </div>
               </div>
+
+              {selected.call_context &&
+                ["voicemail_or_no_answer", "brief_or_unclear"].includes(selected.call_context) &&
+                draftAssumesLiveCall(emailBody) && (
+                  <p className="text-xs text-amber-200/95 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+                    This draft reads like a live conversation, but the call was voicemail or could
+                    not connect. Click <strong>Regenerate</strong> or edit before sending.
+                  </p>
+                )}
+
+              {selected.call_context === "negative_call" && (
+                <p className="text-xs text-slate-400 rounded-lg border border-slate-700 bg-slate-950/50 px-3 py-2">
+                  Captions suggest a difficult call — the draft stays professional and does not
+                  repeat any hostile language.
+                </p>
+              )}
 
               {selected.generation_error && selected.status !== "ready" && (
                 <p className="text-xs text-amber-200/90">{selected.generation_error}</p>

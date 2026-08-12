@@ -217,6 +217,22 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
               <p className="text-sm text-slate-400 animate-pulse">Preparing email & WhatsApp drafts…</p>
             ) : draft?.status === "ready" || draft?.status === "sent" ? (
               <div className="space-y-4">
+                {draft.call_context_label ? (
+                  <p className="text-xs text-slate-400">
+                    Draft tone:{" "}
+                    <span className="text-slate-200">{draft.call_context_label}</span>
+                  </p>
+                ) : null}
+                {draft.call_context &&
+                ["voicemail_or_no_answer", "brief_or_unclear"].includes(draft.call_context) &&
+                /\b(as per our (call|conversation|discussion)|following our call|thank you for speaking with us today)\b/i.test(
+                  emailBody,
+                ) ? (
+                  <p className="text-xs text-amber-200/95 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+                    This draft assumes a live conversation, but the call was voicemail or could
+                    not connect. Edit the text before sending.
+                  </p>
+                ) : null}
                 <label className="block">
                   <span className="text-xs text-slate-400">Email subject</span>
                   <input
