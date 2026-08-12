@@ -29,7 +29,7 @@ export function AppBrand({ variant = "sidebar", className = "" }: AppBrandProps)
       {logoVisible ? (
         <img
           src={APP_LOGO_SRC}
-          alt=""
+          alt="Kafi Commodities"
           className={`${logoSize} shrink-0 object-contain rounded-md`}
           onError={() => setLogoVisible(false)}
         />
