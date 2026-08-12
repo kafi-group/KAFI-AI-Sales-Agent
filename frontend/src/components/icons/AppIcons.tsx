@@ -512,6 +512,41 @@ export function IconTwilio({ size, className }: IconProps) {
   return <LogoTwilio size={size} className={className} />;
 }
 
+const MAIL_SUB_ICON_COLORS: Record<string, string> = {
+  inbox: "", // Outlook brand logo
+  sent: "text-blue-400",
+  drafts: "text-amber-400",
+  trash: "text-red-400",
+  archive: "text-violet-400",
+  activity: "text-cyan-400",
+  "email-templates": "text-indigo-400",
+  "personalized-emails": "text-fuchsia-400",
+};
+
+const LABEL_TAG_PALETTE = [
+  "text-rose-400",
+  "text-orange-400",
+  "text-lime-400",
+  "text-teal-400",
+  "text-fuchsia-400",
+  "text-yellow-400",
+  "text-pink-400",
+  "text-emerald-400",
+] as const;
+
+function mailSubIconClass(navId: string, className: string): string {
+  if (className.includes("text-white")) return "text-white";
+  return MAIL_SUB_ICON_COLORS[navId] ?? className;
+}
+
+function labelTagIconClass(navId: string, className: string): string {
+  if (className.includes("text-white")) return "text-white";
+  if (navId.startsWith("label-linkedin:")) return "";
+  const idPart = navId.split(":")[1];
+  const id = Number.parseInt(idPart ?? "0", 10);
+  return LABEL_TAG_PALETTE[Number.isFinite(id) ? id % LABEL_TAG_PALETTE.length : 0];
+}
+
 export function NavIcon({
   navId,
   size = "sm",
@@ -526,8 +561,10 @@ export function NavIcon({
   if (navId === "indexes") return <IconList {...props} />;
   if (navId === "user-manual")
     return <IconBookOpen size={size} className="text-amber-400" />;
-  if (navId === "whatsapp-templates") return <IconTemplate {...props} />;
-  if (navId === "whatsapp-activity") return <IconActivity {...props} />;
+  if (navId === "whatsapp-templates")
+    return <IconTemplate size={size} className="text-violet-400" />;
+  if (navId === "whatsapp-activity")
+    return <IconActivity size={size} className="text-emerald-400" />;
   if (navId === "whatsapp-inbox" || navId.startsWith("whatsapp"))
     return <LogoWhatsApp size={size} />;
   if (navId === "leads") return <IconSearch {...props} />;
@@ -553,15 +590,23 @@ export function NavIcon({
     return <IconSearch {...props} />;
   if (navId.startsWith("assigned:")) return <IconUser {...props} />;
   if (navId === "inbox") return <LogoOutlook size={size} />;
-  if (navId === "sent") return <IconSend {...props} />;
-  if (navId === "drafts") return <IconDraft {...props} />;
-  if (navId === "trash") return <IconTrash {...props} />;
-  if (navId === "archive") return <IconArchive {...props} />;
-  if (navId === "activity") return <IconMailStack {...props} />;
-  if (navId === "email-templates") return <IconTemplate {...props} />;
-  if (navId === "personalized-emails") return <IconSparkles {...props} />;
+  if (navId === "sent")
+    return <IconSend size={size} className={mailSubIconClass(navId, className)} />;
+  if (navId === "drafts")
+    return <IconDraft size={size} className={mailSubIconClass(navId, className)} />;
+  if (navId === "trash")
+    return <IconTrash size={size} className={mailSubIconClass(navId, className)} />;
+  if (navId === "archive")
+    return <IconArchive size={size} className={mailSubIconClass(navId, className)} />;
+  if (navId === "activity")
+    return <IconMailStack size={size} className={mailSubIconClass(navId, className)} />;
+  if (navId === "email-templates")
+    return <IconTemplate size={size} className={mailSubIconClass(navId, className)} />;
+  if (navId === "personalized-emails")
+    return <IconSparkles size={size} className={mailSubIconClass(navId, className)} />;
   if (navId.startsWith("label-linkedin:")) return <LogoLinkedIn size={size} />;
-  if (navId.startsWith("label:")) return <IconTag {...props} />;
+  if (navId.startsWith("label:"))
+    return <IconTag size={size} className={labelTagIconClass(navId, className)} />;
   if (navId === "mail") return <LogoOutlook size={size} />;
   if (navId === "calls") return <LogoTwilio size={size} />;
   if (navId === "client-history")
