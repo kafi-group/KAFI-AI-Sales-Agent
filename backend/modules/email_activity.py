@@ -23,6 +23,19 @@ def _is_whatsapp_event_clause():
     )
 
 
+def _is_email_event_clause():
+    """Email activity rows — NULL-safe inverse of WhatsApp filter.
+
+    Plain ``~whatsapp_clause`` wrongly drops rows where details.channel is NULL
+    because ``NOT (NULL OR false)`` is NULL in SQL three-valued logic. Open
+    events from the tracking pixel have no details.channel set.
+    """
+    from sqlalchemy import func as sa_func
+
+    channel = sa_func.coalesce(EmailActivityEvent.details.op("->>")("channel"), "")
+    return sa_func.lower(channel) != "whatsapp", ~EmailActivityEvent.title.ilike("WhatsApp%")
+
+
 def _scoped_query(
     db: Session,
     *,
@@ -39,7 +52,7 @@ def _scoped_query(
     if channel == "whatsapp":
         query = query.filter(_is_whatsapp_event_clause())
     elif channel == "email":
-        query = query.filter(~_is_whatsapp_event_clause())
+        query = query.filter(*_is_email_event_clause())
     return query
 
 
