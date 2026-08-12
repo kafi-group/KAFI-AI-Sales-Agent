@@ -492,6 +492,14 @@ def delete_buyers_bulk(db: Session, buyer_ids: list[int], *, commit: bool = True
         for row in db.query(Contact.id).filter(Contact.buyer_id.in_(ids)).all()
     ]
     if contact_ids:
+        interaction_ids = [
+            row[0]
+            for row in db.query(Interaction.id).filter(Interaction.contact_id.in_(contact_ids)).all()
+        ]
+        if interaction_ids:
+            db.query(EmailActivityEvent).filter(
+                EmailActivityEvent.interaction_id.in_(interaction_ids)
+            ).update({EmailActivityEvent.interaction_id: None}, synchronize_session=False)
         db.query(Interaction).filter(Interaction.contact_id.in_(contact_ids)).delete(
             synchronize_session=False
         )

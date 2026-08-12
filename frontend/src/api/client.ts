@@ -1276,6 +1276,7 @@ export interface LeadTableSectionCountsResponse {
   hyperstore_targeted?: number;
   targeted_distributor?: number;
   targeted_client?: number;
+  incomplete_archives?: number;
 }
 
 export interface LeadTableBulkDeleteResponse {
@@ -1831,6 +1832,14 @@ export const client = {
       method: "POST",
       body: JSON.stringify({ limit_per_pool: limitPerPool }),
     }),
+  promoteIncompleteArchives: (leadIds: number[]) =>
+    request<{ promoted_count: number; promoted_ids: number[]; target: string }>(
+      "/leads/table/promote-incomplete-archives",
+      {
+        method: "POST",
+        body: JSON.stringify({ lead_ids: leadIds }),
+      },
+    ),
   setInterestedClientsMembership: (leadIds: number[], inList: boolean) =>
     request<{ updated_count: number; updated_ids: number[] }>(
       "/leads/table/interested-clients-membership",

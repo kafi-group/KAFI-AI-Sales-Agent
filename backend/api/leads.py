@@ -50,6 +50,8 @@ from api.schemas import (
     LeadTableRemoveFromTargetPoolResponse,
     LeadTableClassifyTargetPoolsRequest,
     LeadTableClassifyTargetPoolsResponse,
+    LeadTablePromoteIncompleteArchivesRequest,
+    LeadTablePromoteIncompleteArchivesResponse,
     ProductInterestEmailRequest,
     QuotationEligibleLeadRead,
     InterestedFollowUpAckRead,
@@ -136,6 +138,9 @@ def _table_assignment_filters(
         )
     # Old clients: show every old_clients row (assigned + unassigned).
     if (source or "").strip().lower() == "old_clients":
+        return None, False, False, None, False
+    # Incomplete archives: all rows in that pool.
+    if (source or "").strip().lower() == "incomplete_archives":
         return None, False, False, None, False
     # Other pool sections (New search lead): hide assigned leads.
     unassigned_only = not placed_section
@@ -764,6 +769,27 @@ def remove_from_target_pool_rows(
         raise HTTPException(400, "Select at least one lead")
     result = leads_module.remove_from_target_pool(db, lead_ids=payload.lead_ids)
     return LeadTableRemoveFromTargetPoolResponse(**result)
+
+
+@router.post(
+    "/table/promote-incomplete-archives",
+    response_model=LeadTablePromoteIncompleteArchivesResponse,
+)
+def promote_incomplete_archives_rows(
+    payload: LeadTablePromoteIncompleteArchivesRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(require_admin),
+):
+    """Manual promotion from Incomplete Data from Archives → Old clients."""
+    if not payload.lead_ids:
+        raise HTTPException(400, "Select at least one lead")
+    from modules.incomplete_archives import promote_from_incomplete_archives
+
+    try:
+        result = promote_from_incomplete_archives(db, lead_ids=payload.lead_ids)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return LeadTablePromoteIncompleteArchivesResponse(**result)
 
 
 @router.post(

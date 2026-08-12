@@ -46,10 +46,11 @@ export type LeadsTableSection =
   | "hyperstore_targeted"
   | "targeted_distributor"
   | "targeted_client"
+  | "incomplete_archives"
   | `assigned:${number}`;
 
 export const TARGETED_POOL_EXCLUDE =
-  "old_clients,hyperstore_targeted,targeted_distributor,targeted_client";
+  "old_clients,incomplete_archives,hyperstore_targeted,targeted_distributor,targeted_client";
 
 export function isTargetedPoolSection(
   section: LeadsTableSection,

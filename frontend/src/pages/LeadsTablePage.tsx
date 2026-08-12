@@ -50,6 +50,7 @@ import {
   IconPlus,
   IconRefresh,
   IconSearch,
+  IconArchive,
   IconSparkles,
   IconTrash,
   IconUpload,
@@ -436,6 +437,7 @@ function sectionTableScope(
   if (section === "hyperstore_targeted") return { source: "hyperstore_targeted" };
   if (section === "targeted_distributor") return { source: "targeted_distributor" };
   if (section === "targeted_client") return { source: "targeted_client" };
+  if (section === "incomplete_archives") return { source: "incomplete_archives" };
   if (isAssignedLeadsSection(section)) {
     const userId = assignedUserIdFromSection(section);
     return userId != null ? { assigned_to_user_id: userId } : {};
@@ -476,6 +478,7 @@ function sectionTableParams(
       ...(intakeMethod !== "all" ? { intake_method: intakeMethod } : {}),
     };
   }
+  if (section === "incomplete_archives") return { source: "incomplete_archives" };
   if (section === "interested_clients") return { call_outcome: "follow_up" };
   if (section === "sales_interested_clients") return { in_interested_clients: true };
   if (section === "not_interested_clients") return { call_outcome: "not_interested" };
@@ -498,6 +501,7 @@ function sectionTitle(
   if (section === "hyperstore_targeted") return "Hyperstore Target";
   if (section === "targeted_distributor") return "Targeted Distributors";
   if (section === "targeted_client") return "Targeted Client";
+  if (section === "incomplete_archives") return "Incomplete Data from Archives";
   if (section === "interested_clients") return "Follow up clients";
   if (section === "sales_interested_clients") return "Interested Clients";
   if (section === "not_interested_clients") return "Not interested";
@@ -525,6 +529,9 @@ function sectionDescription(
   if (section === "targeted_client") {
     return "Hand-picked priority clients — use Add to Targeted Client on any table row selection. No auto keyword matching.";
   }
+  if (section === "incomplete_archives") {
+    return "Partial rows from archives — name only, phone only, product only (e.g. Salt), or mixed columns. Edit manually or use Research to fill gaps. Promote to Old clients when complete (manual only).";
+  }
   if (section === "old_clients") {
     return isAdmin
       ? "All past clients from your spreadsheet — assigned and unassigned. Kept separate from Discover Leads — companies here are never mixed into new discoveries."
@@ -549,7 +556,8 @@ function sectionDescription(
 }
 
 function targetPoolIntakeMethod(section: LeadsTableSection): "upload" | "discover" {
-  if (section === "old_clients" || section === "master") return "upload";
+  if (section === "old_clients" || section === "incomplete_archives" || section === "master")
+    return "upload";
   if (section === "all") return "discover";
   if (isTargetedPoolSection(section)) return "upload";
   return "discover";
@@ -581,6 +589,9 @@ function sectionEmptyMessage(section: LeadsTableSection): string | null {
   }
   if (section === "not_received_call_clients") {
     return "No clients listed yet. After a call, label the client as Did not receive call, then set a reminder date with the calendar.";
+  }
+  if (section === "incomplete_archives") {
+    return "No partial archive rows yet. Rows with only a name, phone, or product (e.g. Salt) land here instead of being deleted.";
   }
   if (isAssignedLeadsSection(section)) {
     return "No leads sent by an admin to this user yet. Assign leads from Scrapped Leads or Old clients to move them here.";
@@ -797,6 +808,7 @@ export function LeadsTablePage({
   const [populatingPool, setPopulatingPool] = useState(false);
   const [removingFromPool, setRemovingFromPool] = useState(false);
   const [classifyingPools, setClassifyingPools] = useState(false);
+  const [promotingIncomplete, setPromotingIncomplete] = useState(false);
   const [showCreateLead, setShowCreateLead] = useState(false);
   const [bulkEmailNotice, setBulkEmailNotice] = useState<string | null>(null);
   const [deduping, setDeduping] = useState(false);
@@ -989,21 +1001,34 @@ export function LeadsTablePage({
   /** Old-clients column set + filters on every leads table section. */
   const useClientsFilters = true;
   const isOldClients = section === "old_clients";
+  const isIncompleteArchives = section === "incomplete_archives";
   const isMaster = section === "master";
   const isTargetedPool = isTargetedPoolSection(section);
   const canImportSpreadsheet =
-    section === "all" || section === "old_clients" || isTargetedPool;
+    section === "all" ||
+    section === "old_clients" ||
+    isIncompleteArchives ||
+    isTargetedPool;
   /** Every user can manually add leads on Clients / Master / New search lead / targeted pools. */
   const canAddLead =
     section === "old_clients" ||
+    section === "incomplete_archives" ||
     section === "master" ||
     section === "all" ||
     isTargetedPool;
   const createLeadSource =
-    section === "all" && isAdmin ? "manual" : isTargetedPool ? section : "old_clients";
+    section === "all" && isAdmin
+      ? "manual"
+      : isIncompleteArchives
+        ? "incomplete_archives"
+        : isTargetedPool
+          ? section
+          : "old_clients";
   const canBulkAssign = isAdmin && (section === "all" || section === "old_clients" || isMaster);
   const importSource = isOldClients
     ? "old_clients"
+    : isIncompleteArchives
+      ? "incomplete_archives"
     : isTargetedPool
       ? section
       : "csv";
@@ -1022,7 +1047,8 @@ export function LeadsTablePage({
     !isAssignedLeadsSection(section);
   const callOutcomeEmptyMessage = sectionEmptyMessage(section);
 
-  const isWideLayout = isOldClients || isCallOutcomeSection || isTargetedPool;
+  const isWideLayout =
+    isOldClients || isIncompleteArchives || isCallOutcomeSection || isTargetedPool;
   const columnDefs = useMemo(() => {
     const base = isTargetedPool
       ? TARGETED_POOL_COLUMNS
@@ -1559,6 +1585,35 @@ export function LeadsTablePage({
       setPage(1);
     }
     await populateTargetPoolFrom("discover_leads");
+  }
+
+  async function promoteSelectedFromIncompleteArchives() {
+    if (!isAdmin || !isIncompleteArchives || selected.size === 0 || promotingIncomplete) return;
+    const count = selected.size;
+    const confirmed = window.confirm(
+      `Promote ${count} selected row${count === 1 ? "" : "s"} to Old clients? (Manual promotion only.)`,
+    );
+    if (!confirmed) return;
+    setPromotingIncomplete(true);
+    try {
+      const result = await client.promoteIncompleteArchives([...selected]);
+      const moved = new Set(result.promoted_ids);
+      if (moved.size > 0) {
+        setRows((prev) => prev.filter((row) => !moved.has(row.id)));
+        setTotal((prev) => Math.max(0, prev - moved.size));
+        setFilteredCount((prev) => Math.max(0, prev - moved.size));
+        clearSelection();
+      }
+      await loadSectionCounts();
+      setSaveNotice(
+        `Promoted ${result.promoted_count} row${result.promoted_count === 1 ? "" : "s"} to Old clients.`,
+      );
+      window.setTimeout(() => setSaveNotice(null), 5000);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to promote rows");
+    } finally {
+      setPromotingIncomplete(false);
+    }
   }
 
   async function classifyHyperstoreAndDistributors() {
@@ -2559,6 +2614,17 @@ export function LeadsTablePage({
               Clear
             </ActionButton>
           )}
+          {isIncompleteArchives && isAdmin && selected.size > 0 ? (
+            <ActionButton
+              icon={IconArchive}
+              variant="emerald"
+              onClick={() => void promoteSelectedFromIncompleteArchives()}
+              disabled={promotingIncomplete || bulkOnboarding || editMode}
+              title="Manual promotion to Old clients when data is complete enough"
+            >
+              {promotingIncomplete ? "Promoting…" : `Promote to Old clients (${selected.size})`}
+            </ActionButton>
+          ) : null}
           {isAdmin && selected.size > 0 ? (
             <>
               {section !== "hyperstore_targeted" ? (

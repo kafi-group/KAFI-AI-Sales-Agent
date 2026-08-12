@@ -485,9 +485,18 @@ export function NavIcon({
   if (navId === "whatsapp-inbox" || navId.startsWith("whatsapp"))
     return <LogoWhatsApp size={size} />;
   if (navId === "leads") return <IconSearch {...props} />;
+  if (navId === "data-synthesis") {
+    const emojiSize = size === "xs" ? "text-xs" : size === "md" ? "text-base" : "text-sm";
+    return (
+      <span className={`inline-flex shrink-0 leading-none ${emojiSize}`} aria-hidden>
+        🧩
+      </span>
+    );
+  }
   if (navId === "table" || navId === "master" || navId === "all")
     return <IconTable {...props} />;
   if (navId === "old_clients") return <IconUsers {...props} />;
+  if (navId === "incomplete_archives") return <IconArchive {...props} />;
   if (navId === "sales_interested_clients") return <IconHeart {...props} />;
   if (navId === "interested_clients") return <IconFollowUp {...props} />;
   if (navId === "not_interested_clients") return <IconXCircle {...props} />;
@@ -510,6 +519,7 @@ export function NavIcon({
   if (navId === "client-history") return <IconCalendar {...props} />;
   if (navId === "quotation-agent") return <IconQuote {...props} />;
   if (navId === "chatbot") return <IconRobot {...props} />;
+  if (navId === "sales-assistant") return <IconBook {...props} />;
   if (navId === "ai-mode") return <IconSparkles {...props} />;
   if (navId === "kpi") return <IconChart {...props} />;
   if (navId === "users") return <IconUser {...props} />;

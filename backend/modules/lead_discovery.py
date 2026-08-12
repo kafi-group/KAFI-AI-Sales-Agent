@@ -438,6 +438,8 @@ def _import_scope_for_source(import_source: str | None) -> dict[str, str | None]
     normalized = (import_source or "").strip().lower()
     if normalized == "old_clients":
         return {"source": "old_clients", "exclude_source": None}
+    if normalized == "incomplete_archives":
+        return {"source": "incomplete_archives", "exclude_source": None}
     if normalized == "csv":
         # Leads-table spreadsheet imports only collide with other leads-table rows.
         return {"source": "csv", "exclude_source": None}
@@ -3440,10 +3442,10 @@ def discover_from_csv(
             **_import_scope_for_source(scope_source or "csv"),
             assigned_to_user_id=assigned_to_user_id,
         )
-    elif (scope_source or "").strip().lower() == "old_clients":
+    elif (scope_source or "").strip().lower() in {"old_clients", "incomplete_archives"}:
         existing_names, existing_domains = _existing_buyer_keys(
             db,
-            **_import_scope_for_source("old_clients"),
+            **_import_scope_for_source(scope_source.strip().lower()),
             assigned_to_user_id=assigned_to_user_id,
         )
     else:
@@ -3519,7 +3521,8 @@ def import_candidates(
     # Sales users only check against their own clients, not admin/other users.
     other_names: set[str] = set()
     other_domains: set[str] = set()
-    if (batch_source or "").strip().lower() != "old_clients":
+    batch_source_norm = (batch_source or "").strip().lower()
+    if batch_source_norm not in {"old_clients", "incomplete_archives"}:
         other_names, other_domains = _existing_buyer_keys(
             db,
             source="old_clients",
@@ -3670,7 +3673,7 @@ def import_candidates(
             ):
                 reason = (
                     "Already an old client"
-                    if (batch_source or "").strip().lower() != "old_clients"
+                    if batch_source_norm not in {"old_clients", "incomplete_archives"}
                     else "Already in Discover / Leads table"
                 )
                 skipped.append(
@@ -3723,17 +3726,22 @@ def import_candidates(
                         }
                     )
                 else:
-                    is_clients = (batch_source or "").strip().lower() == "old_clients"
+                    is_clients = batch_source_norm == "old_clients"
+                    is_incomplete = batch_source_norm == "incomplete_archives"
                     if assigned_to_user_id is not None:
                         reason = (
                             "Already in your clients table"
                             if is_clients
+                            else "Already in incomplete archives"
+                            if is_incomplete
                             else "Already in your leads"
                         )
                     else:
                         reason = (
                             "Already in clients table"
                             if is_clients
+                            else "Already in incomplete archives"
+                            if is_incomplete
                             else "Already in leads"
                         )
                     skipped.append({"company_name": name, "reason": reason})
@@ -3754,11 +3762,17 @@ def import_candidates(
                     "intake_method": (
                         "upload"
                         if skip_enrichment
-                        and (batch_source or "").strip().lower()
-                        in {"hyperstore_targeted", "targeted_distributor", "targeted_client"}
+                        and batch_source_norm
+                        in {
+                            "hyperstore_targeted",
+                            "targeted_distributor",
+                            "targeted_client",
+                            "old_clients",
+                            "incomplete_archives",
+                        }
                         else (
                             "discover"
-                            if (batch_source or "").strip().lower()
+                            if batch_source_norm
                             in {"hyperstore_targeted", "targeted_distributor", "targeted_client"}
                             else None
                         )

@@ -147,6 +147,7 @@ function DashboardApp() {
     hyperstore_targeted: 0,
     targeted_distributor: 0,
     targeted_client: 0,
+    incomplete_archives: 0,
     by_assignee: {},
   });
   const [assigneeNavUsers, setAssigneeNavUsers] = useState<AppUser[]>([]);
@@ -870,6 +871,11 @@ function DashboardApp() {
       id: "targeted_client" as const,
       label: "Targeted Client",
       count: tableCounts.targeted_client ?? 0,
+    },
+    {
+      id: "incomplete_archives" as const,
+      label: "Incomplete Data from Archives",
+      count: tableCounts.incomplete_archives ?? 0,
     },
   ];
 

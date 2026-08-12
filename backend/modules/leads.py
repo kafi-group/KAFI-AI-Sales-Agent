@@ -18,6 +18,7 @@ from modules.product_categories import (
     keywords_for_category,
 )
 from modules.research import BuyerProfile, ResearchModule
+from modules.incomplete_archives import INCOMPLETE_ARCHIVES_SOURCE
 
 _orchestrator = Orchestrator()
 _research = ResearchModule()
@@ -25,8 +26,10 @@ _research = ResearchModule()
 TARGETED_POOL_SOURCES = frozenset(
     {"hyperstore_targeted", "targeted_distributor", "targeted_client"}
 )
+
+ARCHIVES_POOL_SOURCES = frozenset({INCOMPLETE_ARCHIVES_SOURCE, "old_clients"})
 TARGETED_POOL_EXCLUDE = ",".join(
-    ["old_clients", *sorted(TARGETED_POOL_SOURCES)]
+    ["old_clients", INCOMPLETE_ARCHIVES_SOURCE, *sorted(TARGETED_POOL_SOURCES)]
 )
 # Buyers imported via Discover Leads (web search, enrichment, CSV in discover tab).
 DISCOVER_LEAD_SOURCES = frozenset(
@@ -1233,6 +1236,7 @@ def _compute_section_counts(
     elif assigned_to_user_id is not None:
         buyer_query = buyer_query.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
 
+    incomplete_archives_ids: set[int] = set()
     old_client_ids: set[int] = set()
     other_ids: set[int] = set()
     unassigned_old_ids: set[int] = set()
@@ -1244,8 +1248,11 @@ def _compute_section_counts(
         source_key = (source or "").strip().lower()
         if source_key in pool_counts:
             pool_counts[source_key] += 1
+        is_incomplete = source_key == INCOMPLETE_ARCHIVES_SOURCE
         is_old = source_key == "old_clients"
-        if is_old:
+        if is_incomplete:
+            incomplete_archives_ids.add(buyer_id)
+        elif is_old:
             old_client_ids.add(buyer_id)
         else:
             other_ids.add(buyer_id)
@@ -1307,6 +1314,7 @@ def _compute_section_counts(
         "hyperstore_targeted": pool_counts.get("hyperstore_targeted", 0),
         "targeted_distributor": pool_counts.get("targeted_distributor", 0),
         "targeted_client": pool_counts.get("targeted_client", 0),
+        "incomplete_archives": len(incomplete_archives_ids),
     }
 
 
@@ -1678,7 +1686,15 @@ def dedupe_leads_table(
         buyer.id: buyers_module.buyer_data_score(db, buyer) for buyer in buyers
     }
 
+    from modules.incomplete_archives import (
+        has_salvage_data,
+        merge_duplicate_into_keeper,
+        primary_contact,
+        relocate_buyer_to_incomplete_archives,
+    )
+
     remove_ids: list[int] = []
+    relocated_ids: list[int] = []
     groups: list[dict[str, object]] = []
 
     for cluster in clusters.values():
@@ -1693,7 +1709,18 @@ def dedupe_leads_table(
             ),
         )
         removed = [buyer for buyer in cluster if buyer.id != keeper.id]
-        remove_ids.extend(buyer.id for buyer in removed)
+        for loser in removed:
+            merge_duplicate_into_keeper(db, keeper, loser)
+            loser_contact = primary_contact(db, loser.id)
+            if relocate_buyer_to_incomplete_archives(
+                db, loser.id, reason="dedupe_duplicate", commit=False
+            ):
+                relocated_ids.append(loser.id)
+            elif has_salvage_data(loser, loser_contact):
+                loser.source = INCOMPLETE_ARCHIVES_SOURCE
+                relocated_ids.append(loser.id)
+            else:
+                remove_ids.append(loser.id)
         groups.append(
             {
                 "company_name": keeper.company_name,
@@ -1704,28 +1731,29 @@ def dedupe_leads_table(
         )
 
     removed_count = 0
-    # Delete in small chunks — large bulk deletes hit Supabase statement_timeout
-    # when row locks are contested (e.g. a concurrent import).
-    import time
+    if remove_ids:
+        import time
 
-    from sqlalchemy import text
-    from sqlalchemy.exc import OperationalError
+        from sqlalchemy import text
+        from sqlalchemy.exc import OperationalError
 
-    CHUNK = 40
-    for start in range(0, len(remove_ids), CHUNK):
-        chunk = remove_ids[start : start + CHUNK]
-        for attempt in range(4):
-            try:
-                db.execute(text("SET LOCAL statement_timeout = '60s'"))
-                removed_count += buyers_module.delete_buyers_bulk(db, chunk, commit=True)
-                break
-            except OperationalError:
-                db.rollback()
-                if attempt >= 3:
-                    raise
-                time.sleep(1.5 * (attempt + 1))
+        CHUNK = 40
+        for start in range(0, len(remove_ids), CHUNK):
+            chunk = remove_ids[start : start + CHUNK]
+            for attempt in range(4):
+                try:
+                    db.execute(text("SET LOCAL statement_timeout = '60s'"))
+                    removed_count += buyers_module.delete_buyers_bulk(db, chunk, commit=True)
+                    break
+                except OperationalError:
+                    db.rollback()
+                    if attempt >= 3:
+                        raise
+                    time.sleep(1.5 * (attempt + 1))
+    else:
+        db.commit()
 
-    if removed_count:
+    if removed_count or relocated_ids:
         invalidate_lead_table_filters_cache()
         invalidate_section_counts_cache()
 
@@ -1736,6 +1764,7 @@ def dedupe_leads_table(
         action="table_deduped",
         details={
             "removed_count": removed_count,
+            "relocated_to_incomplete": len(relocated_ids),
             "groups": len(groups),
             "source": source,
             "exclude_source": exclude_source,
@@ -1744,6 +1773,7 @@ def dedupe_leads_table(
 
     return {
         "removed_count": removed_count,
+        "relocated_count": len(relocated_ids),
         "kept_count": len(buyers) - removed_count,
         "groups": groups,
     }
@@ -1760,10 +1790,17 @@ def cleanup_sparse_csv_leads(
     assigned_to_user_id: int | None = None,
     unassigned_only: bool = False,
 ) -> dict[str, object]:
-    """Remove sparse CSV/old-client imports that have almost no scraped details."""
+    """Move sparse CSV/old-client imports to Incomplete Data from Archives (no deletes)."""
     from modules.audit import log_action
+    from modules.incomplete_archives import (
+        has_salvage_data,
+        is_incomplete_archives_source,
+        merge_duplicate_into_keeper,
+        relocate_buyer_to_incomplete_archives,
+        primary_contact,
+    )
 
-    removed: list[dict[str, object]] = []
+    relocated: list[dict[str, object]] = []
     excluded = {
         part.strip().lower()
         for part in (exclude_source or "").split(",")
@@ -1791,12 +1828,17 @@ def cleanup_sparse_csv_leads(
         ]
 
     for buyer in candidates:
+        if is_incomplete_archives_source(buyer.source):
+            continue
         if not buyers_module.is_sparse_buyer(db, buyer):
             continue
-        company_name = buyer.company_name
-        buyer_id = buyer.id
-        if buyers_module.delete_buyer(db, buyer_id, commit=False):
-            removed.append({"id": buyer_id, "company_name": company_name})
+        contact = primary_contact(db, buyer.id)
+        if not has_salvage_data(buyer, contact):
+            continue
+        if relocate_buyer_to_incomplete_archives(
+            db, buyer.id, reason="sparse_import", commit=False
+        ):
+            relocated.append({"id": buyer.id, "company_name": buyer.company_name})
 
     db.commit()
 
@@ -1804,17 +1846,19 @@ def cleanup_sparse_csv_leads(
         db,
         entity_type="buyer",
         entity_id=0,
-        action="sparse_csv_cleanup",
+        action="sparse_csv_relocated_incomplete",
         details={
-            "removed_count": len(removed),
+            "relocated_count": len(relocated),
             "source": source,
             "exclude_source": exclude_source,
         },
     )
 
     return {
-        "removed_count": len(removed),
-        "removed": removed,
+        "removed_count": 0,
+        "relocated_count": len(relocated),
+        "relocated": relocated,
+        "removed": [],
     }
 
 
