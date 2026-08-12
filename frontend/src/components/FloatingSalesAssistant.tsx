@@ -9,10 +9,8 @@ import type { IndexAction } from "../data/indexSections";
 
 const STORAGE_KEY = "kafi_sales_assistant_code";
 export const OPEN_SALES_ASSISTANT_EVENT = "kafi:open-sales-assistant";
-const FAB_SIZE = 56;
 const PANEL_WIDTH = 520;
-/** Keep above Windows taskbar and the dialpad FAB. */
-const FAB_OFFSET = { left: 16, bottom: 88 };
+const PANEL_OFFSET = { left: 16, bottom: 24 };
 
 type UiMessage = {
   id: string;
@@ -86,7 +84,7 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
           id: msgId(),
           role: "assistant",
           content:
-            "Sales assistant ready. Ask about calls, team activity, or say “open WhatsApp” / “go to inbox”.",
+            "FAQ ready. Ask about calls, team activity, or say “open WhatsApp” / “go to inbox”.",
         },
       ]);
     } catch (e) {
@@ -133,7 +131,7 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
       }
     } catch (e) {
       setMessages((prev) => prev.filter((m) => m.id !== thinking.id));
-      onError(e instanceof Error ? e.message : "Sales assistant could not respond");
+      onError(e instanceof Error ? e.message : "FAQ could not respond");
     } finally {
       setSending(false);
     }
@@ -143,8 +141,8 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
     <div
       className="fixed z-[90] flex flex-col rounded-2xl border border-violet-500/30 bg-slate-950/95 shadow-2xl shadow-violet-950/40 backdrop-blur-md"
       style={{
-        left: FAB_OFFSET.left,
-        bottom: open ? FAB_OFFSET.bottom + FAB_SIZE + 12 : FAB_OFFSET.bottom,
+        left: PANEL_OFFSET.left,
+        bottom: PANEL_OFFSET.bottom,
         width: PANEL_WIDTH,
         maxWidth: "calc(100vw - 32px)",
         maxHeight: "min(640px, calc(100dvh - 96px))",
@@ -152,7 +150,7 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
     >
       <div className="flex items-center justify-between gap-2 border-b border-slate-800 px-3 py-2.5">
         <div>
-          <p className="text-base font-semibold text-violet-200">Sales assistant</p>
+          <p className="text-base font-semibold text-violet-200">FAQ</p>
           <p className="text-xs text-slate-500">Calls · activity · navigation</p>
         </div>
         <button
@@ -259,29 +257,6 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
   return createPortal(
     <>
       {open && panel}
-      <button
-        type="button"
-        aria-label="Sales assistant"
-        title="Sales assistant (code required)"
-        onClick={() => setOpen((v) => !v)}
-        className="fixed z-[89] flex items-center justify-center rounded-full border border-violet-500/40 bg-violet-700 text-white shadow-lg shadow-violet-950/50 hover:bg-violet-600"
-        style={{
-          left: FAB_OFFSET.left,
-          bottom: FAB_OFFSET.bottom,
-          width: FAB_SIZE,
-          height: FAB_SIZE,
-        }}
-      >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M12 3c-4.4 0-8 2.7-8 6v5l-2 2v1h20v-1l-2-2v-5c0-3.3-3.6-6-8-6Z"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-          />
-          <path d="M9 19a3 3 0 0 0 6 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      </button>
     </>,
     document.body,
   );

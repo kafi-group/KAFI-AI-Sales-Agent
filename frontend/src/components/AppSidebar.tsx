@@ -278,16 +278,16 @@ export function AppSidebar({
 
       <aside
         className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r border-slate-800 bg-slate-950 h-dvh transition-[width,transform] duration-200 ease-out overflow-hidden
-          w-[min(18rem,85vw)]
+          w-[min(20rem,88vw)]
           ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
           lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 lg:bg-slate-900/50
-          ${desktopOpen ? "lg:w-64 lg:border-r" : "lg:w-0 lg:border-0"}
+          ${desktopOpen ? "lg:w-80 lg:border-r" : "lg:w-0 lg:border-0"}
         `}
         aria-label="Main navigation"
         aria-hidden={!mobileOpen && !desktopOpen}
       >
         <div
-          className={`w-[min(18rem,85vw)] lg:w-64 shrink-0 flex flex-col h-full ${
+          className={`w-[min(20rem,88vw)] lg:w-80 shrink-0 flex flex-col h-full ${
             desktopOpen ? "" : "lg:pointer-events-none lg:opacity-0"
           }`}
         >
@@ -345,7 +345,7 @@ export function AppSidebar({
                   className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-left transition text-slate-300 hover:bg-slate-800 hover:text-slate-100 group"
                 >
                   <span className="flex items-center gap-2.5 truncate min-w-0">
-                    <NavIcon navId="chatbot" className={navIconClass(false)} />
+                    <NavIcon navId="sales-assistant" className={navIconClass(false)} />
                     <span className="truncate">{item.label}</span>
                   </span>
                 </button>

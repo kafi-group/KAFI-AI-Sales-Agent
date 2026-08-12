@@ -31,6 +31,7 @@ class PersonalizedFollowupSend(BaseModel):
     template_name: Optional[str] = None
     template_language: str = "en_US"
     template_variables: list[str] = Field(default_factory=list)
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _generate_in_background(draft_id: int) -> None:
@@ -135,6 +136,7 @@ def send_personalized_followup(
             template_name=body.template_name,
             template_language=body.template_language,
             template_variables=body.template_variables,
+            attachments=body.attachments or None,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

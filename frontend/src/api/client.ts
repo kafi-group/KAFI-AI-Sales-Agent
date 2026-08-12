@@ -773,6 +773,7 @@ export interface PersonalizedFollowupSendPayload {
   template_name?: string;
   template_language?: string;
   template_variables?: string[];
+  attachments?: EmailAttachment[];
 }
 
 export interface PersonalizedFollowupSendResponse {

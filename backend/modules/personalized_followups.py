@@ -403,6 +403,7 @@ def send_draft(
     template_name: str | None = None,
     template_language: str = "en_US",
     template_variables: list[str] | None = None,
+    attachments: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Send the reviewed message via email and/or WhatsApp (human-approved).
 
@@ -495,6 +496,7 @@ def send_draft(
                 contact_id=draft.contact_id,
                 subject=draft.subject or "",
                 body=draft.email_body or "",
+                attachments=attachments,
             )
             email_interaction_id = email_draft.id
             _approved, send_result = comms.approve_draft(

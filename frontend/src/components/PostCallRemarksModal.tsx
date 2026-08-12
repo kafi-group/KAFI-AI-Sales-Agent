@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { client, type PersonalizedFollowupDraft } from "../api/client";
+import { client, type EmailAttachment, type PersonalizedFollowupDraft } from "../api/client";
 import { useCallQueueOptional } from "../hooks/useCallQueue";
 import { useTwilioVoice } from "../hooks/useTwilioVoice";
 import { type CallOutcome, callOutcomeSectionHint } from "../utils/callOutcomes";
+import { deriveWhatsAppFromEmail } from "../utils/channelSync";
 import { autocorrectText } from "../utils/spelling";
 import { CallRemarksForm } from "./CallRemarksForm";
+import { EmailAttachmentsField } from "./EmailAttachmentsField";
 import { ActionButton } from "./ui/ActionButton";
-import { IconX } from "./icons/AppIcons";
+import { IconWhatsApp, IconX } from "./icons/AppIcons";
 
 interface PostCallRemarksModalProps {
   onError: (message: string) => void;
@@ -28,14 +30,30 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
   const [draftLoading, setDraftLoading] = useState(false);
   const [sendingChannel, setSendingChannel] = useState<string | null>(null);
   const [step, setStep] = useState<"remarks" | "confirm">("remarks");
+  const [subject, setSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [attachments, setAttachments] = useState<EmailAttachment[]>([]);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftNotice, setDraftNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (!pendingFollowUp) return;
     setRemarks("");
     setOutcome("");
     setDraft(null);
+    setSubject("");
+    setEmailBody("");
+    setAttachments([]);
+    setDraftNotice(null);
     setStep("remarks");
   }, [pendingFollowUp]);
+
+  useEffect(() => {
+    if (!draft) return;
+    setSubject(draft.subject || "");
+    setEmailBody(draft.email_body || draft.whatsapp_body || "");
+    setAttachments([]);
+  }, [draft?.id]);
 
   if (!pendingFollowUp || bulkOwnsFollowUp) return null;
 
@@ -74,12 +92,46 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     }
   }
 
+  async function saveDraftEdits(showNotice = true) {
+    if (!draft) return false;
+    setSavingDraft(true);
+    setDraftNotice(null);
+    try {
+      const updated = await client.updatePersonalizedFollowup(draft.id, {
+        subject,
+        email_body: emailBody,
+      });
+      setDraft(updated);
+      setSubject(updated.subject || subject);
+      setEmailBody(updated.email_body || emailBody);
+      if (showNotice) {
+        setDraftNotice("Draft saved. WhatsApp will mirror the email text when sent.");
+      }
+      return true;
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to save draft");
+      return false;
+    } finally {
+      setSavingDraft(false);
+    }
+  }
+
   async function sendDraft(channels: "email" | "whatsapp" | "whatsapp_personal" | "all") {
     if (!draft) return;
     setSendingChannel(channels);
+    setDraftNotice(null);
     try {
-      await client.sendPersonalizedFollowup(draft.id, { channels });
-      clearPendingFollowUp();
+      const saved = await saveDraftEdits(false);
+      if (!saved) return;
+      const result = await client.sendPersonalizedFollowup(draft.id, {
+        channels,
+        attachments: channels === "email" || channels === "all" ? attachments : undefined,
+      });
+      setDraft(result.draft);
+      setDraftNotice(result.message);
+      if (result.email_sent || result.whatsapp_sent) {
+        window.setTimeout(() => clearPendingFollowUp(), 1200);
+      }
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to send confirmation");
     } finally {
@@ -91,6 +143,8 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     clearPendingFollowUp();
   }
 
+  const whatsappPreview = deriveWhatsAppFromEmail(emailBody);
+
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60">
       <div
@@ -100,14 +154,13 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
       >
         <div>
           <h3 id="post-call-title" className="text-lg font-medium text-slate-100">
-            {step === "confirm" ? "Call confirmation ready" : "Call finished"}
+            {step === "confirm" ? "Review & send confirmation" : "Call finished"}
           </h3>
           <p className="text-sm text-slate-400 mt-1">
             {step === "confirm" ? (
               <>
-                Email and WhatsApp drafts for{" "}
-                <span className="text-slate-200">{pendingFollowUp.label}</span> — review and send
-                with one click.
+                Edit the message, attach files for email, then send to{" "}
+                <span className="text-slate-200">{pendingFollowUp.label}</span>.
               </>
             ) : (
               <>
@@ -149,29 +202,56 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
           <>
             {draftLoading ? (
               <p className="text-sm text-slate-400 animate-pulse">Preparing email & WhatsApp drafts…</p>
-            ) : draft?.status === "ready" ? (
+            ) : draft?.status === "ready" || draft?.status === "sent" ? (
               <div className="space-y-4">
                 <label className="block">
                   <span className="text-xs text-slate-400">Email subject</span>
                   <input
-                    readOnly
-                    value={draft.subject || ""}
-                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
+                    value={subject}
+                    onChange={(e) => setSubject(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-sky-500"
                   />
                 </label>
                 <label className="block">
-                  <span className="text-xs text-slate-400">Message (email & WhatsApp)</span>
+                  <span className="text-xs text-slate-400">Email message</span>
                   <textarea
-                    readOnly
                     rows={8}
-                    value={draft.email_body || draft.whatsapp_body || ""}
-                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
+                    value={emailBody}
+                    onChange={(e) => setEmailBody(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-sky-500"
                   />
                 </label>
+                <EmailAttachmentsField
+                  attachments={attachments}
+                  onChange={setAttachments}
+                  disabled={Boolean(sendingChannel) || savingDraft}
+                  label="Email attachments"
+                  hint="Optional — PDF, images, Excel, etc. Included when you send email."
+                />
+                <label className="block">
+                  <span className="text-xs text-slate-400">WhatsApp preview (auto-synced from email)</span>
+                  <textarea
+                    readOnly
+                    rows={4}
+                    value={whatsappPreview}
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-400"
+                  />
+                </label>
+                {draftNotice ? (
+                  <p className="text-sm text-emerald-300/90">{draftNotice}</p>
+                ) : null}
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    disabled={Boolean(sendingChannel)}
+                    disabled={Boolean(sendingChannel) || savingDraft}
+                    onClick={() => void saveDraftEdits()}
+                    className="rounded-lg border border-slate-600 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 px-3 py-2 text-sm font-medium text-slate-100"
+                  >
+                    {savingDraft ? "Saving…" : "Save draft"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={Boolean(sendingChannel) || savingDraft}
                     onClick={() => void sendDraft("email")}
                     className="rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-50 px-3 py-2 text-sm font-medium"
                   >
@@ -179,23 +259,25 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                   </button>
                   <button
                     type="button"
-                    disabled={Boolean(sendingChannel)}
+                    disabled={Boolean(sendingChannel) || savingDraft}
                     onClick={() => void sendDraft("whatsapp")}
-                    className="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-3 py-2 text-sm font-medium"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-3 py-2 text-sm font-medium"
                   >
+                    <IconWhatsApp size="xs" className="text-white" />
                     {sendingChannel === "whatsapp" ? "Sending…" : "WhatsApp Meta"}
                   </button>
                   <button
                     type="button"
-                    disabled={Boolean(sendingChannel)}
+                    disabled={Boolean(sendingChannel) || savingDraft}
                     onClick={() => void sendDraft("whatsapp_personal")}
-                    className="rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 px-3 py-2 text-sm font-medium"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 px-3 py-2 text-sm font-medium"
                   >
+                    <IconWhatsApp size="xs" className="text-white" />
                     {sendingChannel === "whatsapp_personal" ? "Sending…" : "WhatsApp Personal"}
                   </button>
                   <button
                     type="button"
-                    disabled={Boolean(sendingChannel)}
+                    disabled={Boolean(sendingChannel) || savingDraft}
                     onClick={() => void sendDraft("all")}
                     className="rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-50 px-3 py-2 text-sm font-medium"
                   >
@@ -206,7 +288,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
             ) : (
               <p className="text-sm text-amber-200/90">
                 {draft?.generation_error ||
-                  "Draft is still generating — open AI Mode → Personalized emails in a moment."}
+                  "Draft is still generating — open Emails → Personalized emails in a moment."}
               </p>
             )}
             <ActionButton
