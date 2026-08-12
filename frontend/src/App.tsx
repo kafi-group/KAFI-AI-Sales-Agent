@@ -890,7 +890,6 @@ function DashboardApp() {
   const navItems: NavItem[] = [
     { id: "indexes", label: "Indexes", count: 0 },
     { id: "user-manual", label: "User Manual", count: 0 },
-    { id: "whatsapp-qr", label: "WhatsApp QR", count: 0 },
     {
       id: "whatsapp-inbox",
       label: "WhatsApp",
@@ -968,10 +967,10 @@ function DashboardApp() {
       count: 0,
       external: QUOTATION_AGENT_URL,
     },
-    { id: "chatbot", label: "AI Chatbot", count: 0 },
+    { id: "chatbot", label: "Brand assistant", count: 0 },
     {
       id: "sales-assistant",
-      label: "FAQ",
+      label: "FAQ (Management & Sales)",
       count: 0,
       openSalesAssistant: true,
     },

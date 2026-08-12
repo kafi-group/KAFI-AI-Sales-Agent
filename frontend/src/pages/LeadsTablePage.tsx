@@ -35,7 +35,7 @@ import {
 import { CallLeadButton } from "../components/CallLeadButton";
 import { WhatsAppLeadButton } from "../components/WhatsAppLeadButton";
 import { DialpadPhoneText } from "../components/DialpadPhoneText";
-import { EmailComposeButton } from "../components/EmailComposeLink";
+import { EmailLeadButton } from "../components/EmailLeadButton";
 import { Pagination } from "../components/Pagination";
 import { ColumnVisibilityMenu } from "../components/ColumnVisibilityMenu";
 import { ActionButton } from "../components/ui/ActionButton";
@@ -3771,20 +3771,17 @@ export function LeadsTablePage({
                         {editMode ? (
                           cell("contact_email", row.contact_email ?? "", { type: "email" })
                         ) : row.contact_email ? (
-                          <ExpandableCell
-                            text={row.contact_email}
-                            title="Primary Email"
-                            detail={
-                              <div className="pt-2 border-t border-slate-700">
-                                <EmailComposeButton
-                                  row={row}
-                                  email={row.contact_email}
-                                  onError={onError}
-                                  onDraftCreated={showEmailNotice}
-                                />
-                              </div>
-                            }
-                          />
+                          <span className="flex items-center gap-2 min-w-0">
+                            <span className="truncate block" title={row.contact_email}>
+                              {row.contact_email}
+                            </span>
+                            <EmailLeadButton
+                              email={row.contact_email}
+                              row={row}
+                              onError={onError}
+                              compact
+                            />
+                          </span>
                         ) : (
                           "—"
                         )}
@@ -3794,11 +3791,20 @@ export function LeadsTablePage({
                           cell("contact_secondary_email", row.contact_secondary_email ?? "", {
                             type: "email",
                           })
+                        ) : row.contact_secondary_email?.includes("@") ? (
+                          <span className="flex items-center gap-2 min-w-0">
+                            <span className="truncate block" title={row.contact_secondary_email}>
+                              {row.contact_secondary_email}
+                            </span>
+                            <EmailLeadButton
+                              email={row.contact_secondary_email}
+                              row={row}
+                              onError={onError}
+                              compact
+                            />
+                          </span>
                         ) : (
-                          <ExpandableCell
-                            text={row.contact_secondary_email}
-                            title="Secondary Email"
-                          />
+                          "—"
                         )}
                       </td>
                       <td data-col="country" className={TD_MUTED}>
@@ -4171,20 +4177,17 @@ export function LeadsTablePage({
                           {...spellingPropsForLeadField("contact_email")}
                         />
                       ) : row.contact_email ? (
-                        <ExpandableCell
-                          text={row.contact_email}
-                          title="Email"
-                          detail={
-                            <div className="pt-2 border-t border-slate-700">
-                              <EmailComposeButton
-                                row={row}
-                                email={row.contact_email}
-                                onError={onError}
-                                onDraftCreated={showEmailNotice}
-                              />
-                            </div>
-                          }
-                        />
+                        <span className="flex items-center gap-2 min-w-0">
+                          <span className="truncate block" title={row.contact_email}>
+                            {row.contact_email}
+                          </span>
+                          <EmailLeadButton
+                            email={row.contact_email}
+                            row={row}
+                            onError={onError}
+                            compact
+                          />
+                        </span>
                       ) : (
                         "—"
                       )}

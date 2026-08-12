@@ -3,6 +3,7 @@ import { client, type ChatMessage } from "../api/client";
 import { CreateLeadForm } from "../components/CreateLeadForm";
 import { capitalizeFirstLetter } from "../utils/spelling";
 import { parseBrandAssistantLead } from "../utils/parseBrandAssistantLead";
+import { summarizeBrandAssistantDuplicates } from "../utils/checkBrandAssistantDuplicates";
 
 interface ChatbotPageProps {
   onError: (msg: string) => void;
@@ -16,6 +17,11 @@ interface UIMessage {
   provider?: string;
   loading?: boolean;
 }
+
+const COMPANY_DETAILS_PROMPT =
+  "Based on the brand or product we discussed above, provide full company details in a clear structured format: " +
+  "company name, country, head office address, website, phone, email, contact person, designation, " +
+  "social media links, and a short business overview suitable for adding as a sales lead.";
 
 const WELCOME: UIMessage = {
   id: "welcome",
@@ -71,9 +77,13 @@ function UserAvatar() {
 function MessageBubble({
   msg,
   onAddLead,
+  onProvideCompanyDetails,
+  detailsLoading,
 }: {
   msg: UIMessage;
   onAddLead?: (content: string) => void;
+  onProvideCompanyDetails?: (content: string) => void;
+  detailsLoading?: boolean;
 }) {
   const isUser = msg.role === "user";
 
@@ -119,6 +129,16 @@ function MessageBubble({
                 Add new lead
               </button>
             ) : null}
+            {onProvideCompanyDetails && msg.content.trim().length > 40 ? (
+              <button
+                type="button"
+                disabled={detailsLoading}
+                onClick={() => onProvideCompanyDetails(msg.content)}
+                className="text-xs px-2.5 py-1 rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 disabled:opacity-50"
+              >
+                {detailsLoading ? "Loading…" : "Provide company details"}
+              </button>
+            ) : null}
           </div>
         )}
       </div>
@@ -141,6 +161,9 @@ export function ChatbotPage({ onError }: ChatbotPageProps) {
     null,
   );
   const [leadNotice, setLeadNotice] = useState<string | null>(null);
+  const [duplicateSummary, setDuplicateSummary] = useState<string | null>(null);
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [detailsLoading, setDetailsLoading] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -182,61 +205,92 @@ export function ChatbotPage({ onError }: ChatbotPageProps) {
     setImagePreview(null);
   }
 
-  const send = useCallback(async () => {
-    const text = input.trim();
-    if (!text || sending) return;
+  const send = useCallback(
+    async (textOverride?: string) => {
+      const text = (textOverride ?? input).trim();
+      if (!text || sending) return;
 
-    const history: ChatMessage[] = messages
-      .filter((m) => !m.loading && m.id !== "welcome")
-      .map((m) => ({ role: m.role, content: m.content }));
+      const history: ChatMessage[] = messages
+        .filter((m) => !m.loading && m.id !== "welcome")
+        .map((m) => ({ role: m.role, content: m.content }));
 
-    const userMsg: UIMessage = {
-      id: msgId(),
-      role: "user",
-      content: text,
-      imagePreview: imagePreview ?? undefined,
-    };
-    const thinkingMsg: UIMessage = { id: msgId(), role: "assistant", content: "", loading: true };
+      const userMsg: UIMessage = {
+        id: msgId(),
+        role: "user",
+        content: text,
+        imagePreview: textOverride ? undefined : imagePreview ?? undefined,
+      };
+      const thinkingMsg: UIMessage = {
+        id: msgId(),
+        role: "assistant",
+        content: "",
+        loading: true,
+      };
 
-    setMessages((prev) => [...prev, userMsg, thinkingMsg]);
-    setInput("");
-    clearImage();
-    setSending(true);
+      setMessages((prev) => [...prev, userMsg, thinkingMsg]);
+      if (!textOverride) {
+        setInput("");
+        clearImage();
+      }
+      setSending(true);
 
+      try {
+        const resp = await client.sendChatbotMessage({
+          message: text,
+          image: textOverride ? undefined : imageFile ?? undefined,
+          history,
+        });
+
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === thinkingMsg.id
+              ? {
+                  ...m,
+                  content: resp.reply,
+                  provider: resp.provider,
+                  loading: false,
+                }
+              : m,
+          ),
+        );
+      } catch (err) {
+        const errText =
+          err instanceof Error ? err.message : "The product assistant could not respond right now.";
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === thinkingMsg.id
+              ? { ...m, content: `Error: ${errText}`, loading: false }
+              : m,
+          ),
+        );
+        onError(errText);
+      } finally {
+        setSending(false);
+        setDetailsLoading(false);
+      }
+    },
+    [input, sending, messages, imageFile, imagePreview, onError],
+  );
+
+  async function openLeadFromAssistant(content: string) {
+    const parsed = parseBrandAssistantLead(content);
+    setLeadDraft(parsed);
+    setDuplicateSummary(null);
+    setCheckingDuplicates(true);
     try {
-      const resp = await client.sendChatbotMessage({
-        message: text,
-        image: imageFile ?? undefined,
-        history,
-      });
-
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === thinkingMsg.id
-            ? {
-                ...m,
-                content: resp.reply,
-                provider: resp.provider,
-                loading: false,
-              }
-            : m,
-        ),
-      );
-    } catch (err) {
-      const errText =
-        err instanceof Error ? err.message : "The product assistant could not respond right now.";
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === thinkingMsg.id
-            ? { ...m, content: `Error: ${errText}`, loading: false }
-            : m,
-        ),
-      );
-      onError(errText);
+      const summary = await summarizeBrandAssistantDuplicates(parsed);
+      setDuplicateSummary(summary);
+    } catch {
+      setDuplicateSummary(null);
     } finally {
-      setSending(false);
+      setCheckingDuplicates(false);
     }
-  }, [input, sending, messages, imageFile, imagePreview, onError]);
+  }
+
+  async function requestCompanyDetails(_priorAssistantContent: string) {
+    setDetailsLoading(true);
+    await send(COMPANY_DETAILS_PROMPT);
+  }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -261,7 +315,7 @@ export function ChatbotPage({ onError }: ChatbotPageProps) {
         <div>
           <h1 className="text-xl font-semibold text-slate-100">Brand assistant</h1>
           <p className="text-sm text-slate-400 mt-0.5">
-            Upload a product image — brand identification and full company details first.
+            Upload a product image for brand identification and full company details first.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -305,9 +359,15 @@ export function ChatbotPage({ onError }: ChatbotPageProps) {
           <MessageBubble
             key={msg.id}
             msg={msg}
+            detailsLoading={detailsLoading}
             onAddLead={
               msg.role === "assistant" && !msg.loading && msg.id !== "welcome"
-                ? (content) => setLeadDraft(parseBrandAssistantLead(content))
+                ? (content) => void openLeadFromAssistant(content)
+                : undefined
+            }
+            onProvideCompanyDetails={
+              msg.role === "assistant" && !msg.loading && msg.id !== "welcome"
+                ? (content) => void requestCompanyDetails(content)
                 : undefined
             }
           />
@@ -320,6 +380,17 @@ export function ChatbotPage({ onError }: ChatbotPageProps) {
           {leadNotice ? (
             <p className="mb-3 text-sm text-emerald-300">{leadNotice}</p>
           ) : null}
+          {checkingDuplicates ? (
+            <p className="mb-3 text-sm text-slate-500">Checking Master Table for existing records…</p>
+          ) : duplicateSummary ? (
+            <p className="mb-3 text-sm text-amber-200/95 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 whitespace-pre-wrap">
+              {duplicateSummary}
+            </p>
+          ) : (
+            <p className="mb-3 text-sm text-slate-500">
+              No close match found in Master Table for this company or contact.
+            </p>
+          )}
           <CreateLeadForm
             title="Add lead from Brand assistant"
             source="manual"
@@ -327,11 +398,12 @@ export function ChatbotPage({ onError }: ChatbotPageProps) {
             onCancel={() => {
               setLeadDraft(null);
               setLeadNotice(null);
+              setDuplicateSummary(null);
             }}
             onError={onError}
             onSuccess={(id) => {
               setLeadDraft(null);
-              setLeadNotice(`Lead #${id} created — open Master table or New search lead to review.`);
+              setLeadNotice(`Lead #${id} created — open Master Table or New search lead to review.`);
               window.setTimeout(() => setLeadNotice(null), 6000);
             }}
           />

@@ -150,7 +150,7 @@ export function FloatingSalesAssistant({ onNavigate, onError }: Props) {
     >
       <div className="flex items-center justify-between gap-2 border-b border-slate-800 px-3 py-2.5">
         <div>
-          <p className="text-base font-semibold text-violet-200">FAQ</p>
+          <p className="text-base font-semibold text-violet-200">FAQ (Management & Sales)</p>
           <p className="text-xs text-slate-500">Calls · activity · navigation</p>
         </div>
         <button

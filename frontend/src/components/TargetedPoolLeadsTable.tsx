@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { CountrySelect } from "./CountrySelect";
 import { CallLeadButton } from "./CallLeadButton";
 import { DialpadPhoneText } from "./DialpadPhoneText";
+import { EmailLeadButton } from "./EmailLeadButton";
 import { WhatsAppLeadButton } from "./WhatsAppLeadButton";
 import { formatCountryLabel } from "../data/countries";
 import type { LeadTableRow } from "../api/client";
@@ -190,6 +191,23 @@ export function TargetedPoolLeadsTable({
               <span className={`block truncate ${opts?.className ?? ""}`}>{display || "—"}</span>
             );
 
+          const emailCell = (
+            email: string | null | undefined,
+            field: keyof LeadTableRow,
+          ) =>
+            editMode ? (
+              cell(field, email ?? "", { type: "email" })
+            ) : email?.includes("@") ? (
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="truncate block" title={email}>
+                  {email}
+                </span>
+                <EmailLeadButton email={email} row={row} onError={onError} compact />
+              </span>
+            ) : (
+              "—"
+            );
+
           const phoneCell = (
             phone: string | null | undefined,
             field: keyof LeadTableRow,
@@ -273,24 +291,10 @@ export function TargetedPoolLeadsTable({
                 className={`${TD_MUTED} ${COL_EMAIL} ${COL_FIXED}`}
                 onClick={(e) => e.stopPropagation()}
               >
-                {editMode ? (
-                  cell("contact_email", row.contact_email ?? "", { type: "email" })
-                ) : row.contact_email ? (
-                  <span className="truncate block" title={row.contact_email}>
-                    {row.contact_email}
-                  </span>
-                ) : (
-                  "—"
-                )}
+                {emailCell(row.contact_email, "contact_email")}
               </td>
               <td data-col="secondary_email" className={`${TD_MUTED} ${COL_EMAIL2} ${COL_FIXED}`}>
-                {editMode ? (
-                  cell("contact_secondary_email", row.contact_secondary_email ?? "", { type: "email" })
-                ) : (
-                  <span className="truncate block" title={row.contact_secondary_email ?? undefined}>
-                    {row.contact_secondary_email || "—"}
-                  </span>
-                )}
+                {emailCell(row.contact_secondary_email, "contact_secondary_email")}
               </td>
               <td data-col="country" className={TD_MUTED}>
                 {editMode ? (
