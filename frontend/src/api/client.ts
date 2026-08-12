@@ -1953,6 +1953,15 @@ export const client = {
     }),
   listLeadContacts: (leadId: number) =>
     request<Contact[]>(`/leads/${leadId}/contacts`),
+  getLeadDialPhones: (leadId: number) =>
+    request<{
+      phones: Array<{
+        index: number;
+        label: string;
+        phone: string;
+        contact_id?: number;
+      }>;
+    }>(`/leads/${leadId}/dial-phones`),
   createContact: (data: ContactCreate) =>
     request<Contact>("/leads/contacts", { method: "POST", body: JSON.stringify(data) }),
   updateContact: (contactId: number, data: ContactUpdate) =>

@@ -905,6 +905,11 @@ def _dial_phone_options_for_contact(contact: Contact) -> list[dict[str, object]]
     return options
 
 
+def dial_phone_options_for_buyer(db: Session, buyer_id: int) -> list[dict[str, object]]:
+    """Public wrapper for dial options (used by leads API and call center)."""
+    return _dial_phone_options_for_buyer(db, buyer_id)
+
+
 def _dial_phone_options_for_buyer(db: Session, buyer_id: int) -> list[dict[str, object]]:
     """All dialable numbers for a lead across contacts."""
     contacts = (

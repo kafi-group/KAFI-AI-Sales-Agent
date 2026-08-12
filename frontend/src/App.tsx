@@ -989,7 +989,7 @@ function DashboardApp() {
         }}
       />
       <CallingCardOverlay />
-      <BulkCallQueueHost />
+      <BulkCallQueueHost onError={setError} />
       <FloatingDialpad onError={setError} />
       <FloatingSalesAssistant onNavigate={handleIndexNavigate} onError={setError} />
       <div className="min-h-dvh flex">

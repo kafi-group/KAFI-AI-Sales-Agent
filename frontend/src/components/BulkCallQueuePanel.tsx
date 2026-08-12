@@ -8,10 +8,12 @@ import {
 } from "../utils/spelling";
 import { CallingCard } from "./CallingCard";
 import { DraggableFloat } from "./DraggableFloat";
+import { TryAnotherNumberButtons } from "./TryAnotherNumberButtons";
 
 interface BulkCallQueuePanelProps {
   queue: CallQueueState;
   onClose: () => void;
+  onError?: (message: string) => void;
 }
 
 function statusDot(
@@ -51,7 +53,7 @@ function statusDot(
   return <span className="w-2 h-2 rounded-full border border-slate-600 shrink-0" title="Queued" />;
 }
 
-export function BulkCallQueuePanel({ queue, onClose }: BulkCallQueuePanelProps) {
+export function BulkCallQueuePanel({ queue, onClose, onError }: BulkCallQueuePanelProps) {
   const {
     status,
     currentIndex,
@@ -68,6 +70,7 @@ export function BulkCallQueuePanel({ queue, onClose }: BulkCallQueuePanelProps) 
     resume,
     stop,
     skipCurrent,
+    redialAlternatePhone,
     queue: entries,
   } = queue;
 
@@ -311,6 +314,20 @@ export function BulkCallQueuePanel({ queue, onClose }: BulkCallQueuePanelProps) 
                   <p className="text-xs text-red-300/90 mt-1">{currentResult.error}</p>
                 )}
               </div>
+
+              <TryAnotherNumberButtons
+                buyerId={currentEntry.leadId}
+                triedPhones={
+                  currentEntry.triedPhones?.length
+                    ? currentEntry.triedPhones
+                    : currentEntry.phone
+                      ? [currentEntry.phone]
+                      : []
+                }
+                onError={onError ?? (() => undefined)}
+                onBulkRedial={redialAlternatePhone}
+                disabled={savingRemarks}
+              />
 
               <div>
                 <p className="text-xs text-slate-500 mb-1">Outcome</p>

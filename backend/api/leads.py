@@ -257,6 +257,16 @@ def list_lead_contacts(lead_id: int, db: Session = Depends(get_db)):
     return [buyers_module.contact_to_read(contact) for contact in contacts]
 
 
+@router.get("/{lead_id}/dial-phones")
+def list_lead_dial_phones(lead_id: int, db: Session = Depends(get_db)):
+    """All dialable numbers for a lead (main, primary, mobile 2, phone 2, across contacts)."""
+    from modules import calls as calls_module
+
+    if not buyers_module.get_buyer(db, lead_id):
+        raise HTTPException(404, "Lead not found")
+    return {"phones": calls_module.dial_phone_options_for_buyer(db, lead_id)}
+
+
 @router.post("/{lead_id}/product-interest-email", response_model=InteractionRead)
 def create_product_interest_email(
     lead_id: int,

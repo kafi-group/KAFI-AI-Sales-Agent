@@ -8,6 +8,7 @@ import { deriveWhatsAppFromEmail } from "../utils/channelSync";
 import { autocorrectText } from "../utils/spelling";
 import { CallRemarksForm } from "./CallRemarksForm";
 import { EmailAttachmentsField } from "./EmailAttachmentsField";
+import { TryAnotherNumberButtons } from "./TryAnotherNumberButtons";
 import { ActionButton } from "./ui/ActionButton";
 import { IconWhatsApp, IconX } from "./icons/AppIcons";
 
@@ -17,7 +18,8 @@ interface PostCallRemarksModalProps {
 }
 
 export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalProps) {
-  const { pendingFollowUp, clearPendingFollowUp, bulkModeActive } = useTwilioVoice();
+  const { pendingFollowUp, clearPendingFollowUp, clearLeadDialSession, bulkModeActive } =
+    useTwilioVoice();
   const callQueue = useCallQueueOptional();
   const bulkOwnsFollowUp =
     bulkModeActive &&
@@ -84,6 +86,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
         call_outcome: outcome || null,
       });
       onSaved?.(outcome || null);
+      clearLeadDialSession();
       void loadDraft(pendingFollowUp.interactionId);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to save call remarks");
@@ -130,6 +133,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
       setDraft(result.draft);
       setDraftNotice(result.message);
       if (result.email_sent || result.whatsapp_sent) {
+        clearLeadDialSession();
         window.setTimeout(() => clearPendingFollowUp(), 1200);
       }
     } catch (e) {
@@ -140,6 +144,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
   }
 
   function dismiss() {
+    clearLeadDialSession();
     clearPendingFollowUp();
   }
 
@@ -178,6 +183,14 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
 
         {step === "remarks" ? (
           <>
+            {pendingFollowUp.buyerId ? (
+              <TryAnotherNumberButtons
+                buyerId={pendingFollowUp.buyerId}
+                triedPhones={pendingFollowUp.triedPhones ?? []}
+                onError={onError}
+                disabled={saving}
+              />
+            ) : null}
             <CallRemarksForm
               remarks={remarks}
               outcome={outcome}

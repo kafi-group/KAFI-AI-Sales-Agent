@@ -13,6 +13,11 @@ import { client, type CallInitiateResult } from "../api/client";
 export interface PendingCallFollowUp {
   interactionId: number;
   label: string;
+  buyerId?: number | null;
+  contactId?: number | null;
+  dialedPhone?: string | null;
+  /** Numbers already tried this session (same lead, before final remarks). */
+  triedPhones?: string[];
 }
 
 /** Identifies which dialed number currently owns the live call UI. */
@@ -32,6 +37,8 @@ interface TwilioVoiceContextValue {
   clearCallError: () => void;
   pendingFollowUp: PendingCallFollowUp | null;
   clearPendingFollowUp: () => void;
+  /** Reset multi-number retry tracking after remarks are saved or skipped. */
+  clearLeadDialSession: () => void;
   /** When true the global PostCallRemarksModal is suppressed (bulk queue handles it). */
   bulkModeActive: boolean;
   setBulkModeActive: (active: boolean) => void;
@@ -103,9 +110,14 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
   const [pendingFollowUp, setPendingFollowUp] = useState<PendingCallFollowUp | null>(null);
 
   const [bulkModeActive, setBulkModeActive] = useState(false);
+  const leadDialSessionRef = useRef<{ buyerId: number; triedPhones: string[] } | null>(null);
 
   const clearPendingFollowUp = useCallback(() => {
     setPendingFollowUp(null);
+  }, []);
+
+  const clearLeadDialSession = useCallback(() => {
+    leadDialSessionRef.current = null;
   }, []);
 
   const clearCallError = useCallback(() => {
@@ -249,6 +261,21 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
           if (activePrepRef.current?.id === prepForThisCall.id) {
             activePrepRef.current = null;
           }
+          const buyerId = prepForThisCall.buyer_id ?? null;
+          const dialedPhone = prepForThisCall.lead_phone ?? null;
+          let triedPhones: string[] = [];
+          if (buyerId != null && dialedPhone) {
+            const session = leadDialSessionRef.current;
+            if (session?.buyerId === buyerId) {
+              triedPhones = [...session.triedPhones];
+              if (!triedPhones.some((p) => phonesMatch(p, dialedPhone))) {
+                triedPhones.push(dialedPhone);
+              }
+            } else {
+              triedPhones = [dialedPhone];
+            }
+            leadDialSessionRef.current = { buyerId, triedPhones };
+          }
           setPendingFollowUp({
             interactionId: prepForThisCall.id,
             label:
@@ -256,6 +283,10 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
               prepForThisCall.contact_name ||
               prepForThisCall.subject?.replace(/^Call to /, "") ||
               "this call",
+            buyerId,
+            contactId: prepForThisCall.contact_id ?? null,
+            dialedPhone,
+            triedPhones,
           });
         };
         call.on("error", (err) => {
@@ -330,6 +361,7 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
         clearCallError,
         pendingFollowUp,
         clearPendingFollowUp,
+        clearLeadDialSession,
         bulkModeActive,
         setBulkModeActive,
         placeCall,

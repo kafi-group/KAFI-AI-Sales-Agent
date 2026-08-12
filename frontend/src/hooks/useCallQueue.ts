@@ -10,7 +10,7 @@ import {
 } from "react";
 import { client } from "../api/client";
 import { autocorrectText } from "../utils/spelling";
-import { useTwilioVoice } from "./useTwilioVoice";
+import { phonesMatch, useTwilioVoice } from "./useTwilioVoice";
 
 export const BATCH_SIZE = 10;
 
@@ -23,6 +23,8 @@ export interface QueueEntry {
   contactName?: string | null;
   phone: string;
   country?: string | null;
+  /** Numbers already dialed for this lead in the current bulk batch stop. */
+  triedPhones?: string[];
 }
 
 export interface QueueResult {
@@ -62,6 +64,8 @@ export interface CallQueueState {
    * Never advances the queue and never finishes the batch.
    */
   skipCurrent: () => void;
+  /** Redial the current lead on a different number without saving remarks. */
+  redialAlternatePhone: (phone: string, contactId?: number) => void;
 }
 
 const CallQueueContext = createContext<CallQueueState | null>(null);
@@ -138,7 +142,7 @@ function useCallQueueController(): CallQueueState {
 
       const generation = ++dialGenerationRef.current;
 
-      placeCall(entry.leadId, entry.contactId)
+      placeCall(entry.leadId, entry.contactId, entry.phone)
         .then((prep) => {
           // Cancelled by End call / Stop / newer dial.
           if (dialGenerationRef.current !== generation) {
@@ -253,6 +257,40 @@ function useCallQueueController(): CallQueueState {
     hangUp();
     enterRemarksStep();
   }, [enterRemarksStep, hangUp]);
+
+  const redialAlternatePhone = useCallback(
+    (phone: string, contactId?: number) => {
+      if (statusRef.current !== "between") return;
+      const idx = currentIndexRef.current;
+      const entry = queueRef.current[idx];
+      if (!entry) return;
+
+      dialGenerationRef.current += 1;
+      hangUp();
+      clearRemarksFields();
+
+      const tried = [...(entry.triedPhones ?? [])];
+      if (entry.phone && !tried.some((t) => phonesMatch(t, entry.phone))) {
+        tried.push(entry.phone);
+      }
+
+      const updatedQueue = queueRef.current.map((e, i) =>
+        i === idx
+          ? {
+              ...e,
+              phone,
+              contactId: contactId ?? e.contactId,
+              triedPhones: tried,
+            }
+          : e,
+      );
+      queueRef.current = updatedQueue;
+      setQueue(updatedQueue);
+      syncStatus("running");
+      dialEntry(idx);
+    },
+    [clearRemarksFields, dialEntry, hangUp, syncStatus],
+  );
 
   const savePendingAndContinue = useCallback(async () => {
     if (statusRef.current !== "between") return;
@@ -421,6 +459,7 @@ function useCallQueueController(): CallQueueState {
     resume,
     stop,
     skipCurrent,
+    redialAlternatePhone,
   };
 }
 
