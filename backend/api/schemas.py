@@ -1528,6 +1528,12 @@ class WhatsAppTemplateCreateResponse(BaseModel):
     meta_status: str = "PENDING"
 
 
+class WhatsAppTemplateResubmitRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=1024)
+    footer: Optional[str] = Field(default=None, max_length=60)
+    category: Optional[Literal["MARKETING", "UTILITY", "AUTHENTICATION"]] = None
+
+
 class WhatsAppTemplateNotificationRead(BaseModel):
     id: int
     template_id: int

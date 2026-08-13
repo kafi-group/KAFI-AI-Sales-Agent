@@ -1527,6 +1527,12 @@ export interface WhatsAppTemplateCreateResult {
   meta_status: string;
 }
 
+export interface WhatsAppTemplateResubmitPayload {
+  body: string;
+  footer?: string | null;
+  category?: WhatsAppTemplateCreatePayload["category"];
+}
+
 export interface WhatsAppTemplateNotification {
   id: number;
   template_id: number;
@@ -2813,6 +2819,11 @@ export const client = {
   createWhatsAppTemplate: (data: WhatsAppTemplateCreatePayload) =>
     request<WhatsAppTemplateCreateResult>("/whatsapp/templates", {
       method: "POST",
+      body: JSON.stringify(data),
+    }),
+  resubmitWhatsAppTemplate: (templateId: number, data: WhatsAppTemplateResubmitPayload) =>
+    request<WhatsAppTemplateCreateResult>(`/whatsapp/templates/${templateId}`, {
+      method: "PUT",
       body: JSON.stringify(data),
     }),
   listWhatsAppTemplateNotifications: (params: { unreadOnly?: boolean; limit?: number } = {}) => {

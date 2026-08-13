@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { client, type EmailAttachment, type PersonalizedFollowupDraft } from "../api/client";
+import {
+  client,
+  type EmailAttachment,
+  type PersonalizedFollowupDraft,
+  type WhatsAppTemplate,
+} from "../api/client";
 import { useCallQueueOptional } from "../hooks/useCallQueue";
 import { useTwilioVoice } from "../hooks/useTwilioVoice";
 import { type CallOutcome, callOutcomeSectionHint } from "../utils/callOutcomes";
@@ -9,6 +14,7 @@ import { autocorrectText } from "../utils/spelling";
 import { CallRemarksForm } from "./CallRemarksForm";
 import { EmailAttachmentsField } from "./EmailAttachmentsField";
 import { TryAnotherNumberButtons } from "./TryAnotherNumberButtons";
+import { WhatsAppTemplatePicker } from "./WhatsAppTemplatePicker";
 import { ActionButton } from "./ui/ActionButton";
 import { IconWhatsApp, IconX } from "./icons/AppIcons";
 
@@ -37,6 +43,12 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
   const [attachments, setAttachments] = useState<EmailAttachment[]>([]);
   const [savingDraft, setSavingDraft] = useState(false);
   const [draftNotice, setDraftNotice] = useState<string | null>(null);
+  const [waTemplates, setWaTemplates] = useState<WhatsAppTemplate[]>([]);
+  const [waTemplatesLoading, setWaTemplatesLoading] = useState(false);
+  const [waTemplateId, setWaTemplateId] = useState("");
+  const [waTemplateSearch, setWaTemplateSearch] = useState("");
+  const [waTemplateVariables, setWaTemplateVariables] = useState<string[]>([]);
+  const [needsWaTemplate, setNeedsWaTemplate] = useState(false);
 
   useEffect(() => {
     if (!pendingFollowUp) return;
@@ -48,7 +60,50 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     setAttachments([]);
     setDraftNotice(null);
     setStep("remarks");
+    setWaTemplateId("");
+    setWaTemplateSearch("");
+    setWaTemplateVariables([]);
+    setNeedsWaTemplate(false);
   }, [pendingFollowUp]);
+
+  useEffect(() => {
+    if (step !== "confirm") return;
+    let cancelled = false;
+    setWaTemplatesLoading(true);
+    client
+      .listWhatsAppTemplates(true)
+      .then((rows) => {
+        if (cancelled) return;
+        setWaTemplates(rows);
+        setWaTemplateId((current) => {
+          if (current && rows.some((t) => String(t.id) === current)) return current;
+          return rows.length > 0 ? String(rows[0].id) : "";
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setWaTemplates([]);
+      })
+      .finally(() => {
+        if (!cancelled) setWaTemplatesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [step]);
+
+  const selectedWaTemplate = waTemplates.find((t) => String(t.id) === waTemplateId);
+
+  useEffect(() => {
+    const count = selectedWaTemplate?.variable_count ?? 0;
+    setWaTemplateVariables((prev) => {
+      if (prev.length === count) return prev;
+      const next = Array(count).fill("");
+      for (let i = 0; i < Math.min(prev.length, count); i += 1) {
+        next[i] = prev[i];
+      }
+      return next;
+    });
+  }, [selectedWaTemplate?.id, selectedWaTemplate?.variable_count]);
 
   useEffect(() => {
     if (!draft) return;
@@ -121,6 +176,12 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
 
   async function sendDraft(channels: "email" | "whatsapp" | "whatsapp_personal" | "all") {
     if (!draft) return;
+    const wantsWaMeta = channels === "whatsapp" || channels === "all";
+    if (wantsWaMeta && needsWaTemplate && !selectedWaTemplate) {
+      onError("Select an approved Meta template for WhatsApp Business send.");
+      return;
+    }
+    const useWaTemplate = wantsWaMeta && Boolean(selectedWaTemplate);
     setSendingChannel(channels);
     setDraftNotice(null);
     try {
@@ -129,15 +190,43 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
       const result = await client.sendPersonalizedFollowup(draft.id, {
         channels,
         attachments: channels === "email" || channels === "all" ? attachments : undefined,
+        ...(useWaTemplate
+          ? {
+              template_name: selectedWaTemplate!.name,
+              template_language: selectedWaTemplate!.language,
+              template_variables: waTemplateVariables,
+            }
+          : {}),
       });
       setDraft(result.draft);
-      setDraftNotice(result.message);
-      if (result.email_sent || result.whatsapp_sent) {
-        clearLeadDialSession();
-        window.setTimeout(() => clearPendingFollowUp(), 1200);
+      const waFailedNeedsTemplate =
+        result.needs_whatsapp_template ||
+        (!result.whatsapp_sent &&
+          channels !== "email" &&
+          /template/i.test(result.message || result.draft.whatsapp_send_message || ""));
+      if (waFailedNeedsTemplate) {
+        setNeedsWaTemplate(true);
+        setDraftNotice(
+          result.email_sent
+            ? "Email sent. Outside the 24h WhatsApp window — confirm the approved template below and send again."
+            : "Outside the 24h WhatsApp window — select an approved template and send WhatsApp Meta again.",
+        );
+      } else {
+        setNeedsWaTemplate(false);
+        setDraftNotice(result.message);
+        if (result.email_sent || result.whatsapp_sent) {
+          clearLeadDialSession();
+          window.setTimeout(() => clearPendingFollowUp(), 1200);
+        }
       }
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to send confirmation");
+      const message = e instanceof Error ? e.message : "Failed to send confirmation";
+      if ((channels === "whatsapp" || channels === "all") && /template/i.test(message)) {
+        setNeedsWaTemplate(true);
+        setDraftNotice("Outside the 24h WhatsApp window — select an approved template and retry.");
+      } else {
+        onError(message);
+      }
     } finally {
       setSendingChannel(null);
     }
@@ -266,6 +355,30 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                     className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-400"
                   />
                 </label>
+                <div
+                  className={`rounded-lg border p-3 space-y-2 ${
+                    needsWaTemplate
+                      ? "border-amber-500/40 bg-amber-500/10"
+                      : "border-emerald-500/25 bg-emerald-500/5"
+                  }`}
+                >
+                  <p className="text-xs text-slate-300">
+                    <strong className="text-emerald-300">WhatsApp Meta</strong> — searchable
+                    approved templates. Use a template for cold outreach; inside the 24h reply
+                    window free text may work without one.
+                  </p>
+                  <WhatsAppTemplatePicker
+                    templates={waTemplates}
+                    loading={waTemplatesLoading}
+                    templateId={waTemplateId}
+                    onTemplateIdChange={setWaTemplateId}
+                    search={waTemplateSearch}
+                    onSearchChange={setWaTemplateSearch}
+                    variables={waTemplateVariables}
+                    onVariablesChange={setWaTemplateVariables}
+                    compact
+                  />
+                </div>
                 {draftNotice ? (
                   <p className="text-sm text-emerald-300/90">{draftNotice}</p>
                 ) : null}

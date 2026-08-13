@@ -22,6 +22,7 @@ from api.schemas import (
     WhatsAppReplyResponse,
     WhatsAppTemplateCreateRequest,
     WhatsAppTemplateCreateResponse,
+    WhatsAppTemplateResubmitRequest,
     WhatsAppTemplateNotificationsReadRequest,
     WhatsAppTemplateNotificationsResponse,
     WhatsAppTemplateRead,
@@ -173,6 +174,42 @@ def create_whatsapp_template(
         entity_type="whatsapp_template",
         entity_id=result["template"]["id"],
         action="submitted",
+        actor=user.username,
+        details={
+            "name": result["template"]["name"],
+            "meta_status": result.get("meta_status"),
+        },
+    )
+    return WhatsAppTemplateCreateResponse(**result)
+
+
+@router.put("/templates/{template_id}", response_model=WhatsAppTemplateCreateResponse)
+def resubmit_whatsapp_template(
+    template_id: int,
+    payload: WhatsAppTemplateResubmitRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """Edit a rejected/paused/disabled template and resubmit to Meta for review."""
+    from modules import whatsapp_templates as templates_module
+
+    try:
+        result = templates_module.resubmit_template_for_meta(
+            db,
+            template_id=template_id,
+            user_id=user.id,
+            body=payload.body,
+            footer=payload.footer,
+            category=payload.category,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    log_action(
+        db,
+        entity_type="whatsapp_template",
+        entity_id=result["template"]["id"],
+        action="resubmitted",
         actor=user.username,
         details={
             "name": result["template"]["name"],

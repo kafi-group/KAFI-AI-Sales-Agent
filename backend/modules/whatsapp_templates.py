@@ -255,6 +255,39 @@ def create_template_for_meta(
     }
 
 
+def resubmit_template_for_meta(
+    db: Session,
+    *,
+    template_id: int,
+    user_id: int,
+    body: str,
+    footer: str | None = None,
+    category: str | None = None,
+) -> dict[str, Any]:
+    """Update a local template and resubmit to Meta (rejected / paused / disabled only)."""
+    record = get_template(db, template_id)
+    if not record:
+        raise ValueError("Template not found")
+    if record.status == WhatsAppTemplateStatus.approved:
+        raise ValueError(
+            "Approved templates cannot be changed on Meta. Use Duplicate & submit with a new name."
+        )
+    if record.status == WhatsAppTemplateStatus.pending:
+        raise ValueError(
+            "This template is still pending Meta review. Wait for the decision, or create "
+            "a new template with a different name."
+        )
+    return create_template_for_meta(
+        db,
+        user_id=user_id,
+        name=record.name,
+        category=category or record.category or "UTILITY",
+        language=record.language,
+        body=body,
+        footer=footer,
+    )
+
+
 def handle_template_status_webhook(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
     """Apply Meta message_template_status_update webhook payload."""
     event = (payload.get("event") or payload.get("status") or "").strip().upper()

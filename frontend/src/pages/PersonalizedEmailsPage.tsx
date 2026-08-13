@@ -17,6 +17,7 @@ import {
 } from "../components/icons/AppIcons";
 import { EmailBodyEditor } from "../components/EmailBodyEditor";
 import { ProseInput } from "../components/ProseTextField";
+import { WhatsAppTemplatePicker } from "../components/WhatsAppTemplatePicker";
 import { deriveWhatsAppFromEmail } from "../utils/channelSync";
 
 interface PersonalizedEmailsPageProps {
@@ -97,6 +98,7 @@ export function PersonalizedEmailsPage({
   const [needsTemplate, setNeedsTemplate] = useState(false);
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
   const [templateId, setTemplateId] = useState("");
+  const [templateSearch, setTemplateSearch] = useState("");
   const [variables, setVariables] = useState<string[]>([]);
   const [pendingWaChannel, setPendingWaChannel] = useState<SendChannel | null>(null);
 
@@ -521,49 +523,26 @@ export function PersonalizedEmailsPage({
                     Outside the 24h WhatsApp reply window — select an approved template to
                     send instead of free text.
                   </p>
-                  {templates.length === 0 ? (
-                    <p className="text-xs text-amber-200/80">
-                      No approved templates synced yet. Open{" "}
-                      <strong>WhatsApp templates</strong> and sync from Meta.
-                    </p>
-                  ) : (
-                    <>
-                      <select
-                        value={templateId}
-                        onChange={(e) => setTemplateId(e.target.value)}
-                        className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-slate-200"
-                      >
-                        {templates.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.name} ({t.language})
-                          </option>
-                        ))}
-                      </select>
-                      {variables.map((value, index) => (
-                        <input
-                          key={index}
-                          value={value}
-                          onChange={(e) =>
-                            setVariables((prev) =>
-                              prev.map((v, i) => (i === index ? e.target.value : v)),
-                            )
-                          }
-                          placeholder={`Variable {{${index + 1}}}`}
-                          className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-slate-200"
-                        />
-                      ))}
-                      <ActionButton
-                        icon={IconWhatsApp}
-                        variant="primary"
-                        size="md"
-                        onClick={() => void handleSendWithTemplate()}
-                        disabled={!!sending || !selectedTemplate}
-                        title="Send WhatsApp with template"
-                      >
-                        {sending ? "Sending…" : "Send with template"}
-                      </ActionButton>
-                    </>
-                  )}
+                  <WhatsAppTemplatePicker
+                    templates={templates}
+                    loading={false}
+                    templateId={templateId}
+                    onTemplateIdChange={(id) => setTemplateId(id)}
+                    search={templateSearch}
+                    onSearchChange={setTemplateSearch}
+                    variables={variables}
+                    onVariablesChange={setVariables}
+                  />
+                  <ActionButton
+                    icon={IconWhatsApp}
+                    variant="primary"
+                    size="md"
+                    onClick={() => void handleSendWithTemplate()}
+                    disabled={!!sending || !selectedTemplate}
+                    title="Send WhatsApp with template"
+                  >
+                    {sending ? "Sending…" : "Send with template"}
+                  </ActionButton>
                 </div>
               )}
 

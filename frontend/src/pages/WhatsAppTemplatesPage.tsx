@@ -83,6 +83,10 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
   const [testSending, setTestSending] = useState(false);
   const [templateSearch, setTemplateSearch] = useState("");
 
+  const [editingTemplateId, setEditingTemplateId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<WhatsAppTemplateCreateForm | null>(null);
+  const [resubmitting, setResubmitting] = useState(false);
+
   const refreshNotifications = useCallback(async () => {
     try {
       const data = await client.listWhatsAppTemplateNotifications({ unreadOnly: true, limit: 20 });
@@ -158,6 +162,8 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
       setNotice(result.message);
       setShowCreator(false);
       setCreateForm(DEFAULT_CREATE_FORM);
+      setEditingTemplateId(null);
+      setEditForm(null);
       await refresh();
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to submit template to Meta";
@@ -166,6 +172,81 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function startDuplicateFromTemplate(template: WhatsAppTemplate) {
+    const suffix = template.status === "approved" ? "_v2" : "_rev";
+    setCreateForm({
+      name: `${template.name}${suffix}`.slice(0, 512),
+      category: (template.category?.toUpperCase() as WhatsAppTemplateCategory) || "UTILITY",
+      language: template.language || "en_US",
+      body: template.body_text || DEFAULT_CREATE_FORM.body,
+      footer: DEFAULT_CREATE_FORM.footer,
+    });
+    setShowCreator(true);
+    setEditingTemplateId(null);
+    setEditForm(null);
+    setNotice(null);
+    setSubmitError(null);
+  }
+
+  function startEditTemplate(template: WhatsAppTemplate) {
+    if (template.status === "approved") {
+      startDuplicateFromTemplate(template);
+      setNotice(
+        "Approved templates cannot be edited on Meta — duplicate opened with a new name. Submit when ready.",
+      );
+      return;
+    }
+    if (template.status === "pending") {
+      onError("This template is still pending Meta review. Wait for approval or rejection.");
+      return;
+    }
+    setEditingTemplateId(template.id);
+    setEditForm({
+      name: template.name,
+      category: (template.category?.toUpperCase() as WhatsAppTemplateCategory) || "UTILITY",
+      language: template.language || "en_US",
+      body: template.body_text || "",
+      footer: DEFAULT_CREATE_FORM.footer,
+    });
+    setShowCreator(false);
+    setNotice(null);
+    setSubmitError(null);
+  }
+
+  function cancelEditTemplate() {
+    setEditingTemplateId(null);
+    setEditForm(null);
+    setSubmitError(null);
+  }
+
+  async function handleResubmitEdit(event: FormEvent) {
+    event.preventDefault();
+    if (editingTemplateId == null || !editForm) return;
+    setResubmitting(true);
+    setNotice(null);
+    setSubmitError(null);
+    try {
+      const result = await client.resubmitWhatsAppTemplate(editingTemplateId, {
+        body: editForm.body.trim(),
+        footer: editForm.footer.trim() || null,
+        category: editForm.category,
+      });
+      setNotice(result.message);
+      cancelEditTemplate();
+      await refresh();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to resubmit template";
+      setSubmitError(message);
+      onError(message);
+    } finally {
+      setResubmitting(false);
+    }
+  }
+
+  function canResubmitStatus(status: string): boolean {
+    return status === "rejected" || status === "paused" || status === "disabled";
   }
 
   async function dismissNotifications(ids?: number[]) {
@@ -235,9 +316,10 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
         <div>
           <h2 className="text-lg font-medium text-slate-100">WhatsApp templates</h2>
           <p className="text-sm text-slate-500 mt-1 max-w-2xl">
-            Create templates here and submit them to Meta for review. When Meta approves or
-            rejects a template, you&apos;ll see a notification on this page. Approved templates
-            are available immediately in bulk send and lead WhatsApp compose.
+            Create templates here and submit them to Meta for review. Rejected templates can be
+            edited and resubmitted from the list below. Approved templates must be duplicated with
+            a new name to change wording. When Meta approves or rejects a template, you&apos;ll
+            see a notification on this page.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 shrink-0">
@@ -531,37 +613,132 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
             </p>
           ) : (
             filteredTemplates.map((template) => (
-              <div
-                key={template.id}
-                className="rounded-lg border border-slate-800 bg-slate-950 p-3 flex items-start justify-between gap-3"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-medium text-slate-100">{template.name}</p>
-                    <StatusBadge status={template.status} />
-                    {template.category && (
-                      <span className="px-2 py-0.5 rounded text-xs border border-slate-700 bg-slate-800 text-slate-400">
-                        {template.category}
-                      </span>
+              <div key={template.id} className="space-y-2">
+                <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-medium text-slate-100">{template.name}</p>
+                      <StatusBadge status={template.status} />
+                      {template.category && (
+                        <span className="px-2 py-0.5 rounded text-xs border border-slate-700 bg-slate-800 text-slate-400">
+                          {template.category}
+                        </span>
+                      )}
+                      <span className="text-xs text-slate-500">{template.language}</span>
+                    </div>
+                    {template.body_text && (
+                      <p className="text-xs text-slate-500 mt-1.5 whitespace-pre-wrap line-clamp-3">
+                        {template.body_text}
+                      </p>
                     )}
-                    <span className="text-xs text-slate-500">{template.language}</span>
+                    {template.rejection_reason && (
+                      <p className="text-xs text-red-300/90 mt-2">
+                        Rejection reason: {template.rejection_reason}
+                      </p>
+                    )}
+                    {template.variable_count > 0 && (
+                      <p className="text-xs text-slate-600 mt-1">
+                        {template.variable_count} variable{template.variable_count === 1 ? "" : "s"}
+                      </p>
+                    )}
                   </div>
-                  {template.body_text && (
-                    <p className="text-xs text-slate-500 mt-1.5 whitespace-pre-wrap line-clamp-3">
-                      {template.body_text}
-                    </p>
-                  )}
-                  {template.rejection_reason && (
-                    <p className="text-xs text-red-300/90 mt-2">
-                      Rejection reason: {template.rejection_reason}
-                    </p>
-                  )}
-                  {template.variable_count > 0 && (
-                    <p className="text-xs text-slate-600 mt-1">
-                      {template.variable_count} variable{template.variable_count === 1 ? "" : "s"}
-                    </p>
-                  )}
+                  <div className="flex flex-col gap-1 shrink-0">
+                    {canResubmitStatus(template.status) ? (
+                      <button
+                        type="button"
+                        onClick={() => startEditTemplate(template)}
+                        className="text-xs px-2.5 py-1.5 rounded-md border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20"
+                      >
+                        Edit & resubmit
+                      </button>
+                    ) : template.status === "approved" ? (
+                      <button
+                        type="button"
+                        onClick={() => startDuplicateFromTemplate(template)}
+                        className="text-xs px-2.5 py-1.5 rounded-md border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20"
+                      >
+                        Duplicate & edit
+                      </button>
+                    ) : template.status === "pending" ? (
+                      <span className="text-xs text-slate-500 px-1">Awaiting Meta</span>
+                    ) : null}
+                  </div>
                 </div>
+                {editingTemplateId === template.id && editForm ? (
+                  <form
+                    onSubmit={(e) => void handleResubmitEdit(e)}
+                    className="rounded-lg border border-sky-500/30 bg-sky-950/20 p-4 space-y-3"
+                  >
+                    <p className="text-sm text-sky-200">
+                      Edit <strong>{template.name}</strong> and resubmit to Meta for review.
+                    </p>
+                    <label className="block">
+                      <span className="text-xs text-slate-400">Category</span>
+                      <select
+                        value={editForm.category}
+                        onChange={(e) =>
+                          setEditForm((f) =>
+                            f
+                              ? {
+                                  ...f,
+                                  category: e.target.value as WhatsAppTemplateCategory,
+                                }
+                              : f,
+                          )
+                        }
+                        className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+                      >
+                        <option value="UTILITY">Utility</option>
+                        <option value="MARKETING">Marketing</option>
+                        <option value="AUTHENTICATION">Authentication</option>
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-xs text-slate-400">Body</span>
+                      <textarea
+                        rows={8}
+                        value={editForm.body}
+                        onChange={(e) =>
+                          setEditForm((f) =>
+                            f ? { ...f, body: capitalizeFirstLetter(e.target.value) } : f,
+                          )
+                        }
+                        className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono"
+                        required
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs text-slate-400">Footer (optional)</span>
+                      <input
+                        value={editForm.footer}
+                        onChange={(e) =>
+                          setEditForm((f) => (f ? { ...f, footer: e.target.value } : f))
+                        }
+                        className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+                        maxLength={60}
+                      />
+                    </label>
+                    {submitError && editingTemplateId === template.id ? (
+                      <p className="text-sm text-red-300">{submitError}</p>
+                    ) : null}
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={cancelEditTemplate}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={resubmitting}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium disabled:opacity-50"
+                      >
+                        {resubmitting ? "Submitting…" : "Submit for Meta review"}
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
               </div>
             ))
           )}
