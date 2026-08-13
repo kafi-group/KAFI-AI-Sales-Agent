@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { displayUserName } from "@/lib/displayUserName";
 import { useAuth } from "./AuthProvider";
 
 type FolderCounts = {
@@ -79,7 +80,7 @@ export function MailSidebar() {
     <aside className="mail-sidebar">
       <div className="mail-brand">
         <p className="mail-brand-title">Kafi Mail</p>
-        <p className="mail-brand-sub">{user?.mailbox_email || user?.full_name || "Mailbox"}</p>
+        <p className="mail-brand-sub">{user?.mailbox_email || displayUserName(user) || "Mailbox"}</p>
       </div>
       <button type="button" className="btn compose-btn" onClick={() => router.push("/compose")}>
         Compose
@@ -100,7 +101,7 @@ export function MailSidebar() {
         })}
       </nav>
       <div className="mail-sidebar-foot">
-        <p className="muted small">{user?.full_name}</p>
+        <p className="muted small">{displayUserName(user)}</p>
         <button
           type="button"
           className="btn ghost"

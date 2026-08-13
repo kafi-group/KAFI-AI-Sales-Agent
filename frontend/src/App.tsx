@@ -21,6 +21,7 @@ import {
   type WhatsAppSection,
 } from "./components/AppSidebar";
 import { mailLabelSectionId } from "./lib/mailLabelRules";
+import { displayDashboardUserLabel } from "./utils/displayUserName";
 import { InboxAlertToasts } from "./components/InboxAlertToasts";
 import { WhatsAppAlertToasts } from "./components/WhatsAppAlertToasts";
 import { InterestedFollowUpAlertToasts } from "./components/InterestedFollowUpAlertToasts";
@@ -1031,7 +1032,7 @@ function DashboardApp() {
           onOpenSalesAssistant={() => {
             window.dispatchEvent(new CustomEvent(OPEN_SALES_ASSISTANT_EVENT));
           }}
-          userLabel={user?.full_name || user?.username}
+          userLabel={displayDashboardUserLabel(user)}
           userRole={user?.role}
           mobileOpen={mobileNavOpen}
           onMobileClose={() => setMobileNavOpen(false)}

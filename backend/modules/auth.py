@@ -14,7 +14,7 @@ from db.models import AppUser, AppUserRole, AppUserSession
 # Default admin (seeded once on startup). Change later via Users UI / env if needed.
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "1234"
-DEFAULT_ADMIN_FULL_NAME = "Administrator"
+DEFAULT_ADMIN_FULL_NAME = "Mr. Khalid"
 
 SESSION_DAYS = 30
 SESSION_COOKIE_NAME = "kafi_session"
@@ -123,6 +123,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 def ensure_default_admin(db: Session) -> AppUser:
     """Create the default admin account if no admin exists yet."""
+    sync_admin_display_names(db)
     admin = (
         db.query(AppUser)
         .filter(AppUser.role == AppUserRole.admin, AppUser.is_active.is_(True))
@@ -152,6 +153,34 @@ def ensure_default_admin(db: Session) -> AppUser:
     db.commit()
     db.refresh(admin)
     return admin
+
+
+def sync_admin_display_names(db: Session) -> None:
+    """Rename legacy admin labels (Administrator) and Khalid's mailbox account."""
+    changed = False
+    legacy_admins = (
+        db.query(AppUser)
+        .filter(
+            AppUser.role == AppUserRole.admin,
+            AppUser.full_name.in_(["Administrator", "Admin", ""]),
+        )
+        .all()
+    )
+    for user in legacy_admins:
+        user.full_name = DEFAULT_ADMIN_FULL_NAME
+        changed = True
+
+    khalid = (
+        db.query(AppUser)
+        .filter(AppUser.mailbox_email.ilike("%khaled.paracha%"))
+        .first()
+    )
+    if khalid and khalid.full_name != DEFAULT_ADMIN_FULL_NAME:
+        khalid.full_name = DEFAULT_ADMIN_FULL_NAME
+        changed = True
+
+    if changed:
+        db.commit()
 
 
 def authenticate(db: Session, username: str, password: str) -> AppUser | None:
