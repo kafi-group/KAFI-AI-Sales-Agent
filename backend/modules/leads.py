@@ -35,6 +35,17 @@ TARGETED_POOL_EXCLUDE = ",".join(
 DISCOVER_LEAD_SOURCES = frozenset(
     {"discovery", "web_search", "website_links", "manual", "csv"}
 )
+# New search lead pool — AI/scrape only (Discover Leads tab), not uploads or manual entry.
+SCRAPED_LEAD_SOURCES = frozenset({"discovery", "web_search", "website_links"})
+
+
+def is_new_search_lead_source(source: str | None) -> bool:
+    key = (source or "").strip().lower()
+    if not key or key in ARCHIVES_POOL_SOURCES or key in TARGETED_POOL_SOURCES:
+        return False
+    if key in {"manual", "manual_dial", "csv"}:
+        return False
+    return key in SCRAPED_LEAD_SOURCES
 
 
 def is_targeted_pool_source(source: str | None) -> bool:
@@ -572,6 +583,13 @@ def _apply_intake_method_scope(buyer_query, *, intake_method: str | None):
     )
 
 
+def _apply_new_search_lead_scope(buyer_query):
+    allowed = [source.lower() for source in SCRAPED_LEAD_SOURCES]
+    return buyer_query.filter(
+        sa_func.lower(sa_func.coalesce(Buyer.source, "")).in_(allowed)
+    )
+
+
 def _apply_call_outcome_scope(
     db: Session,
     buyer_query,
@@ -754,6 +772,7 @@ def _filtered_lead_table_rows(
     include_placed_outcomes: bool = False,
     admin_sent_only: bool = False,
     intake_method: str | None = None,
+    new_search_lead_only: bool = False,
     page: int | None = None,
     page_size: int | None = None,
     ids_only: bool = False,
@@ -775,6 +794,8 @@ def _filtered_lead_table_rows(
         admin_sent_only=admin_sent_only,
     )
     buyer_query = _apply_intake_method_scope(buyer_query, intake_method=intake_method)
+    if new_search_lead_only:
+        buyer_query = _apply_new_search_lead_scope(buyer_query)
     buyer_query, _ = _apply_call_outcome_scope(
         db,
         buyer_query,
@@ -1065,6 +1086,7 @@ def list_leads_table_ids(
     include_placed_outcomes: bool = False,
     admin_sent_only: bool = False,
     intake_method: str | None = None,
+    new_search_lead_only: bool = False,
 ) -> dict[str, object]:
     rows, _section_total, filtered_count = _filtered_lead_table_rows(
         db,
@@ -1089,6 +1111,7 @@ def list_leads_table_ids(
         include_placed_outcomes=include_placed_outcomes,
         admin_sent_only=admin_sent_only,
         intake_method=intake_method,
+        new_search_lead_only=new_search_lead_only,
         ids_only=True,
     )
     return {
@@ -1123,6 +1146,7 @@ def list_leads_table(
     include_placed_outcomes: bool = False,
     admin_sent_only: bool = False,
     intake_method: str | None = None,
+    new_search_lead_only: bool = False,
 ) -> dict[str, object]:
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
@@ -1150,6 +1174,7 @@ def list_leads_table(
         include_placed_outcomes=include_placed_outcomes,
         admin_sent_only=admin_sent_only,
         intake_method=intake_method,
+        new_search_lead_only=new_search_lead_only,
         page=page,
         page_size=page_size,
     )
@@ -1241,6 +1266,7 @@ def _compute_section_counts(
     other_ids: set[int] = set()
     unassigned_old_ids: set[int] = set()
     unassigned_other_ids: set[int] = set()
+    new_search_lead_ids: set[int] = set()
     by_assignee: dict[str, int] = {}
     pool_counts = {key: 0 for key in TARGETED_POOL_SOURCES}
 
@@ -1262,6 +1288,8 @@ def _compute_section_counts(
                 unassigned_old_ids.add(buyer_id)
             else:
                 unassigned_other_ids.add(buyer_id)
+            if is_new_search_lead_source(source):
+                new_search_lead_ids.add(buyer_id)
         elif pool_for_user_id is None and assigned_by_id is not None:
             # Admin "Leads Sent To" badges — only admin-sent leads, not self-imports.
             key = str(assignee_id)
@@ -1294,8 +1322,8 @@ def _compute_section_counts(
         all_count = len(other_ids - placed_ids)
         old_count = len(old_client_ids - placed_ids)
     elif assigned_to_user_id is None:
-        # Admin: New search lead pool stays unassigned-only; Old clients = all rows.
-        all_count = len(unassigned_other_ids - placed_ids)
+        # Admin: New search lead = unassigned AI/scraped only; Old clients = all rows.
+        all_count = len(new_search_lead_ids - placed_ids)
         old_count = len(old_client_ids)
     else:
         all_count = len(other_ids - placed_ids)

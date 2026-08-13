@@ -457,6 +457,7 @@ function sectionTableParams(
   assigned_to_user_id?: number;
   master?: boolean;
   intake_method?: string;
+  new_search_lead_only?: boolean;
 } {
   if (section === "master") return { master: true };
   if (section === "old_clients") return { source: "old_clients" };
@@ -487,7 +488,9 @@ function sectionTableParams(
     const userId = assignedUserIdFromSection(section);
     return userId != null ? { assigned_to_user_id: userId } : {};
   }
-  if (section === "all") return { exclude_source: TARGETED_POOL_EXCLUDE };
+  if (section === "all") {
+    return { exclude_source: TARGETED_POOL_EXCLUDE, new_search_lead_only: true };
+  }
   return { exclude_source: "old_clients" };
 }
 
@@ -552,7 +555,7 @@ function sectionDescription(
   if (isAssignedLeadsSection(section)) {
     return `Only leads an admin sent to ${assigneeUsername || "this user"}. Their own spreadsheet imports stay on their account and do not appear here.`;
   }
-  return "New discoveries from Discover Leads (and spreadsheet imports into this section). Does not include Old clients or targeted pool lists.";
+  return "AI-discovered leads from Discover Leads only (web search & scraping). Upload or import spreadsheets in Old clients or Incomplete Data from Archives — not here.";
 }
 
 function targetPoolIntakeMethod(section: LeadsTableSection): "upload" | "discover" {
@@ -592,6 +595,9 @@ function sectionEmptyMessage(section: LeadsTableSection): string | null {
   }
   if (section === "incomplete_archives") {
     return "No partial archive rows yet. Rows with only a name, phone, or product (e.g. Salt) land here instead of being deleted.";
+  }
+  if (section === "all") {
+    return "No AI-discovered leads yet. Use Discover Leads to search and import prospects — uploads belong in Old clients or Incomplete Data from Archives.";
   }
   if (isAssignedLeadsSection(section)) {
     return "No leads sent by an admin to this user yet. Assign leads from Scrapped Leads or Old clients to move them here.";
@@ -1005,25 +1011,21 @@ export function LeadsTablePage({
   const isMaster = section === "master";
   const isTargetedPool = isTargetedPoolSection(section);
   const canImportSpreadsheet =
-    section === "all" ||
     section === "old_clients" ||
     isIncompleteArchives ||
     isTargetedPool;
-  /** Every user can manually add leads on Clients / Master / New search lead / targeted pools. */
+  /** Every user can manually add leads on Clients / Master / targeted pools — not New search lead. */
   const canAddLead =
     section === "old_clients" ||
     section === "incomplete_archives" ||
     section === "master" ||
-    section === "all" ||
     isTargetedPool;
   const createLeadSource =
-    section === "all" && isAdmin
-      ? "manual"
-      : isIncompleteArchives
-        ? "incomplete_archives"
-        : isTargetedPool
-          ? section
-          : "old_clients";
+    isIncompleteArchives
+      ? "incomplete_archives"
+      : isTargetedPool
+        ? section
+        : "old_clients";
   const canBulkAssign = isAdmin && (section === "all" || section === "old_clients" || isMaster);
   const importSource = isOldClients
     ? "old_clients"

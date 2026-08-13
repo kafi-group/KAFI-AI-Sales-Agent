@@ -492,6 +492,7 @@ def list_leads_table(
     assigned_to_user_id: int | None = None,
     master: bool = False,
     intake_method: str | None = None,
+    new_search_lead_only: bool = False,
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -531,6 +532,7 @@ def list_leads_table(
         include_placed_outcomes=include_placed,
         admin_sent_only=admin_sent_only,
         intake_method=intake_method,
+        new_search_lead_only=new_search_lead_only,
     )
     return LeadTableResponse(**result)
 
@@ -555,6 +557,7 @@ def list_leads_table_ids(
     assigned_to_user_id: int | None = None,
     master: bool = False,
     intake_method: str | None = None,
+    new_search_lead_only: bool = False,
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -592,6 +595,7 @@ def list_leads_table_ids(
         include_placed_outcomes=include_placed,
         admin_sent_only=admin_sent_only,
         intake_method=intake_method,
+        new_search_lead_only=new_search_lead_only,
     )
     return LeadTableIdsResponse(**result)
 

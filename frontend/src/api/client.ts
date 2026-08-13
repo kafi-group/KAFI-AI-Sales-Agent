@@ -1469,6 +1469,7 @@ export interface LeadTableQuery {
   assigned_to_user_id?: number;
   master?: boolean;
   intake_method?: string;
+  new_search_lead_only?: boolean;
 }
 
 export type LeadTableSectionScope = Pick<
@@ -1708,6 +1709,7 @@ export const client = {
     }
     if (params.master) search.set("master", "true");
     if (params.intake_method) search.set("intake_method", params.intake_method);
+    if (params.new_search_lead_only) search.set("new_search_lead_only", "true");
     const query = search.toString();
     return request<LeadTableResponse>(`/leads/table${query ? `?${query}` : ""}`);
   },
@@ -1733,6 +1735,7 @@ export const client = {
     }
     if (params.master) search.set("master", "true");
     if (params.intake_method) search.set("intake_method", params.intake_method);
+    if (params.new_search_lead_only) search.set("new_search_lead_only", "true");
     const query = search.toString();
     return request<LeadTableIdsResponse>(`/leads/table/ids${query ? `?${query}` : ""}`);
   },
