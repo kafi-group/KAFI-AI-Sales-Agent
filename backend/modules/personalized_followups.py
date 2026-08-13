@@ -815,9 +815,32 @@ def send_draft(
     # WhatsApp (free text inside 24h window, or approved template outside it)
     if send_whatsapp:
         try:
+            from modules import whatsapp_templates as templates_module
+
             contact = db.get(Contact, draft.contact_id) if draft.contact_id else None
             if not contact or not (contact.phone or contact.wa_id):
                 raise ValueError("Contact has no phone number for WhatsApp")
+            resolved_variables = list(template_variables or [])
+            if (template_name or "").strip():
+                from db.models import WhatsAppTemplate
+
+                template_row = (
+                    db.query(WhatsAppTemplate)
+                    .filter(WhatsAppTemplate.name == template_name.strip())
+                    .first()
+                )
+                if template_row and template_row.variable_count > 0:
+                    suggested = templates_module.suggest_template_variables(
+                        template_row.body_text,
+                        template_row.variable_count,
+                        contact_name=draft.contact_name or contact.full_name,
+                        company_name=draft.company_name,
+                        country=draft.country,
+                    )
+                    resolved_variables = templates_module.merge_template_variables(
+                        resolved_variables,
+                        suggested,
+                    )
             wa_draft = comms.create_manual_whatsapp_draft(
                 db,
                 contact_id=contact.id,
@@ -831,7 +854,7 @@ def send_draft(
                 send=True,
                 template_name=(template_name or "").strip() or None,
                 template_language=template_language or "en_US",
-                template_variables=template_variables,
+                template_variables=resolved_variables,
             )
             approved_wa = getattr(_wa_approved.status, "value", _wa_approved.status)
             wa_status = (wa_result or {}).get("status") or (

@@ -49,6 +49,24 @@ class MailerHandoffResponse(BaseModel):
     skipped_no_email: int
 
 
+class MailerScheduleBulkRequest(BaseModel):
+    token: str = Field(min_length=10)
+    subject: str = Field(min_length=1)
+    body: str = Field(min_length=1)
+    scheduled_at: datetime
+    batch_size: int = Field(default=10, ge=1, le=15)
+    message_delay_seconds: float = Field(default=2.0, ge=0)
+    batch_pause_seconds: float = Field(default=45.0, ge=0)
+
+
+class MailerScheduleBulkResponse(BaseModel):
+    id: int
+    recipient_count: int
+    scheduled_at: str
+    status: str
+    message: str
+
+
 class MailerSessionResponse(BaseModel):
     url: str
     code: str
@@ -329,6 +347,53 @@ def create_mailer_handoff(
         expires_in_seconds=expires_in,
         recipient_count=len(leads),
         skipped_no_email=skipped,
+    )
+
+
+@router.post("/schedule-bulk", response_model=MailerScheduleBulkResponse)
+def schedule_bulk_email(
+    payload: MailerScheduleBulkRequest,
+    db: Session = Depends(get_db),
+):
+    """Queue a bulk email campaign for later delivery via Vercel mailer SMTP."""
+    from modules import bulk_email_schedule
+
+    user = _user_from_handoff_token(db, payload.token.strip())
+    buyer_ids = list(
+        dict.fromkeys(
+            jwt.decode(
+                payload.token.strip(),
+                (settings.mailer_handoff_secret or "").strip(),
+                algorithms=["HS256"],
+            ).get("buyer_ids")
+            or []
+        )
+    )
+    if not buyer_ids:
+        raise HTTPException(status_code=400, detail="Handoff token has no recipients")
+
+    try:
+        row = bulk_email_schedule.create_schedule(
+            db,
+            user=user,
+            buyer_ids=[int(b) for b in buyer_ids],
+            subject=payload.subject,
+            body=payload.body,
+            scheduled_at=payload.scheduled_at,
+            batch_size=payload.batch_size,
+            message_delay_seconds=payload.message_delay_seconds,
+            batch_pause_seconds=payload.batch_pause_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    when = row.scheduled_at.isoformat() if row.scheduled_at else ""
+    return MailerScheduleBulkResponse(
+        id=row.id,
+        recipient_count=len(row.leads or []),
+        scheduled_at=when,
+        status=row.status,
+        message=f"Scheduled {len(row.leads or [])} emails for {when}",
     )
 
 

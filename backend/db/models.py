@@ -7,6 +7,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
     Numeric,
@@ -865,4 +866,32 @@ class AiNotInterestedActivityLog(Base):
     message: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+class BulkEmailSchedule(Base):
+    """Queued bulk email campaign — executed on Vercel mailer at scheduled_at."""
+
+    __tablename__ = "bulk_email_schedules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    mailbox_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    username: Mapped[str] = mapped_column(String(100), nullable=False)
+    display_name: Mapped[Optional[str]] = mapped_column(String(255))
+    buyer_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    leads: Mapped[list] = mapped_column(JSONB, default=list)
+    subject: Mapped[str] = mapped_column(String(500), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    batch_size: Mapped[int] = mapped_column(Integer, default=10)
+    message_delay_seconds: Mapped[float] = mapped_column(Float, default=2.0)
+    batch_pause_seconds: Mapped[float] = mapped_column(Float, default=45.0)
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    result_message: Mapped[Optional[str]] = mapped_column(Text)
+    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )

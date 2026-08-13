@@ -376,6 +376,15 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                     onSearchChange={setWaTemplateSearch}
                     variables={waTemplateVariables}
                     onVariablesChange={setWaTemplateVariables}
+                    leadContext={
+                      draft
+                        ? {
+                            company_name: draft.company_name,
+                            contact_name: draft.contact_name,
+                            country: draft.country,
+                          }
+                        : null
+                    }
                     compact
                   />
                 </div>
@@ -405,7 +414,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                     onClick={() => void sendDraft("whatsapp")}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-3 py-2 text-sm font-medium"
                   >
-                    <IconWhatsApp size="xs" className="text-white" />
+                    <IconWhatsApp size="md" className="text-white !h-7 !w-7" />
                     {sendingChannel === "whatsapp" ? "Sending…" : "WhatsApp Meta"}
                   </button>
                   <button
@@ -414,7 +423,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                     onClick={() => void sendDraft("whatsapp_personal")}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 px-3 py-2 text-sm font-medium"
                   >
-                    <IconWhatsApp size="xs" className="text-white" />
+                    <IconWhatsApp size="md" className="text-white !h-7 !w-7" />
                     {sendingChannel === "whatsapp_personal" ? "Sending…" : "WhatsApp Personal"}
                   </button>
                   <button

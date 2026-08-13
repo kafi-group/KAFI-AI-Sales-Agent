@@ -42,6 +42,7 @@ import { ActionButton } from "../components/ui/ActionButton";
 import {
   IconCheck,
   IconCheckSquare,
+  IconCalendar,
   IconDownload,
   IconEdit,
   IconHeart,
@@ -801,6 +802,7 @@ export function LeadsTablePage({
   const [bulkResults, setBulkResults] = useState<BulkOnboardRowResult[] | null>(null);
   const [showBulkEmail, setShowBulkEmail] = useState(false);
   const [openingMailer, setOpeningMailer] = useState(false);
+  const [openingScheduleMailer, setOpeningScheduleMailer] = useState(false);
   const [showBulkWhatsApp, setShowBulkWhatsApp] = useState(false);
   const [whatsappTargetIds, setWhatsappTargetIds] = useState<number[] | null>(null);
   const [whatsappComposeTarget, setWhatsappComposeTarget] =
@@ -924,6 +926,32 @@ export function LeadsTablePage({
       onError(msg);
     } finally {
       setOpeningMailer(false);
+    }
+  }, [selected, onError, showEmailNotice]);
+
+  const openScheduleBulkMailer = useCallback(async () => {
+    const ids = [...selected];
+    if (!ids.length) return;
+    setOpeningScheduleMailer(true);
+    try {
+      const handoff = await client.createMailerHandoff(ids);
+      const url = `${handoff.url}&schedule=1`;
+      const opened = window.open(url, "_blank", "noopener,noreferrer");
+      if (!opened) {
+        onError(
+          "Pop-up blocked. Allow pop-ups for this site, then click Schedule bulk email again.",
+        );
+        return;
+      }
+      showEmailNotice(
+        `Opened mailer to schedule ${handoff.recipient_count} recipient${
+          handoff.recipient_count === 1 ? "" : "s"
+        }. Pick date/time and click Schedule.`,
+      );
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to open schedule mailer");
+    } finally {
+      setOpeningScheduleMailer(false);
     }
   }, [selected, onError, showEmailNotice]);
 
@@ -2676,6 +2704,24 @@ export function LeadsTablePage({
             title="Send emails"
           >
             {openingMailer ? "Opening mailer…" : `Send emails (${selected.size})`}
+          </ActionButton>
+          <ActionButton
+            icon={IconCalendar}
+            variant="violet"
+            onClick={() => void openScheduleBulkMailer()}
+            disabled={
+              selected.size === 0 ||
+              bulkOnboarding ||
+              deletingSelected ||
+              deletingId !== null ||
+              editMode ||
+              openingScheduleMailer
+            }
+            title="Schedule bulk email for a later date/time"
+          >
+            {openingScheduleMailer
+              ? "Opening…"
+              : `Schedule emails (${selected.size})`}
           </ActionButton>
           <ActionButton
             icon={IconPhone}

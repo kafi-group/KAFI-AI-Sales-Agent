@@ -76,6 +76,20 @@ def _run_ai_mode_email_job():
         print(f"AI Mode email job failed: {exc}", flush=True)
 
 
+def _run_bulk_email_schedule_job():
+    db = SessionLocal()
+    try:
+        from modules import bulk_email_schedule
+
+        results = bulk_email_schedule.process_due_schedules(db)
+        if results:
+            print(f"Bulk email schedule job: processed {len(results)} campaign(s).", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Bulk email schedule job failed: {exc}", flush=True)
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import os
@@ -165,6 +179,14 @@ async def lifespan(app: FastAPI):
             max_instances=1,
             coalesce=True,
         )
+        apscheduler.add_job(
+            _run_bulk_email_schedule_job,
+            "interval",
+            minutes=2,
+            id="bulk_email_schedule",
+            max_instances=1,
+            coalesce=True,
+        )
         apscheduler.start()
         print("Daily scheduler started in this worker.", flush=True)
     else:
@@ -195,6 +217,7 @@ _PUBLIC_API_PATHS = {
     "/api/mailer/report-activity",
     "/api/mailer/append-sent",
     "/api/mailer/prepare-tracked-body",
+    "/api/mailer/schedule-bulk",
 }
 _PUBLIC_API_PREFIXES = ("/api/webhooks/", "/api/track/", "/api/agent-bridge/")
 

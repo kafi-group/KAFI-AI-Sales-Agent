@@ -419,11 +419,106 @@ def get_template(db: Session, template_id: int) -> WhatsAppTemplate | None:
     return db.get(WhatsAppTemplate, template_id)
 
 
+def resolve_contact_salutation_name(
+    *,
+    contact_name: str | None = None,
+    company_name: str | None = None,
+) -> str:
+    for value in (contact_name, company_name):
+        if value and str(value).strip():
+            return str(value).strip()
+    return "Sir/Madam"
+
+
+def suggest_template_variables(
+    body_text: str | None,
+    variable_count: int,
+    *,
+    contact_name: str | None = None,
+    company_name: str | None = None,
+    country: str | None = None,
+) -> list[str]:
+    """Fill Meta {{1}}…{{n}} from lead context (matches mailer Dear XYZ behaviour)."""
+    contact = resolve_contact_salutation_name(
+        contact_name=contact_name,
+        company_name=company_name,
+    )
+    company = (company_name or "").strip()
+    country_val = (country or "").strip()
+    body = body_text or ""
+
+    values: list[str] = []
+    for index in range(1, variable_count + 1):
+        placeholder = f"{{{{{index}}}}}"
+        pos = body.find(placeholder)
+        context = ""
+        if pos >= 0:
+            start = max(0, pos - 40)
+            end = pos + len(placeholder) + 40
+            context = body[start:end].lower()
+
+        if "dear" in context and "{{" in context:
+            values.append(contact)
+        elif any(
+            token in context
+            for token in ("company", "organisation", "organization", "firm", "business", "client")
+        ):
+            values.append(company or contact)
+        elif any(token in context for token in ("country", "region", "market")):
+            values.append(country_val or company or contact)
+        elif index == 1:
+            values.append(contact)
+        elif index == 2:
+            values.append(company or contact)
+        else:
+            values.append(company or contact)
+    return values
+
+
+def merge_template_variables(
+    existing: list[str] | None,
+    suggested: list[str],
+) -> list[str]:
+    """Keep user edits; replace empty or literal placeholder values."""
+    placeholder_values = {
+        "[company name]",
+        "[contact name]",
+        "[company_name]",
+        "[contact_name]",
+        "company name",
+        "contact name",
+    }
+    existing = existing or []
+    merged: list[str] = []
+    for index, suggested_value in enumerate(suggested):
+        current = (existing[index] if index < len(existing) else "").strip()
+        if not current:
+            merged.append(suggested_value)
+            continue
+        if current.lower() in placeholder_values:
+            merged.append(suggested_value)
+            continue
+        if re.fullmatch(r"\{\{\d+\}\}", current):
+            merged.append(suggested_value)
+            continue
+        merged.append(current)
+    return merged
+
+
 def render_variables(body_text: str, variables: list[str]) -> str:
     """Preview only — actual send uses Meta's {{n}} component substitution."""
-    rendered = body_text
+    rendered = body_text or ""
     for index, value in enumerate(variables, start=1):
         rendered = rendered.replace(f"{{{{{index}}}}}", value)
+    contact = variables[0] if variables else ""
+    company = variables[1] if len(variables) > 1 else (variables[0] if variables else "")
+    for pattern, replacement in (
+        (r"\[Company Name\]", company),
+        (r"\[Contact Name\]", contact),
+        (r"\[company_name\]", company),
+        (r"\[contact_name\]", contact),
+    ):
+        rendered = re.sub(pattern, replacement, rendered, flags=re.IGNORECASE)
     return rendered
 
 

@@ -157,7 +157,7 @@ export function PersonalizedEmailsPage({
 
   useEffect(() => {
     setVariables(Array(selectedTemplate?.variable_count ?? 0).fill(""));
-  }, [selectedTemplate]);
+  }, [selectedTemplate?.id, selectedTemplate?.variable_count]);
 
   // WhatsApp always mirrors email — same information on both channels.
   const whatsappBody = deriveWhatsAppFromEmail(emailBody);
@@ -532,6 +532,15 @@ export function PersonalizedEmailsPage({
                     onSearchChange={setTemplateSearch}
                     variables={variables}
                     onVariablesChange={setVariables}
+                    leadContext={
+                      selected
+                        ? {
+                            company_name: selected.company_name,
+                            contact_name: selected.contact_name,
+                            country: selected.country,
+                          }
+                        : null
+                    }
                   />
                   <ActionButton
                     icon={IconWhatsApp}

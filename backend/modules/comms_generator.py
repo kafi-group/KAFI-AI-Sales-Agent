@@ -683,11 +683,6 @@ class CommsGenerator:
             )
 
         variables = template_variables or []
-        rendered_body = (
-            templates_module.render_variables(template.body_text, variables)
-            if template.body_text
-            else template.name
-        )
 
         created: list[dict] = []
         skipped: list[dict] = []
@@ -728,6 +723,26 @@ class CommsGenerator:
                         f"{buyer.company_name} contact has not opted in to WhatsApp marketing"
                     )
 
+                if template.body_text and template.variable_count > 0:
+                    buyer_variables = templates_module.merge_template_variables(
+                        variables,
+                        templates_module.suggest_template_variables(
+                            template.body_text,
+                            template.variable_count,
+                            contact_name=contact.full_name,
+                            company_name=buyer.company_name,
+                            country=buyer.country,
+                        ),
+                    )
+                else:
+                    buyer_variables = variables
+
+                rendered_body = (
+                    templates_module.render_variables(template.body_text, buyer_variables)
+                    if template.body_text
+                    else template.name
+                )
+
                 draft = Interaction(
                     contact_id=contact.id,
                     channel=Channel.whatsapp,
@@ -760,7 +775,7 @@ class CommsGenerator:
                         record_activity=record_each,
                         template_name=template.name,
                         template_language=template.language or "en_US",
-                        template_variables=variables,
+                        template_variables=buyer_variables,
                         user_id=user_id,
                     )
                     status = (send_result or {}).get("status")

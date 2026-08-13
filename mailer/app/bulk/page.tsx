@@ -45,6 +45,7 @@ function sleep(ms: number) {
 function BulkInner() {
   const params = useSearchParams();
   const token = params.get("token") || "";
+  const scheduleMode = params.get("schedule") === "1";
   const { refresh, user } = useAuth();
 
   const preview = useMemo(() => {
@@ -98,6 +99,8 @@ function BulkInner() {
   const [templateId, setTemplateId] = useState("");
   const [writeMode, setWriteMode] = useState<ComposeWriteMode>("free");
   const [tplNotice, setTplNotice] = useState<string | null>(null);
+  const [scheduling, setScheduling] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState("");
 
   const leads: Lead[] = (preview?.leads || []).filter((l) =>
     (l.contact_email || "").includes("@"),
@@ -255,6 +258,56 @@ function BulkInner() {
     setRunning(false);
   }
 
+  async function runSchedule() {
+    if (!token) {
+      pushLog("Missing token — open from Sales Agent Schedule bulk email.");
+      return;
+    }
+    if (!scheduledAt) {
+      pushLog("Pick a date and time for the scheduled send.");
+      return;
+    }
+    if (!leads.length) {
+      pushLog("No leads with email in this handoff.");
+      return;
+    }
+    const apiBase = (
+      process.env.NEXT_PUBLIC_KAFI_API_BASE_URL ||
+      process.env.KAFI_API_BASE_URL ||
+      "https://kafi-sales-agent.up.railway.app/api"
+    )
+      .trim()
+      .replace(/\/$/, "");
+    setScheduling(true);
+    setLog([]);
+    try {
+      const res = await fetch(`${apiBase}/mailer/schedule-bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          subject,
+          body,
+          scheduled_at: new Date(scheduledAt).toISOString(),
+          batch_size: batchSize,
+          message_delay_seconds: messageDelay,
+          batch_pause_seconds: batchPause,
+        }),
+      });
+      const data = (await res.json()) as { message?: string; detail?: string };
+      if (!res.ok) {
+        pushLog(`Schedule failed: ${data.detail || data.message || res.statusText}`);
+        return;
+      }
+      pushLog(data.message || "Bulk email scheduled.");
+      setTplNotice(data.message || "Scheduled.");
+    } catch (e) {
+      pushLog(`Schedule failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setScheduling(false);
+    }
+  }
+
   if (!token) {
     return (
       <div className="wrap">
@@ -275,7 +328,13 @@ function BulkInner() {
     <div className="wrap">
       <div className="card">
         <div className="folder-list-head">
-          <h1>Bulk send</h1>
+          <h1>{scheduleMode ? "Schedule bulk send" : "Bulk send"}</h1>
+          {scheduleMode ? (
+            <p className="muted small" style={{ marginTop: "0.25rem" }}>
+              Compose your message, pick a date/time below, then click{" "}
+              <strong>Schedule N emails</strong>.
+            </p>
+          ) : null}
           {user && (
             <Link className="btn ghost small" href="/inbox">
               Open inbox
@@ -364,16 +423,46 @@ function BulkInner() {
           </div>
         </div>
 
-        <button
-          className="btn"
-          type="button"
-          disabled={running || !leads.length || !emailBodyHasContent(body)}
-          onClick={() => void runSend()}
-        >
-          {running
-            ? `Sending ${progress.done}/${progress.total}…`
-            : `Send ${leads.length} email${leads.length === 1 ? "" : "s"}`}
-        </button>
+        <div className="row" style={{ marginTop: "0.75rem" }}>
+          <div style={{ flex: 1 }}>
+            <label>Schedule for later (optional — your local time)</label>
+            <input
+              type="datetime-local"
+              value={scheduledAt}
+              onChange={(e) => setScheduledAt(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
+          <button
+            className="btn"
+            type="button"
+            disabled={running || scheduling || !leads.length || !emailBodyHasContent(body)}
+            onClick={() => void runSend()}
+          >
+            {running
+              ? `Sending ${progress.done}/${progress.total}…`
+              : `Send ${leads.length} email${leads.length === 1 ? "" : "s"} now`}
+          </button>
+
+          <button
+            className="btn ghost"
+            type="button"
+            disabled={
+              scheduling ||
+              running ||
+              !leads.length ||
+              !emailBodyHasContent(body) ||
+              !scheduledAt
+            }
+            onClick={() => void runSchedule()}
+          >
+            {scheduling
+              ? "Scheduling…"
+              : `Schedule ${leads.length} email${leads.length === 1 ? "" : "s"}`}
+          </button>
+        </div>
 
         {running && progress.total > 0 && (
           <div className="bulk-progress" aria-live="polite">
