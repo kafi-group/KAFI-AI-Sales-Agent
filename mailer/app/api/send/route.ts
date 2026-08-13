@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyHandoff } from "@/lib/handoff";
-import { personalizeEmailText } from "@/lib/personalizeEmail";
+import {
+  ensureDearSalutation,
+  personalizeEmailText,
+  resolveContactSalutationName,
+} from "@/lib/personalizeEmail";
 import { prepareTrackedBody } from "@/lib/prepareTrackedBody";
 import { resolveMergeContext } from "@/lib/resolveMergeContext";
 import { reportMailerActivity } from "@/lib/reportActivity";
@@ -135,7 +139,11 @@ export async function POST(req: NextRequest) {
       designation,
     });
     const personalizedSubject = personalizeEmailText(subject, mergeLead);
-    const personalizedBody = personalizeEmailText(text, mergeLead);
+    const mergedBody = personalizeEmailText(text, mergeLead);
+    const personalizedBody = ensureDearSalutation(
+      mergedBody,
+      resolveContactSalutationName(mergeLead),
+    );
 
     const cc = (body.cc || "").trim() || undefined;
     const bcc = (body.bcc || "").trim() || undefined;

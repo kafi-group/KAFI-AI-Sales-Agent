@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyHandoff } from "@/lib/handoff";
-import { personalizeEmailText } from "@/lib/personalizeEmail";
+import {
+  ensureDearSalutation,
+  personalizeEmailText,
+  resolveContactSalutationName,
+} from "@/lib/personalizeEmail";
 import { reportMailerActivity } from "@/lib/reportActivity";
 import { sendSmtp, sleep } from "@/lib/smtp";
 import { appendMailerSentCopy } from "@/lib/syncSent";
@@ -15,8 +19,9 @@ type Lead = {
   contact_email: string;
 };
 
-function renderTemplate(template: string, lead: Lead): string {
-  return personalizeEmailText(template, lead);
+function renderTemplate(template: string, lead: Lead, salutation = false): string {
+  const merged = personalizeEmailText(template, lead);
+  return salutation ? ensureDearSalutation(merged, resolveContactSalutationName(lead)) : merged;
 }
 
 function jsonError(error: string, status: number) {
@@ -100,7 +105,7 @@ export async function POST(req: NextRequest) {
       const lead = leads[i];
       try {
         const subject = renderTemplate(subjectTpl, lead);
-        const text = renderTemplate(bodyTpl, lead);
+        const text = renderTemplate(bodyTpl, lead, true);
         const { prepareTrackedBody } = await import("@/lib/prepareTrackedBody");
         const tracked = await prepareTrackedBody({
           token,

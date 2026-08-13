@@ -26,10 +26,14 @@ const FIELD_ALIASES: Record<string, Array<keyof PersonalizeLead | string>> = {
   industry: ["industry"],
 };
 
+export function resolveContactSalutationName(lead: PersonalizeLead): string {
+  return (lead.contact_name || lead.company_name || "Sir/Madam").trim();
+}
+
 function fieldValue(lead: PersonalizeLead, key: string): string {
   const k = key as keyof PersonalizeLead;
   if (k === "contact_name") {
-    return (lead.contact_name || lead.company_name || "Sir/Madam").trim();
+    return resolveContactSalutationName(lead);
   }
   if (k === "company_name") {
     return (lead.company_name || "").trim();
@@ -70,4 +74,29 @@ export function personalizeEmailText(template: string, lead: PersonalizeLead): s
   });
 
   return out;
+}
+
+function plainBodyStart(text: string): string {
+  return text
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .trim();
+}
+
+/** Prepend "Dear {name}," when the body does not already open with a salutation. */
+export function ensureDearSalutation(body: string, contactName: string): string {
+  if (!body?.trim()) {
+    const name = (contactName || "Sir/Madam").trim();
+    return `Dear ${name},\n\n`;
+  }
+  if (/^dear\s+/i.test(plainBodyStart(body))) return body;
+  const name = (contactName || "Sir/Madam").trim();
+  const greeting = `Dear ${name},`;
+  const isHtml = /<[a-z][\s\S]*>/i.test(body);
+  if (isHtml) {
+    return `<p>${greeting}</p>${body}`;
+  }
+  return `${greeting}\n\n${body}`;
 }

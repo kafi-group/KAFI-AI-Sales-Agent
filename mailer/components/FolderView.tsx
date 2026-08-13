@@ -29,6 +29,14 @@ export type MessageDetail = MessageSummary & {
   direction?: string | null;
 };
 
+type MessageListResponse = {
+  items: MessageSummary[];
+  total?: number;
+  offset?: number;
+  limit?: number;
+  has_more?: boolean;
+};
+
 type Props = {
   folder: "inbox" | "sent" | "trash" | "archive";
 };
@@ -63,9 +71,14 @@ export function FolderView({ folder }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const rows = await apiFetch<MessageSummary[]>(
+      const data = await apiFetch<MessageListResponse | MessageSummary[]>(
         `/inbox/messages?folder=${encodeURIComponent(folder)}&limit=50`,
       );
+      const rows = Array.isArray(data)
+        ? data
+        : Array.isArray((data as MessageListResponse)?.items)
+          ? (data as MessageListResponse).items
+          : [];
       setMessages(rows);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load mail");
@@ -185,7 +198,7 @@ export function FolderView({ folder }: Props) {
         {error && <p className="bad pad">{error}</p>}
         {notice && <p className="ok pad">{notice}</p>}
         <ul className="msg-list">
-          {messages.map((m) => (
+          {(Array.isArray(messages) ? messages : []).map((m) => (
             <li key={m.uid}>
               <button
                 type="button"

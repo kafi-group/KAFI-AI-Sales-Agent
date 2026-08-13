@@ -13,8 +13,9 @@ import {
 import {
   EmailBodyEditor,
   emailBodyHasContent,
+  plainTextToEditorHtml,
 } from "@/components/EmailBodyEditor";
-import { personalizeEmailText } from "@/lib/personalizeEmail";
+import { ensureDearSalutation, personalizeEmailText } from "@/lib/personalizeEmail";
 
 type Lead = {
   buyer_id: number;
@@ -83,8 +84,10 @@ function BulkInner() {
   const [subject, setSubject] = useState(
     "Introduction — Kafi Commodities ({{company_name}})",
   );
-  const [body, setBody] = useState(
-    "Dear {{contact_name}},\n\nI hope you are well. I am reaching out from Kafi Commodities regarding our export range (rice, spices, Essence Himalayan salt, sauces & pickles).\n\nI would welcome a short call at your convenience.\n\nBest regards",
+  const [body, setBody] = useState(() =>
+    plainTextToEditorHtml(
+      "Dear {{contact_name}},\n\nI hope you are well. I am reaching out from Kafi Commodities regarding our export range (rice, spices, Essence Himalayan salt, sauces & pickles).\n\nI would welcome a short call at your convenience.\n\nBest regards",
+    ),
   );
   const [batchSize, setBatchSize] = useState(10);
   const [messageDelay, setMessageDelay] = useState(2);
@@ -176,6 +179,7 @@ function BulkInner() {
                 html: true,
                 buyer_id: lead.buyer_id,
                 company_name: lead.company_name,
+                contact_name: lead.contact_name || undefined,
                 send_mode: isBulk ? "bulk" : "individual",
                 // Bulk uses summary events only (matches in-app Sales Agent bulk).
                 record_activity: !isBulk,
@@ -298,7 +302,7 @@ function BulkInner() {
             setTemplateId(id);
             if (tpl) {
               setSubject(tpl.subject);
-              setBody(tpl.body);
+              setBody(ensureDearSalutation(tpl.body, "{{contact_name}}"));
               setWriteMode("free");
               setTplNotice(`Loaded template “${tpl.name}”`);
             } else {

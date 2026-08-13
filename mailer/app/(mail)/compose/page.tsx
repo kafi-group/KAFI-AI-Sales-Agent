@@ -12,7 +12,15 @@ import {
 import {
   EmailBodyEditor,
   emailBodyHasContent,
+  plainTextToEditorHtml,
 } from "@/components/EmailBodyEditor";
+import { ensureDearSalutation } from "@/lib/personalizeEmail";
+
+function defaultComposeBody(contactName: string, companyName: string): string {
+  const name = contactName.trim() || "[Contact Name]";
+  void companyName;
+  return plainTextToEditorHtml(`Dear ${name},\n\n`);
+}
 
 function ComposeInner() {
   const params = useSearchParams();
@@ -24,7 +32,16 @@ function ComposeInner() {
   const [showCc, setShowCc] = useState(Boolean(params.get("cc")));
   const [showBcc, setShowBcc] = useState(Boolean(params.get("bcc")));
   const [subject, setSubject] = useState(params.get("subject") || "");
-  const [body, setBody] = useState(params.get("body") || "");
+  const [body, setBody] = useState(() => {
+    const fromParam = params.get("body") || "";
+    if (fromParam) return fromParam;
+    const contact = params.get("contact_name") || "";
+    const company = params.get("company_name") || "";
+    if (contact || company) {
+      return defaultComposeBody(contact, company);
+    }
+    return "";
+  });
   const [templateId, setTemplateId] = useState("");
   const [writeMode, setWriteMode] = useState<ComposeWriteMode>("free");
   const [sending, setSending] = useState(false);
@@ -160,7 +177,8 @@ function ComposeInner() {
           setTemplateId(id);
           if (tpl) {
             setSubject(tpl.subject);
-            setBody(tpl.body);
+            const salutationName = mergeContact.trim() || "[Contact Name]";
+            setBody(ensureDearSalutation(tpl.body, salutationName));
             setWriteMode("free");
             setNotice(`Loaded template “${tpl.name}” — edit before send if needed`);
           }
