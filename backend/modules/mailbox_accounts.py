@@ -28,6 +28,25 @@ class MailboxAccount:
     display_name: str | None = None
 
 
+# Shared mailboxes use a fixed public From name (not the logged-in rep's name).
+_MAILBOX_PUBLIC_SENDER_NAMES: dict[str, str] = {
+    "info@kafi-group.com": "Asad Ali",
+    "marketing@kafi-group.com": "Anjum Ali",
+}
+
+
+def public_sender_display_name(
+    mailbox_email: str,
+    fallback: str | None = None,
+) -> str | None:
+    """Return the customer-facing From name for known shared Kafi mailboxes."""
+    mapped = _MAILBOX_PUBLIC_SENDER_NAMES.get((mailbox_email or "").strip().lower())
+    if mapped:
+        return mapped
+    cleaned = (fallback or "").strip()
+    return cleaned or None
+
+
 def hosts_enabled() -> bool:
     """Feature flag — credentials are per-user."""
     return bool(settings.mailbox_enabled)
@@ -112,6 +131,7 @@ def resolve_user_mailbox(user) -> MailboxAccount | None:
     display = (getattr(user, "mailbox_display_name", None) or "").strip() or None
     if not display:
         display = (getattr(user, "full_name", None) or "").strip() or None
+    display = public_sender_display_name(email, display)
     return MailboxAccount(email=email, password=password, display_name=display)
 
 

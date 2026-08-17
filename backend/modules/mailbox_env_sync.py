@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from db.models import AppUser
-from modules.mailbox_accounts import set_user_mailbox
+from modules.mailbox_accounts import public_sender_display_name, set_user_mailbox
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ def sync_mailboxes_from_env(db: Session) -> list[str]:
             user,
             mailbox_email=email,
             mailbox_password=password,
-            mailbox_display_name=display or user.full_name,
+            mailbox_display_name=public_sender_display_name(email, display or user.full_name),
             mailbox_enabled=True,
         )
         updated.append(username)

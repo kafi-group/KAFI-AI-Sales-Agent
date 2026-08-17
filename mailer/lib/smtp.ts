@@ -1,11 +1,5 @@
 import nodemailer from "nodemailer";
 
-type MailboxCreds = {
-  email: string;
-  password: string;
-  displayName?: string;
-};
-
 const USER_ENV: Record<string, { email: string; password: string; display?: string }> = {
   admin: {
     email: "MAILBOX_ADMIN_EMAIL",
@@ -29,6 +23,32 @@ const USER_ENV: Record<string, { email: string; password: string; display?: stri
   },
 };
 
+type MailboxCreds = {
+  email: string;
+  password: string;
+  displayName?: string;
+};
+
+/** Shared Kafi mailboxes — fixed public From name, not the logged-in rep. */
+const PUBLIC_SENDER_NAMES: Record<string, string> = {
+  "info@kafi-group.com": "Asad Ali",
+  "marketing@kafi-group.com": "Anjum Ali",
+};
+
+function senderDisplayName(email: string, fallback?: string): string | undefined {
+  const mapped = PUBLIC_SENDER_NAMES[email.trim().toLowerCase()];
+  if (mapped) return mapped;
+  const cleaned = (fallback || "").trim();
+  return cleaned || undefined;
+}
+
+function withPublicSenderName(creds: MailboxCreds): MailboxCreds {
+  return {
+    ...creds,
+    displayName: senderDisplayName(creds.email, creds.displayName),
+  };
+}
+
 export function resolveMailbox(username: string, fallbackEmail?: string): MailboxCreds | null {
   const map = USER_ENV[username.toLowerCase()];
   if (map) {
@@ -36,7 +56,11 @@ export function resolveMailbox(username: string, fallbackEmail?: string): Mailbo
     const password = process.env[map.password] || "";
     const displayName = (map.display && process.env[map.display]) || undefined;
     if (email && password) {
-      return { email, password, displayName: displayName?.trim() || undefined };
+      return withPublicSenderName({
+        email,
+        password,
+        displayName: displayName?.trim() || undefined,
+      });
     }
   }
   // Fallback: match by email against any configured mailbox
@@ -47,11 +71,11 @@ export function resolveMailbox(username: string, fallbackEmail?: string): Mailbo
       if (email && email === fallbackEmail.trim().toLowerCase()) {
         const password = process.env[cfg.password] || "";
         if (password) {
-          return {
+          return withPublicSenderName({
             email,
             password,
             displayName: (cfg.display && process.env[cfg.display])?.trim() || undefined,
-          };
+          });
         }
       }
     }
