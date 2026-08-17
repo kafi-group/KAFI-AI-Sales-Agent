@@ -3231,7 +3231,10 @@ def parse_csv_candidates(
             if not has_any and not any((v or "").strip() for v in row.values()):
                 continue
         website = csv_value(row, website_col)
-        country = csv_value(row, country_col)
+        country_raw = csv_value(row, country_col)
+        country = resolve_country_name(country_raw) if country_raw else None
+        if not country and country_raw:
+            country = country_raw
         industry = csv_value(row, industry_col)
         contact_name = csv_value(row, contact_col) or None
         email_raw = csv_value(row, email_col)
@@ -3335,6 +3338,10 @@ def _import_raw_to_candidate(raw: dict[str, Any]) -> DiscoveryCandidate:
     legacy_serial = raw.get("legacy_serial_no")
     if legacy_serial is not None and not isinstance(legacy_serial, int):
         legacy_serial = _parse_optional_int(str(legacy_serial))
+    country_raw = (raw.get("country") or "").strip() or None
+    country = resolve_country_name(country_raw) if country_raw else None
+    if not country and country_raw:
+        country = country_raw
     return DiscoveryCandidate(
         candidate_id=str(uuid.uuid4()),
         company_name=name,
@@ -3345,7 +3352,7 @@ def _import_raw_to_candidate(raw: dict[str, Any]) -> DiscoveryCandidate:
         linkedin_url=_field_or_not_found(raw, "linkedin_url", "linkedin_company_url"),
         facebook_url=_field_or_not_found(raw, "facebook_url", "facebook_company_url"),
         instagram_url=_field_or_not_found(raw, "instagram_url", "instagram_company_url"),
-        country=raw.get("country") or None,
+        country=country,
         industry=raw.get("industry") or None,
         legacy_serial_no=legacy_serial,
         company_grading=(raw.get("company_grading") or "").strip() or None,
@@ -4028,9 +4035,18 @@ def import_candidates(
 
     auto_clean: dict[str, Any] | None = None
     if skip_enrichment and created:
-        from modules.post_import_old_clients import clean_contacts_for_buyer_ids
+        from modules.post_import_old_clients import (
+            clean_contacts_for_buyer_ids,
+            normalize_countries_for_buyer_ids,
+        )
 
-        auto_clean = clean_contacts_for_buyer_ids(db, [buyer.id for buyer in created])
+        buyer_ids = [buyer.id for buyer in created]
+        auto_clean = {
+            **clean_contacts_for_buyer_ids(db, buyer_ids),
+            "countries_normalized": normalize_countries_for_buyer_ids(db, buyer_ids).get(
+                "changed", 0
+            ),
+        }
 
     return {
         "created_count": len(created),

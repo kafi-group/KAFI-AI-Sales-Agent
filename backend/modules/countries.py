@@ -215,6 +215,7 @@ ALIASES: dict[str, list[str]] = {
     "CI": ["cote d'ivoire", "côte d'ivoire"],
     "CV": ["cape verde"],
     "HK": ["hongkong", "h.k.", "hong kong sar"],
+    "LK": ["srilanka", "sri lanka", "ceylon"],
 }
 
 _BY_NAME = {name.lower(): (code, name) for code, name in COUNTRY_DATA}
@@ -290,17 +291,20 @@ def country_search_terms(name: str) -> list[str]:
     if key in _BY_NAME:
         code, canonical = _BY_NAME[key]
         terms.add(canonical.lower())
+        terms.add(re.sub(r"[^a-z]", "", canonical.lower()))
         terms.update(ALIASES.get(code, []))
         return sorted(terms)
     for code, canonical in COUNTRY_DATA:
         if key == canonical.lower():
             terms.add(canonical.lower())
+            terms.add(re.sub(r"[^a-z]", "", canonical.lower()))
             terms.update(ALIASES.get(code, []))
             return sorted(terms)
     for code, aliases in ALIASES.items():
         if key in aliases or any(alias in key for alias in aliases):
             canonical = _BY_CODE[code.lower()][1]
             terms.add(canonical.lower())
+            terms.add(re.sub(r"[^a-z]", "", canonical.lower()))
             terms.update(aliases)
     return sorted(terms)
 
@@ -329,6 +333,16 @@ def resolve_country_name(value: str | None) -> str | None:
     for code, aliases in ALIASES.items():
         if key in aliases:
             return _BY_CODE[code.lower()][1]
+    # Collapsed spelling: "Srilanka" / "srilanka" → Sri Lanka
+    collapsed = re.sub(r"[^a-z]", "", key)
+    if collapsed:
+        for code, name in COUNTRY_DATA:
+            if collapsed == re.sub(r"[^a-z]", "", name.lower()):
+                return name
+        for code, aliases in ALIASES.items():
+            for alias in aliases:
+                if collapsed == re.sub(r"[^a-z]", "", alias):
+                    return _BY_CODE[code.lower()][1]
     if len(key) >= 4:
         for term, name in _COUNTRY_TEXT_TERMS:
             if key == term or key in term or term in key:

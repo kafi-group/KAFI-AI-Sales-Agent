@@ -25,6 +25,48 @@ from modules.leads import (
 )
 
 
+def normalize_countries(
+    db: Session,
+    *,
+    source: str | None = "old_clients",
+    exclude_source: str | None = None,
+    assigned_to_user_id: int | None = None,
+    unassigned_only: bool = False,
+) -> dict[str, Any]:
+    """Canonicalize country spellings (e.g. Srilanka → Sri Lanka) for filter matching."""
+    from modules.countries import resolve_country_name
+
+    buyers = _apply_lead_table_scope(
+        db.query(Buyer),
+        source=source,
+        exclude_source=exclude_source,
+        assigned_to_user_id=assigned_to_user_id,
+        unassigned_only=unassigned_only,
+    ).all()
+    changed = 0
+    samples: list[dict[str, Any]] = []
+    for buyer in buyers:
+        before = (buyer.country or "").strip()
+        if not before:
+            continue
+        after = resolve_country_name(before) or before
+        if after != before:
+            buyer.country = after
+            changed += 1
+            if len(samples) < 20:
+                samples.append(
+                    {
+                        "buyer_id": buyer.id,
+                        "company_name": buyer.company_name,
+                        "before": before,
+                        "after": after,
+                    }
+                )
+    if changed:
+        db.commit()
+    return {"scanned": len(buyers), "changed": changed, "samples": samples}
+
+
 def _normalize_email(value: str) -> tuple[str, bool]:
     return normalize_email(value)
 
@@ -154,6 +196,27 @@ def clean_contacts_for_buyer_ids(db: Session, buyer_ids: list[int]) -> dict[str,
     return {"scanned": scanned, "changed": changed, "samples": samples}
 
 
+def normalize_countries_for_buyer_ids(db: Session, buyer_ids: list[int]) -> dict[str, Any]:
+    """Fix country spellings on freshly imported rows only."""
+    from modules.countries import resolve_country_name
+
+    if not buyer_ids:
+        return {"changed": 0}
+    changed = 0
+    for buyer_id in buyer_ids:
+        buyer = db.get(Buyer, buyer_id)
+        if not buyer or not (buyer.country or "").strip():
+            continue
+        before = buyer.country.strip()
+        after = resolve_country_name(before) or before
+        if after != before:
+            buyer.country = after
+            changed += 1
+    if changed:
+        db.commit()
+    return {"changed": changed}
+
+
 def run_post_import_clean(
     db: Session,
     *,
@@ -174,6 +237,7 @@ def run_post_import_clean(
     }
 
     emails = clean_contact_emails(db, **scope)
+    countries = normalize_countries(db, **scope)
     company = clean_old_clients_company_fields(db, **scope)
     # Skip repair_location here — it can web-lookup per row and takes hours on 8k+ Old clients.
     # Use Master Table → Fix names for location-as-company rows in smaller batches.
@@ -193,6 +257,7 @@ def run_post_import_clean(
 
     summary = {
         "emails_fixed": emails.get("changed", 0),
+        "countries_fixed": countries.get("changed", 0),
         "company_fields_fixed": company.get("changed", 0),
         "names_fixed": names_fixed,
         "junk_rows_removed": junk.get("relocated_count", junk.get("removed_count", 0)),
@@ -211,6 +276,7 @@ def run_post_import_clean(
 
     return {
         "emails": emails,
+        "countries": countries,
         "company_fields": company,
         "names": names,
         "junk_removed": junk,
