@@ -150,6 +150,7 @@ function DashboardApp() {
     targeted_distributor: 0,
     targeted_client: 0,
     incomplete_archives: 0,
+    my_assigned: 0,
     by_assignee: {},
   });
   const [assigneeNavUsers, setAssigneeNavUsers] = useState<AppUser[]>([]);
@@ -839,6 +840,15 @@ function DashboardApp() {
       label: "Old clients",
       count: tableCounts.old_clients,
     },
+    ...(!isAdmin
+      ? [
+          {
+            id: "my_assigned" as const,
+            label: "Assigned",
+            count: tableCounts.my_assigned ?? 0,
+          },
+        ]
+      : []),
     {
       id: "interested_clients" as const,
       label: "Follow up clients",
@@ -1055,7 +1065,7 @@ function DashboardApp() {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-slate-100 truncate">{APP_BRAND_NAME}</p>
               <p className="text-[11px] text-slate-500 truncate capitalize">
-                {user?.full_name || user?.username || "Signed in"}
+                {displayDashboardUserLabel(user) || "Signed in"}
               </p>
             </div>
             <AppTopActions

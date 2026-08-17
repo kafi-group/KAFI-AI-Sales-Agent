@@ -100,6 +100,7 @@ def _table_assignment_filters(
     user: AppUser,
     *,
     assigned_to_user_id: int | None,
+    my_assigned: bool = False,
     call_outcome: str | None,
     source: str | None,
     exclude_source: str | None,
@@ -126,6 +127,10 @@ def _table_assignment_filters(
     if master:
         # Every lead (assigned + unassigned, all sources).
         return None, False, True, None, False
+
+    if my_assigned:
+        # Sales user's "Assigned" list — every lead assigned to them (incl. self-imports).
+        return (user.id, False, True, None, False)
 
     if assigned_to_user_id is not None:
         # "Leads Sent To {username}" — only admin-sent leads.
@@ -490,6 +495,7 @@ def list_leads_table(
     page: int = 1,
     page_size: int = 20,
     assigned_to_user_id: int | None = None,
+    my_assigned: bool = False,
     master: bool = False,
     intake_method: str | None = None,
     new_search_lead_only: bool = False,
@@ -500,6 +506,7 @@ def list_leads_table(
         _table_assignment_filters(
             user,
             assigned_to_user_id=assigned_to_user_id,
+            my_assigned=my_assigned,
             call_outcome=call_outcome,
             source=source,
             exclude_source=exclude_source,
@@ -555,6 +562,7 @@ def list_leads_table_ids(
     sort_by: str = "created_at",
     sort_dir: str = "desc",
     assigned_to_user_id: int | None = None,
+    my_assigned: bool = False,
     master: bool = False,
     intake_method: str | None = None,
     new_search_lead_only: bool = False,
@@ -565,6 +573,7 @@ def list_leads_table_ids(
         _table_assignment_filters(
             user,
             assigned_to_user_id=assigned_to_user_id,
+            my_assigned=my_assigned,
             call_outcome=call_outcome,
             source=source,
             exclude_source=exclude_source,
@@ -610,6 +619,7 @@ def get_leads_table_section_counts(
         assigned_to_user_id=None,
         pool_for_user_id=None,
     )
+    counts["my_assigned"] = leads_module.count_my_assigned_leads(db, user.id)
     return LeadTableSectionCountsResponse(**counts)
 
 

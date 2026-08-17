@@ -435,6 +435,7 @@ function sectionTableScope(
 } {
   if (section === "master") return { master: true };
   if (section === "old_clients") return { source: "old_clients" };
+  if (section === "my_assigned") return {};
   if (section === "hyperstore_targeted") return { source: "hyperstore_targeted" };
   if (section === "targeted_distributor") return { source: "targeted_distributor" };
   if (section === "targeted_client") return { source: "targeted_client" };
@@ -456,12 +457,14 @@ function sectionTableParams(
   call_outcome?: string;
   in_interested_clients?: boolean;
   assigned_to_user_id?: number;
+  my_assigned?: boolean;
   master?: boolean;
   intake_method?: string;
   new_search_lead_only?: boolean;
 } {
   if (section === "master") return { master: true };
   if (section === "old_clients") return { source: "old_clients" };
+  if (section === "my_assigned") return { my_assigned: true };
   if (section === "hyperstore_targeted") {
     return {
       source: "hyperstore_targeted",
@@ -502,6 +505,7 @@ function sectionTitle(
 ): string {
   if (section === "master") return "Master Table";
   if (section === "old_clients") return isAdmin ? "Old clients" : "Clients";
+  if (section === "my_assigned") return "Assigned";
   if (section === "hyperstore_targeted") return "Hyperstore Target";
   if (section === "targeted_distributor") return "Targeted Distributors";
   if (section === "targeted_client") return "Targeted Client";
@@ -540,6 +544,9 @@ function sectionDescription(
     return isAdmin
       ? "All past clients from your spreadsheet — assigned and unassigned. Kept separate from Discover Leads — companies here are never mixed into new discoveries."
       : "Your client list from imports and past relationships. Import a spreadsheet to add clients — only you can see rows assigned to you.";
+  }
+  if (section === "my_assigned") {
+    return "Leads assigned to you — from admin assignment or your own imports. Use this list for your daily calling and follow-ups.";
   }
   if (section === "interested_clients") {
     return "Clients moved here after a call is labeled Follow up — schedule the next call. This does not mean the client is interested.";
@@ -596,6 +603,9 @@ function sectionEmptyMessage(section: LeadsTableSection): string | null {
   }
   if (section === "incomplete_archives") {
     return "No partial archive rows yet. Rows with only a name, phone, or product (e.g. Salt) land here instead of being deleted.";
+  }
+  if (section === "my_assigned") {
+    return "No leads assigned to you yet. An admin can assign clients from Old clients, or import a spreadsheet to add your own.";
   }
   if (section === "all") {
     return "No AI-discovered leads yet. Use Discover Leads to search and import prospects — uploads belong in Old clients or Incomplete Data from Archives.";
@@ -1035,6 +1045,7 @@ export function LeadsTablePage({
   /** Old-clients column set + filters on every leads table section. */
   const useClientsFilters = true;
   const isOldClients = section === "old_clients";
+  const isMyAssigned = section === "my_assigned";
   const isIncompleteArchives = section === "incomplete_archives";
   const isMaster = section === "master";
   const isTargetedPool = isTargetedPoolSection(section);
@@ -1074,11 +1085,12 @@ export function LeadsTablePage({
   const canMoveToInterestedClients =
     section !== "sales_interested_clients" &&
     section !== "not_interested_clients" &&
-    !isAssignedLeadsSection(section);
+    !isAssignedLeadsSection(section) &&
+    section !== "my_assigned";
   const callOutcomeEmptyMessage = sectionEmptyMessage(section);
 
   const isWideLayout =
-    isOldClients || isIncompleteArchives || isCallOutcomeSection || isTargetedPool;
+    isOldClients || isMyAssigned || isIncompleteArchives || isCallOutcomeSection || isTargetedPool;
   const columnDefs = useMemo(() => {
     const base = isTargetedPool
       ? TARGETED_POOL_COLUMNS
@@ -1374,8 +1386,12 @@ export function LeadsTablePage({
       assigneeChanged &&
       isAssignedSection &&
       (assignedToUserId == null || assignedToUserId !== assignedSectionUserId);
+    const leavesMyAssignedSection =
+      assigneeChanged &&
+      isMyAssigned &&
+      (assignedToUserId == null || assignedToUserId !== user?.id);
 
-    if (leavesPoolSection || leavesAssignedSection) {
+    if (leavesPoolSection || leavesAssignedSection || leavesMyAssignedSection) {
       setRows((prev) => prev.filter((row) => row.id !== rowId));
       setDrafts((prev) => {
         const next = { ...prev };
@@ -1810,6 +1826,8 @@ export function LeadsTablePage({
           contactName: row.contact_name,
           phone,
           country: row.country,
+          assignedToUserId: row.assigned_to_user_id,
+          assignedTo: row.assigned_to,
         });
       }
 
@@ -3715,6 +3733,8 @@ export function LeadsTablePage({
                               leadId={row.id}
                               phone={row.contact_phone}
                               onError={onError}
+                              assignedToUserId={row.assigned_to_user_id}
+                              assignedTo={row.assigned_to}
                               compact
                             />
                             <WhatsAppLeadButton
@@ -3741,6 +3761,8 @@ export function LeadsTablePage({
                               leadId={row.id}
                               phone={row.contact_secondary_mobile}
                               onError={onError}
+                              assignedToUserId={row.assigned_to_user_id}
+                              assignedTo={row.assigned_to}
                               compact
                             />
                             <WhatsAppLeadButton
@@ -3769,6 +3791,8 @@ export function LeadsTablePage({
                               leadId={row.id}
                               phone={row.contact_primary_phone}
                               onError={onError}
+                              assignedToUserId={row.assigned_to_user_id}
+                              assignedTo={row.assigned_to}
                               compact
                             />
                             <WhatsAppLeadButton
@@ -3797,6 +3821,8 @@ export function LeadsTablePage({
                               leadId={row.id}
                               phone={row.contact_secondary_phone}
                               onError={onError}
+                              assignedToUserId={row.assigned_to_user_id}
+                              assignedTo={row.assigned_to}
                               compact
                             />
                             <WhatsAppLeadButton
@@ -4300,6 +4326,8 @@ export function LeadsTablePage({
                                 row.contact_secondary_phone) as string
                             }
                             onError={onError}
+                            assignedToUserId={row.assigned_to_user_id}
+                            assignedTo={row.assigned_to}
                             compact
                           />
                           <WhatsAppLeadButton

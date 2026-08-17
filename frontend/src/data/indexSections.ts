@@ -92,21 +92,21 @@ export const INDEX_SECTIONS: IndexSection[] = [
   },
   {
     number: 2,
-    title: "Discover Leads & Master table",
+    title: "Searched by AI & Master Table",
     description:
       "Prospect discovery, scrapped leads pool, client outcome buckets, and leads sent to each sales user.",
     openAction: { type: "table", section: "master" },
     items: [
       {
         id: "2.1",
-        title: "Discover Leads",
+        title: "Searched by AI",
         description: "Search and add new prospects from the web.",
         icon: "search",
         action: { type: "tab", tab: "leads" },
       },
       {
         id: "2.2",
-        title: "Master table",
+        title: "Master Table",
         description: "Overview — assign, score, call, and bulk outreach from one table.",
         icon: "table",
         action: { type: "table", section: "master" },
@@ -124,6 +124,13 @@ export const INDEX_SECTIONS: IndexSection[] = [
         description: "Repeat buyers and assigned client pool.",
         icon: "users",
         action: { type: "table", section: "old_clients" },
+      },
+      {
+        id: "2.4a",
+        title: "Assigned",
+        description: "Leads assigned to you — your working list for calls and follow-ups.",
+        icon: "users",
+        action: { type: "table", section: "my_assigned" },
       },
       {
         id: "2.5",
@@ -157,7 +164,7 @@ export const INDEX_SECTIONS: IndexSection[] = [
   },
   {
     number: 3,
-    title: "Mail",
+    title: "Emails",
     description:
       "Personal IMAP mailbox — inbox, folders, activity log, templates, and custom labels.",
     openAction: { type: "mail", section: "inbox" },
@@ -222,14 +229,14 @@ export const INDEX_SECTIONS: IndexSection[] = [
   },
   {
     number: 4,
-    title: "Vercel mailer",
+    title: "Bulk Email Sender",
     description: "Full mailer web app — labels, drafts, and advanced compose.",
     openAction: { type: "mailer" },
     items: [
       {
         id: "4.1",
-        title: "Vercel mailer",
-        description: "Opens the Vercel mailer in the same session when configured.",
+        title: "Bulk Email Sender",
+        description: "Opens the bulk email sender in the same session when configured.",
         icon: "mail",
         action: { type: "mailer" },
       },
@@ -237,13 +244,13 @@ export const INDEX_SECTIONS: IndexSection[] = [
   },
   {
     number: 5,
-    title: "Calls",
+    title: "Call Center",
     description: "Twilio call log, floating dialpad, and post-call outcomes.",
     openAction: { type: "tab", tab: "calls" },
     items: [
       {
         id: "5.1",
-        title: "Calls",
+        title: "Call Center",
         description: "Recent calls with outcomes, notes, and recordings.",
         icon: "call",
         action: { type: "tab", tab: "calls" },
@@ -267,13 +274,13 @@ export const INDEX_SECTIONS: IndexSection[] = [
   },
   {
     number: 6,
-    title: "Quotation agent",
+    title: "CNF or FOB",
     description: "ESSENCE catalog quotations with carton specs and PDF export.",
     openAction: { type: "external", url: "__QUOTATION_AGENT__" },
     items: [
       {
         id: "6.1",
-        title: "Quotation agent",
+        title: "CNF or FOB",
         description: "Build ESSENCE quotations with carton specs and PDF export.",
         icon: "quote",
         action: { type: "external", url: "__QUOTATION_AGENT__" },
@@ -282,13 +289,13 @@ export const INDEX_SECTIONS: IndexSection[] = [
   },
   {
     number: 7,
-    title: "Brand assistant",
+    title: "AI Chatbot",
     description: "Ask about Kafi / ESSENCE products, specs, and export guidance.",
     openAction: { type: "tab", tab: "chatbot" },
     items: [
       {
         id: "7.1",
-        title: "Brand assistant",
+        title: "AI Chatbot",
         description: "Chatbot for product and export questions.",
         icon: "robot",
         action: { type: "tab", tab: "chatbot" },
@@ -357,13 +364,13 @@ export const INDEX_SECTIONS: IndexSection[] = [
   },
   {
     number: 9,
-    title: "KPI Generation",
+    title: "KPI",
     description: "Per-user and team activity reports for calls, emails, and outcomes.",
     openAction: { type: "tab", tab: "kpi" },
     items: [
       {
         id: "9.1",
-        title: "KPI Generation",
+        title: "KPI",
         description: "Calls, emails, outcomes, and team rollup for admins.",
         icon: "chart",
         action: { type: "tab", tab: "kpi" },

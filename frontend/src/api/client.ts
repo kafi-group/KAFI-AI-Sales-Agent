@@ -1279,6 +1279,7 @@ export interface LeadTableSectionCountsResponse {
   targeted_distributor?: number;
   targeted_client?: number;
   incomplete_archives?: number;
+  my_assigned?: number;
 }
 
 export interface LeadTableBulkDeleteResponse {
@@ -1467,6 +1468,7 @@ export interface LeadTableQuery {
   page?: number;
   page_size?: number;
   assigned_to_user_id?: number;
+  my_assigned?: boolean;
   master?: boolean;
   intake_method?: string;
   new_search_lead_only?: boolean;
@@ -1474,7 +1476,7 @@ export interface LeadTableQuery {
 
 export type LeadTableSectionScope = Pick<
   LeadTableQuery,
-  "source" | "exclude_source" | "assigned_to_user_id" | "master"
+  "source" | "exclude_source" | "assigned_to_user_id" | "my_assigned" | "master"
 >;
 
 export interface WhatsAppConfig {
@@ -1713,6 +1715,7 @@ export const client = {
     if (params.assigned_to_user_id != null) {
       search.set("assigned_to_user_id", String(params.assigned_to_user_id));
     }
+    if (params.my_assigned) search.set("my_assigned", "true");
     if (params.master) search.set("master", "true");
     if (params.intake_method) search.set("intake_method", params.intake_method);
     if (params.new_search_lead_only) search.set("new_search_lead_only", "true");
@@ -1739,6 +1742,7 @@ export const client = {
     if (params.assigned_to_user_id != null) {
       search.set("assigned_to_user_id", String(params.assigned_to_user_id));
     }
+    if (params.my_assigned) search.set("my_assigned", "true");
     if (params.master) search.set("master", "true");
     if (params.intake_method) search.set("intake_method", params.intake_method);
     if (params.new_search_lead_only) search.set("new_search_lead_only", "true");
@@ -1868,6 +1872,7 @@ export const client = {
     if (params.assigned_to_user_id != null) {
       search.set("assigned_to_user_id", String(params.assigned_to_user_id));
     }
+    if (params.my_assigned) search.set("my_assigned", "true");
     if (params.master) search.set("master", "true");
     const query = search.toString();
     return request<LeadTableDedupeResponse>(
@@ -1886,6 +1891,7 @@ export const client = {
     if (params.assigned_to_user_id != null) {
       search.set("assigned_to_user_id", String(params.assigned_to_user_id));
     }
+    if (params.my_assigned) search.set("my_assigned", "true");
     if (params.master) search.set("master", "true");
     const query = search.toString();
     return request<LeadTableCleanupResponse>(
@@ -1902,6 +1908,7 @@ export const client = {
     if (params.assigned_to_user_id != null) {
       search.set("assigned_to_user_id", String(params.assigned_to_user_id));
     }
+    if (params.my_assigned) search.set("my_assigned", "true");
     if (params.master) search.set("master", "true");
     if (params.dry_run) search.set("dry_run", "true");
     if (params.limit != null) search.set("limit", String(params.limit));
@@ -1920,6 +1927,7 @@ export const client = {
     if (params.assigned_to_user_id != null) {
       search.set("assigned_to_user_id", String(params.assigned_to_user_id));
     }
+    if (params.my_assigned) search.set("my_assigned", "true");
     if (params.master) search.set("master", "true");
     if (params.dry_run) search.set("dry_run", "true");
     if (params.limit != null) search.set("limit", String(params.limit));
@@ -1936,6 +1944,7 @@ export const client = {
     if (params.assigned_to_user_id != null) {
       search.set("assigned_to_user_id", String(params.assigned_to_user_id));
     }
+    if (params.my_assigned) search.set("my_assigned", "true");
     if (params.master) search.set("master", "true");
     const query = search.toString();
     return request<PostImportCleanResponse>(

@@ -601,6 +601,7 @@ class LeadTableSectionCountsResponse(BaseModel):
     targeted_distributor: int = 0
     targeted_client: int = 0
     incomplete_archives: int = 0
+    my_assigned: int = 0
 
 
 class LeadTablePromoteIncompleteArchivesRequest(BaseModel):

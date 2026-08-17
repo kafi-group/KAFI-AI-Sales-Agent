@@ -1197,6 +1197,15 @@ _SECTION_COUNTS_TTL = 20.0
 _SECTION_COUNTS_PREFIX = "section_counts:"
 
 
+def count_my_assigned_leads(db: Session, user_id: int) -> int:
+    """Leads assigned to a sales user (admin-sent + self-imports)."""
+    from sqlalchemy import func as sa_func
+
+    return (
+        db.query(sa_func.count(Buyer.id)).filter(Buyer.assigned_to_user_id == user_id).scalar()
+    ) or 0
+
+
 def invalidate_section_counts_cache() -> None:
     """Call after any write that changes lead counts or call outcomes."""
     cache.clear_prefix(_SECTION_COUNTS_PREFIX)

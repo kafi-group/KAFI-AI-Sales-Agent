@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { client, type CallConfig, type CallInitiateResult } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { phonesMatch, useTwilioVoiceOptional } from "../hooks/useTwilioVoice";
+import {
+  confirmAssignmentCallProceed,
+  getAssignmentCallWarning,
+} from "../utils/assignmentCallGuard";
 import { IconPhone, IconX } from "./icons/AppIcons";
 
 interface CallLeadButtonProps {
   leadId: number;
   phone: string | null | undefined;
   contactId?: number;
+  assignedToUserId?: number | null;
+  assignedTo?: string | null;
   onError: (message: string) => void;
   onSuccess?: (result: CallInitiateResult) => void;
   compact?: boolean;
@@ -22,10 +29,13 @@ export function CallLeadButton({
   leadId,
   phone,
   contactId,
+  assignedToUserId,
+  assignedTo,
   onError,
   onSuccess,
   compact = false,
 }: CallLeadButtonProps) {
+  const { user } = useAuth();
   const voice = useTwilioVoiceOptional();
   const [config, setConfig] = useState<CallConfig | null>(null);
   const [calling, setCalling] = useState(false);
@@ -54,6 +64,14 @@ export function CallLeadButton({
 
   async function handleTwilioCall() {
     if (!twilioVoice) return;
+    const assignmentWarning = getAssignmentCallWarning(
+      assignedToUserId,
+      assignedTo,
+      user?.id,
+    );
+    if (assignmentWarning && !confirmAssignmentCallProceed(assignmentWarning)) {
+      return;
+    }
     if (!twilioVoice.ready) {
       try {
         await twilioVoice.retryInit();

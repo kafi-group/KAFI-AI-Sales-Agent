@@ -9,7 +9,12 @@ import {
   type ReactNode,
 } from "react";
 import { client } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { autocorrectText } from "../utils/spelling";
+import {
+  confirmAssignmentCallProceed,
+  getAssignmentCallWarning,
+} from "../utils/assignmentCallGuard";
 import { phonesMatch, useTwilioVoice } from "./useTwilioVoice";
 
 export const BATCH_SIZE = 10;
@@ -23,6 +28,8 @@ export interface QueueEntry {
   contactName?: string | null;
   phone: string;
   country?: string | null;
+  assignedToUserId?: number | null;
+  assignedTo?: string | null;
   /** Numbers already dialed for this lead in the current bulk batch stop. */
   triedPhones?: string[];
 }
@@ -71,6 +78,7 @@ export interface CallQueueState {
 const CallQueueContext = createContext<CallQueueState | null>(null);
 
 function useCallQueueController(): CallQueueState {
+  const { user } = useAuth();
   const { placeCall, hangUp, pendingFollowUp, clearPendingFollowUp, setBulkModeActive } =
     useTwilioVoice();
 
@@ -140,6 +148,16 @@ function useCallQueueController(): CallQueueState {
       const entry = queueRef.current[index];
       if (!entry) return;
 
+      const assignmentWarning = getAssignmentCallWarning(
+        entry.assignedToUserId,
+        entry.assignedTo,
+        user?.id,
+      );
+      if (assignmentWarning && !confirmAssignmentCallProceed(assignmentWarning)) {
+        enterRemarksStep();
+        return;
+      }
+
       const generation = ++dialGenerationRef.current;
 
       placeCall(entry.leadId, entry.contactId, entry.phone)
@@ -177,7 +195,7 @@ function useCallQueueController(): CallQueueState {
           enterRemarksStep();
         });
     },
-    [bindInteraction, enterRemarksStep, hangUp, placeCall],
+    [bindInteraction, enterRemarksStep, hangUp, placeCall, user?.id],
   );
 
   /** Drop stale bulk-queue UI after bulk finished/paused; keep single-call follow-up. */
