@@ -287,7 +287,13 @@ def get_buyer(db: Session, buyer_id: int) -> Buyer | None:
 
 
 def create_buyer(db: Session, data: dict, *, commit: bool = True, flush: bool = True) -> Buyer:
-    buyer = Buyer(**data)
+    from modules.countries import resolve_country_name
+
+    payload = dict(data)
+    country = (payload.get("country") or "").strip()
+    if country:
+        payload["country"] = resolve_country_name(country) or country
+    buyer = Buyer(**payload)
     db.add(buyer)
     if commit:
         db.commit()
@@ -394,6 +400,10 @@ def update_buyer(
             "assigned_to",
             "assigned_to_user_id",
         }:
+            if key == "country" and value:
+                from modules.countries import resolve_country_name
+
+                value = resolve_country_name(str(value)) or value
             setattr(buyer, key, value)
     db.commit()
     db.refresh(buyer)

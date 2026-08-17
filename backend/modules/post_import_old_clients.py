@@ -67,6 +67,47 @@ def normalize_countries(
     return {"scanned": len(buyers), "changed": changed, "samples": samples}
 
 
+def backfill_country_from_phones(
+    db: Session,
+    *,
+    source: str | None = "old_clients",
+    exclude_source: str | None = None,
+    assigned_to_user_id: int | None = None,
+    unassigned_only: bool = False,
+) -> dict[str, Any]:
+    """Set country from international phone prefix when country is blank."""
+    from modules.countries import country_from_phone
+
+    buyers = _apply_lead_table_scope(
+        db.query(Buyer),
+        source=source,
+        exclude_source=exclude_source,
+        assigned_to_user_id=assigned_to_user_id,
+        unassigned_only=unassigned_only,
+    ).all()
+    changed = 0
+    for buyer in buyers:
+        if (buyer.country or "").strip():
+            continue
+        contact = primary_contact(db, buyer.id)
+        if not contact:
+            continue
+        for phone in (
+            contact.phone,
+            contact.primary_phone,
+            contact.secondary_phone,
+            contact.secondary_mobile,
+        ):
+            inferred = country_from_phone(phone)
+            if inferred:
+                buyer.country = inferred
+                changed += 1
+                break
+    if changed:
+        db.commit()
+    return {"scanned": len(buyers), "changed": changed}
+
+
 def _normalize_email(value: str) -> tuple[str, bool]:
     return normalize_email(value)
 

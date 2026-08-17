@@ -147,6 +147,25 @@ async def lifespan(app: FastAPI):
             synced = sync_mailboxes_from_env(db)
             if synced:
                 print(f"Synced mailboxes from .env for: {', '.join(synced)}", flush=True)
+
+            from modules.leads import (
+                invalidate_lead_table_filters_cache,
+                invalidate_section_counts_cache,
+            )
+            from modules.post_import_old_clients import backfill_country_from_phones, normalize_countries
+
+            country_repair = normalize_countries(db, source="old_clients")
+            phone_backfill = backfill_country_from_phones(db, source="old_clients")
+            repaired = (country_repair.get("changed") or 0) + (phone_backfill.get("changed") or 0)
+            if repaired:
+                print(
+                    f"Startup: repaired {repaired} Old clients country value(s) "
+                    f"(spellings={country_repair.get('changed', 0)}, "
+                    f"from_phone={phone_backfill.get('changed', 0)}).",
+                    flush=True,
+                )
+                invalidate_lead_table_filters_cache()
+                invalidate_section_counts_cache()
         finally:
             db.close()
     except Exception as exc:

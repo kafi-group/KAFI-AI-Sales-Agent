@@ -3342,6 +3342,23 @@ def _import_raw_to_candidate(raw: dict[str, Any]) -> DiscoveryCandidate:
     country = resolve_country_name(country_raw) if country_raw else None
     if not country and country_raw:
         country = country_raw
+    if not country:
+        for phone_key in (
+            "phone",
+            "contact_phone",
+            "primary_phone",
+            "contact_primary_phone",
+            "secondary_phone",
+            "contact_secondary_phone",
+            "secondary_mobile",
+            "contact_secondary_mobile",
+        ):
+            phone_val = (raw.get(phone_key) or "").strip()
+            if phone_val:
+                inferred = country_from_phone(phone_val)
+                if inferred:
+                    country = inferred
+                    break
     return DiscoveryCandidate(
         candidate_id=str(uuid.uuid4()),
         company_name=name,

@@ -241,6 +241,7 @@ _PHONE_COUNTRY_PREFIXES: list[tuple[str, str]] = [
     ("973", "Bahrain"),
     ("92", "Pakistan"),
     ("91", "India"),
+    ("94", "Sri Lanka"),
     ("880", "Bangladesh"),
     ("60", "Malaysia"),
     ("65", "Singapore"),

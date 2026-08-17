@@ -176,6 +176,7 @@ def _run_import(
             import_source=import_source,
             job_id=job_id,
             user_id=user_id,
+            assigned_to_user_id=assigned_to_user_id,
         )
         created_rows = [
             {"id": buyer.id, "company_name": buyer.company_name}
@@ -211,6 +212,7 @@ def _run_import(
                 import_source=import_source,
                 job_id=job_id,
                 user_id=user_id,
+                assigned_to_user_id=assigned_to_user_id,
             )
             created_rows = [
                 {"id": buyer.id, "company_name": buyer.company_name}
@@ -243,6 +245,43 @@ def _run_import(
         db.close()
 
 
+def _post_import_country_repair(
+    db: Any,
+    *,
+    import_source: str | None,
+    assigned_to_user_id: int | None,
+    created: list[Any],
+) -> None:
+    """Canonicalize country spellings after spreadsheet import (e.g. Srilanka → Sri Lanka)."""
+    if (import_source or "").strip().lower() != "old_clients":
+        return
+    try:
+        from modules.leads import invalidate_lead_table_filters_cache, invalidate_section_counts_cache
+        from modules.post_import_old_clients import (
+            backfill_country_from_phones,
+            normalize_countries,
+            normalize_countries_for_buyer_ids,
+        )
+
+        if created:
+            normalize_countries_for_buyer_ids(db, [buyer.id for buyer in created])
+        spelling = normalize_countries(
+            db,
+            source="old_clients",
+            assigned_to_user_id=assigned_to_user_id,
+        )
+        phone_fill = backfill_country_from_phones(
+            db,
+            source="old_clients",
+            assigned_to_user_id=assigned_to_user_id,
+        )
+        if spelling.get("changed") or phone_fill.get("changed"):
+            invalidate_lead_table_filters_cache()
+            invalidate_section_counts_cache()
+    except Exception as exc:  # noqa: BLE001 — repair must not fail the import job
+        print(f"Post-import country repair skipped: {exc}", flush=True)
+
+
 def _finalize_import_result(
     db: Any,
     result: dict[str, Any],
@@ -250,6 +289,7 @@ def _finalize_import_result(
     import_source: str | None,
     job_id: str,
     user_id: int | None,
+    assigned_to_user_id: int | None = None,
 ) -> tuple[int, list[dict[str, str]], list[dict[str, Any]], int | None]:
     """Verify the DB row count for the import source and log the activity entry.
 
@@ -295,5 +335,12 @@ def _finalize_import_result(
             )
         except Exception:  # noqa: BLE001 — activity log must not fail the import
             pass
+
+    _post_import_country_repair(
+        db,
+        import_source=import_source,
+        assigned_to_user_id=assigned_to_user_id,
+        created=list(result.get("created") or []),
+    )
 
     return created_count, skipped_rows, replaced_rows, verified_total
