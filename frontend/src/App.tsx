@@ -44,6 +44,7 @@ import { LeadsPage } from "./pages/LeadsPage";
 import { DataSynthesisPage } from "./pages/DataSynthesisPage";
 import { LeadsTablePage } from "./pages/LeadsTablePage";
 import { ClientHistoryPage } from "./pages/ClientHistoryPage";
+import { HelpfulGuidancePage } from "./pages/HelpfulGuidancePage";
 import { ChatbotPage } from "./pages/ChatbotPage";
 import { KpiPage } from "./pages/KpiPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -972,6 +973,7 @@ function DashboardApp() {
     },
     { id: "calls", label: "Call Center", count: 0 },
     { id: "client-history", label: "Client History", count: 0 },
+    { id: "helpful-guidance", label: "Helpful Guidance", count: 0 },
     {
       id: "quotation-agent",
       label: "CNF or FOB",
@@ -1248,6 +1250,9 @@ function DashboardApp() {
                   setTab("table");
                 }}
               />
+            )}
+            {tab === "helpful-guidance" && (
+              <HelpfulGuidancePage onError={setError} />
             )}
             {tab === "chatbot" && <ChatbotPage onError={setError} />}
             {tab === "ai-mode" && (

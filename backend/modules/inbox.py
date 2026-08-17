@@ -419,6 +419,8 @@ def _strip_thread_internals(thread: dict[str, Any]) -> dict[str, Any]:
         "latest_from_name": thread["latest_from_name"],
         "has_attachments": thread["has_attachments"],
         "provider": _mailbox_provider(),
+        "triage_category": thread.get("triage_category"),
+        "triage_label": thread.get("triage_label"),
     }
 
 
@@ -429,6 +431,7 @@ def list_threads(
     offset: int = 0,
     unread_only: bool = False,
     search_text: str | None = None,
+    triage_category: str | None = None,
 ) -> dict[str, Any]:
     account = resolve_user_mailbox(user)
     if not account:
@@ -458,6 +461,26 @@ def list_threads(
             ]
         finally:
             db.close()
+        from modules.inbox_triage import enrich_thread_with_triage
+
+        visible = [enrich_thread_with_triage(t) for t in visible]
+        # Auto-archive low-priority info threads on inbox sync (newsletters, noreply, etc.)
+        kept: list[dict[str, Any]] = []
+        archived_info = 0
+        for t in visible:
+            if t.get("triage_category") == "info" and archived_info < 12:
+                try:
+                    result = move_thread_messages(user, t["thread_id"], to_folder="archive")
+                    if result.get("status") == "ok" and (result.get("moved_count") or 0) > 0:
+                        archived_info += 1
+                        continue
+                except Exception:  # noqa: BLE001
+                    pass
+            kept.append(t)
+        visible = kept
+        triage_key = (triage_category or "").strip().lower()
+        if triage_key:
+            visible = [t for t in visible if (t.get("triage_category") or "") == triage_key]
         total_estimate = len(visible)
         if not search_text:
             try:

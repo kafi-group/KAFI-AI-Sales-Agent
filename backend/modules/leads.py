@@ -1658,6 +1658,19 @@ def remove_leads_overlapping_old_clients(db: Session) -> dict[str, object]:
     }
 
 
+def _contact_country_dedupe_key(contact_name: str | None, country: str | None) -> str | None:
+    """Normalize contact + country for duplicate clustering."""
+    import re
+
+    name = re.sub(r"[^a-z]", "", (contact_name or "").strip().lower())
+    if len(name) < 3:
+        return None
+    country_key = re.sub(r"[^a-z]", "", (country or "").strip().lower())
+    if not country_key:
+        return None
+    return f"{name}|{country_key}"
+
+
 def dedupe_leads_table(
     db: Session,
     *,
@@ -1712,6 +1725,22 @@ def dedupe_leads_table(
     for ids in by_domain.values():
         for other_id in ids[1:]:
             union(ids[0], other_id)
+
+    # Same contact person + country → likely duplicate companies (e.g. ENZE / ENZE Canada Ltd).
+    buyer_country = {buyer.id: buyer.country for buyer in buyers}
+    by_contact_country: dict[str, list[int]] = defaultdict(list)
+    if buyers:
+        buyer_id_set = [buyer.id for buyer in buyers]
+        for contact in db.query(Contact).filter(Contact.buyer_id.in_(buyer_id_set)).all():
+            key = _contact_country_dedupe_key(contact.full_name, buyer_country.get(contact.buyer_id))
+            if key:
+                by_contact_country[key].append(contact.buyer_id)
+    for ids in by_contact_country.values():
+        unique_ids = list(dict.fromkeys(ids))
+        if len(unique_ids) < 2:
+            continue
+        for other_id in unique_ids[1:]:
+            union(unique_ids[0], other_id)
 
     clusters: dict[int, list[Buyer]] = defaultdict(list)
     for buyer in buyers:

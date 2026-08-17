@@ -20,7 +20,13 @@ import { IconPhone, IconRefresh, IconX } from "../components/icons/AppIcons";
 import { type CallOutcome, callOutcomeBadge, callOutcomeLabel, callOutcomeListNotice } from "../utils/callOutcomes";
 import { pushNumberToFloatingDialpad } from "../utils/dialpadEvents";
 import { autocorrectText } from "../utils/spelling";
-import { useCallQueue, BATCH_SIZE } from "../hooks/useCallQueue";
+import { useCallQueue } from "../hooks/useCallQueue";
+import {
+  CALL_BATCH_SIZE_OPTIONS,
+  getCallBatchSize,
+  setCallBatchSize,
+  type CallBatchSize,
+} from "../utils/callBatchSize";
 
 interface CallsPageProps {
   onError: (message: string) => void;
@@ -86,6 +92,8 @@ export function CallsPage({ onError, onSelectLead, onCallFollowUpSaved }: CallsP
     lead: DialableLeadRow;
     phones: DialablePhoneOption[];
   } | null>(null);
+  const [selectingAllMatching, setSelectingAllMatching] = useState(false);
+  const [callBatchSize, setCallBatchSizeLocal] = useState<CallBatchSize>(() => getCallBatchSize());
   const callQueue = useCallQueue();
   const pollRef = useRef<number | null>(null);
 
@@ -249,9 +257,84 @@ export function CallsPage({ onError, onSelectLead, onCallFollowUpSaved }: CallsP
     setSelectedLeadIds(new Set());
   }
 
-  function startBulkCall() {
-    const leads = dialableLeads
-      .filter((l) => selectedLeadIds.has(l.id))
+  async function selectAllMatching() {
+    if (dialableTotal <= 0) return;
+    if (
+      !window.confirm(
+        `Select all ${dialableTotal.toLocaleString()} matching lead${dialableTotal === 1 ? "" : "s"}${countryFilter ? ` in ${countryFilter}` : ""}?`,
+      )
+    ) {
+      return;
+    }
+    setSelectingAllMatching(true);
+    try {
+      const ids = new Set<number>();
+      let pageNum = 1;
+      let totalPages = 1;
+      while (pageNum <= totalPages && pageNum <= 500) {
+        const table = await client.listDialableLeads({
+          page: pageNum,
+          page_size: 100,
+          country: countryFilter || undefined,
+          valid_now: validNowFilter || undefined,
+        });
+        for (const row of table.rows) ids.add(row.id);
+        totalPages = table.total_pages;
+        pageNum += 1;
+      }
+      setSelectedLeadIds(ids);
+      setNotice(`Selected ${ids.size} lead${ids.size === 1 ? "" : "s"}.`);
+      window.setTimeout(() => setNotice(null), 4000);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Could not select all matching leads");
+    } finally {
+      setSelectingAllMatching(false);
+    }
+  }
+
+  function changeCallBatchSize(size: CallBatchSize) {
+    setCallBatchSize(size);
+    setCallBatchSizeLocal(size);
+  }
+
+  async function startBulkCall() {
+    const ids = [...selectedLeadIds];
+    if (!ids.length) return;
+
+    const byId = new Map<number, DialableLeadRow>();
+    for (const row of dialableLeads) {
+      if (selectedLeadIds.has(row.id)) byId.set(row.id, row);
+    }
+    if (byId.size < ids.length) {
+      let pageNum = 1;
+      let totalPages = 1;
+      while (byId.size < ids.length && pageNum <= totalPages && pageNum <= 500) {
+        const table = await client.listDialableLeads({
+          page: pageNum,
+          page_size: 100,
+          country: countryFilter || undefined,
+          valid_now: validNowFilter || undefined,
+        });
+        for (const row of table.rows) {
+          if (selectedLeadIds.has(row.id)) byId.set(row.id, row);
+        }
+        totalPages = table.total_pages;
+        pageNum += 1;
+      }
+    }
+
+    const selected = ids.map((id) => byId.get(id)).filter((r): r is DialableLeadRow => Boolean(r));
+    const missingContact = selected.filter(
+      (l) => l.missing_contact_name || !(l.contact_name || "").trim(),
+    );
+    if (missingContact.length > 0) {
+      const proceed = window.confirm(
+        `${missingContact.length} selected lead${missingContact.length === 1 ? "" : "s"} ha${missingContact.length === 1 ? "s" : "ve"} no contact person name. Fix the contact first for cleaner call logs.\n\nStart bulk call anyway?`,
+      );
+      if (!proceed) return;
+    }
+
+    const leads = selected
       .map((l) => {
         const phones = l.phones?.length ? l.phones : [];
         const primary = phones[0];
@@ -303,7 +386,7 @@ export function CallsPage({ onError, onSelectLead, onCallFollowUpSaved }: CallsP
   if (!loading && config && !config.configured) {
     return (
       <section className="space-y-4">
-        <h2 className="text-lg font-medium text-slate-100">Calls</h2>
+        <h2 className="text-lg font-medium text-slate-100">Call Center</h2>
         <div className="p-6 rounded-xl border border-amber-800/50 bg-amber-900/20 text-amber-100 text-sm space-y-3">
           <p className="font-medium">Twilio not connected yet.</p>
           <p className="text-amber-200/80">
@@ -337,7 +420,7 @@ TWILIO_WEBHOOK_BASE_URL=https://abc123.ngrok-free.app`}
     <section className="space-y-4 w-full min-w-0">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-medium text-slate-100">Calls</h2>
+          <h2 className="text-lg font-medium text-slate-100">Call Center</h2>
           <p className="text-sm text-slate-500 mt-1">
             Browser calling via Twilio
             {config?.caller_id_masked ? ` · Caller ID ${config.caller_id_masked}` : ""}
@@ -471,39 +554,73 @@ TWILIO_WEBHOOK_BASE_URL=https://abc123.ngrok-free.app`}
               )}
 
               {dialableLeads.length > 0 && (
-                <div className="flex items-center gap-2 pt-1">
+                <div className="flex flex-wrap items-center gap-2 pt-1">
                   <ActionButton
                     icon={selectedLeadIds.size > 0 ? IconX : IconPhone}
                     size="sm"
                     variant="ghost"
                     onClick={selectedLeadIds.size > 0 ? clearSelection : selectAllVisible}
                     title={
-                      selectedLeadIds.size > 0
-                        ? "Clear selection"
-                        : "Select page"
+                      selectedLeadIds.size > 0 ? "Clear selection" : "Select leads on this page"
                     }
                     className="text-sky-300 border-sky-700/40"
                   >
                     {selectedLeadIds.size > 0
                       ? `Clear (${selectedLeadIds.size})`
-                      : `Select page (${dialableLeads.length})`}
+                      : `Select this page (${dialableLeads.length})`}
                   </ActionButton>
+                  {dialableTotal > dialableLeads.length && selectedLeadIds.size === 0 && (
+                    <ActionButton
+                      icon={IconPhone}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void selectAllMatching()}
+                      disabled={selectingAllMatching || callQueue.status !== "idle"}
+                      title={`Select all ${dialableTotal} matching leads`}
+                      className="text-sky-300 border-sky-700/40"
+                    >
+                      {selectingAllMatching
+                        ? "Selecting…"
+                        : `Select all ${dialableTotal.toLocaleString()} matching`}
+                    </ActionButton>
+                  )}
+                  <label className="text-xs text-slate-500 ml-auto flex items-center gap-1.5">
+                    Batch size
+                    <select
+                      value={callBatchSize}
+                      onChange={(e) =>
+                        changeCallBatchSize(Number(e.target.value) === 25 ? 25 : 10)
+                      }
+                      className="rounded-md bg-slate-950 border border-slate-700 px-2 py-1 text-xs text-slate-200"
+                    >
+                      {CALL_BATCH_SIZE_OPTIONS.map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   {selectedLeadIds.size > 0 && (
                     <ActionButton
                       icon={IconPhone}
                       variant="sky"
-                      onClick={startBulkCall}
+                      onClick={() => void startBulkCall()}
                       disabled={callQueue.status !== "idle"}
                       title="Bulk call"
-                      className="ml-auto"
                     >
                       Bulk call ({selectedLeadIds.size})
-                      {selectedLeadIds.size > BATCH_SIZE
-                        ? ` · ${Math.ceil(selectedLeadIds.size / BATCH_SIZE)} batches`
+                      {selectedLeadIds.size > callBatchSize
+                        ? ` · ${Math.ceil(selectedLeadIds.size / callBatchSize)} batches`
                         : ""}
                     </ActionButton>
                   )}
                 </div>
+              )}
+              {dialableTotal > 0 && (
+                <p className="text-xs text-slate-500 pt-1">
+                  Batch size {callBatchSize} — next batch starts after remarks for each group of{" "}
+                  {callBatchSize}.
+                </p>
               )}
             </div>
             <div className="max-h-[320px] overflow-y-auto divide-y divide-slate-800/80">
@@ -542,9 +659,21 @@ TWILIO_WEBHOOK_BASE_URL=https://abc123.ngrok-free.app`}
                       }}
                       className="text-left min-w-0 flex-1"
                     >
-                      <p className="text-sm text-slate-200 truncate">{lead.company_name}</p>
+                      <p className="text-sm text-slate-200 truncate flex flex-wrap items-center gap-1.5">
+                        <span className="truncate">{lead.company_name}</span>
+                        {lead.possible_duplicate && (
+                          <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                            Possible duplicate
+                          </span>
+                        )}
+                        {(lead.missing_contact_name || !(lead.contact_name || "").trim()) && (
+                          <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-300 border border-red-500/30">
+                            No contact name
+                          </span>
+                        )}
+                      </p>
                       <p className="text-xs text-slate-500 truncate">
-                        {lead.contact_name ?? "Contact"} · {lead.contact_phone}
+                        {(lead.contact_name || "").trim() || "—"} · {lead.contact_phone}
                         {lead.country ? ` · ${lead.country}` : ""}
                       </p>
                       <div className="mt-1">

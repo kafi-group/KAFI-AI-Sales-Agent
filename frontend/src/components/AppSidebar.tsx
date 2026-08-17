@@ -31,6 +31,7 @@ export type Tab =
   | "inbox"
   | "calls"
   | "client-history"
+  | "helpful-guidance"
   | "chatbot"
   | "kpi"
   | "ai-mode"

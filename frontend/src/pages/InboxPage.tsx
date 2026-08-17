@@ -65,6 +65,44 @@ interface InboxPageProps {
 
 const PAGE_SIZE = 50;
 
+const TRIAGE_FILTERS: Array<{ key: string; label: string; chipClass: string }> = [
+  { key: "", label: "All", chipClass: "border-slate-600 text-slate-300" },
+  { key: "urgent", label: "Urgent", chipClass: "border-red-700/60 text-red-200 bg-red-950/40" },
+  {
+    key: "action_required",
+    label: "Action",
+    chipClass: "border-amber-700/60 text-amber-200 bg-amber-950/40",
+  },
+  {
+    key: "opportunity",
+    label: "Opportunity",
+    chipClass: "border-emerald-700/60 text-emerald-200 bg-emerald-950/40",
+  },
+  { key: "info", label: "Info", chipClass: "border-slate-600 text-slate-400 bg-slate-900/60" },
+  {
+    key: "tracking",
+    label: "Tracking",
+    chipClass: "border-sky-700/60 text-sky-200 bg-sky-950/40",
+  },
+];
+
+function triageBadgeClass(category: string | null | undefined): string {
+  switch ((category || "").toLowerCase()) {
+    case "urgent":
+      return "border-red-700/50 text-red-200 bg-red-950/50";
+    case "action_required":
+      return "border-amber-700/50 text-amber-200 bg-amber-950/50";
+    case "opportunity":
+      return "border-emerald-700/50 text-emerald-200 bg-emerald-950/50";
+    case "tracking":
+      return "border-sky-700/50 text-sky-200 bg-sky-950/50";
+    case "info":
+      return "border-slate-600 text-slate-400 bg-slate-900/60";
+    default:
+      return "border-slate-700 text-slate-400";
+  }
+}
+
 function formatDate(value: string | null | undefined): string {
   if (!value) return "";
   const date = new Date(value);
@@ -262,6 +300,7 @@ export function InboxPage({
   const [mailAiQuestion, setMailAiQuestion] = useState("");
   const [mailAiAnswer, setMailAiAnswer] = useState<string | null>(null);
   const [mailAiLoading, setMailAiLoading] = useState(false);
+  const [triageFilter, setTriageFilter] = useState("");
 
   const pollTimerRef = useRef<number | null>(null);
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
@@ -412,6 +451,7 @@ export function InboxPage({
             limit: PAGE_SIZE,
             offset,
             unread_only: unreadOnly,
+            triage_category: triageFilter || undefined,
           });
           if (generation !== loadGenerationRef.current) return;
           setThreads(result.items);
@@ -475,7 +515,7 @@ export function InboxPage({
         }
       }
     },
-    [messagePage, refreshFolderCounts, section, threadPage, unreadOnly],
+    [messagePage, refreshFolderCounts, section, threadPage, triageFilter, unreadOnly],
   );
 
   useEffect(() => {
@@ -485,6 +525,7 @@ export function InboxPage({
     setThreadPage(1);
     setMessagePage(1);
     setSearchActive(false);
+    setTriageFilter("");
   }, [clearSelection, section]);
 
   useEffect(() => {
@@ -1159,6 +1200,32 @@ export function InboxPage({
               </ActionButton>
             ) : null}
           </div>
+          {section === "inbox" && !searchActive ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-slate-500 mr-1">Triage</span>
+              {TRIAGE_FILTERS.map((f) => {
+                const active = triageFilter === f.key;
+                return (
+                  <button
+                    key={f.key || "all"}
+                    type="button"
+                    onClick={() => {
+                      setTriageFilter(f.key);
+                      setThreadPage(1);
+                      clearSelection();
+                    }}
+                    className={`px-2 py-0.5 rounded-full border text-[11px] transition ${
+                      active
+                        ? `${f.chipClass} ring-1 ring-emerald-500/40`
+                        : "border-slate-800 text-slate-500 hover:border-slate-600 hover:text-slate-300"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
           <div
             ref={mailAiPanelRef}
             className={`rounded-xl border bg-slate-950/50 p-3 space-y-2 ${
@@ -1325,6 +1392,15 @@ export function InboxPage({
                             }`}
                           >
                             {item.subject}
+                            {item.triage_label ? (
+                              <span
+                                className={`ml-2 inline-flex align-middle px-1.5 py-0 rounded border text-[10px] font-medium ${triageBadgeClass(
+                                  item.triage_category,
+                                )}`}
+                              >
+                                {item.triage_label}
+                              </span>
+                            ) : null}
                             <span className="ml-1 text-slate-500">
                               · {item.message_count} msg{item.message_count === 1 ? "" : "s"}
                             </span>

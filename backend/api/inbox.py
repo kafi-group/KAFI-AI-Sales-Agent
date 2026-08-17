@@ -90,6 +90,7 @@ def list_inbox_threads(
     offset: int = Query(default=0, ge=0),
     unread_only: bool = Query(default=False),
     q: str | None = Query(default=None, max_length=200),
+    triage_category: str | None = Query(default=None, max_length=40),
     user: AppUser = Depends(get_current_user_released),
 ):
     _guard_configured(user)
@@ -100,6 +101,7 @@ def list_inbox_threads(
             offset=offset,
             unread_only=unread_only,
             search_text=q,
+            triage_category=triage_category,
         )
         return result
     except Exception as exc:  # noqa: BLE001

@@ -27,6 +27,16 @@ _VALID_CALL_OUTCOMES = frozenset(
 CALL_HISTORY_RETENTION_DAYS = 30
 
 
+def _contact_country_dedupe_key(contact_name: str | None, country: str | None) -> str | None:
+    name = re.sub(r"[^a-z]", "", (contact_name or "").strip().lower())
+    if len(name) < 3:
+        return None
+    country_key = re.sub(r"[^a-z]", "", (country or "").strip().lower())
+    if not country_key:
+        return None
+    return f"{name}|{country_key}"
+
+
 def _split_metadata(content: str | None) -> tuple[str, str | None, str | None]:
     base = (content or "").strip()
     notes: str | None = None
@@ -259,6 +269,13 @@ def voice_access_token() -> dict:
         "token": voice_client.create_access_token(),
         "identity": "sales-agent",
     }
+
+
+def get_call_history_item(db: Session, *, interaction_id: int) -> dict | None:
+    interaction = db.get(Interaction, interaction_id)
+    if not interaction or interaction.channel != Channel.phone:
+        return None
+    return call_interaction_to_dict(db, interaction)
 
 
 def call_interaction_to_dict(db: Session, interaction: Interaction) -> dict:
@@ -1026,6 +1043,18 @@ def list_dialable_leads(
 
     filtered.sort(key=lambda row: ((row[1] or "").lower(), row[0]))
     total = len(filtered)
+
+    duplicate_ids: set[int] = set()
+    key_to_ids: dict[str, list[int]] = {}
+    for buyer_id, _company_name, country_val, _created_at in filtered:
+        contact = phone_by_buyer.get(buyer_id)
+        key = _contact_country_dedupe_key(contact.full_name if contact else None, country_val)
+        if key:
+            key_to_ids.setdefault(key, []).append(buyer_id)
+    for ids in key_to_ids.values():
+        if len(ids) > 1:
+            duplicate_ids.update(ids)
+
     total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
     if page > total_pages:
         page = total_pages
@@ -1038,6 +1067,7 @@ def list_dialable_leads(
         phone_options = _dial_phone_options_for_buyer(db, buyer_id)
         timing = get_call_recommendation(country_val)
         primary_phone = phone_options[0]["phone"] if phone_options else None
+        contact_name = (contact.full_name if contact else None) or None
         rows.append(
             {
                 "id": buyer_id,
@@ -1050,9 +1080,11 @@ def list_dialable_leads(
                 "contact_id": (
                     phone_options[0].get("contact_id") if phone_options else (contact.id if contact else None)
                 ),
-                "contact_name": contact.full_name if contact else None,
+                "contact_name": contact_name,
                 "contact_phone": primary_phone,
                 "phones": phone_options,
+                "possible_duplicate": buyer_id in duplicate_ids,
+                "missing_contact_name": not (contact_name or "").strip(),
             }
         )
 

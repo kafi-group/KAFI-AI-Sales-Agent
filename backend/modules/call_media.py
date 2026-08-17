@@ -201,6 +201,12 @@ def transcribe_call_recording(db: Session, *, interaction_id: int) -> dict[str, 
         db.commit()
         raise ValueError("Recording file is not available yet")
 
+    current_status = (media.get("transcript_status") or "").lower()
+    if current_status == "ready" and (media.get("transcript") or "").strip():
+        return media
+    if current_status == "processing":
+        raise ValueError("Closed captions are already being generated — check back shortly")
+
     media["transcript_status"] = "processing"
     media["transcript_error"] = None
     media["transcript"] = None
@@ -224,9 +230,14 @@ def transcribe_call_recording(db: Session, *, interaction_id: int) -> dict[str, 
         else:
             mime_type = "audio/mpeg"
 
+        duration_seconds = media.get("duration_seconds")
+        if isinstance(duration_seconds, str) and duration_seconds.isdigit():
+            duration_seconds = int(duration_seconds)
+
         transcript = llm_client.transcribe_audio(
             audio_bytes,
             mime_type=mime_type,
+            duration_seconds=int(duration_seconds) if duration_seconds else None,
             hint=(
                 "This is a sales phone call between a Kafi Commodities sales agent "
                 "and a buyer/client. Produce a full word-for-word transcript."

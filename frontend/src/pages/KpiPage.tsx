@@ -7,6 +7,7 @@ import {
   type AppUser,
 } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { ManualKpiSection } from "../components/ManualKpiSection";
 import { ColumnVisibilityMenu } from "../components/ColumnVisibilityMenu";
 import {
   useColumnVisibility,
@@ -62,7 +63,7 @@ const COUNT_CARDS: { key: keyof KpiCounts; label: string }[] = [
   { key: "personal_whatsapp_sent", label: "Personal WhatsApp sent" },
   { key: "bulk_whatsapp_sent", label: "Bulk WhatsApp sent" },
   { key: "inbox_replies", label: "Inbox replies" },
-  { key: "brand_assistant_sessions", label: "Brand assistant" },
+  { key: "brand_assistant_sessions", label: "AI Chatbot" },
 ];
 
 const KPI_PER_USER_COLUMNS: ColumnDef[] = [
@@ -201,7 +202,7 @@ export function KpiPage({ onError }: KpiPageProps) {
     <div className="space-y-6 w-full min-w-0">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-slate-100">KPI Generation</h2>
+          <h2 className="text-xl font-semibold text-slate-100">KPI</h2>
           <p className="mt-1 text-sm text-slate-400">
             {periodLabel} activity report ({report?.timezone || "Asia/Karachi"}).
             Weeks are Mon–Sun. Tracking starts from go-live.
@@ -337,11 +338,34 @@ export function KpiPage({ onError }: KpiPageProps) {
               >
                 <p className="text-xs text-slate-500">{card.label}</p>
                 <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-100">
-                  {report.counts[card.key]}
+                  {report.counts[card.key] ?? 0}
                 </p>
+                {card.key === "personal_emails_sent" &&
+                ((report.counts.emails_after_calls ?? 0) > 0 ||
+                  (report.counts.emails_other_personal ?? 0) > 0) ? (
+                  <p className="mt-1 text-[11px] text-slate-500 leading-snug">
+                    {report.counts.emails_after_calls ?? 0} after calls ·{" "}
+                    {report.counts.emails_other_personal ?? 0} other personal
+                  </p>
+                ) : null}
               </div>
             ))}
           </div>
+
+          {report.email_attribution_note ? (
+            <section className="rounded-lg border border-sky-800/40 bg-sky-950/20 px-4 py-3">
+              <h3 className="text-xs font-medium uppercase tracking-wider text-sky-400/90">
+                Calls vs emails
+              </h3>
+              <p className="mt-2 text-sm text-slate-200 leading-relaxed">
+                {report.email_attribution_note}
+              </p>
+              <p className="mt-2 text-xs text-slate-500">
+                Personal emails linked to a call log count as post-call follow-up. Other personal
+                sends are table outreach, mailer, or manual compose. Bulk is batch sends.
+              </p>
+            </section>
+          ) : null}
 
           {isAdmin && report.scope === "team" && report.per_user.length > 0 && (
             <section className="space-y-3">
@@ -381,6 +405,11 @@ export function KpiPage({ onError }: KpiPageProps) {
                         row.counts.outcomes_not_received_call;
                       const emails =
                         (row.counts.personal_emails_sent ?? 0) + (row.counts.bulk_emails_sent ?? 0);
+                      const emailDetail =
+                        (row.counts.emails_after_calls ?? 0) > 0 ||
+                        (row.counts.emails_other_personal ?? 0) > 0
+                          ? `${row.counts.emails_after_calls ?? 0} call · ${row.counts.emails_other_personal ?? 0} other · ${row.counts.bulk_emails_sent ?? 0} bulk`
+                          : null;
                       const whatsapp =
                         (row.counts.personal_whatsapp_sent ?? 0) +
                         (row.counts.bulk_whatsapp_sent ?? 0);
@@ -392,7 +421,12 @@ export function KpiPage({ onError }: KpiPageProps) {
                           <td data-col="calls" className="px-3 py-2 tabular-nums">{row.counts.calls_logged}</td>
                           <td data-col="outcomes" className="px-3 py-2 tabular-nums">{outcomes}</td>
                           <td data-col="edits" className="px-3 py-2 tabular-nums">{row.counts.table_edits}</td>
-                          <td data-col="email" className="px-3 py-2 tabular-nums">{emails}</td>
+                          <td data-col="email" className="px-3 py-2 tabular-nums">
+                            <div>{emails}</div>
+                            {emailDetail ? (
+                              <div className="text-[10px] text-slate-500 font-normal">{emailDetail}</div>
+                            ) : null}
+                          </td>
                           <td data-col="whatsapp" className="px-3 py-2 tabular-nums">{whatsapp}</td>
                           <td data-col="events" className="px-3 py-2 tabular-nums">{row.activity_count}</td>
                         </tr>
@@ -437,6 +471,13 @@ export function KpiPage({ onError }: KpiPageProps) {
           </section>
         </>
       ) : null}
+
+      <ManualKpiSection
+        anchorDate={date}
+        isAdmin={isAdmin}
+        assignees={assignees}
+        onError={onError}
+      />
     </div>
   );
 }

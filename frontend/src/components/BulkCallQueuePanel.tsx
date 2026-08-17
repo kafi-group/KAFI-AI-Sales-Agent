@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { type CallQueueState, BATCH_SIZE } from "../hooks/useCallQueue";
+import { type CallQueueState } from "../hooks/useCallQueue";
 import { CALL_OUTCOMES } from "../utils/callOutcomes";
 import {
   autocorrectText,
@@ -71,6 +71,9 @@ export function BulkCallQueuePanel({ queue, onClose, onError }: BulkCallQueuePan
     stop,
     skipCurrent,
     redialAlternatePhone,
+    skipWithoutRemarks,
+    toggleMinimize,
+    batchSize,
     queue: entries,
   } = queue;
 
@@ -96,8 +99,8 @@ export function BulkCallQueuePanel({ queue, onClose, onError }: BulkCallQueuePan
     (status === "running" || status === "between" || status === "paused") &&
     dismissedLeadId !== currentEntry?.leadId;
 
-  const batchStart = (batchNumber - 1) * BATCH_SIZE;
-  const batchEnd = Math.min(batchStart + BATCH_SIZE, totalCalls);
+  const batchStart = (batchNumber - 1) * batchSize;
+  const batchEnd = Math.min(batchStart + batchSize, totalCalls);
   const batchEntries = entries.slice(batchStart, batchEnd);
 
   return (
@@ -149,6 +152,14 @@ export function BulkCallQueuePanel({ queue, onClose, onError }: BulkCallQueuePan
                       ? ` · ${totalCalls - currentIndex - 1} still waiting`
                       : " · last in queue"
                   }`}
+              {status !== "completed" ? (
+                <span className="text-slate-500">
+                  {" "}
+                  · Batch size {batchSize}
+                  {totalBatches > 1 ? ` (${batchNumber}/${totalBatches})` : ""} — next batch after
+                  remarks
+                </span>
+              ) : null}
             </p>
           </div>
         </div>
@@ -174,14 +185,25 @@ export function BulkCallQueuePanel({ queue, onClose, onError }: BulkCallQueuePan
             </>
           )}
           {status === "between" && (
-            <button
-              type="button"
-              onClick={() => void savePendingAndContinue()}
-              disabled={savingRemarks}
-              className="px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-60 border border-emerald-600 text-white text-xs font-medium"
-            >
-              {savingRemarks ? "Saving…" : "Save & next"}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => void skipWithoutRemarks()}
+                disabled={savingRemarks}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs disabled:opacity-60"
+                title="Skip remarks for this lead and dial the next"
+              >
+                Skip & next
+              </button>
+              <button
+                type="button"
+                onClick={() => void savePendingAndContinue()}
+                disabled={savingRemarks}
+                className="px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-60 border border-emerald-600 text-white text-xs font-medium"
+              >
+                {savingRemarks ? "Saving…" : "Save & next"}
+              </button>
+            </>
           )}
           {status === "paused" && (
             <button
@@ -193,15 +215,33 @@ export function BulkCallQueuePanel({ queue, onClose, onError }: BulkCallQueuePan
             </button>
           )}
           {status !== "completed" && (
-            <button
-              type="button"
-              onClick={stop}
-              disabled={savingRemarks}
-              className="px-2.5 py-1.5 rounded-lg bg-red-900/50 hover:bg-red-900/70 border border-red-700/40 text-red-200 text-xs disabled:opacity-60"
-              title="Stop the entire bulk queue"
-            >
-              Stop all
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={toggleMinimize}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs"
+                title="Minimize to a small chip"
+              >
+                Minimize
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs"
+                title="Hide panel (pauses queue — resume from Call Center)"
+              >
+                Hide panel
+              </button>
+              <button
+                type="button"
+                onClick={stop}
+                disabled={savingRemarks}
+                className="px-2.5 py-1.5 rounded-lg bg-red-900/50 hover:bg-red-900/70 border border-red-700/40 text-red-200 text-xs disabled:opacity-60"
+                title="Stop the entire bulk queue and discard remaining calls"
+              >
+                Stop all (end batch)
+              </button>
+            </>
           )}
           {status === "completed" && (
             <button

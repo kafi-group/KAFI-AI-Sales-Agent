@@ -316,6 +316,8 @@ export interface InboxThreadSummary {
   latest_from_name: string | null;
   has_attachments: boolean;
   provider?: string | null;
+  triage_category?: string | null;
+  triage_label?: string | null;
 }
 
 export interface InboxThreadDetail extends InboxThreadSummary {
@@ -398,6 +400,8 @@ export interface KpiCounts {
   table_edits: number;
   email_templates_created: number;
   personal_emails_sent?: number;
+  emails_after_calls?: number;
+  emails_other_personal?: number;
   bulk_emails_sent: number;
   personal_whatsapp_sent?: number;
   bulk_whatsapp_sent?: number;
@@ -432,6 +436,34 @@ export interface KpiPerUserSummary {
 }
 
 export type KpiPeriod = "day" | "week" | "month";
+export type ManualKpiPeriod = "day" | "week" | "month" | "year";
+
+export interface ManualKpiEntry {
+  id: number;
+  user_id: number;
+  username: string | null;
+  full_name: string | null;
+  activity_date: string;
+  person_name: string | null;
+  company: string | null;
+  country: string | null;
+  contact_type: string | null;
+  follow_up_type: string | null;
+  wechat_contacts: string | null;
+  remarks: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ManualKpiListResponse {
+  items: ManualKpiEntry[];
+  total: number;
+  period: string;
+  date_start: string;
+  date_end: string;
+  timezone: string;
+  scope: string;
+}
 
 export interface DailyKpiReport {
   date: string;
@@ -447,6 +479,7 @@ export interface DailyKpiReport {
     role: string;
   } | null;
   counts: KpiCounts;
+  email_attribution_note?: string | null;
   per_user: KpiPerUserSummary[];
   activities: KpiActivityItem[];
   activity_count: number;
@@ -698,6 +731,8 @@ export interface DialableLeadRow {
   contact_name: string | null;
   contact_phone: string | null;
   phones?: DialablePhoneOption[];
+  possible_duplicate?: boolean;
+  missing_contact_name?: boolean;
 }
 
 export interface DialableCountryNow {
@@ -2321,6 +2356,51 @@ export const client = {
       }),
     }),
 
+  listManualKpi: (params: {
+    date: string;
+    period?: ManualKpiPeriod | string;
+    user_id?: number;
+  }) => {
+    const search = new URLSearchParams();
+    search.set("date", params.date);
+    if (params.period) search.set("period", params.period);
+    if (params.user_id != null) search.set("user_id", String(params.user_id));
+    return request<ManualKpiListResponse>(`/kpi/manual?${search}`);
+  },
+  createManualKpi: (payload: {
+    activity_date: string;
+    person_name?: string | null;
+    company?: string | null;
+    country?: string | null;
+    contact_type?: string | null;
+    follow_up_type?: string | null;
+    wechat_contacts?: string | null;
+    remarks?: string | null;
+  }) =>
+    request<ManualKpiEntry>("/kpi/manual", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateManualKpi: (
+    entryId: number,
+    payload: Partial<{
+      activity_date: string;
+      person_name: string | null;
+      company: string | null;
+      country: string | null;
+      contact_type: string | null;
+      follow_up_type: string | null;
+      wechat_contacts: string | null;
+      remarks: string | null;
+    }>,
+  ) =>
+    request<ManualKpiEntry>(`/kpi/manual/${entryId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteManualKpi: (entryId: number) =>
+    request<void>(`/kpi/manual/${entryId}`, { method: "DELETE" }),
+
   getInboxStatus: () => request<InboxStatus>("/inbox/status"),
   listInboxFolders: () => request<InboxFoldersResponse>("/inbox/folders"),
   composeInboxMail: (payload: {
@@ -2343,14 +2423,23 @@ export const client = {
     offset?: number;
     unread_only?: boolean;
     q?: string;
+    triage_category?: string;
   } = {}) => {
     const search = new URLSearchParams();
     if (params.limit) search.set("limit", String(params.limit));
     if (params.offset) search.set("offset", String(params.offset));
     if (params.unread_only) search.set("unread_only", "true");
     if (params.q) search.set("q", params.q);
+    if (params.triage_category) search.set("triage_category", params.triage_category);
     const query = search.toString();
     return request<InboxThreadListResponse>(`/inbox/threads${query ? `?${query}` : ""}`);
+  },
+  getHelpfulGuidance: (params: { months?: number; user_id?: number } = {}) => {
+    const search = new URLSearchParams();
+    if (params.months) search.set("months", String(params.months));
+    if (params.user_id != null) search.set("user_id", String(params.user_id));
+    const query = search.toString();
+    return request<Record<string, unknown>>(`/guidance/helpful${query ? `?${query}` : ""}`);
   },
   getInboxThread: (threadId: string) =>
     request<InboxThreadDetail>(`/inbox/threads/${encodeURIComponent(threadId)}`),
@@ -2748,6 +2837,8 @@ export const client = {
     if (params.since_days != null) search.set("since_days", String(params.since_days));
     return request<CallHistoryListResponse>(`/leads/${leadId}/calls?${search}`);
   },
+  getCallHistoryItem: (interactionId: number) =>
+    request<CallHistoryItem>(`/calls/${interactionId}`),
   updateCallNotes: (interactionId: number, notes: string) =>
     request<CallHistoryItem>(`/calls/${interactionId}/notes`, {
       method: "PATCH",

@@ -270,6 +270,20 @@ export const INDEX_SECTIONS: IndexSection[] = [
         icon: "heart",
         action: { type: "table", section: "sales_interested_clients" },
       },
+      {
+        id: "5.4",
+        title: "Client History",
+        description: "Past calls, emails, and outcomes per client.",
+        icon: "call",
+        action: { type: "tab", tab: "client-history" },
+      },
+      {
+        id: "5.5",
+        title: "Helpful Guidance",
+        description: "Coaching from call history, KPI trends, and voicemail cost tips.",
+        icon: "chart",
+        action: { type: "tab", tab: "helpful-guidance" },
+      },
     ],
   },
   {

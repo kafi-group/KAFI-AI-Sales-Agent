@@ -15,8 +15,10 @@ import {
   confirmAssignmentCallProceed,
   getAssignmentCallWarning,
 } from "../utils/assignmentCallGuard";
+import { getCallBatchSize, type CallBatchSize } from "../utils/callBatchSize";
 import { phonesMatch, useTwilioVoice } from "./useTwilioVoice";
 
+/** @deprecated use getCallBatchSize() — kept for imports that expect a constant default */
 export const BATCH_SIZE = 10;
 
 export type QueueStatus = "idle" | "running" | "between" | "paused" | "completed";
@@ -62,10 +64,17 @@ export interface CallQueueState {
   setPendingNotes: (v: string) => void;
   /** Save remarks for the current lead, then dial the next (or finish if last). */
   savePendingAndContinue: () => Promise<void>;
+  /** Advance queue without outcome/remarks (logs as skipped). */
+  skipWithoutRemarks: () => Promise<void>;
   start: (leads: QueueEntry[]) => void;
   pause: () => void;
   resume: () => void;
   stop: () => void;
+  panelHidden: boolean;
+  panelMinimized: boolean;
+  hidePanel: () => void;
+  showPanel: () => void;
+  toggleMinimize: () => void;
   /**
    * End the CURRENT call only and open remarks for that same lead.
    * Never advances the queue and never finishes the batch.
@@ -89,6 +98,9 @@ function useCallQueueController(): CallQueueState {
   const [pendingOutcome, setPendingOutcome] = useState<string | null>(null);
   const [pendingNotes, setPendingNotes] = useState("");
   const [savingRemarks, setSavingRemarks] = useState(false);
+  const [panelHidden, setPanelHidden] = useState(false);
+  const [panelMinimized, setPanelMinimized] = useState(false);
+  const [batchSize, setBatchSizeState] = useState<CallBatchSize>(() => getCallBatchSize());
 
   const statusRef = useRef<QueueStatus>("idle");
   const currentIndexRef = useRef(0);
@@ -310,6 +322,60 @@ function useCallQueueController(): CallQueueState {
     [clearRemarksFields, dialEntry, hangUp, syncStatus],
   );
 
+  const advanceAfterCurrent = useCallback(
+    async (idx: number, patch: Partial<QueueResult>) => {
+      const leads = queueRef.current;
+      setResults((prev) => {
+        const next = prev.map((r, i) => (i === idx ? { ...r, ...patch } : r));
+        resultsRef.current = next;
+        return next;
+      });
+      clearPendingFollowUp();
+      const nextIndex = idx + 1;
+      clearRemarksFields();
+      if (nextIndex >= leads.length) {
+        syncIndex(nextIndex);
+        syncStatus("completed");
+        setBulkModeActive(false);
+        return;
+      }
+      syncIndex(nextIndex);
+      syncStatus("running");
+      dialEntry(nextIndex);
+    },
+    [clearPendingFollowUp, clearRemarksFields, dialEntry, setBulkModeActive, syncIndex, syncStatus],
+  );
+
+  const skipWithoutRemarks = useCallback(async () => {
+    if (statusRef.current !== "between") return;
+    if (saveLockRef.current) return;
+    const leads = queueRef.current;
+    if (!leads.length) return;
+    const idx = currentIndexRef.current;
+    if (idx < 0 || idx >= leads.length) return;
+
+    saveLockRef.current = true;
+    setSavingRemarks(true);
+    try {
+      hangUp();
+      dialGenerationRef.current += 1;
+      const interactionId =
+        pendingInteractionIdRef.current ?? resultsRef.current[idx]?.interactionId;
+      if (interactionId != null) {
+        handledInteractionIdsRef.current.add(interactionId);
+        try {
+          await flushRemarks(interactionId, null, "Skipped — no remarks logged");
+        } catch {
+          /* best-effort */
+        }
+      }
+      await advanceAfterCurrent(idx, { skipped: true, notes: "Skipped" });
+    } finally {
+      saveLockRef.current = false;
+      setSavingRemarks(false);
+    }
+  }, [advanceAfterCurrent, hangUp]);
+
   const savePendingAndContinue = useCallback(async () => {
     if (statusRef.current !== "between") return;
     if (saveLockRef.current) return;
@@ -337,54 +403,23 @@ function useCallQueueController(): CallQueueState {
       }
       await flushRemarks(interactionId, outcome, notes);
 
-      setResults((prev) => {
-        const next = prev.map((r, i) =>
-          i === idx
-            ? {
-                ...r,
-                interactionId: interactionId ?? r.interactionId,
-                outcome: outcome || r.outcome,
-                notes: notes || r.notes,
-                skipped: false,
-              }
-            : r,
-        );
-        resultsRef.current = next;
-        return next;
+      await advanceAfterCurrent(idx, {
+        interactionId: interactionId ?? undefined,
+        outcome: outcome || undefined,
+        notes: notes || undefined,
+        skipped: false,
       });
-      clearPendingFollowUp();
-
-      const nextIndex = idx + 1;
-      clearRemarksFields();
-
-      // Last lead in the queue → finished. Otherwise dial the next one.
-      if (nextIndex >= leads.length) {
-        syncIndex(nextIndex);
-        syncStatus("completed");
-        setBulkModeActive(false);
-        return;
-      }
-
-      syncIndex(nextIndex);
-      syncStatus("running");
-      dialEntry(nextIndex);
     } finally {
       saveLockRef.current = false;
       setSavingRemarks(false);
     }
-  }, [
-    clearPendingFollowUp,
-    clearRemarksFields,
-    dialEntry,
-    hangUp,
-    setBulkModeActive,
-    syncIndex,
-    syncStatus,
-  ]);
+  }, [advanceAfterCurrent, hangUp]);
 
   const start = useCallback(
     (leads: QueueEntry[]) => {
       if (!leads.length) return;
+      const size = getCallBatchSize();
+      setBatchSizeState(size);
 
       // Snapshot a fresh copy so later page reloads cannot shrink the queue.
       const snapshot = leads.map((l) => ({ ...l }));
@@ -406,10 +441,34 @@ function useCallQueueController(): CallQueueState {
       clearRemarksFields();
       setSavingRemarks(false);
       setBulkModeActive(true);
+      setPanelHidden(false);
+      setPanelMinimized(false);
       dialEntry(0);
     },
     [clearRemarksFields, dialEntry, setBulkModeActive, syncIndex, syncStatus],
   );
+
+  const hidePanel = useCallback(() => {
+    if (statusRef.current === "running") {
+      dialGenerationRef.current += 1;
+      hangUp();
+    }
+    if (statusRef.current === "running" || statusRef.current === "between") {
+      syncStatus("paused");
+    }
+    setPanelHidden(true);
+    setPanelMinimized(false);
+  }, [hangUp, syncStatus]);
+
+  const showPanel = useCallback(() => {
+    setPanelHidden(false);
+    setPanelMinimized(false);
+  }, []);
+
+  const toggleMinimize = useCallback(() => {
+    setPanelMinimized((prev) => !prev);
+    setPanelHidden(false);
+  }, []);
 
   const pause = useCallback(() => {
     if (statusRef.current !== "running" && statusRef.current !== "between") return;
@@ -443,6 +502,8 @@ function useCallQueueController(): CallQueueState {
     clearRemarksFields();
     setSavingRemarks(false);
     setBulkModeActive(false);
+    setPanelHidden(false);
+    setPanelMinimized(false);
   }, [
     clearPendingFollowUp,
     clearRemarksFields,
@@ -452,9 +513,9 @@ function useCallQueueController(): CallQueueState {
     syncStatus,
   ]);
 
-  const batchNumber = Math.floor(currentIndex / BATCH_SIZE) + 1;
-  const totalBatches = Math.ceil(queue.length / BATCH_SIZE) || 0;
-  const indexInBatch = currentIndex % BATCH_SIZE;
+  const batchNumber = Math.floor(currentIndex / batchSize) + 1;
+  const totalBatches = Math.ceil(queue.length / batchSize) || 0;
+  const indexInBatch = currentIndex % batchSize;
 
   return {
     queue,
@@ -465,19 +526,25 @@ function useCallQueueController(): CallQueueState {
     batchNumber,
     totalBatches,
     indexInBatch,
-    batchSize: BATCH_SIZE,
+    batchSize,
+    panelHidden,
+    panelMinimized,
     pendingOutcome,
     pendingNotes,
     savingRemarks,
     setPendingOutcome: setPendingOutcomeSafe,
     setPendingNotes: setPendingNotesSafe,
     savePendingAndContinue,
+    skipWithoutRemarks,
     start,
     pause,
     resume,
     stop,
     skipCurrent,
     redialAlternatePhone,
+    hidePanel,
+    showPanel,
+    toggleMinimize,
   };
 }
 

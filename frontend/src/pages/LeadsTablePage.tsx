@@ -59,7 +59,8 @@ import {
   IconX,
   IconXCircle,
 } from "../components/icons/AppIcons";
-import { BATCH_SIZE, useCallQueue, type QueueEntry } from "../hooks/useCallQueue";
+import { useCallQueue, type QueueEntry } from "../hooks/useCallQueue";
+import { getCallBatchSize } from "../utils/callBatchSize";
 import {
   useColumnVisibility,
   type ColumnDef,
@@ -1091,6 +1092,9 @@ export function LeadsTablePage({
 
   const isWideLayout =
     isOldClients || isMyAssigned || isIncompleteArchives || isCallOutcomeSection || isTargetedPool;
+  /** Same spreadsheet-style table as Old clients (not Discover narrow layout). */
+  const usesOldClientsTable =
+    isOldClients || isMyAssigned || isIncompleteArchives || isCallOutcomeSection;
   const columnDefs = useMemo(() => {
     const base = isTargetedPool
       ? TARGETED_POOL_COLUMNS
@@ -1292,11 +1296,11 @@ export function LeadsTablePage({
 
   useEffect(() => {
     client
-      .listLeadTableFilters(isOldClients ? { source: "old_clients" } : {})
+      .listLeadTableFilters(isOldClients || isMyAssigned ? { source: "old_clients" } : {})
       .then(setFilters)
       .catch(() => onError("Failed to load lead filters"));
     void loadSectionCounts();
-  }, [isOldClients, isMaster, loadSectionCounts, onError]);
+  }, [isOldClients, isMyAssigned, isMaster, loadSectionCounts, onError]);
 
   useEffect(() => {
     void loadTable();
@@ -2759,8 +2763,8 @@ export function LeadsTablePage({
             {startingBulkCall
               ? "Starting…"
               : `Bulk call (${selected.size})`}
-            {!startingBulkCall && selected.size > BATCH_SIZE
-              ? ` · ${Math.ceil(selected.size / BATCH_SIZE)} batches`
+            {!startingBulkCall && selected.size > getCallBatchSize()
+              ? ` · ${Math.ceil(selected.size / getCallBatchSize())} batches`
               : ""}
           </ActionButton>
           <ActionButton
@@ -3427,12 +3431,14 @@ export function LeadsTablePage({
             {hasActiveFilters
               ? "No leads match these filters."
               : !isAdmin
-                ? isOldClients
+                ? isOldClients || isMyAssigned
                   ? "No clients yet. Add a lead manually or import a CSV/Excel file."
                   : callOutcomeEmptyMessage ??
                     "No clients in this section yet. After a call, clients move here from Clients."
-                : isOldClients
-                  ? "No old clients yet. Add a lead manually or import a CSV/Excel file."
+                : isOldClients || isMyAssigned
+                  ? isMyAssigned
+                    ? "No leads assigned to you yet. An admin can assign clients from Old clients, or import a spreadsheet to add your own."
+                    : "No old clients yet. Add a lead manually or import a CSV/Excel file."
                   : callOutcomeEmptyMessage ??
                     "No leads in this section yet. Add a lead manually or import a CSV/Excel file."}
           </p>
@@ -3564,7 +3570,7 @@ export function LeadsTablePage({
               commitDraftField={commitDraftField}
               openWhatsAppCompose={openWhatsAppCompose}
             />
-          ) : isOldClients || isIncompleteArchives || isCallOutcomeSection ? (
+          ) : usesOldClientsTable ? (
             <table
               className={`w-full text-sm border-collapse ${
                 canScheduleFollowUp ? "min-w-[2800px]" : "min-w-[2600px]"

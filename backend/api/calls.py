@@ -15,7 +15,7 @@ from api.schemas import (
     TwilioBalanceRead,
     VoiceTokenRead,
 )
-from db.models import AppUser, AppUserRole
+from db.models import AppUser, AppUserRole, Contact
 from db.session import SessionLocal
 from integrations.voice_client import voice_client
 from modules import calls as calls_module
@@ -100,12 +100,14 @@ async def _twilio_form(request: Request) -> dict[str, str]:
 
 
 def _transcribe_in_background(interaction_id: int) -> None:
+    import logging
+
+    logger = logging.getLogger(__name__)
     db = SessionLocal()
     try:
         calls_module.transcribe_call(db, interaction_id=interaction_id)
     except Exception:
-        # Status/error already stored on the interaction when possible.
-        pass
+        logger.exception("Background transcription failed for interaction %s", interaction_id)
     finally:
         db.close()
 
@@ -249,6 +251,27 @@ def _generate_personalized_followup(draft_id: int) -> None:
         db.close()
 
 
+@router.get("/calls/{interaction_id}", response_model=CallHistoryItem)
+def get_call_history_item(
+    interaction_id: int,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    from db.models import Channel, Interaction
+
+    interaction = db.get(Interaction, interaction_id)
+    if not interaction or interaction.channel != Channel.phone:
+        raise HTTPException(404, "Call not found")
+    if interaction.contact_id:
+        contact = db.get(Contact, interaction.contact_id)
+        if contact and contact.buyer_id:
+            _require_lead_access(db, user, contact.buyer_id)
+    row = calls_module.get_call_history_item(db, interaction_id=interaction_id)
+    if not row:
+        raise HTTPException(404, "Call not found")
+    return CallHistoryItem(**row)
+
+
 @router.patch("/calls/{interaction_id}/notes", response_model=CallHistoryItem)
 def update_call_notes(
     interaction_id: int,
@@ -343,6 +366,9 @@ def transcribe_call(
         except Exception as exc:
             raise HTTPException(502, str(exc)) from exc
         return CallHistoryItem(**result)
+
+    if (current.get("transcript_status") or "").lower() == "processing":
+        return CallHistoryItem(**current)
 
     background_tasks.add_task(_transcribe_in_background, interaction_id)
     current["transcript_status"] = "processing"

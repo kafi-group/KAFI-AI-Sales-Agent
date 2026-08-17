@@ -1134,6 +1134,8 @@ class DialableLeadRow(BaseModel):
     contact_name: Optional[str] = None
     contact_phone: Optional[str] = None
     phones: list[DialablePhoneOption] = Field(default_factory=list)
+    possible_duplicate: bool = False
+    missing_contact_name: bool = False
 
 
 class DialableCountryNow(BaseModel):
@@ -1251,6 +1253,8 @@ class InboxThreadSummary(BaseModel):
     latest_from_name: Optional[str] = None
     has_attachments: bool = False
     provider: Optional[str] = None
+    triage_category: Optional[str] = None
+    triage_label: Optional[str] = None
 
 
 class InboxThreadListResponse(BaseModel):
@@ -1408,6 +1412,8 @@ class KpiCounts(BaseModel):
     table_edits: int = 0
     email_templates_created: int = 0
     personal_emails_sent: int = 0
+    emails_after_calls: int = 0
+    emails_other_personal: int = 0
     bulk_emails_sent: int = 0
     personal_whatsapp_sent: int = 0
     bulk_whatsapp_sent: int = 0
@@ -1445,6 +1451,7 @@ class DailyKpiReportRead(BaseModel):
     scope: str
     user: Optional[KpiUserBrief] = None
     counts: KpiCounts
+    email_attribution_note: Optional[str] = None
     per_user: list[KpiPerUserSummary] = Field(default_factory=list)
     activities: list[KpiActivityItem] = Field(default_factory=list)
     activity_count: int = 0
@@ -1461,6 +1468,55 @@ class KpiSummaryResponse(BaseModel):
     source: str
     subject: str
     report: DailyKpiReportRead
+
+
+class ManualKpiEntryRead(BaseModel):
+    id: int
+    user_id: int
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+    activity_date: str
+    person_name: Optional[str] = None
+    company: Optional[str] = None
+    country: Optional[str] = None
+    contact_type: Optional[str] = None
+    follow_up_type: Optional[str] = None
+    wechat_contacts: Optional[str] = None
+    remarks: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ManualKpiEntryCreate(BaseModel):
+    activity_date: date
+    person_name: Optional[str] = None
+    company: Optional[str] = None
+    country: Optional[str] = None
+    contact_type: Optional[str] = None
+    follow_up_type: Optional[str] = None
+    wechat_contacts: Optional[str] = None
+    remarks: Optional[str] = None
+
+
+class ManualKpiEntryUpdate(BaseModel):
+    activity_date: Optional[date] = None
+    person_name: Optional[str] = None
+    company: Optional[str] = None
+    country: Optional[str] = None
+    contact_type: Optional[str] = None
+    follow_up_type: Optional[str] = None
+    wechat_contacts: Optional[str] = None
+    remarks: Optional[str] = None
+
+
+class ManualKpiListResponse(BaseModel):
+    items: list[ManualKpiEntryRead] = Field(default_factory=list)
+    total: int = 0
+    period: str = "day"
+    date_start: str
+    date_end: str
+    timezone: str = "Asia/Karachi"
+    scope: str = "user"
 
 
 # ── WhatsApp Cloud API ────────────────────────────────────────────────────────

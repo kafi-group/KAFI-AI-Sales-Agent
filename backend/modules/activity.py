@@ -44,6 +44,8 @@ _EMPTY_COUNTS = {
     "table_edits": 0,
     "email_templates_created": 0,
     "personal_emails_sent": 0,
+    "emails_after_calls": 0,
+    "emails_other_personal": 0,
     "bulk_emails_sent": 0,
     "personal_whatsapp_sent": 0,
     "bulk_whatsapp_sent": 0,
@@ -179,6 +181,15 @@ def _is_whatsapp_activity_event(event: Any) -> bool:
     return title.lower().startswith("whatsapp")
 
 
+def _empty_email_bucket() -> dict[str, int]:
+    return {
+        "personal_emails_sent": 0,
+        "emails_after_calls": 0,
+        "emails_other_personal": 0,
+        "bulk_emails_sent": 0,
+    }
+
+
 def _email_send_counts_by_user(
     db: Session,
     *,
@@ -204,10 +215,7 @@ def _email_send_counts_by_user(
         uid = event.user_id
         if uid is None:
             continue
-        bucket = by_user.setdefault(
-            uid,
-            {"personal_emails_sent": 0, "bulk_emails_sent": 0},
-        )
+        bucket = by_user.setdefault(uid, _empty_email_bucket())
         details = event.details or {}
         mode = str(details.get("send_mode") or "").lower()
         et = event.event_type
@@ -224,6 +232,10 @@ def _email_send_counts_by_user(
             if mode == "bulk":
                 continue
             bucket["personal_emails_sent"] += 1
+            if event.interaction_id is not None:
+                bucket["emails_after_calls"] += 1
+            else:
+                bucket["emails_other_personal"] += 1
 
     return by_user
 
@@ -285,9 +297,64 @@ def _apply_email_activity_counts(
         return
     personal = int(email_counts.get("personal_emails_sent") or 0)
     bulk = int(email_counts.get("bulk_emails_sent") or 0)
+    after_calls = int(email_counts.get("emails_after_calls") or 0)
+    other_personal = int(email_counts.get("emails_other_personal") or 0)
     # Take the higher of logged KPI events vs Email Activity (covers both writers).
     counts["personal_emails_sent"] = max(int(counts.get("personal_emails_sent") or 0), personal)
     counts["bulk_emails_sent"] = max(int(counts.get("bulk_emails_sent") or 0), bulk)
+    counts["emails_after_calls"] = max(int(counts.get("emails_after_calls") or 0), after_calls)
+    counts["emails_other_personal"] = max(
+        int(counts.get("emails_other_personal") or 0), other_personal
+    )
+
+
+def _email_attribution_note(counts: dict[str, int]) -> str:
+    """Plain-language link between calls and emails for KPI reports."""
+    calls = int(counts.get("calls_logged") or 0)
+    after_calls = int(counts.get("emails_after_calls") or 0)
+    other = int(counts.get("emails_other_personal") or 0)
+    bulk = int(counts.get("bulk_emails_sent") or 0)
+    inbox = int(counts.get("inbox_replies") or 0)
+    personal_total = int(counts.get("personal_emails_sent") or 0)
+    email_total = personal_total + bulk
+
+    if email_total == 0 and calls == 0:
+        return ""
+
+    parts: list[str] = []
+    if calls:
+        parts.append(f"{calls} call{'s' if calls != 1 else ''}")
+    if after_calls:
+        parts.append(
+            f"{after_calls} email{'s' if after_calls != 1 else ''} linked to calls "
+            f"(post-call / personalized follow-up)"
+        )
+    if other:
+        parts.append(
+            f"{other} other personal email{'s' if other != 1 else ''} "
+            f"(table outreach, mailer, manual compose — not tied to a call log)"
+        )
+    if bulk:
+        parts.append(f"{bulk} bulk email{'s' if bulk != 1 else ''} (batch sends)")
+    if inbox:
+        parts.append(f"{inbox} inbox repl{'ies' if inbox != 1 else 'y'}")
+
+    if not parts:
+        return ""
+
+    note = " · ".join(parts) + "."
+    if calls and after_calls > calls:
+        note += (
+            f" Note: {after_calls - calls} more call-linked email(s) than calls — "
+            "multiple follow-ups or emails per conversation."
+        )
+    elif calls and personal_total + bulk > calls and after_calls <= calls:
+        extra = personal_total + bulk - after_calls
+        if extra > 0:
+            note += (
+                f" Remaining {extra} email(s) are bulk or non-call personal sends."
+            )
+    return note
 
 
 def _apply_whatsapp_activity_counts(
@@ -394,10 +461,10 @@ def get_kpi_report(
         _apply_whatsapp_activity_counts(counts, wa_by_user.get(target_user_id))
     else:
         # Team rollup: sum Email/WhatsApp Activity across users (then max with KPI logs).
-        email_totals = {"personal_emails_sent": 0, "bulk_emails_sent": 0}
+        email_totals = _empty_email_bucket()
         for bucket in email_by_user.values():
-            email_totals["personal_emails_sent"] += int(bucket.get("personal_emails_sent") or 0)
-            email_totals["bulk_emails_sent"] += int(bucket.get("bulk_emails_sent") or 0)
+            for key in email_totals:
+                email_totals[key] += int(bucket.get(key) or 0)
         _apply_email_activity_counts(counts, email_totals)
         wa_totals = {"personal_whatsapp_sent": 0, "bulk_whatsapp_sent": 0}
         for bucket in wa_by_user.values():
@@ -462,6 +529,7 @@ def get_kpi_report(
         "scope": scope,
         "user": _user_brief(focus_user) if scope == "user" else None,
         "counts": counts,
+        "email_attribution_note": _email_attribution_note(counts),
         "per_user": per_user,
         "activities": activities,
         "activity_count": len(activities),
@@ -550,7 +618,9 @@ def _build_rule_based_summary(report: dict[str, Any]) -> str:
             f"- Leads imported: {counts.get('leads_imported', 0)}",
             f"- Lead table edits: {counts.get('table_edits', 0)}",
             f"- Email templates created: {counts.get('email_templates_created', 0)}",
-            f"- Personal emails sent: {counts.get('personal_emails_sent', 0)}",
+            f"- Personal emails sent: {counts.get('personal_emails_sent', 0)} "
+            f"({counts.get('emails_after_calls', 0)} after calls, "
+            f"{counts.get('emails_other_personal', 0)} other personal)",
             f"- Bulk emails sent: {counts.get('bulk_emails_sent', 0)}",
             f"- Personal WhatsApp sent: {counts.get('personal_whatsapp_sent', 0)}",
             f"- Bulk WhatsApp sent: {counts.get('bulk_whatsapp_sent', 0)}",
@@ -559,6 +629,9 @@ def _build_rule_based_summary(report: dict[str, Any]) -> str:
             f"- Total activity events: {activity_count}",
         ]
     )
+    attribution = _email_attribution_note(counts)
+    if attribution:
+        lines.extend(["", "Email vs calls:", attribution])
 
     highlights: list[str] = []
     if interested:

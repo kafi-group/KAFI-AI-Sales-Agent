@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { client, type CallHistoryItem } from "../api/client";
 
 interface CallRecordingPanelProps {
@@ -22,6 +22,10 @@ function transcriptStatusLabel(status: string | null | undefined): string {
   }
 }
 
+function isTranscriptInProgress(status: string | null | undefined): boolean {
+  return status === "processing" || status === "pending";
+}
+
 export function CallRecordingPanel({
   call,
   onUpdated,
@@ -34,6 +38,14 @@ export function CallRecordingPanel({
   const [audioSrc, setAudioSrc] = useState<string | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const kickoffRef = useRef(false);
+
+  const refreshCall = useCallback(async () => {
+    const updated = await client.getCallHistoryItem(call.id);
+    onUpdated?.(updated);
+    if (updated.transcript) setShowCaptions(true);
+    return updated;
+  }, [call.id, onUpdated]);
 
   useEffect(() => {
     if (!call.recording_available) {
@@ -73,49 +85,78 @@ export function CallRecordingPanel({
     };
   }, [call.id, call.recording_available, onError]);
 
+  // Auto-start background transcription when recording is ready but CC not started.
   useEffect(() => {
     if (!call.recording_available) return;
-    if (call.transcript_status !== "processing" && call.transcript_status !== "pending") {
+    if (call.transcript_status !== "pending") return;
+    if (kickoffRef.current) return;
+    kickoffRef.current = true;
+    void client
+      .transcribeCall(call.id, false)
+      .then((updated) => onUpdated?.(updated))
+      .catch(() => {
+        kickoffRef.current = false;
+      });
+  }, [call.id, call.recording_available, call.transcript_status, onUpdated]);
+
+  useEffect(() => {
+    if (!call.recording_available) return;
+    if (!isTranscriptInProgress(call.transcript_status)) {
+      setPolling(false);
       return;
     }
 
     setPolling(true);
-    const timer = window.setInterval(async () => {
-      try {
-        const history = await client.listCallHistory({ page: 1, page_size: 50, since_days: 30 });
-        const updated = history.rows.find((item) => item.id === call.id);
-        if (!updated) return;
-        onUpdated?.(updated);
-        if (
-          updated.transcript_status === "ready" ||
-          updated.transcript_status === "failed"
-        ) {
-          setPolling(false);
-          if (updated.transcript) setShowCaptions(true);
-        }
-      } catch {
-        /* ignore transient poll errors */
-      }
-    }, 5000);
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      void refreshCall()
+        .then((updated) => {
+          if (
+            updated.transcript_status === "ready" ||
+            updated.transcript_status === "failed"
+          ) {
+            window.clearInterval(timer);
+            setPolling(false);
+            if (updated.transcript_status === "failed" && updated.transcript_error) {
+              onError(updated.transcript_error);
+            }
+          } else if (attempts >= 90) {
+            window.clearInterval(timer);
+            setPolling(false);
+            onError(
+              "Closed captions are taking longer than expected. Click Regenerate CC or refresh the page.",
+            );
+          }
+        })
+        .catch(() => {
+          /* ignore transient poll errors */
+        });
+    }, 2000);
 
     return () => {
       window.clearInterval(timer);
       setPolling(false);
     };
-  }, [call.id, call.recording_available, call.transcript_status, onUpdated]);
+  }, [call.id, call.recording_available, call.transcript_status, onError, refreshCall]);
 
   async function generateCaptions() {
     setTranscribing(true);
     try {
-      const updated = await client.transcribeCall(call.id, true);
+      const updated = await client.transcribeCall(call.id, false);
       onUpdated?.(updated);
+      if (updated.transcript_status === "ready" && updated.transcript) {
+        setShowCaptions(true);
+        return;
+      }
       if (updated.transcript_status === "failed" && updated.transcript_error) {
         onError(updated.transcript_error);
-      } else {
-        setShowCaptions(true);
+        return;
       }
+      setPolling(true);
+      await refreshCall();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to generate closed captions");
+      onError(e instanceof Error ? e.message : "Failed to start closed captions");
     } finally {
       setTranscribing(false);
     }
@@ -203,6 +244,7 @@ export function CallRecordingPanel({
         </div>
         <p className="text-xs text-slate-500">
           {transcriptStatusLabel(call.transcript_status)}
+          {polling ? " · Checking every few seconds…" : ""}
           {call.transcript_error ? ` — ${call.transcript_error}` : ""}
         </p>
       </div>
@@ -231,7 +273,7 @@ export function CallRecordingPanel({
             </pre>
           ) : (
             <p className="text-sm text-slate-500">
-              {call.transcript_status === "processing" || call.transcript_status === "pending"
+              {isTranscriptInProgress(call.transcript_status)
                 ? "Closed captions are being generated from the recording…"
                 : "No closed captions yet. Click Generate CC to create a full word-for-word transcript."}
             </p>

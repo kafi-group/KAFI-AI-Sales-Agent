@@ -26,6 +26,21 @@ from config import settings
 
 PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
 
+# Prefer fast Flash models for audio (lower latency than text-default chain).
+TRANSCRIPTION_MODEL_CHAIN = (
+    "gemini-2.0-flash",
+    "gemini-2.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash",
+)
+
+
+def _transcription_max_tokens(duration_seconds: int | None) -> int:
+    """Scale output budget with recording length (~12 tokens/sec, min 4k, max 16k)."""
+    seconds = max(30, int(duration_seconds or 180))
+    return min(16384, max(4096, seconds * 12))
+
+
 # Cheapest → slightly more capable. All Flash-family, low cost.
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_FALLBACK_MODELS = (
@@ -262,6 +277,7 @@ class LLMClient:
         *,
         mime_type: str = "audio/mpeg",
         hint: str | None = None,
+        duration_seconds: int | None = None,
     ) -> str:
         """Speech-to-text via Gemini multimodal audio understanding."""
         clients = self._get_clients()
@@ -291,7 +307,14 @@ class LLMClient:
 
         last_error: Exception | None = None
         retryable = False
-        chain = self.model_chain()
+        chain: list[str] = []
+        for model in TRANSCRIPTION_MODEL_CHAIN:
+            resolved = _resolve_model_name(model)
+            if resolved not in chain:
+                chain.append(resolved)
+        if not chain:
+            chain = self.model_chain()
+        token_budget = _transcription_max_tokens(duration_seconds)
         for client in clients:
             for model in chain:
                 try:
@@ -300,7 +323,7 @@ class LLMClient:
                         model,
                         prompt,
                         contents=contents,
-                        max_output_tokens=max(2048, self._max_output_tokens),
+                        max_output_tokens=token_budget,
                     ).strip()
                 except Exception as exc:
                     last_error = exc

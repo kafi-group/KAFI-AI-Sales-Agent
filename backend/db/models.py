@@ -591,6 +591,33 @@ class UserActivityEvent(Base):
     )
 
 
+class ManualKpiEntry(Base):
+    """Manually logged off-system KPI rows (phone/WhatsApp/email work outside Sales Agent)."""
+
+    __tablename__ = "manual_kpi_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    activity_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    person_name: Mapped[Optional[str]] = mapped_column(String(255))
+    company: Mapped[Optional[str]] = mapped_column(String(500))
+    country: Mapped[Optional[str]] = mapped_column(String(120))
+    contact_type: Mapped[Optional[str]] = mapped_column(String(80))
+    follow_up_type: Mapped[Optional[str]] = mapped_column(String(80))
+    wechat_contacts: Mapped[Optional[str]] = mapped_column(String(40))
+    remarks: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped["AppUser"] = relationship("AppUser")
+
+
 class MailLabel(Base):
     """Per-user Gmail-style label for IMAP messages (app-level, not IMAP folders)."""
 
