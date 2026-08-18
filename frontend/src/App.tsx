@@ -116,6 +116,7 @@ function CallInitBanner() {
 
   if (!voice.initError) return null;
   const micFail = /31402|AcquisitionFailed|getting the media failed/i.test(voice.initError);
+  const warmingUp = /warming up|cannot reach the api|hard restart/i.test(voice.initError);
   return (
     <div className="mb-7 p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-100 text-sm">
       <p className="font-medium">Browser calling is not ready</p>
@@ -123,7 +124,9 @@ function CallInitBanner() {
       <p className="mt-2 text-xs text-amber-200/60">
         {micFail
           ? "Microphone access failed after permission was granted. Close other apps using the mic (Zoom/Teams/WhatsApp), use Chrome/Edge on HTTPS, unplug/replug the headset, then refresh and try again."
-          : "Refresh the page, or open Calls and try again in a moment. Railway may still be warming up."}
+          : warmingUp
+            ? "The API is restarting after deploy — wait 30–60 seconds, then Ctrl + Shift + R. Inbox and tables work without browser calling."
+            : "Refresh the page, or open Calls and try again in a moment."}
       </p>
     </div>
   );

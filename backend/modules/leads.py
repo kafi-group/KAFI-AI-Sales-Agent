@@ -88,20 +88,20 @@ def _assignee_label(user: AppUser | None) -> str:
 
 def repair_assignee_labels(db: Session) -> int:
     """Sync buyers.assigned_to text from assigned_to_user_id (fixes swapped labels)."""
-    fixed = 0
-    rows = (
-        db.query(Buyer)
-        .filter(Buyer.assigned_to_user_id.isnot(None))
-        .all()
+    from sqlalchemy import text
+
+    result = db.execute(
+        text(
+            """
+            UPDATE buyers AS b
+            SET assigned_to = u.username
+            FROM app_users AS u
+            WHERE b.assigned_to_user_id = u.id
+              AND LOWER(TRIM(COALESCE(b.assigned_to, ''))) <> LOWER(TRIM(u.username))
+            """
+        )
     )
-    for buyer in rows:
-        user = db.get(AppUser, buyer.assigned_to_user_id)
-        if not user:
-            continue
-        expected = _assignee_label(user)
-        if (buyer.assigned_to or "").strip().lower() != expected.lower():
-            buyer.assigned_to = expected
-            fixed += 1
+    fixed = int(result.rowcount or 0)
     if fixed:
         db.commit()
         invalidate_section_counts_cache()

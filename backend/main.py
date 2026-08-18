@@ -168,19 +168,35 @@ async def lifespan(app: FastAPI):
                 )
                 invalidate_lead_table_filters_cache()
                 invalidate_section_counts_cache()
-
-            from modules.leads import repair_assignee_labels
-
-            label_repair = repair_assignee_labels(db)
-            if label_repair:
-                print(f"Startup: synced {label_repair} lead assignee label(s) to usernames.", flush=True)
-                invalidate_section_counts_cache()
         finally:
             db.close()
     except Exception as exc:
         print(f"WARNING: startup seed/admin failed: {exc}", flush=True)
 
     print("Application startup complete.", flush=True)
+
+    def _deferred_startup_tasks() -> None:
+        db = SessionLocal()
+        try:
+            from modules.leads import repair_assignee_labels
+
+            label_repair = repair_assignee_labels(db)
+            if label_repair:
+                print(
+                    f"Background: synced {label_repair} lead assignee label(s) to usernames.",
+                    flush=True,
+                )
+                from modules.leads import invalidate_section_counts_cache
+
+                invalidate_section_counts_cache()
+        except Exception as exc:
+            print(f"WARNING: deferred startup tasks failed: {exc}", flush=True)
+        finally:
+            db.close()
+
+    import threading
+
+    threading.Thread(target=_deferred_startup_tasks, daemon=True).start()
 
     # With --workers >1, only one process should own the daily scheduler.
     lock_path = Path("/tmp/kafi_apscheduler.lock")
