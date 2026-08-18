@@ -76,6 +76,7 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
   const [countryOpen, setCountryOpen] = useState(false);
   const [countryQuery, setCountryQuery] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [ivrSent, setIvrSent] = useState("");
   const openRef = useRef(open);
   const posRef = useRef(pos);
   openRef.current = open;
@@ -103,15 +104,26 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
     });
   }, [countryQuery]);
 
+  const inCall = Boolean(voice?.active);
+
   useEffect(() => {
     function onResize() {
       setPos((prev) =>
-        clampPos(prev, open ? PANEL_WIDTH : FAB_SIZE, open ? 420 : FAB_SIZE),
+        clampPos(prev, open ? PANEL_WIDTH : FAB_SIZE, open ? (inCall ? 480 : 420) : FAB_SIZE),
       );
     }
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [open]);
+  }, [open, inCall]);
+
+  useEffect(() => {
+    if (inCall) {
+      setOpen(true);
+      setPos((prev) => clampPos(prev, PANEL_WIDTH, 480));
+    } else {
+      setIvrSent("");
+    }
+  }, [inCall]);
 
   useEffect(() => {
     return subscribeFloatingDialpadNumber((payload) => {
@@ -132,11 +144,31 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
     setDigits((prev) => `${prev}${key}`.slice(0, 20));
   }, []);
 
+  const handleKeyPress = useCallback(
+    (key: string) => {
+      if (voice?.active) {
+        voice.sendDigits(key);
+        setIvrSent((prev) => `${prev}${key}`.slice(-24));
+        return;
+      }
+      appendDigit(key);
+    },
+    [appendDigit, voice],
+  );
+
   function backspace() {
+    if (voice?.active) {
+      setIvrSent((prev) => prev.slice(0, -1));
+      return;
+    }
     setDigits((prev) => prev.slice(0, -1));
   }
 
   function clearDigits() {
+    if (voice?.active) {
+      setIvrSent("");
+      return;
+    }
     setDigits("");
   }
 
@@ -236,8 +268,12 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
         <button
           type="button"
           data-dialpad-drag
-          aria-label="Open dialpad"
-          title="Drag to move · Click to open"
+          aria-label={inCall ? "Open IVR keypad" : "Open dialpad"}
+          title={
+            inCall
+              ? "Live call — open keypad for menu digits (1, 2, 3…)"
+              : "Drag to move · Click to open"
+          }
           onPointerDown={onDragStart}
           onClick={(e) => {
             if (suppressClickRef.current) {
@@ -246,9 +282,13 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
               return;
             }
             setOpen(true);
-            setPos((prev) => clampPos(prev, PANEL_WIDTH, 420));
+            setPos((prev) => clampPos(prev, PANEL_WIDTH, inCall ? 480 : 420));
           }}
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-sky-600 text-white shadow-lg shadow-sky-950/50 border border-sky-400/30 hover:bg-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-300 cursor-grab active:cursor-grabbing"
+          className={`flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg border focus:outline-none focus:ring-2 cursor-grab active:cursor-grabbing ${
+            inCall
+              ? "bg-amber-600 hover:bg-amber-500 border-amber-400/40 shadow-amber-950/50 focus:ring-amber-300 animate-pulse"
+              : "bg-sky-600 hover:bg-sky-500 border-sky-400/30 shadow-sky-950/50 focus:ring-sky-300"
+          }`}
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M7 2h2v4H7V2zm4 0h2v4h-2V2zm4 0h2v4h-2V2zM7 8h2v4H7V8zm4 0h2v4h-2V8zm4 0h2v4h-2V8zM7 14h2v4H7v-4zm4 0h2v4h-2v-4zm4 0h2v4h-2v-4zM5 22h14a1 1 0 0 0 1-1v-2H4v2a1 1 0 0 0 1 1z" />
@@ -269,10 +309,12 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
               className="min-w-0 flex-1 cursor-grab active:cursor-grabbing select-none"
             >
               <p id={titleId} className="text-sm font-medium text-slate-100">
-                Dialpad
+                {inCall ? "IVR keypad" : "Dialpad"}
               </p>
               <p className="text-[11px] text-slate-500 truncate">
-                Drag to move · Available on all pages
+                {inCall
+                  ? "Press digits for menu (1 English, 2…, 3 operator)"
+                  : "Drag to move · Available on all pages"}
               </p>
             </div>
             <button
@@ -290,6 +332,18 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
           </div>
 
           <div className="p-3 space-y-3">
+            {inCall ? (
+              <div className="rounded-xl border border-amber-600/40 bg-amber-950/30 px-3 py-2.5">
+                <p className="text-xs text-amber-100/90 font-medium">Live call — send menu digits</p>
+                <p className="text-[11px] text-amber-200/70 mt-1">
+                  Tap 1, 2, 3… when the operator asks (English, department, operator).
+                </p>
+                <p className="mt-2 font-mono text-lg text-amber-300 min-h-[1.75rem]">
+                  {ivrSent || "—"}
+                </p>
+              </div>
+            ) : (
+              <>
             <label className="block text-xs text-slate-500">
               Contact name (optional)
               <input
@@ -377,14 +431,20 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
                 <p className="mt-1 text-[11px] font-mono text-slate-500">{formattedNumber}</p>
               )}
             </div>
+              </>
+            )}
 
             <div className="grid grid-cols-3 gap-1.5">
               {DIAL_KEYS.map((key) => (
                 <button
                   key={key}
                   type="button"
-                  onClick={() => appendDigit(key)}
-                  className="rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-700 border border-slate-700 py-3 text-lg text-slate-100 font-semibold"
+                  onClick={() => handleKeyPress(key)}
+                  className={`rounded-xl border py-3 text-lg font-semibold ${
+                    inCall
+                      ? "bg-amber-950/50 hover:bg-amber-900/60 active:bg-amber-800/70 border-amber-700/50 text-amber-100"
+                      : "bg-slate-900 hover:bg-slate-800 active:bg-slate-700 border-slate-700 text-slate-100"
+                  }`}
                 >
                   {key}
                 </button>
@@ -395,10 +455,10 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
               <button
                 type="button"
                 onClick={backspace}
-                disabled={!digits}
+                disabled={inCall ? !ivrSent : !digits}
                 className="flex-1 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 py-2.5 text-sm text-slate-300 disabled:opacity-40"
               >
-                Delete
+                {inCall ? "Clear display" : "Delete"}
               </button>
               {voice?.active ? (
                 <button
