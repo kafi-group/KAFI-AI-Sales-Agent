@@ -15,6 +15,11 @@ import {
   plainTextToEditorHtml,
 } from "@/components/EmailBodyEditor";
 import { ensureDearSalutation } from "@/lib/personalizeEmail";
+import {
+  attachmentSizeMessage,
+  estimateSendPayloadBytes,
+  parseSendApiResponse,
+} from "@/lib/parseSendResponse";
 
 function defaultComposeBody(contactName: string, companyName: string): string {
   const name = contactName.trim() || "[Contact Name]";
@@ -67,6 +72,11 @@ function ComposeInner() {
   ]
     .filter(Boolean)
     .join(". ");
+
+  const attachmentWarning =
+    attachments.length > 0
+      ? attachmentSizeMessage(estimateSendPayloadBytes({ attachments }))
+      : null;
 
   async function addAttachments(files: FileList | null) {
     if (!files?.length) return;
@@ -130,26 +140,33 @@ function ComposeInner() {
     setSending(true);
     setError(null);
     try {
+      const payload = {
+        auth_token: auth,
+        to: to.trim(),
+        cc: cc.trim() || undefined,
+        bcc: bcc.trim() || undefined,
+        subject: subject.trim(),
+        body,
+        html: true,
+        buyer_id: buyerId,
+        company_name: mergeCompany.trim() || undefined,
+        contact_name: mergeContact.trim() || undefined,
+        designation: mergeDesignation.trim() || undefined,
+        attachments: attachments.length ? attachments : undefined,
+      };
+      const tooLarge = attachmentSizeMessage(estimateSendPayloadBytes(payload));
+      if (tooLarge) {
+        setError(tooLarge);
+        return;
+      }
+
       const res = await fetch("/api/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          auth_token: auth,
-          to: to.trim(),
-          cc: cc.trim() || undefined,
-          bcc: bcc.trim() || undefined,
-          subject: subject.trim(),
-          body,
-          html: true,
-          buyer_id: buyerId,
-          company_name: mergeCompany.trim() || undefined,
-          contact_name: mergeContact.trim() || undefined,
-          designation: mergeDesignation.trim() || undefined,
-          attachments: attachments.length ? attachments : undefined,
-        }),
+        body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Send failed");
+      const data = await parseSendApiResponse(res);
+      if (!data.ok) throw new Error(data.error || "Send failed");
       if (draftId) {
         void apiFetch(`/inbox/drafts/${draftId}`, { method: "DELETE" }).catch(() => null);
       }
@@ -272,16 +289,19 @@ function ComposeInner() {
         }}
       />
       {attachments.length > 0 && (
-        <ul className="small muted">
-          {attachments.map((file, index) => (
-            <li key={`${file.filename}-${index}`}>
-              {file.filename}{" "}
-              <button type="button" className="linkish" onClick={() => removeAttachment(index)}>
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="small muted">
+            {attachments.map((file, index) => (
+              <li key={`${file.filename}-${index}`}>
+                {file.filename}{" "}
+                <button type="button" className="linkish" onClick={() => removeAttachment(index)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+          {attachmentWarning && <p className="bad small">{attachmentWarning}</p>}
+        </>
       )}
       <label>Body</label>
       <EmailBodyEditor value={body} onChange={setBody} rows={14} />
