@@ -32,7 +32,7 @@ def _scan_remark_patterns(db: Session, *, assigned_to_user_id: int | None) -> di
     if assigned_to_user_id is not None:
         query = query.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
     counts: Counter[str] = Counter()
-    samples: dict[str, list[str]] = {key: [] for key, _ in _REMARK_PATTERNS}
+    samples: dict[str, list[str]] = {label: [] for _, label in _REMARK_PATTERNS}
     scanned = 0
     for _bid, company, history, remarks in query.all():
         texts: list[str] = []
