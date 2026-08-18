@@ -466,19 +466,24 @@ export function EmailActivityPage({
                 <StatTile
                   label="Success rate"
                   value={`${insights.totals.success_rate_pct}%`}
-                  hint={`${insights.totals.attempted} attempted`}
+                  hint={`${insights.totals.attempted} attempted (sent + failed)`}
                 />
               </div>
 
-              <div className="grid gap-3 lg:grid-cols-2">
+              <p className="text-xs text-slate-500 -mt-1">
+                <strong>Attempted</strong> = messages we tried to send (successful + failed).
+                Opens and in-progress sends are not included.
+              </p>
+
+              <div className="grid gap-3 lg:grid-cols-3">
                 <ModeBlock
-                  title={isWhatsApp ? "Individual WhatsApp" : "Individual emails"}
+                  title={isWhatsApp ? "Regular WhatsApp" : "Regular emails"}
                   subtitle={
                     isWhatsApp
                       ? "One-off replies and personal messages"
-                      : "One-off sends to a single lead"
+                      : "Compose, inbox reply, Cc/Bcc — not bulk campaigns"
                   }
-                  stats={insights.individual}
+                  stats={insights.regular ?? insights.individual}
                   showOpens={!isWhatsApp}
                 />
                 <ModeBlock
@@ -486,13 +491,38 @@ export function EmailActivityPage({
                   subtitle={
                     isWhatsApp
                       ? "Template campaigns from Leads / WhatsApp compose"
-                      : "Multi-recipient campaigns from Leads"
+                      : "Bulk Email Sender batches from Leads"
                   }
                   stats={insights.bulk}
                   showBatches
                   showOpens={!isWhatsApp}
                 />
+                {!isWhatsApp ? (
+                  <ModeBlock
+                    title="Test emails"
+                    subtitle="Safe test sends from mailer compose (not counted as regular or bulk)"
+                    stats={insights.test ?? insights.individual}
+                    showOpens
+                  />
+                ) : null}
               </div>
+
+              {!isWhatsApp && (insights.failed_by_reason?.length ?? 0) > 0 ? (
+                <div className="rounded-2xl border border-red-500/20 bg-red-950/20 p-4">
+                  <h4 className="text-sm font-medium text-red-100 mb-2">Why emails failed</h4>
+                  <ul className="space-y-1 text-sm text-red-200/90">
+                    {insights.failed_by_reason!.map((row) => (
+                      <li key={row.label} className="flex justify-between gap-4">
+                        <span>{row.label}</span>
+                        <span className="tabular-nums font-medium">{row.count}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Open the activity list below for per-message error details.
+                  </p>
+                </div>
+              ) : null}
 
               {isWhatsApp ? (
                 <p className="text-xs text-slate-500">

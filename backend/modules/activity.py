@@ -47,6 +47,7 @@ _EMPTY_COUNTS = {
     "emails_after_calls": 0,
     "emails_other_personal": 0,
     "bulk_emails_sent": 0,
+    "test_emails_sent": 0,
     "personal_whatsapp_sent": 0,
     "bulk_whatsapp_sent": 0,
     "inbox_replies": 0,
@@ -187,6 +188,7 @@ def _empty_email_bucket() -> dict[str, int]:
         "emails_after_calls": 0,
         "emails_other_personal": 0,
         "bulk_emails_sent": 0,
+        "test_emails_sent": 0,
     }
 
 
@@ -217,7 +219,9 @@ def _email_send_counts_by_user(
             continue
         bucket = by_user.setdefault(uid, _empty_email_bucket())
         details = event.details or {}
-        mode = str(details.get("send_mode") or "").lower()
+        from modules.email_activity import normalize_send_mode
+
+        mode = normalize_send_mode(str(details.get("send_mode") or ""))
         et = event.event_type
 
         if et in ("bulk_completed", "bulk_partial"):
@@ -228,8 +232,10 @@ def _email_send_counts_by_user(
             continue
 
         if et == "sent":
-            # Per-message bulk rows are suppressed by the mailer; still ignore mode=bulk.
             if mode == "bulk":
+                continue
+            if mode == "test":
+                bucket["test_emails_sent"] += 1
                 continue
             bucket["personal_emails_sent"] += 1
             if event.interaction_id is not None:
@@ -297,11 +303,13 @@ def _apply_email_activity_counts(
         return
     personal = int(email_counts.get("personal_emails_sent") or 0)
     bulk = int(email_counts.get("bulk_emails_sent") or 0)
+    test = int(email_counts.get("test_emails_sent") or 0)
     after_calls = int(email_counts.get("emails_after_calls") or 0)
     other_personal = int(email_counts.get("emails_other_personal") or 0)
     # Take the higher of logged KPI events vs Email Activity (covers both writers).
     counts["personal_emails_sent"] = max(int(counts.get("personal_emails_sent") or 0), personal)
     counts["bulk_emails_sent"] = max(int(counts.get("bulk_emails_sent") or 0), bulk)
+    counts["test_emails_sent"] = max(int(counts.get("test_emails_sent") or 0), test)
     counts["emails_after_calls"] = max(int(counts.get("emails_after_calls") or 0), after_calls)
     counts["emails_other_personal"] = max(
         int(counts.get("emails_other_personal") or 0), other_personal

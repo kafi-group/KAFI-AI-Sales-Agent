@@ -61,9 +61,11 @@ export async function POST(req: NextRequest) {
       company_name?: string;
       contact_name?: string;
       designation?: string;
-      send_mode?: "individual" | "bulk";
+      send_mode?: "individual" | "regular" | "bulk" | "test";
       /** When false, skip Email Activity per-message row (bulk summary only). */
       record_activity?: boolean;
+      /** When true, do not IMAP-append to Sent (bulk batches use one summary copy). */
+      skip_sent_copy?: boolean;
       attachments?: Array<{
         filename: string;
         content: string;
@@ -121,8 +123,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const sendMode = body.send_mode === "bulk" ? "bulk" : "individual";
+    const rawMode = (body.send_mode || "regular").toLowerCase();
+    const sendMode =
+      rawMode === "bulk" ? "bulk" : rawMode === "test" ? "test" : "regular";
     const recordActivity = body.record_activity !== false;
+    const skipSentCopy = body.skip_sent_copy === true;
     const buyerId =
       typeof body.buyer_id === "number" && Number.isFinite(body.buyer_id)
         ? body.buyer_id
@@ -194,17 +199,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: sent.message }, { status: 502 });
     }
 
-    // cPanel SMTP does not auto-save to Sent — APPEND via Railway IMAP.
-    const savedToSent = await appendMailerSentCopy({
-      token: handoffToken || undefined,
-      authToken: authToken || undefined,
-      to,
-      cc,
-      bcc,
-      subject,
-      body: text,
-      html: asHtml,
-    });
+    // cPanel SMTP does not auto-save to Sent — APPEND via Railway IMAP (unless bulk per-message skip).
+    let savedToSent = false;
+    if (!skipSentCopy) {
+      savedToSent = await appendMailerSentCopy({
+        token: handoffToken || undefined,
+        authToken: authToken || undefined,
+        to,
+        cc,
+        bcc,
+        subject,
+        body: text,
+        html: asHtml,
+      });
+    }
 
     return NextResponse.json({
       ok: true,

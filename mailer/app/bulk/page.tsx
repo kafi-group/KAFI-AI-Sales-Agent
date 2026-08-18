@@ -16,6 +16,7 @@ import {
   plainTextToEditorHtml,
 } from "@/components/EmailBodyEditor";
 import { ensureDearSalutation, personalizeEmailText } from "@/lib/personalizeEmail";
+import { appendMailerSentCopy } from "@/lib/syncSent";
 
 type Lead = {
   buyer_id: number;
@@ -142,7 +143,9 @@ function BulkInner() {
     const batches = chunk(leads, Math.max(1, Math.min(15, batchSize)));
     let sentTotal = 0;
     let failTotal = 0;
-    const isBulk = leads.length > 1;
+    // Bulk handoff page always uses bulk mode — CC / multi-recipient on compose stays regular.
+    const isBulk = true;
+    const recipientEmails = leads.map((l) => l.contact_email);
     pushLog(
       `Starting ${leads.length} emails in ${batches.length} batch(es) as ${preview?.mailbox_email}`,
     );
@@ -183,9 +186,9 @@ function BulkInner() {
                 buyer_id: lead.buyer_id,
                 company_name: lead.company_name,
                 contact_name: lead.contact_name || undefined,
-                send_mode: isBulk ? "bulk" : "individual",
-                // Bulk uses summary events only (matches in-app Sales Agent bulk).
-                record_activity: !isBulk,
+                send_mode: "bulk",
+                record_activity: false,
+                skip_sent_copy: true,
               }),
             });
             const raw = await res.text();
@@ -250,6 +253,25 @@ function BulkInner() {
         sent_count: sentTotal,
         failed_count: failTotal,
         send_mode: "bulk",
+        subject,
+        recipient_emails: recipientEmails,
+      });
+      // One Sent-folder summary instead of N copies (keeps mailbox tidy).
+      const summaryBody = [
+        `Bulk email sent by ${preview?.display_name || preview?.username || "user"}`,
+        `Subject: ${subject}`,
+        `Sent: ${sentTotal} · Failed: ${failTotal} · Total: ${leads.length}`,
+        "",
+        "Recipients:",
+        ...recipientEmails,
+      ].join("\n");
+      await appendMailerSentCopy({
+        token,
+        authToken: getStoredToken() || undefined,
+        to: preview?.mailbox_email || recipientEmails[0] || "bulk@local",
+        subject: `[Bulk ${sentTotal}/${leads.length}] ${subject.slice(0, 120)}`,
+        body: summaryBody,
+        html: false,
       });
     }
 

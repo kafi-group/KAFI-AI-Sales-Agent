@@ -391,6 +391,26 @@ textarea {
   flex-shrink: 0;
 }
 
+.compose-send-mode {
+  margin: 0.75rem 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.compose-send-mode-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.compose-send-mode-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
 .compose-page {
   max-width: min(1200px, 100%);
   width: 100%;

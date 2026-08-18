@@ -50,6 +50,9 @@ def send_via_mailer(
     html: bool = True,
     cc: str | None = None,
     bcc: str | None = None,
+    send_mode: str = "regular",
+    record_activity: bool = True,
+    skip_sent_copy: bool = False,
 ) -> dict[str, Any]:
     """POST one message to the Vercel mailer /api/send endpoint."""
     secret = (settings.mailer_handoff_secret or "").strip()
@@ -106,6 +109,9 @@ def send_via_mailer(
                     "subject": subject,
                     "body": body,
                     "html": html,
+                    "send_mode": send_mode,
+                    "record_activity": record_activity,
+                    "skip_sent_copy": skip_sent_copy,
                     **({"cc": cc} if (cc or "").strip() else {}),
                     **({"bcc": bcc} if (bcc or "").strip() else {}),
                 },

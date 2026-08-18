@@ -442,6 +442,7 @@ export interface KpiCounts {
   emails_after_calls?: number;
   emails_other_personal?: number;
   bulk_emails_sent: number;
+  test_emails_sent?: number;
   personal_whatsapp_sent?: number;
   bulk_whatsapp_sent?: number;
   inbox_replies: number;
@@ -983,6 +984,11 @@ export interface EmailActivityModeStats {
   batches_failed?: number | null;
 }
 
+export interface EmailActivityFailedReason {
+  label: string;
+  count: number;
+}
+
 export interface EmailActivityInsights {
   period_days: number | null;
   since: string | null;
@@ -991,8 +997,11 @@ export interface EmailActivityInsights {
   tracking_base_url?: string | null;
   tracking_pixel_path?: string | null;
   totals: EmailActivityModeStats;
-  individual: EmailActivityModeStats;
+  regular: EmailActivityModeStats;
   bulk: EmailActivityModeStats;
+  test: EmailActivityModeStats;
+  individual: EmailActivityModeStats;
+  failed_by_reason?: EmailActivityFailedReason[];
   event_count: number;
 }
 

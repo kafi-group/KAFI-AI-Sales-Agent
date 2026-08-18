@@ -13,6 +13,17 @@ from db.models import AppUser, EmailActivityEvent
 DEFAULT_PAGE_SIZE = 25
 
 ActivityChannel = Literal["email", "whatsapp"]
+SendMode = Literal["regular", "bulk", "test"]
+
+
+def normalize_send_mode(mode: str | None) -> SendMode:
+    """Map legacy individual/bulk flags to regular | bulk | test."""
+    m = (mode or "").strip().lower()
+    if m == "bulk":
+        return "bulk"
+    if m == "test":
+        return "test"
+    return "regular"
 
 
 def _is_whatsapp_event_clause():
@@ -263,7 +274,7 @@ def record_send_result(
     event_type = classify_send_result(send_result)
     catalog = EVENT_CATALOG.get(event_type, {})
     provider_message = (send_result or {}).get("message") or catalog.get("description", "")
-    mode = "bulk" if send_mode == "bulk" else "individual"
+    mode = normalize_send_mode(send_mode)
     if event_type == "sent":
         title = f"Sent to {company_name}"
         message = f"Email delivered to outbound queue for {to_email or 'recipient'}."
@@ -525,26 +536,40 @@ def insights_stats(
                 if orphan.id not in seen_open_ids:
                     rows.append(orphan)
 
-    individual_sent = 0
-    individual_failed = 0
-    individual_opened = 0
+    regular_sent = 0
+    regular_failed = 0
+    regular_opened = 0
     bulk_sent = 0
     bulk_failed = 0
     bulk_opened = 0
     bulk_batches = 0
     bulk_batches_partial = 0
     bulk_batches_failed = 0
+    test_sent = 0
+    test_failed = 0
+    test_opened = 0
+    failed_by_reason: dict[str, int] = {}
+
+    def _bucket_for_mode(mode: str) -> str:
+        normalized = normalize_send_mode(mode)
+        if normalized == "bulk":
+            return "bulk"
+        if normalized == "test":
+            return "test"
+        return "regular"
 
     for event in rows:
         details = event.details or {}
-        mode = str(details.get("send_mode") or "").lower()
+        bucket = _bucket_for_mode(str(details.get("send_mode") or ""))
         et = event.event_type
 
         if et == "opened":
-            if mode == "bulk":
+            if bucket == "bulk":
                 bulk_opened += 1
+            elif bucket == "test":
+                test_opened += 1
             else:
-                individual_opened += 1
+                regular_opened += 1
             continue
 
         if et in ("bulk_completed", "bulk_partial"):
@@ -565,13 +590,17 @@ def insights_stats(
             continue
 
         if et == "sent":
-            if mode == "bulk":
+            if bucket == "bulk":
                 bulk_sent += 1
+            elif bucket == "test":
+                test_sent += 1
             else:
-                individual_sent += 1
+                regular_sent += 1
             continue
 
         if et in _FAIL_TYPES:
+            label = EVENT_CATALOG.get(et, {}).get("label") or et.replace("_", " ").title()
+            failed_by_reason[label] = failed_by_reason.get(label, 0) + 1
             # Bulk batch-level total failure (0 sent)
             if et == "send_failed" and (
                 "sent_count" in details or "failed_count" in details or "interaction_ids" in details
@@ -582,16 +611,19 @@ def insights_stats(
                     bulk_failed += int(details.get("failed_count") or 0)
                 except (TypeError, ValueError):
                     pass
-            elif mode == "bulk":
+            elif bucket == "bulk":
                 bulk_failed += 1
+            elif bucket == "test":
+                test_failed += 1
             else:
-                individual_failed += 1
+                regular_failed += 1
 
-    individual_total = individual_sent + individual_failed
+    regular_total = regular_sent + regular_failed
     bulk_total = bulk_sent + bulk_failed
-    total_sent = individual_sent + bulk_sent
-    total_failed = individual_failed + bulk_failed
-    total_opened = individual_opened + bulk_opened
+    test_total = test_sent + test_failed
+    total_sent = regular_sent + bulk_sent + test_sent
+    total_failed = regular_failed + bulk_failed + test_failed
+    total_opened = regular_opened + bulk_opened + test_opened
     total_attempted = total_sent + total_failed
     not_opened = max(0, total_sent - total_opened)
 
@@ -600,9 +632,37 @@ def insights_stats(
             return 0.0
         return round((part / whole) * 100.0, 1)
 
+    def _mode_stats(
+        sent: int,
+        failed: int,
+        opened: int,
+        *,
+        batches: int | None = None,
+        batches_partial: int | None = None,
+        batches_failed: int | None = None,
+    ) -> dict[str, Any]:
+        attempted = sent + failed
+        return {
+            "attempted": attempted,
+            "sent": sent,
+            "failed": failed,
+            "opened": opened,
+            "not_opened": max(0, sent - opened),
+            "open_rate_pct": _rate(opened, sent),
+            "success_rate_pct": _rate(sent, attempted),
+            "batches": batches,
+            "batches_partial": batches_partial,
+            "batches_failed": batches_failed,
+        }
+
     from modules.email_tracking import public_api_base
 
     tracking_base = public_api_base()
+
+    failed_reason_rows = [
+        {"label": label, "count": count}
+        for label, count in sorted(failed_by_reason.items(), key=lambda x: (-x[1], x[0]))
+    ]
 
     return {
         "period_days": period_days,
@@ -611,35 +671,19 @@ def insights_stats(
         "tracking_enabled": bool(tracking_base),
         "tracking_base_url": tracking_base,
         "tracking_pixel_path": "/api/track/email-open/{token}.gif",
-        "totals": {
-            "attempted": total_attempted,
-            "sent": total_sent,
-            "failed": total_failed,
-            "opened": total_opened,
-            "not_opened": not_opened,
-            "open_rate_pct": _rate(total_opened, total_sent),
-            "success_rate_pct": _rate(total_sent, total_attempted),
-        },
-        "individual": {
-            "attempted": individual_total,
-            "sent": individual_sent,
-            "failed": individual_failed,
-            "opened": individual_opened,
-            "not_opened": max(0, individual_sent - individual_opened),
-            "open_rate_pct": _rate(individual_opened, individual_sent),
-            "success_rate_pct": _rate(individual_sent, individual_total),
-        },
-        "bulk": {
-            "batches": bulk_batches,
-            "batches_partial": bulk_batches_partial,
-            "batches_failed": bulk_batches_failed,
-            "attempted": bulk_total,
-            "sent": bulk_sent,
-            "failed": bulk_failed,
-            "opened": bulk_opened,
-            "not_opened": max(0, bulk_sent - bulk_opened),
-            "open_rate_pct": _rate(bulk_opened, bulk_sent),
-            "success_rate_pct": _rate(bulk_sent, bulk_total),
-        },
+        "totals": _mode_stats(total_sent, total_failed, total_opened),
+        "regular": _mode_stats(regular_sent, regular_failed, regular_opened),
+        "bulk": _mode_stats(
+            bulk_sent,
+            bulk_failed,
+            bulk_opened,
+            batches=bulk_batches,
+            batches_partial=bulk_batches_partial,
+            batches_failed=bulk_batches_failed,
+        ),
+        "test": _mode_stats(test_sent, test_failed, test_opened),
+        # Legacy alias — same as regular (individual one-off sends).
+        "individual": _mode_stats(regular_sent, regular_failed, regular_opened),
+        "failed_by_reason": failed_reason_rows,
         "event_count": len(rows),
     }

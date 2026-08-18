@@ -739,8 +739,11 @@ class EmailActivityInsights(BaseModel):
     tracking_base_url: str | None = None
     tracking_pixel_path: str | None = None
     totals: EmailActivityModeStats
-    individual: EmailActivityModeStats
+    regular: EmailActivityModeStats
     bulk: EmailActivityModeStats
+    test: EmailActivityModeStats
+    individual: EmailActivityModeStats  # legacy alias for regular
+    failed_by_reason: list[dict[str, Any]] = Field(default_factory=list)
     event_count: int = 0
 
 

@@ -58,8 +58,9 @@ const COUNT_CARDS: { key: keyof KpiCounts; label: string }[] = [
   { key: "leads_imported", label: "Leads imported" },
   { key: "table_edits", label: "Table edits" },
   { key: "email_templates_created", label: "Templates created" },
-  { key: "personal_emails_sent", label: "Personal emails sent" },
+  { key: "personal_emails_sent", label: "Regular emails sent" },
   { key: "bulk_emails_sent", label: "Bulk emails sent" },
+  { key: "test_emails_sent", label: "Test emails sent" },
   { key: "personal_whatsapp_sent", label: "Personal WhatsApp sent" },
   { key: "bulk_whatsapp_sent", label: "Bulk WhatsApp sent" },
   { key: "inbox_replies", label: "Inbox replies" },
@@ -361,8 +362,8 @@ export function KpiPage({ onError }: KpiPageProps) {
                 {report.email_attribution_note}
               </p>
               <p className="mt-2 text-xs text-slate-500">
-                Personal emails linked to a call log count as post-call follow-up. Other personal
-                sends are table outreach, mailer, or manual compose. Bulk is batch sends.
+                Personal = regular compose/replies. After-call emails are still regular. Bulk =
+                batch campaigns. Test = mailer test mode.
               </p>
             </section>
           ) : null}
@@ -404,11 +405,12 @@ export function KpiPage({ onError }: KpiPageProps) {
                         row.counts.outcomes_not_interested +
                         row.counts.outcomes_not_received_call;
                       const emails =
-                        (row.counts.personal_emails_sent ?? 0) + (row.counts.bulk_emails_sent ?? 0);
+                        (row.counts.personal_emails_sent ?? 0) +
+                        (row.counts.bulk_emails_sent ?? 0) +
+                        (row.counts.test_emails_sent ?? 0);
                       const emailDetail =
-                        (row.counts.emails_after_calls ?? 0) > 0 ||
-                        (row.counts.emails_other_personal ?? 0) > 0
-                          ? `${row.counts.emails_after_calls ?? 0} call · ${row.counts.emails_other_personal ?? 0} other · ${row.counts.bulk_emails_sent ?? 0} bulk`
+                        emails > 0
+                          ? `${row.counts.emails_after_calls ?? 0} call · ${row.counts.emails_other_personal ?? 0} regular · ${row.counts.bulk_emails_sent ?? 0} bulk · ${row.counts.test_emails_sent ?? 0} test`
                           : null;
                       const whatsapp =
                         (row.counts.personal_whatsapp_sent ?? 0) +

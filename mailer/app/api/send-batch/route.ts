@@ -84,15 +84,12 @@ export async function POST(req: NextRequest) {
       Math.round((body.message_delay_seconds ?? 2) * 1000),
     );
 
-    const isBulk = leads.length > 1;
-    if (isBulk) {
-      await reportMailerActivity({
-        token,
-        kind: "bulk_started",
-        selected_count: leads.length,
-        send_mode: "bulk",
-      });
-    }
+    await reportMailerActivity({
+      token,
+      kind: "bulk_started",
+      selected_count: leads.length,
+      send_mode: "bulk",
+    });
 
     const results: Array<{
       buyer_id: number;
@@ -113,7 +110,7 @@ export async function POST(req: NextRequest) {
           subject,
           body: text,
           buyer_id: lead.buyer_id,
-          send_mode: isBulk ? "bulk" : "individual",
+          send_mode: "bulk",
         });
         const sendBody = tracked.body || text;
         const sent = await sendSmtp({
@@ -130,7 +127,6 @@ export async function POST(req: NextRequest) {
           ok: sent.ok,
           message: sent.message,
         });
-        // Match in-app bulk: only per-message activity when a single recipient.
         await reportMailerActivity({
           token,
           kind: "send_result",
@@ -141,18 +137,9 @@ export async function POST(req: NextRequest) {
           buyer_id: lead.buyer_id,
           interaction_id: tracked.interaction_id || undefined,
           error_message: sent.ok ? undefined : sent.message,
-          send_mode: isBulk ? "bulk" : "individual",
-          record_send: !isBulk,
+          send_mode: "bulk",
+          record_send: false,
         });
-        if (sent.ok) {
-          await appendMailerSentCopy({
-            token,
-            to: lead.contact_email,
-            subject,
-            body: sendBody,
-            html: tracked.html !== false,
-          });
-        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         results.push({
@@ -169,8 +156,8 @@ export async function POST(req: NextRequest) {
           company_name: lead.company_name,
           buyer_id: lead.buyer_id,
           error_message: message,
-          send_mode: isBulk ? "bulk" : "individual",
-          record_send: !isBulk,
+          send_mode: "bulk",
+          record_send: false,
         });
       }
       if (i < leads.length - 1 && delayMs > 0) {
@@ -180,16 +167,32 @@ export async function POST(req: NextRequest) {
 
     const sent = results.filter((r) => r.ok).length;
     const failed = results.length - sent;
-    if (isBulk) {
-      await reportMailerActivity({
-        token,
-        kind: "bulk_finished",
-        selected_count: leads.length,
-        sent_count: sent,
-        failed_count: failed,
-        send_mode: "bulk",
-      });
-    }
+    const recipientEmails = leads.map((l) => l.contact_email);
+    await reportMailerActivity({
+      token,
+      kind: "bulk_finished",
+      selected_count: leads.length,
+      sent_count: sent,
+      failed_count: failed,
+      send_mode: "bulk",
+      subject: subjectTpl,
+      recipient_emails: recipientEmails,
+    });
+    const summaryBody = [
+      `Bulk email (scheduled batch) by ${handoff.username}`,
+      `Subject: ${subjectTpl}`,
+      `Sent: ${sent} · Failed: ${failed} · Total: ${leads.length}`,
+      "",
+      "Recipients:",
+      ...recipientEmails,
+    ].join("\n");
+    await appendMailerSentCopy({
+      token,
+      to: handoff.mailbox_email || recipientEmails[0] || "bulk@local",
+      subject: `[Bulk ${sent}/${leads.length}] ${subjectTpl.slice(0, 120)}`,
+      body: summaryBody,
+      html: false,
+    });
     return NextResponse.json({ sent, failed, results });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
