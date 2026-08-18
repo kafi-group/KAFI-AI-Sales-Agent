@@ -69,8 +69,8 @@ import {
 } from "./utils/notify";
 
 
-const INBOX_POLL_INTERVAL_MS = 20_000;
-const WHATSAPP_POLL_INTERVAL_MS = 15_000;
+const INBOX_POLL_INTERVAL_MS = 30_000;
+const WHATSAPP_POLL_INTERVAL_MS = 25_000;
 const FOLLOW_UP_POLL_INTERVAL_MS = 60_000;
 const MEETING_POLL_INTERVAL_MS = 60_000;
 const INTERESTED_ACTIVITY_POLL_INTERVAL_MS = 30_000;
@@ -593,31 +593,64 @@ function DashboardApp() {
       .getEmailActivityUnreadCount("whatsapp")
       .then((r) => setWhatsappActivityUnread(r.unread_count))
       .catch(() => setWhatsappActivityUnread(0));
-    const inboxTimer = window.setInterval(pollInbox, INBOX_POLL_INTERVAL_MS);
-    const whatsappTimer = window.setInterval(pollWhatsAppInbox, WHATSAPP_POLL_INTERVAL_MS);
-    const followUpTimer = window.setInterval(pollInterestedFollowUps, FOLLOW_UP_POLL_INTERVAL_MS);
-    const meetingTimer = window.setInterval(pollQuotationMeetings, MEETING_POLL_INTERVAL_MS);
-    const interestedActivityTimer = window.setInterval(
-      pollInterestedClientsActivity,
-      INTERESTED_ACTIVITY_POLL_INTERVAL_MS,
-    );
-    const activityTimer = window.setInterval(() => {
-      client
-        .getEmailActivityUnreadCount("email")
-        .then((r) => setEmailActivityUnread(r.unread_count))
-        .catch(() => undefined);
-      client
-        .getEmailActivityUnreadCount("whatsapp")
-        .then((r) => setWhatsappActivityUnread(r.unread_count))
-        .catch(() => undefined);
-    }, INBOX_POLL_INTERVAL_MS);
-    return () => {
+
+    let inboxTimer = 0;
+    let whatsappTimer = 0;
+    let followUpTimer = 0;
+    let meetingTimer = 0;
+    let interestedActivityTimer = 0;
+    let activityTimer = 0;
+
+    function startPollers() {
       window.clearInterval(inboxTimer);
       window.clearInterval(whatsappTimer);
       window.clearInterval(followUpTimer);
       window.clearInterval(meetingTimer);
       window.clearInterval(interestedActivityTimer);
       window.clearInterval(activityTimer);
+      inboxTimer = window.setInterval(pollInbox, INBOX_POLL_INTERVAL_MS);
+      whatsappTimer = window.setInterval(pollWhatsAppInbox, WHATSAPP_POLL_INTERVAL_MS);
+      followUpTimer = window.setInterval(pollInterestedFollowUps, FOLLOW_UP_POLL_INTERVAL_MS);
+      meetingTimer = window.setInterval(pollQuotationMeetings, MEETING_POLL_INTERVAL_MS);
+      interestedActivityTimer = window.setInterval(
+        pollInterestedClientsActivity,
+        INTERESTED_ACTIVITY_POLL_INTERVAL_MS,
+      );
+      activityTimer = window.setInterval(() => {
+        client
+          .getEmailActivityUnreadCount("email")
+          .then((r) => setEmailActivityUnread(r.unread_count))
+          .catch(() => undefined);
+        client
+          .getEmailActivityUnreadCount("whatsapp")
+          .then((r) => setWhatsappActivityUnread(r.unread_count))
+          .catch(() => undefined);
+      }, INBOX_POLL_INTERVAL_MS);
+    }
+
+    function stopPollers() {
+      window.clearInterval(inboxTimer);
+      window.clearInterval(whatsappTimer);
+      window.clearInterval(followUpTimer);
+      window.clearInterval(meetingTimer);
+      window.clearInterval(interestedActivityTimer);
+      window.clearInterval(activityTimer);
+    }
+
+    function syncPollers() {
+      if (document.visibilityState === "visible") {
+        startPollers();
+      } else {
+        stopPollers();
+      }
+    }
+
+    syncPollers();
+    document.addEventListener("visibilitychange", syncPollers);
+
+    return () => {
+      stopPollers();
+      document.removeEventListener("visibilitychange", syncPollers);
       window.removeEventListener("click", unlock);
       window.removeEventListener("keydown", unlock);
     };

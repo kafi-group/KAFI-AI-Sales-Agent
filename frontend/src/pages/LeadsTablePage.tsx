@@ -1219,6 +1219,26 @@ export function LeadsTablePage({
     }
   }, [onSectionCountsChange]);
 
+  const sectionCountsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleSectionCountsRefresh = useCallback(() => {
+    if (!onSectionCountsChange) return;
+    if (sectionCountsTimerRef.current) {
+      window.clearTimeout(sectionCountsTimerRef.current);
+    }
+    sectionCountsTimerRef.current = window.setTimeout(() => {
+      sectionCountsTimerRef.current = null;
+      void loadSectionCounts();
+    }, 2500);
+  }, [loadSectionCounts, onSectionCountsChange]);
+
+  useEffect(() => {
+    return () => {
+      if (sectionCountsTimerRef.current) {
+        window.clearTimeout(sectionCountsTimerRef.current);
+      }
+    };
+  }, []);
+
   const loadTable = useCallback(async () => {
     const seq = ++tableLoadSeqRef.current;
     setLoading(true);
@@ -1333,8 +1353,7 @@ export function LeadsTablePage({
       .listLeadTableFilters(isOldClients || isMyAssigned ? { source: "old_clients" } : {})
       .then(setFilters)
       .catch(() => onError("Failed to load lead filters"));
-    void loadSectionCounts();
-  }, [isOldClients, isMyAssigned, isMaster, loadSectionCounts, onError]);
+  }, [isOldClients, isMyAssigned, isMaster, onError]);
 
   useEffect(() => {
     void loadTable();
@@ -1470,7 +1489,7 @@ export function LeadsTablePage({
       }
       const updated = await client.updateLeadTableRow(rowId, payload);
       applyAssigneeMove(rowId, updated, previousAssigneeId);
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       setSaveNotice("Row saved.");
       setTimeout(() => setSaveNotice(null), 3000);
     } catch (e) {
@@ -1519,7 +1538,7 @@ export function LeadsTablePage({
         assigned_to_user_id: assignedToUserId,
       });
       applyAssigneeMove(rowId, updated, previousAssigneeId);
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       const label =
         assignedToUserId == null
           ? "Unassigned"
@@ -1643,7 +1662,7 @@ export function LeadsTablePage({
         setFilteredCount((prev) => Math.max(0, prev - movedIds.size));
       }
       clearSelection();
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       setSaveNotice(
         assignedToUserId == null
           ? `Unassigned ${result.assigned_count} lead${result.assigned_count === 1 ? "" : "s"}.`
@@ -1682,7 +1701,7 @@ export function LeadsTablePage({
         setFilteredCount((prev) => Math.max(0, prev - movedIds.size));
         clearSelection();
       }
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       setSaveNotice(
         `Moved ${result.updated_count} lead${result.updated_count === 1 ? "" : "s"} to ${labels[pool]}.`,
       );
@@ -1717,7 +1736,7 @@ export function LeadsTablePage({
     try {
       const result = await client.populateTargetPool(section, fromSource, 50);
       await loadTable();
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       setSaveNotice(
         result.updated_count > 0
           ? fromSource === "discover_leads"
@@ -1760,7 +1779,7 @@ export function LeadsTablePage({
         setFilteredCount((prev) => Math.max(0, prev - moved.size));
         clearSelection();
       }
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       setSaveNotice(
         `Promoted ${result.promoted_count} row${result.promoted_count === 1 ? "" : "s"} to Old clients.`,
       );
@@ -1787,7 +1806,7 @@ export function LeadsTablePage({
     try {
       const result = await client.classifyTargetPoolsFromOldClients();
       await loadTable();
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       const hyper = result.hyperstore_targeted?.updated_count ?? 0;
       const dist = result.targeted_distributor?.updated_count ?? 0;
       setSaveNotice(
@@ -1820,7 +1839,7 @@ export function LeadsTablePage({
         setFilteredCount((prev) => Math.max(0, prev - removed.size));
         clearSelection();
       }
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       setSaveNotice(
         `Removed ${result.updated_count} lead${result.updated_count === 1 ? "" : "s"} from this pool.`,
       );
@@ -1862,7 +1881,7 @@ export function LeadsTablePage({
         setFilteredCount((prev) => Math.max(0, prev - movedIds.size));
       }
       clearSelection();
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       setSaveNotice(
         inList
           ? `Moved ${result.updated_count} lead${result.updated_count === 1 ? "" : "s"} to Interested Clients.`
@@ -2181,7 +2200,7 @@ export function LeadsTablePage({
     try {
       const result = await client.postImportClean(sectionTableScope(section));
       await loadTable();
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       const s = result.summary;
       setSaveNotice(
         `Post-import clean — emails ${s.emails_fixed}, company fields ${s.company_fields_fixed}, ` +
@@ -2220,7 +2239,7 @@ export function LeadsTablePage({
     try {
       const result = await client.cleanCompanyFields(sectionTableScope(section));
       await loadTable();
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       const ruleSummary = Object.entries(result.by_rule)
         .map(([rule, count]) => `${rule}: ${count}`)
         .join(", ");
@@ -2263,7 +2282,7 @@ export function LeadsTablePage({
     try {
       const result = await client.cleanupSparseCsvLeads(sectionTableScope(section));
       await loadTable();
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       setSaveNotice(
         result.removed_count > 0
           ? `Removed ${result.removed_count} empty import${result.removed_count === 1 ? "" : "s"}`
@@ -2300,7 +2319,7 @@ export function LeadsTablePage({
     try {
       const result = await client.dedupeLeadsTable(sectionTableScope(section));
       await loadTable();
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       setSaveNotice(
         result.removed_count > 0
           ? `Removed ${result.removed_count} duplicate lead${result.removed_count === 1 ? "" : "s"} (${result.groups.length} group${result.groups.length === 1 ? "" : "s"})`
@@ -2337,7 +2356,7 @@ export function LeadsTablePage({
     try {
       const result = await client.repairLocationCompanyNames(sectionTableScope(section));
       await loadTable();
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       const fixed = result.repaired_with_name + result.relocated_name_empty;
       setSaveNotice(
         fixed > 0
@@ -2377,7 +2396,7 @@ export function LeadsTablePage({
     try {
       const result = await client.removeOldClientOverlaps();
       await loadTable();
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
       setSaveNotice(
         result.removed_count > 0
           ? `Removed ${result.removed_count} lead${result.removed_count === 1 ? "" : "s"} that matched Old clients (${result.kept_count} discovery lead${result.kept_count === 1 ? "" : "s"} kept)`
@@ -2481,7 +2500,7 @@ export function LeadsTablePage({
       setSaveNotice(`Deleted ${removed.size} lead${removed.size === 1 ? "" : "s"}`);
       const updatedFilters = await client.listLeadTableFilters();
       setFilters(updatedFilters);
-      await loadSectionCounts();
+      scheduleSectionCountsRefresh();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to delete lead(s)");
     } finally {
@@ -3152,7 +3171,7 @@ export function LeadsTablePage({
             clearFilters();
             setPage(1);
             await loadTable();
-            await loadSectionCounts();
+            scheduleSectionCountsRefresh();
             onSelectLead(leadId);
           }}
         />

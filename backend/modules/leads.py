@@ -634,6 +634,14 @@ def _apply_call_outcome_scope(
     include_placed_outcomes: bool,
     in_interested_clients: bool = False,
 ):
+    # Master table and other "show everything" views skip placed-call filtering.
+    if (
+        not in_interested_clients
+        and not call_outcome
+        and include_placed_outcomes
+    ):
+        return buyer_query, set()
+
     scoped_buyer_ids = {
         row[0] for row in buyer_query.with_entities(Buyer.id).all()
     }
@@ -1229,7 +1237,7 @@ def list_leads_table(
     }
 
 
-_SECTION_COUNTS_TTL = 20.0
+_SECTION_COUNTS_TTL = 120.0
 _SECTION_COUNTS_PREFIX = "section_counts:"
 
 
@@ -1288,71 +1296,92 @@ def _compute_section_counts(
     assigned_to_user_id: int | None = None,
     pool_for_user_id: int | None = None,
 ) -> dict[str, object]:
+    from sqlalchemy import case, or_
+
     from modules.calls import latest_call_outcomes_by_buyer
 
-    buyer_query = db.query(
-        Buyer.id, Buyer.source, Buyer.assigned_to_user_id, Buyer.assigned_by_user_id
-    )
-    if pool_for_user_id is not None:
-        from sqlalchemy import or_
+    src = sa_func.lower(sa_func.coalesce(Buyer.source, ""))
+    incomplete = INCOMPLETE_ARCHIVES_SOURCE.lower()
+    scraped = [s.lower() for s in SCRAPED_LEAD_SOURCES]
 
-        # Legacy shared-pool mode (kept for callers); prefer exact assignee.
-        buyer_query = buyer_query.filter(
+    base = db.query(Buyer)
+    if pool_for_user_id is not None:
+        base = base.filter(
             or_(
                 Buyer.assigned_to_user_id.is_(None),
                 Buyer.assigned_to_user_id == pool_for_user_id,
             )
         )
     elif assigned_to_user_id is not None:
-        buyer_query = buyer_query.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
+        base = base.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
 
-    incomplete_archives_ids: set[int] = set()
-    old_client_ids: set[int] = set()
-    other_ids: set[int] = set()
-    unassigned_old_ids: set[int] = set()
-    unassigned_other_ids: set[int] = set()
-    new_search_lead_ids: set[int] = set()
+    agg = base.with_entities(
+        sa_func.sum(case((src == incomplete, 1), else_=0)).label("incomplete"),
+        sa_func.sum(case((src == "old_clients", 1), else_=0)).label("old_clients"),
+        sa_func.sum(case((src == "hyperstore_targeted", 1), else_=0)).label("hyperstore"),
+        sa_func.sum(case((src == "targeted_distributor", 1), else_=0)).label(
+            "targeted_distributor"
+        ),
+        sa_func.sum(case((src == "targeted_client", 1), else_=0)).label("targeted_client"),
+        sa_func.sum(case((src != incomplete, 1), else_=0)).label("master"),
+    ).one()
+
     by_assignee: dict[str, int] = {}
-    pool_counts = {key: 0 for key in TARGETED_POOL_SOURCES}
+    if pool_for_user_id is None:
+        assignee_rows = (
+            base.filter(
+                Buyer.assigned_to_user_id.isnot(None),
+                Buyer.assigned_by_user_id.isnot(None),
+            )
+            .with_entities(Buyer.assigned_to_user_id, sa_func.count(Buyer.id))
+            .group_by(Buyer.assigned_to_user_id)
+            .all()
+        )
+        by_assignee = {
+            str(uid): int(cnt) for uid, cnt in assignee_rows if uid is not None
+        }
 
-    for buyer_id, source, assignee_id, assigned_by_id in buyer_query.all():
-        source_key = (source or "").strip().lower()
-        if source_key in pool_counts:
-            pool_counts[source_key] += 1
-        is_incomplete = source_key == INCOMPLETE_ARCHIVES_SOURCE
-        is_old = source_key == "old_clients"
-        if is_incomplete:
-            incomplete_archives_ids.add(buyer_id)
-        elif is_old:
-            old_client_ids.add(buyer_id)
-        else:
-            other_ids.add(buyer_id)
+    new_search_lead_ids = {
+        int(row[0])
+        for row in base.filter(
+            Buyer.assigned_to_user_id.is_(None),
+            src.in_(scraped),
+        )
+        .with_entities(Buyer.id)
+        .all()
+    }
 
-        if assignee_id is None:
-            if is_old:
-                unassigned_old_ids.add(buyer_id)
-            else:
-                unassigned_other_ids.add(buyer_id)
-            if is_new_search_lead_source(source):
-                new_search_lead_ids.add(buyer_id)
-        elif pool_for_user_id is None and assigned_by_id is not None:
-            # Admin "Leads Sent To" badges — only admin-sent leads, not self-imports.
-            key = str(assignee_id)
-            by_assignee[key] = by_assignee.get(key, 0) + 1
+    all_ids = {
+        int(row[0])
+        for row in base.with_entities(Buyer.id).filter(src != incomplete).all()
+    }
+    old_client_ids = {
+        int(row[0])
+        for row in base.with_entities(Buyer.id).filter(src == "old_clients").all()
+    }
+    other_ids = all_ids - old_client_ids
 
-    all_ids = old_client_ids | other_ids
-    outcomes = latest_call_outcomes_by_buyer(db, buyer_ids=all_ids)
+    # Global latest outcomes (no huge IN clause) — filter to scoped ids in Python.
+    outcomes = latest_call_outcomes_by_buyer(db, buyer_ids=None)
 
-    interested_ids = {bid for bid, v in outcomes.items() if v == "interested"}
-    follow_up_ids = {bid for bid, v in outcomes.items() if v == "follow_up"}
-    not_interested_ids = {bid for bid, v in outcomes.items() if v == "not_interested"}
-    not_received_ids = {bid for bid, v in outcomes.items() if v == "not_received_call"}
+    interested_ids = {
+        bid for bid, v in outcomes.items() if v == "interested" and bid in all_ids
+    }
+    follow_up_ids = {
+        bid for bid, v in outcomes.items() if v == "follow_up" and bid in all_ids
+    }
+    not_interested_ids = {
+        bid for bid, v in outcomes.items() if v == "not_interested" and bid in all_ids
+    }
+    not_received_ids = {
+        bid for bid, v in outcomes.items() if v == "not_received_call" and bid in all_ids
+    }
     placed_ids = interested_ids | follow_up_ids | not_interested_ids | not_received_ids
 
     listed_interested_ids: set[int] = set()
     if all_ids:
         listed_interested_ids = {
-            row[0]
+            int(row[0])
             for row in db.query(Buyer.id)
             .filter(
                 Buyer.id.in_(all_ids),
@@ -1363,13 +1392,11 @@ def _compute_section_counts(
     placed_ids |= listed_interested_ids
 
     if pool_for_user_id is not None:
-        # Sales user scope already filtered to unassigned + own assignments.
         all_count = len(other_ids - placed_ids)
         old_count = len(old_client_ids - placed_ids)
     elif assigned_to_user_id is None:
-        # Admin: New search lead = unassigned AI/scraped only; Old clients = all rows.
         all_count = len(new_search_lead_ids - placed_ids)
-        old_count = len(old_client_ids)
+        old_count = int(agg.old_clients or 0)
     else:
         all_count = len(other_ids - placed_ids)
         old_count = len(old_client_ids - placed_ids)
@@ -1381,13 +1408,14 @@ def _compute_section_counts(
         "sales_interested_clients": len(listed_interested_ids),
         "not_interested_clients": len(not_interested_ids),
         "not_received_call_clients": len(not_received_ids),
-        # Admin master table: every lead (assigned + unassigned, all sources).
-        "master": len(all_ids) if pool_for_user_id is None and assigned_to_user_id is None else 0,
+        "master": int(agg.master or 0)
+        if pool_for_user_id is None and assigned_to_user_id is None
+        else 0,
         "by_assignee": by_assignee if pool_for_user_id is None else {},
-        "hyperstore_targeted": pool_counts.get("hyperstore_targeted", 0),
-        "targeted_distributor": pool_counts.get("targeted_distributor", 0),
-        "targeted_client": pool_counts.get("targeted_client", 0),
-        "incomplete_archives": len(incomplete_archives_ids),
+        "hyperstore_targeted": int(agg.hyperstore or 0),
+        "targeted_distributor": int(agg.targeted_distributor or 0),
+        "targeted_client": int(agg.targeted_client or 0),
+        "incomplete_archives": int(agg.incomplete or 0),
     }
 
 
