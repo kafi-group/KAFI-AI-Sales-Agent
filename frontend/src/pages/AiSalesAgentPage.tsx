@@ -4,6 +4,7 @@ import {
   setAiSalesAgentAccessCode,
   getAiSalesAgentAccessCode,
   sanitizeUserFacingError,
+  isTransientApiError,
   type AiSalesAgentRunner,
   type AiSalesAgentTask,
 } from "../api/client";
@@ -71,17 +72,29 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     if (!code) return;
     setUnlocking(true);
     setUnlockError(null);
+    const retryDelaysMs = [0, 900, 2_200];
+    let lastMessage = "Invalid access code";
     try {
-      await client.unlockAiSalesAgent(code);
-      setAiSalesAgentAccessCode(code);
-      setUnlocked(true);
-      setCodeInput("");
-    } catch (e) {
-      const message = sanitizeUserFacingError(
-        e instanceof Error ? e.message : "Invalid access code",
-      );
-      setUnlockError(message);
-      onError(message);
+      for (let attempt = 0; attempt < retryDelaysMs.length; attempt += 1) {
+        if (retryDelaysMs[attempt] > 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, retryDelaysMs[attempt]));
+        }
+        try {
+          await client.unlockAiSalesAgent(code);
+          setAiSalesAgentAccessCode(code);
+          setUnlocked(true);
+          setCodeInput("");
+          setUnlockError(null);
+          return;
+        } catch (e) {
+          const raw = e instanceof Error ? e.message : "Invalid access code";
+          lastMessage = sanitizeUserFacingError(raw);
+          const wrongCode = /invalid access code|403/i.test(raw);
+          if (wrongCode || !isTransientApiError(raw)) break;
+        }
+      }
+      setUnlockError(lastMessage);
+      onError(lastMessage);
     } finally {
       setUnlocking(false);
     }
@@ -175,7 +188,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
           onClick={() => void tryUnlock()}
           className="px-4 py-2 text-sm rounded-lg bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40"
         >
-          {unlocking ? "Checking…" : "Unlock"}
+          {unlocking ? "Checking… (may retry if API is restarting)" : "Unlock"}
         </button>
       </section>
     );

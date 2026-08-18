@@ -6,8 +6,27 @@ export type WhatsAppLeadContext = {
   country?: string | null;
 };
 
+const PLACEHOLDER_CONTACT_NAMES = new Set([
+  "",
+  "general contact",
+  "contact",
+  "n/a",
+  "na",
+  "-",
+  "unknown",
+  "sir/madam",
+]);
+
+function isRealContactName(name: string | null | undefined): boolean {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return false;
+  return !PLACEHOLDER_CONTACT_NAMES.has(trimmed.toLowerCase());
+}
+
 export function resolveContactSalutationName(lead: WhatsAppLeadContext): string {
-  return (lead.contact_name || lead.company_name || "Sir/Madam").trim();
+  const contact = (lead.contact_name || "").trim();
+  if (isRealContactName(contact)) return contact;
+  return (lead.company_name || "").trim();
 }
 
 export function renderWhatsAppTemplatePreview(

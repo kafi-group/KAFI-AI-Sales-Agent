@@ -9,6 +9,19 @@ export type PersonalizeLead = {
   industry?: string | null;
 };
 
+const PLACEHOLDER_CONTACT_NAMES = new Set([
+  "",
+  "general contact",
+  "contact",
+  "n/a",
+  "na",
+  "-",
+  "unknown",
+  "sir/madam",
+  "sir",
+  "madam",
+]);
+
 const FIELD_ALIASES: Record<string, Array<keyof PersonalizeLead | string>> = {
   company_name: ["company_name", "company name", "company"],
   contact_name: [
@@ -26,14 +39,26 @@ const FIELD_ALIASES: Record<string, Array<keyof PersonalizeLead | string>> = {
   industry: ["industry"],
 };
 
+export function isRealContactName(name: string | null | undefined): boolean {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return false;
+  return !PLACEHOLDER_CONTACT_NAMES.has(trimmed.toLowerCase());
+}
+
+/** Salutation: real contact → company name → empty (bare "Dear,"). */
 export function resolveContactSalutationName(lead: PersonalizeLead): string {
-  return (lead.contact_name || lead.company_name || "Sir/Madam").trim();
+  const contact = (lead.contact_name || "").trim();
+  if (isRealContactName(contact)) return contact;
+  const company = (lead.company_name || "").trim();
+  return company;
 }
 
 function fieldValue(lead: PersonalizeLead, key: string): string {
   const k = key as keyof PersonalizeLead;
   if (k === "contact_name") {
-    return resolveContactSalutationName(lead);
+    const contact = (lead.contact_name || "").trim();
+    if (isRealContactName(contact)) return contact;
+    return (lead.company_name || "").trim();
   }
   if (k === "company_name") {
     return (lead.company_name || "").trim();
@@ -57,6 +82,13 @@ function aliasToCanonical(alias: string): string | null {
   return null;
 }
 
+function normalizeDearGreeting(text: string): string {
+  return text
+    .replace(/^Dear\s+,/im, "Dear,")
+    .replace(/^Dear\s+\n/im, "Dear,\n")
+    .replace(/^Dear\s+<\/p>/im, "Dear,</p>");
+}
+
 export function personalizeEmailText(template: string, lead: PersonalizeLead): string {
   if (!template) return template;
   let out = template;
@@ -73,7 +105,7 @@ export function personalizeEmailText(template: string, lead: PersonalizeLead): s
     return canonical ? fieldValue(lead, canonical) : match;
   });
 
-  return out;
+  return normalizeDearGreeting(out);
 }
 
 function plainBodyStart(text: string): string {
@@ -87,16 +119,16 @@ function plainBodyStart(text: string): string {
 
 /** Prepend "Dear {name}," when the body does not already open with a salutation. */
 export function ensureDearSalutation(body: string, contactName: string): string {
+  const name = (contactName || "").trim();
+  const greeting = name ? `Dear ${name},` : "Dear,";
   if (!body?.trim()) {
-    const name = (contactName || "Sir/Madam").trim();
-    return `Dear ${name},\n\n`;
+    return `${greeting}\n\n`;
   }
-  if (/^dear\s+/i.test(plainBodyStart(body))) return body;
-  const name = (contactName || "Sir/Madam").trim();
-  const greeting = `Dear ${name},`;
+  if (/^dear\s*,?\s*$/i.test(plainBodyStart(body).split("\n")[0] || "")) return body;
+  if (/^dear\s+/i.test(plainBodyStart(body))) return normalizeDearGreeting(body);
   const isHtml = /<[a-z][\s\S]*>/i.test(body);
   if (isHtml) {
-    return `<p>${greeting}</p>${body}`;
+    return normalizeDearGreeting(`<p>${greeting}</p>${body}`);
   }
-  return `${greeting}\n\n${body}`;
+  return normalizeDearGreeting(`${greeting}\n\n${body}`);
 }

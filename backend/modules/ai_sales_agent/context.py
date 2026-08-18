@@ -5,8 +5,11 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from db.models import Buyer, Contact
+from modules.ai_sales_agent.call_coaching import (
+    build_ai_sales_coaching_context,
+    referral_hint_from_remarks,
+)
 from modules.calls import latest_call_notes_by_buyer
-from modules.helpful_guidance import generate_helpful_guidance
 from modules import buyers as buyers_module
 
 
@@ -72,6 +75,9 @@ def build_lead_context(db: Session, *, buyer_id: int, contact_id: int | None = N
         f"Remarks on file: {(buyer.remarks or '')[:400] or 'None'}",
         _contact_line(contact),
     ]
+    referral = referral_hint_from_remarks(buyer.remarks)
+    if referral:
+        text_blocks.append(referral)
     if prior.get("call_notes"):
         text_blocks.append(f"Last call notes: {prior['call_notes']}")
     if prior.get("call_outcome"):
@@ -87,17 +93,13 @@ def build_lead_context(db: Session, *, buyer_id: int, contact_id: int | None = N
 
 
 def guidance_snippet_for_persona(db: Session, *, app_user_id: int | None) -> str:
+    """Helpful Guidance + real human CC exemplars for Sara/Rayan pre-call briefing."""
     try:
         from db.models import AppUser
 
         viewer = db.get(AppUser, app_user_id) if app_user_id else None
         if not viewer:
             return ""
-        report = generate_helpful_guidance(db, viewer=viewer, months=1, user_id=None)
-        recs = report.get("recommendations") or []
-        if not recs:
-            return ""
-        lines = [f"- {r.get('title')}: {r.get('body')}" for r in recs[:2] if r.get("title")]
-        return "Coaching tips:\n" + "\n".join(lines) if lines else ""
+        return build_ai_sales_coaching_context(db, app_user_id=app_user_id, viewer=viewer)
     except Exception:
         return ""

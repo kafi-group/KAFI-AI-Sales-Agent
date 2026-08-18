@@ -132,6 +132,8 @@ const RETRY_BACKOFF_MS = [600, 1_800, 3_500] as const;
 export type ApiRequestOptions = RequestInit & {
   /** Override the path-based client abort timeout. */
   timeoutMs?: number;
+  /** Retry POST/PUT/PATCH on 502/503/504 and network faults (e.g. unlock during deploy). */
+  retryTransient?: boolean;
 };
 
 function timeoutForPath(path: string): number {
@@ -173,13 +175,23 @@ function isRetryableStatus(status: number): boolean {
 
 function networkErrorMessage(isTimeout: boolean): string {
   if (isTimeout) {
-    return "Internet slow, wait a few seconds and refresh again.";
+    return "The API is taking too long — it may be restarting after deploy. Wait 30 seconds, then Ctrl + Shift + R and try again.";
   }
   return "Cannot reach the API right now. Check your connection, then refresh. If this keeps happening, Railway may be restarting.";
 }
 
+/** True for deploy/restart/network faults — safe to retry unlock or show warm-up copy. */
+export function isTransientApiError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    /hard restart|taking too long|cannot reach the api|internet slow|railway may be restarting|upstream 50[234]|502|503|504/.test(
+      m,
+    )
+  );
+}
+
 async function request<T>(path: string, options?: ApiRequestOptions): Promise<T> {
-  const { timeoutMs: timeoutOverride, ...fetchOptions } = options ?? {};
+  const { timeoutMs: timeoutOverride, retryTransient, ...fetchOptions } = options ?? {};
   const headers = new Headers(authHeaders({ "Content-Type": "application/json" }));
   if (fetchOptions.headers) {
     const extra = new Headers(fetchOptions.headers);
@@ -187,7 +199,8 @@ async function request<T>(path: string, options?: ApiRequestOptions): Promise<T>
   }
 
   const method = (fetchOptions.method || "GET").toUpperCase();
-  const canRetry = method === "GET" || method === "HEAD";
+  const canRetry =
+    method === "GET" || method === "HEAD" || (Boolean(retryTransient) && method === "POST");
   const timeoutMs = timeoutOverride ?? timeoutForPath(path);
   const maxAttempts = canRetry ? RETRY_BACKOFF_MS.length + 1 : 1;
   let lastNetworkError: Error | null = null;
@@ -472,6 +485,9 @@ export interface ManualKpiEntry {
   contact_type: string | null;
   follow_up_type: string | null;
   wechat_contacts: string | null;
+  whatsapp_status: string | null;
+  bulk_emails_sent: number | null;
+  bulk_email_country: string | null;
   remarks: string | null;
   created_at: string;
   updated_at: string;
@@ -2397,6 +2413,9 @@ export const client = {
     contact_type?: string | null;
     follow_up_type?: string | null;
     wechat_contacts?: string | null;
+    whatsapp_status?: string | null;
+    bulk_emails_sent?: number | null;
+    bulk_email_country?: string | null;
     remarks?: string | null;
   }) =>
     request<ManualKpiEntry>("/kpi/manual", {
@@ -2413,6 +2432,9 @@ export const client = {
       contact_type: string | null;
       follow_up_type: string | null;
       wechat_contacts: string | null;
+      whatsapp_status: string | null;
+      bulk_emails_sent: number | null;
+      bulk_email_country: string | null;
       remarks: string | null;
     }>,
   ) =>
@@ -3151,6 +3173,8 @@ export const client = {
     request<{ ok: boolean }>("/ai-sales-agent/unlock", {
       method: "POST",
       body: JSON.stringify({ access_code }),
+      retryTransient: true,
+      timeoutMs: 45_000,
     }),
   listAiSalesAgentRunners: () =>
     request<{ runners: AiSalesAgentRunner[] }>("/ai-sales-agent/runners", {

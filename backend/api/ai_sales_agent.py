@@ -10,13 +10,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db, require_admin
-from api.calls import _twilio_form, _twiml_response
+from api.calls import _twilio_form, _twiml_response, _transcribe_in_background
 from db.models import AppUser
 from db.session import SessionLocal
 from integrations.voice_client import voice_client
 from modules.ai_sales_agent import campaign as campaign_module
 from modules.ai_sales_agent.access import access_code_valid
-from modules.ai_sales_agent.conversation import generate_reply
+from modules.ai_sales_agent.conversation import (
+    generate_reply_with_fallback,
+    opening_history,
+    reprompt_for_empty_speech,
+)
 from modules.ai_sales_agent.context import build_lead_context
 from modules.ai_sales_agent.personas import get_persona
 from modules import calls as calls_module
@@ -217,6 +221,11 @@ async def ai_sales_voice(request: Request):
         state = campaign_module.get_transcript_state(task)
         opening = str(state.get("opening") or "")
         persona = get_persona(task.persona)
+        # Ensure opening is in history so turn replies know what was already said.
+        if opening and not (state.get("history") or []):
+            seeded = opening_history(opening)
+            task.transcript = {**state, "history": seeded}
+            db.commit()
         xml = campaign_module.build_gather_twiml(
             voice=persona.voice,
             spoken=opening,
@@ -247,6 +256,14 @@ async def ai_sales_turn(request: Request):
         return _twiml_response(voice_client.say_twiml("Webhook verification failed."))
 
     user_text = str(form.get("SpeechResult") or "").strip()
+    confidence_raw = str(form.get("Confidence") or "")
+    if confidence_raw:
+        log.info(
+            "ai-sales turn task=%s speech=%r confidence=%s",
+            task_id_raw,
+            user_text[:120],
+            confidence_raw,
+        )
 
     db = SessionLocal()
     try:
@@ -257,13 +274,38 @@ async def ai_sales_turn(request: Request):
         state = campaign_module.get_transcript_state(task)
         system_prompt = str(state.get("system_prompt") or "")
         history = list(state.get("history") or [])
+        if not history:
+            opening = str(state.get("opening") or "")
+            history = opening_history(opening)
         turn = int(state.get("turn") or 0) + 1
+        empty_reprompts = int(state.get("empty_reprompts") or 0)
         persona = get_persona(task.persona)
 
-        spoken, meta, history = generate_reply(
+        if not user_text:
+            spoken = reprompt_for_empty_speech(turn=turn, empty_reprompts=empty_reprompts)
+            empty_reprompts += 1
+            end_call = empty_reprompts >= 2 or "Goodbye" in spoken
+            campaign_module.save_turn_result(
+                db,
+                task_id,
+                history=history,
+                turn=turn,
+                empty_reprompts=empty_reprompts,
+            )
+            xml = campaign_module.build_gather_twiml(
+                voice=persona.voice,
+                spoken=spoken,
+                task_id=task_id,
+                final=end_call,
+            )
+            return _twiml_response(xml)
+
+        spoken, meta, history = generate_reply_with_fallback(
             system_prompt=system_prompt,
             history=history,
             user_text=user_text,
+            persona=persona,
+            turn=turn,
         )
         outcome = meta.get("outcome")
         remark = meta.get("remark")
@@ -278,6 +320,7 @@ async def ai_sales_turn(request: Request):
             turn=turn,
             outcome=str(outcome) if outcome else None,
             remarks=str(remark) if remark else None,
+            empty_reprompts=0,
         )
 
         if end_call:
@@ -298,6 +341,22 @@ async def ai_sales_turn(request: Request):
         return _twiml_response(xml)
     except Exception as exc:
         log.exception("ai-sales turn webhook failed: %s", exc)
+        try:
+            failed_task = campaign_module.get_task(db, task_id)
+            if failed_task:
+                failed_persona = get_persona(failed_task.persona)
+                fallback = (
+                    f"This is {failed_persona.display_name} from Kafi Commodities. "
+                    "May I speak with someone in procurement?"
+                )
+                xml = campaign_module.build_gather_twiml(
+                    voice=failed_persona.voice,
+                    spoken=fallback,
+                    task_id=task_id,
+                )
+                return _twiml_response(xml)
+        except Exception:
+            log.exception("ai-sales turn fallback failed task=%s", task_id)
         return _twiml_response(voice_client.say_twiml("Sorry, we had a technical issue. Goodbye."))
     finally:
         db.close()
@@ -336,7 +395,10 @@ async def ai_sales_status(
 
 
 @webhooks_router.post("/recording")
-async def ai_sales_recording(request: Request):
+async def ai_sales_recording(
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
     form = await _twilio_form(request)
     task_id_raw = request.query_params.get("task_id")
     if not task_id_raw:
@@ -354,7 +416,7 @@ async def ai_sales_recording(request: Request):
         recording_sid = str(form.get("RecordingSid") or "")
         recording_url = str(form.get("RecordingUrl") or "")
         if recording_sid and recording_url:
-            calls_module.save_call_recording(
+            media = calls_module.save_call_recording(
                 db,
                 interaction_id=task.interaction_id,
                 recording_sid=recording_sid,
@@ -362,6 +424,8 @@ async def ai_sales_recording(request: Request):
                 recording_status=str(form.get("RecordingStatus") or "completed"),
                 recording_duration=str(form.get("RecordingDuration") or "") or None,
             )
+            if media and media.get("local_path") and media.get("transcript_status") == "pending":
+                background_tasks.add_task(_transcribe_in_background, task.interaction_id)
     except Exception:
         log.exception("ai-sales recording webhook failed task=%s", task_id_raw)
     finally:

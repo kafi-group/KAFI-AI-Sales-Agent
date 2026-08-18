@@ -41,12 +41,7 @@ def get_persona(persona_id: str) -> PersonaProfile:
             gender_label="male",
             voice=PERSONA_TWILIO_VOICE[PERSONA_MALE],
             app_username=PERSONA_APP_USERNAME[PERSONA_MALE],
-            opening_template=(
-                "Hello, may I speak with {contact_name}? "
-                "This is Rayan calling from Kafi Commodities in Pakistan. "
-                "We export FMCG products — rice, sauces, pickles, and Himalayan salt. "
-                "Do you have a moment to discuss your import requirements?"
-            ),
+            opening_template="Hello, is this {contact_name}?",
         )
     if pid == PERSONA_FEMALE:
         return PersonaProfile(
@@ -55,12 +50,7 @@ def get_persona(persona_id: str) -> PersonaProfile:
             gender_label="female",
             voice=PERSONA_TWILIO_VOICE[PERSONA_FEMALE],
             app_username=PERSONA_APP_USERNAME[PERSONA_FEMALE],
-            opening_template=(
-                "Hello, may I speak with {contact_name}? "
-                "This is Sara from Kafi Commodities, a Pakistani food exporter. "
-                "We supply FMCG lines including basmati rice, chutneys, and Essence brand products. "
-                "Could I ask whether your procurement team imports from South Asia?"
-            ),
+            opening_template="Hello, am I speaking with {contact_name}?",
         )
     raise ValueError("persona must be 'male' or 'female'")
 
@@ -76,12 +66,29 @@ FOUNDATION_PROMPT = dedent(
 
     Tone: empathetic, professional, warm — never pushy or robotic.
     - Acknowledge the caller's time and any frustration before pitching.
-    - Ask one question at a time.
-    - Goal: discover if they import FMCG / rice / condiments; if interested, capture email or callback time.
+    - Ask one question at a time. Never more than two short sentences per turn (~15 seconds spoken).
+    - STOP and wait after each question — do not monologue or list every product in one turn.
+
+    CALL FLOW (follow in order — the opening identity check has already been spoken):
+    1. After they confirm identity, answer "who is this?" or similar: introduce yourself briefly —
+       "This is [your name] from Kafi Commodities, a Pakistani food exporter." Optionally ask
+       "How are you doing today?" and wait.
+    2. If lead context mentions a referral contact, mention it once (e.g. "Ms. Monica gave me
+       your number for purchasing").
+    3. Next turn: ask to speak with procurement / imports / purchasing — or ask what they import
+       before listing products.
+    4. If a receptionist or operator answers: politely ask them to transfer to procurement or imports.
+    5. Only after reaching the right person: mention relevant products one at a time (rice,
+       chutneys, Essence salt) — ask if they import from South Asia or Pakistan.
+    6. If "not yet" — explore their business gently; offer to send FOB quotation + port when interest appears.
+    7. Goal: discover import needs; if interested, capture email, WhatsApp, and destination port.
     - If not interested or wrong department, thank them politely and end.
     - If voicemail or no answer, keep remarks brief for the log.
     - Never quote prices, commit to payment terms, or give legal/medical advice.
     - If they say stop calling, acknowledge and end immediately.
+
+    Follow the COACHING & EXEMPLARS section below — it comes from Helpful Guidance and real
+    successful human calls (same style as your team's best FMCG export calls).
 
     When the conversation should end, include exactly [END_CALL] on its own line after your spoken reply.
     After your reply, on a new line, output JSON only:
@@ -90,9 +97,12 @@ FOUNDATION_PROMPT = dedent(
 ).strip()
 
 
-def build_system_prompt(persona: PersonaProfile, lead_context: str) -> str:
-    return (
-        f"{FOUNDATION_PROMPT}\n\n"
-        f"Your spoken name on this call: {persona.display_name} ({persona.gender_label} voice).\n\n"
-        f"Lead context (study before speaking):\n{lead_context}"
-    )
+def build_system_prompt(persona: PersonaProfile, lead_context: str, coaching: str = "") -> str:
+    sections = [
+        FOUNDATION_PROMPT,
+        f"Your spoken name on this call: {persona.display_name} ({persona.gender_label} voice).",
+        f"Lead context (study before speaking):\n{lead_context}",
+    ]
+    if coaching.strip():
+        sections.append(f"COACHING & EXEMPLARS (Helpful Guidance + human call patterns):\n{coaching.strip()}")
+    return "\n\n".join(sections)

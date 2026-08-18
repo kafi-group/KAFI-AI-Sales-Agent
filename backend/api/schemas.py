@@ -1482,6 +1482,9 @@ class ManualKpiEntryRead(BaseModel):
     contact_type: Optional[str] = None
     follow_up_type: Optional[str] = None
     wechat_contacts: Optional[str] = None
+    whatsapp_status: Optional[str] = None
+    bulk_emails_sent: Optional[int] = None
+    bulk_email_country: Optional[str] = None
     remarks: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -1495,6 +1498,9 @@ class ManualKpiEntryCreate(BaseModel):
     contact_type: Optional[str] = None
     follow_up_type: Optional[str] = None
     wechat_contacts: Optional[str] = None
+    whatsapp_status: Optional[str] = None
+    bulk_emails_sent: Optional[int] = None
+    bulk_email_country: Optional[str] = None
     remarks: Optional[str] = None
 
 
@@ -1506,6 +1512,9 @@ class ManualKpiEntryUpdate(BaseModel):
     contact_type: Optional[str] = None
     follow_up_type: Optional[str] = None
     wechat_contacts: Optional[str] = None
+    whatsapp_status: Optional[str] = None
+    bulk_emails_sent: Optional[int] = None
+    bulk_email_country: Optional[str] = None
     remarks: Optional[str] = None
 
 

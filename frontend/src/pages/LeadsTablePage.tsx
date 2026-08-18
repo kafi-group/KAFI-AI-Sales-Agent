@@ -788,6 +788,7 @@ export function LeadsTablePage({
   const initialTableViewRef = useRef(readStoredTableView(user?.id, section));
   const restoringSectionRef = useRef(false);
   const previousSectionRef = useRef(section);
+  const tableLoadSeqRef = useRef(0);
   const [assigneeOptions, setAssigneeOptions] = useState<AssigneeOption[]>([]);
   const [filters, setFilters] = useState<LeadTableFilters | null>(null);
   const [rows, setRows] = useState<LeadTableRow[]>([]);
@@ -796,6 +797,7 @@ export function LeadsTablePage({
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadSlowHint, setLoadSlowHint] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [drafts, setDrafts] = useState<Record<number, LeadTableRow>>({});
   const draftsRef = useRef(drafts);
@@ -1217,22 +1219,33 @@ export function LeadsTablePage({
   }, [onSectionCountsChange]);
 
   const loadTable = useCallback(async () => {
+    const seq = ++tableLoadSeqRef.current;
     setLoading(true);
+    setLoadSlowHint(false);
+    const slowTimer = window.setTimeout(() => {
+      if (tableLoadSeqRef.current === seq) setLoadSlowHint(true);
+    }, 12_000);
     try {
       const result = await client.listLeadsTable({
         ...tableQueryParams,
         page,
         page_size: TABLE_PAGE_SIZE,
       });
+      if (tableLoadSeqRef.current !== seq) return;
       setRows(result.rows);
       setTotal(result.total);
       setFilteredCount(result.filtered_count);
       setTotalPages(result.total_pages);
       setPage(result.page);
     } catch (e) {
+      if (tableLoadSeqRef.current !== seq) return;
       onError(e instanceof Error ? e.message : "Failed to load leads table");
     } finally {
-      setLoading(false);
+      window.clearTimeout(slowTimer);
+      if (tableLoadSeqRef.current === seq) {
+        setLoading(false);
+        setLoadSlowHint(false);
+      }
     }
   }, [onError, page, tableQueryParams]);
 
@@ -2684,7 +2697,8 @@ export function LeadsTablePage({
             </div>
           ) : null}
           <p className="text-sm text-slate-500 mt-1">
-            {filteredCount} matching · {total} in section · {TABLE_PAGE_SIZE} per page
+            {loading && rows.length === 0 ? "…" : filteredCount} matching ·{" "}
+            {loading && rows.length === 0 ? "…" : total} in section · {TABLE_PAGE_SIZE} per page
             {selected.size > 0 ? (
               <span className="text-sky-400">
                 {" "}
@@ -3514,7 +3528,15 @@ export function LeadsTablePage({
       </div>
 
       {loading ? (
-        <p className="text-slate-400 text-sm">Loading leads table…</p>
+        <div className="text-slate-400 text-sm space-y-1">
+          <p>Loading leads table…</p>
+          {loadSlowHint ? (
+            <p className="text-amber-300/90 text-xs max-w-xl">
+              Still loading — the API may be restarting after a deploy. Retrying automatically;
+              if this continues, wait 30 seconds then press Ctrl + Shift + R.
+            </p>
+          ) : null}
+        </div>
       ) : rows.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/50 p-8 text-center space-y-3">
           <p className="text-slate-400 text-sm">

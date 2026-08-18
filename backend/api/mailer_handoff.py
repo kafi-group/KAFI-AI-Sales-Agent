@@ -19,6 +19,7 @@ from modules import auth as auth_module
 from modules import buyers as buyers_module
 from modules import email_activity
 from modules.mailbox_accounts import resolve_user_mailbox
+from modules.salutation import is_real_contact_name
 
 router = APIRouter(prefix="/mailer", tags=["mailer"])
 
@@ -314,7 +315,9 @@ def create_mailer_handoff(
             {
                 "buyer_id": buyer_id,
                 "company_name": buyer.company_name,
-                "contact_name": contact.full_name,
+                "contact_name": contact.full_name
+                if is_real_contact_name(contact.full_name)
+                else "",
                 "contact_email": contact.email.strip(),
             }
         )

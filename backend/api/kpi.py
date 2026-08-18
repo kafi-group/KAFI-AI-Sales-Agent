@@ -116,6 +116,9 @@ def create_manual_kpi(
         contact_type=payload.contact_type,
         follow_up_type=payload.follow_up_type,
         wechat_contacts=payload.wechat_contacts,
+        whatsapp_status=payload.whatsapp_status,
+        bulk_emails_sent=payload.bulk_emails_sent,
+        bulk_email_country=payload.bulk_email_country,
         remarks=payload.remarks,
     )
     return ManualKpiEntryRead(**result)

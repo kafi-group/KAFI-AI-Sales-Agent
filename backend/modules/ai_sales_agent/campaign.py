@@ -23,6 +23,7 @@ from db.models import (
 from integrations.voice_client import normalize_e164, voice_client
 from modules import buyers as buyers_module
 from modules.ai_sales_agent.context import build_lead_context, guidance_snippet_for_persona
+from modules.ai_sales_agent.conversation import opening_history
 from modules.ai_sales_agent.personas import VALID_PERSONAS, build_system_prompt, get_persona
 from modules.calls import _lead_phone_from_contact, _prepare_call_interaction
 from modules.audit import log_action
@@ -259,14 +260,12 @@ def _prepare_task_briefing(db: Session, task: AiSalesAgentTask) -> dict[str, Any
     persona = get_persona(task.persona)
     app_user = _resolve_app_user(db, persona.app_username)
     briefing = build_lead_context(db, buyer_id=task.buyer_id, contact_id=task.contact_id)
-    guidance = guidance_snippet_for_persona(db, app_user_id=app_user.id if app_user else None)
+    coaching = guidance_snippet_for_persona(db, app_user_id=app_user.id if app_user else None)
     context_text = briefing["context_text"]
-    if guidance:
-        context_text = f"{context_text}\n\n{guidance}"
     contact = briefing["contact"]
     contact_name = (contact.full_name if contact else None) or "the procurement contact"
     opening = persona.opening_template.format(contact_name=contact_name)
-    system_prompt = build_system_prompt(persona, context_text)
+    system_prompt = build_system_prompt(persona, context_text, coaching=coaching)
     return {
         "briefing": briefing,
         "system_prompt": system_prompt,
@@ -284,11 +283,13 @@ def _store_transcript_state(
     history: list[dict[str, str]] | None = None,
     turn: int = 0,
 ) -> None:
+    seeded = history if history is not None else opening_history(opening)
     task.transcript = {
         "system_prompt": system_prompt,
         "opening": opening,
-        "history": history or [],
+        "history": seeded,
         "turn": turn,
+        "empty_reprompts": 0,
     }
 
 
@@ -457,6 +458,7 @@ def save_turn_result(
     turn: int,
     outcome: str | None = None,
     remarks: str | None = None,
+    empty_reprompts: int | None = None,
 ) -> None:
     task = get_task(db, task_id)
     if not task:
@@ -464,6 +466,8 @@ def save_turn_result(
     state = dict(task.transcript or {})
     state["history"] = history
     state["turn"] = turn
+    if empty_reprompts is not None:
+        state["empty_reprompts"] = empty_reprompts
     task.transcript = state
     if outcome:
         task.outcome = outcome.strip().lower()
@@ -483,7 +487,7 @@ def build_gather_twiml(
     task_id: int,
     final: bool = False,
 ) -> str:
-    """TwiML: Say text then gather speech (or hang up if final)."""
+    """TwiML: Say text, then gather caller speech (or hang up if final)."""
     text = html.escape((spoken or "").strip()[:900])
     voice_xml = html.escape(voice, quote=True)
     if final or not spoken.strip():
@@ -498,11 +502,15 @@ def build_gather_twiml(
         voice_client.webhook_url(f"/api/webhooks/twilio/ai-sales/turn?task_id={task_id}"),
         quote=True,
     )
+    # Say outside Gather so the agent finishes speaking before we listen.
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response>"
-        f'<Gather input="speech" action="{turn_url}" method="POST" speechTimeout="auto" language="en-US">'
         f'<Say voice="{voice_xml}">{text}</Say>'
+        f'<Gather input="speech" action="{turn_url}" method="POST" '
+        f'timeout="12" speechTimeout="3" language="en-US" '
+        f'speechModel="phone_call" actionOnEmptyResult="true">'
+        "<Pause length=\"1\"/>"
         "</Gather>"
         f'<Say voice="{voice_xml}">Sorry, I did not catch that. Goodbye.</Say>'
         "<Hangup/>"

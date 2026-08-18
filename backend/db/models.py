@@ -607,6 +607,9 @@ class ManualKpiEntry(Base):
     contact_type: Mapped[Optional[str]] = mapped_column(String(80))
     follow_up_type: Mapped[Optional[str]] = mapped_column(String(80))
     wechat_contacts: Mapped[Optional[str]] = mapped_column(String(40))
+    whatsapp_status: Mapped[Optional[str]] = mapped_column(String(40))
+    bulk_emails_sent: Mapped[Optional[int]] = mapped_column(Integer)
+    bulk_email_country: Mapped[Optional[str]] = mapped_column(String(120))
     remarks: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
