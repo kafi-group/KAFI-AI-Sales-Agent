@@ -2,6 +2,28 @@
 
 export const UNASSIGNED = "unassigned";
 
+/** Mirrors backend modules/leads.py — sales reps assignable even if role was mis-set. */
+export const ASSIGNABLE_SALES_USERNAMES = new Set([
+  "asim",
+  "usmankhan",
+  "usman",
+  "sadia",
+  "sadiah",
+  "rayan",
+  "sara",
+]);
+
+export function isAssignableSalesUser(user: {
+  role?: string | null;
+  username?: string | null;
+  is_active?: boolean;
+}): boolean {
+  if (!user.is_active) return false;
+  if (user.role === "user") return true;
+  const username = (user.username || "").trim().toLowerCase();
+  return ASSIGNABLE_SALES_USERNAMES.has(username);
+}
+
 export const AI_SALES_ASSIGN_OPTIONS = [
   { value: "ai:male", label: "Rayan (AI Sales Agent)" },
   { value: "ai:female", label: "Sara (AI Sales Agent)" },
@@ -50,14 +72,24 @@ export function parseAssigneeUserId(value: string): number | null {
 
 export function allAssigneeSelectOptions(
   users: LeadAssigneeOption[],
+  current?: { userId?: number | null; label?: string | null },
 ): LeadAssigneeOption[] {
+  const mapped = users.map((u) => ({
+    value: u.value,
+    label: u.username || u.label,
+    username: u.username,
+  }));
+  if (current?.userId != null) {
+    const key = String(current.userId);
+    if (!mapped.some((u) => u.value === key)) {
+      const label =
+        (current.label && current.label !== "unassigned" ? current.label : null) || key;
+      mapped.unshift({ value: key, label, username: label });
+    }
+  }
   return [
     { value: UNASSIGNED, label: "Unassigned" },
-    ...users.map((u) => ({
-      value: u.value,
-      label: u.username || u.label,
-      username: u.username,
-    })),
+    ...mapped,
     ...AI_SALES_ASSIGN_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
   ];
 }

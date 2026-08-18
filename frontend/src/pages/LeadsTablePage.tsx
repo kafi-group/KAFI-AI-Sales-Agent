@@ -69,6 +69,7 @@ import { exportLeadsTableCsv } from "../utils/exportCsv";
 import {
   AI_SALES_ASSIGN_OPTIONS,
   isAiSalesAssignValue,
+  isAssignableSalesUser,
   personaFromAiAssignValue,
   UNASSIGNED,
 } from "../utils/leadAssignees";
@@ -994,7 +995,7 @@ export function LeadsTablePage({
           const users = await client.listUsers();
           setAssigneeOptions(
             users
-              .filter((u) => u.is_active && u.role === "user")
+              .filter((u) => isAssignableSalesUser(u))
               .map((u) => ({
                 value: String(u.id),
                 label: u.full_name || u.username,
@@ -1519,6 +1520,16 @@ export function LeadsTablePage({
       });
       applyAssigneeMove(rowId, updated, previousAssigneeId);
       await loadSectionCounts();
+      const label =
+        assignedToUserId == null
+          ? "Unassigned"
+          : updated.assigned_to && updated.assigned_to !== "unassigned"
+            ? updated.assigned_to
+            : assigneeOptions.find((o) => o.value === String(assignedToUserId))?.username ||
+              assigneeOptions.find((o) => o.value === String(assignedToUserId))?.label ||
+              "assignee";
+      setSaveNotice(`Assigned to ${label}.`);
+      setTimeout(() => setSaveNotice(null), 3000);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to update assignee");
     } finally {
@@ -1978,7 +1989,7 @@ export function LeadsTablePage({
     }
   }
 
-  function renderAssignedToCell(row: LeadTableRow, draft: LeadTableRow) {
+  function renderAssignedToCell(row: LeadTableRow, _draft: LeadTableRow) {
     if (!isAdmin) {
       return (
         <span className="text-sm text-slate-300">
@@ -1990,27 +2001,10 @@ export function LeadsTablePage({
     }
     return (
       <AssignedToSelect
-        value={editMode ? draft.assigned_to_user_id : row.assigned_to_user_id}
+        value={row.assigned_to_user_id}
+        currentLabel={row.assigned_to}
         options={assigneeOptions}
         onChange={(userId, rawValue) => {
-          if (editMode) {
-            if (isAiSalesAssignValue(rawValue)) return;
-            const label =
-              userId == null
-                ? "unassigned"
-                : assigneeOptions.find((o) => o.value === String(userId))?.username ||
-                  assigneeOptions.find((o) => o.value === String(userId))?.label ||
-                  "unassigned";
-            setDrafts((prev) => ({
-              ...prev,
-              [row.id]: {
-                ...(prev[row.id] ?? row),
-                assigned_to_user_id: userId,
-                assigned_to: label,
-              },
-            }));
-            return;
-          }
           void saveAssignedTo(row.id, userId, rawValue);
         }}
         disabled={assigningId === row.id || savingId === row.id}

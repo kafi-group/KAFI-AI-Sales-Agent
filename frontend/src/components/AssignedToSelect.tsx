@@ -11,6 +11,8 @@ export type AssigneeOption = LeadAssigneeOption;
 
 interface AssignedToSelectProps {
   value: number | null | undefined;
+  /** Display label when assignee id is not in the options list yet. */
+  currentLabel?: string | null;
   onChange: (userId: number | null, rawValue: string) => void;
   options: AssigneeOption[];
   disabled?: boolean;
@@ -19,13 +21,17 @@ interface AssignedToSelectProps {
 
 export function AssignedToSelect({
   value,
+  currentLabel,
   onChange,
   options,
   disabled = false,
   className = "",
 }: AssignedToSelectProps) {
   const selectValue = normalizeAssigneeValue(value);
-  const items = allAssigneeSelectOptions(options);
+  const items = allAssigneeSelectOptions(options, {
+    userId: value,
+    label: currentLabel,
+  });
 
   if (disabled) {
     return (
@@ -52,7 +58,9 @@ export function AssignedToSelect({
       }}
       disabled={disabled}
       onClick={(e) => e.stopPropagation()}
-      className={`w-full rounded-md bg-slate-950 border border-slate-700 px-2 py-1.5 text-sm text-slate-200 ${className}`}
+      onMouseDown={(e) => e.stopPropagation()}
+      aria-label="Assign lead to user"
+      className={`w-full rounded-md bg-slate-950 border border-slate-700 px-2 py-1.5 text-sm text-slate-200 cursor-pointer ${className}`}
     >
       {items.map((item) => (
         <option key={item.value} value={item.value}>
