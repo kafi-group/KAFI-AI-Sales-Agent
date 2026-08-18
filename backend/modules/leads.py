@@ -67,7 +67,7 @@ _SORT_FIELDS = {
 
 # Named export reps — assignable even if role was mis-set to admin during setup.
 ASSIGNABLE_SALES_USERNAMES = frozenset(
-    {"asim", "usmankhan", "usman", "sadia", "sadiah", "rayan", "sara"}
+    {"asim", "usmankhan", "usman", "sadia", "sadiah", "rayan", "ryan", "sara", "shumyle"}
 )
 
 
@@ -1512,16 +1512,20 @@ def update_lead_table_row(
         ):
             from modules import ai_mode as ai_mode_module
 
-            ai_mode_module.record_lead_transfer(
-                db,
-                buyer_ids=[buyer_id],
-                to_user_id=int(new_assignee_id),
-                to_label=buyer.assigned_to or _assignee_label(
-                    resolve_assignee_user(db, int(new_assignee_id))
-                ),
-                by_user_id=by_user_id,
-                commit=False,
-            )
+            try:
+                ai_mode_module.record_lead_transfer(
+                    db,
+                    buyer_ids=[buyer_id],
+                    to_user_id=int(new_assignee_id),
+                    to_label=buyer.assigned_to or _assignee_label(
+                        resolve_assignee_user(db, int(new_assignee_id))
+                    ),
+                    by_user_id=by_user_id,
+                    commit=False,
+                )
+            except Exception:
+                # Lead assignee is already set — don't fail the admin assign action.
+                pass
         db.commit()
         db.refresh(buyer)
         data = {k: v for k, v in data.items() if k not in {"assigned_to_user_id", "assigned_to"}}
@@ -2100,14 +2104,17 @@ def bulk_assign_lead_table_rows(
     if assigned_ids and assigned_to_user_id is not None:
         from modules import ai_mode as ai_mode_module
 
-        transfer_event = ai_mode_module.record_lead_transfer(
-            db,
-            buyer_ids=assigned_ids,
-            to_user_id=assigned_to_user_id,
-            to_label=label,
-            by_user_id=by_user_id,
-            commit=False,
-        )
+        try:
+            transfer_event = ai_mode_module.record_lead_transfer(
+                db,
+                buyer_ids=assigned_ids,
+                to_user_id=assigned_to_user_id,
+                to_label=label,
+                by_user_id=by_user_id,
+                commit=False,
+            )
+        except Exception:
+            transfer_event = None
 
     db.commit()
 

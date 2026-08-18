@@ -807,6 +807,7 @@ export function LeadsTablePage({
   const [savingId, setSavingId] = useState<number | null>(null);
   const [assigningId, setAssigningId] = useState<number | null>(null);
   const [bulkAssignValue, setBulkAssignValue] = useState("");
+  const [bulkAiQueueValue, setBulkAiQueueValue] = useState("");
   const [bulkAssigning, setBulkAssigning] = useState(false);
   const [savingAll, setSavingAll] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
@@ -1428,6 +1429,13 @@ export function LeadsTablePage({
     [drafts, originalKeys],
   );
 
+  function shouldRemoveRowOnAssign(assignedToUserId: number | null): boolean {
+    return (
+      assignedToUserId != null &&
+      (section === "all" || section === "old_clients")
+    );
+  }
+
   function applyAssigneeMove(
     rowId: number,
     updated: LeadTableRow,
@@ -1437,8 +1445,7 @@ export function LeadsTablePage({
     const assigneeChanged = previousAssigneeId !== assignedToUserId;
     const leavesPoolSection =
       assigneeChanged &&
-      (section === "all" || section === "old_clients") &&
-      assignedToUserId != null;
+      shouldRemoveRowOnAssign(assignedToUserId);
     const leavesAssignedSection =
       assigneeChanged &&
       isAssignedSection &&
@@ -1531,9 +1538,30 @@ export function LeadsTablePage({
       if (persona) await queueLeadsForAiAgent([rowId], persona);
       return;
     }
+    const previousRow = rows.find((r) => r.id === rowId);
+    const previousAssigneeId = previousRow?.assigned_to_user_id ?? null;
+    const assigneeLabel =
+      assignedToUserId == null
+        ? "unassigned"
+        : assigneeOptions.find((o) => o.value === String(assignedToUserId))?.username ||
+          assigneeOptions.find((o) => o.value === String(assignedToUserId))?.label ||
+          "assignee";
+
+    // Optimistic UI — dropdown reflects choice immediately.
+    setRows((prev) =>
+      prev.map((row) =>
+        row.id === rowId
+          ? {
+              ...row,
+              assigned_to_user_id: assignedToUserId,
+              assigned_to: assigneeLabel,
+            }
+          : row,
+      ),
+    );
+
     setAssigningId(rowId);
     try {
-      const previousAssigneeId = rows.find((r) => r.id === rowId)?.assigned_to_user_id ?? null;
       const updated = await client.updateLeadTableRow(rowId, {
         assigned_to_user_id: assignedToUserId,
       });
@@ -1550,50 +1578,58 @@ export function LeadsTablePage({
       setSaveNotice(`Assigned to ${label}.`);
       setTimeout(() => setSaveNotice(null), 3000);
     } catch (e) {
+      if (previousRow) {
+        setRows((prev) =>
+          prev.map((row) => (row.id === rowId ? previousRow : row)),
+        );
+      }
       onError(e instanceof Error ? e.message : "Failed to update assignee");
     } finally {
       setAssigningId(null);
     }
   }
 
+  async function bulkQueueAiSelected(rawValue: string) {
+    if (!canBulkAssign || !rawValue || bulkAssigning) {
+      setBulkAiQueueValue("");
+      return;
+    }
+    const persona = personaFromAiAssignValue(rawValue);
+    if (!persona) {
+      setBulkAiQueueValue("");
+      return;
+    }
+    let ids = [...selected];
+    if (ids.length === 0 && filteredCount > 0) {
+      setBulkAssigning(true);
+      try {
+        const result = await client.listLeadsTableIds(tableQueryParams);
+        ids = result.ids;
+      } catch (e) {
+        onError(e instanceof Error ? e.message : "Failed to load matching leads");
+        setBulkAiQueueValue("");
+        setBulkAssigning(false);
+        return;
+      }
+    }
+    if (!ids.length) {
+      setBulkAiQueueValue("");
+      setBulkAssigning(false);
+      return;
+    }
+    setBulkAssigning(true);
+    try {
+      await queueLeadsForAiAgent(ids, persona);
+      clearSelection();
+    } finally {
+      setBulkAiQueueValue("");
+      setBulkAssigning(false);
+    }
+  }
+
   async function bulkAssignSelected(rawValue: string) {
     if (!canBulkAssign || !rawValue || bulkAssigning) {
       setBulkAssignValue("");
-      return;
-    }
-
-    if (isAiSalesAssignValue(rawValue)) {
-      const persona = personaFromAiAssignValue(rawValue);
-      if (!persona) {
-        setBulkAssignValue("");
-        return;
-      }
-      let ids = [...selected];
-      if (ids.length === 0 && filteredCount > 0) {
-        setBulkAssigning(true);
-        try {
-          const result = await client.listLeadsTableIds(tableQueryParams);
-          ids = result.ids;
-        } catch (e) {
-          onError(e instanceof Error ? e.message : "Failed to load matching leads");
-          setBulkAssignValue("");
-          setBulkAssigning(false);
-          return;
-        }
-      }
-      if (!ids.length) {
-        setBulkAssignValue("");
-        setBulkAssigning(false);
-        return;
-      }
-      setBulkAssigning(true);
-      try {
-        await queueLeadsForAiAgent(ids, persona);
-        clearSelection();
-      } finally {
-        setBulkAssignValue("");
-        setBulkAssigning(false);
-      }
       return;
     }
 
@@ -1646,20 +1682,36 @@ export function LeadsTablePage({
     try {
       const result = await client.bulkAssignLeadTableRows(ids, assignedToUserId);
       const movedIds = new Set(result.assigned_ids);
+      const removeFromView = shouldRemoveRowOnAssign(assignedToUserId);
       if (movedIds.size > 0) {
-        setRows((prev) => prev.filter((row) => !movedIds.has(row.id)));
-        setDrafts((prev) => {
-          const next = { ...prev };
-          for (const id of movedIds) delete next[id];
-          return next;
-        });
-        setOriginalKeys((prev) => {
-          const next = { ...prev };
-          for (const id of movedIds) delete next[id];
-          return next;
-        });
-        setTotal((prev) => Math.max(0, prev - movedIds.size));
-        setFilteredCount((prev) => Math.max(0, prev - movedIds.size));
+        if (removeFromView) {
+          setRows((prev) => prev.filter((row) => !movedIds.has(row.id)));
+          setDrafts((prev) => {
+            const next = { ...prev };
+            for (const id of movedIds) delete next[id];
+            return next;
+          });
+          setOriginalKeys((prev) => {
+            const next = { ...prev };
+            for (const id of movedIds) delete next[id];
+            return next;
+          });
+          setTotal((prev) => Math.max(0, prev - movedIds.size));
+          setFilteredCount((prev) => Math.max(0, prev - movedIds.size));
+        } else {
+          const nextLabel = result.assigned_to || label;
+          setRows((prev) =>
+            prev.map((row) =>
+              movedIds.has(row.id)
+                ? {
+                    ...row,
+                    assigned_to_user_id: assignedToUserId,
+                    assigned_to: nextLabel,
+                  }
+                : row,
+            ),
+          );
+        }
       }
       clearSelection();
       scheduleSectionCountsRefresh();
@@ -3412,10 +3464,6 @@ export function LeadsTablePage({
                       value: option.value,
                       label: option.username || option.label,
                     })),
-                    ...AI_SALES_ASSIGN_OPTIONS.map((option) => ({
-                      value: option.value,
-                      label: option.label,
-                    })),
                   ]}
                   allowEmpty
                   emptyLabel={
@@ -3428,6 +3476,37 @@ export function LeadsTablePage({
                           : "Filter or select leads first…"
                   }
                   placeholder="Search team members…"
+                />
+              )}
+              {canBulkAssign && (
+                <SearchableSelect
+                  label="Queue AI calls"
+                  value={bulkAiQueueValue}
+                  onChange={(next) => {
+                    setBulkAiQueueValue(next);
+                    void bulkQueueAiSelected(next);
+                  }}
+                  disabled={
+                    (selected.size === 0 && filteredCount === 0) ||
+                    bulkAssigning ||
+                    deletingSelected ||
+                    editMode
+                  }
+                  options={AI_SALES_ASSIGN_OPTIONS.map((option) => ({
+                    value: option.value,
+                    label: option.label,
+                  }))}
+                  allowEmpty
+                  emptyLabel={
+                    bulkAssigning
+                      ? "Queuing…"
+                      : selected.size > 0
+                        ? `Queue ${selected.size} selected for AI…`
+                        : filteredCount > 0
+                          ? `Queue all ${filteredCount} matching for AI…`
+                          : "Filter or select leads first…"
+                  }
+                  placeholder="Rayan or Sara AI agent…"
                 />
               )}
             </>
@@ -3507,10 +3586,6 @@ export function LeadsTablePage({
                       value: option.value,
                       label: option.username || option.label,
                     })),
-                    ...AI_SALES_ASSIGN_OPTIONS.map((option) => ({
-                      value: option.value,
-                      label: option.label,
-                    })),
                   ]}
                   allowEmpty
                   emptyLabel={
@@ -3523,6 +3598,37 @@ export function LeadsTablePage({
                           : "Filter or select leads first…"
                   }
                   placeholder="Search team members…"
+                />
+              )}
+              {canBulkAssign && (
+                <SearchableSelect
+                  label="Queue AI calls"
+                  value={bulkAiQueueValue}
+                  onChange={(next) => {
+                    setBulkAiQueueValue(next);
+                    void bulkQueueAiSelected(next);
+                  }}
+                  disabled={
+                    (selected.size === 0 && filteredCount === 0) ||
+                    bulkAssigning ||
+                    deletingSelected ||
+                    editMode
+                  }
+                  options={AI_SALES_ASSIGN_OPTIONS.map((option) => ({
+                    value: option.value,
+                    label: option.label,
+                  }))}
+                  allowEmpty
+                  emptyLabel={
+                    bulkAssigning
+                      ? "Queuing…"
+                      : selected.size > 0
+                        ? `Queue ${selected.size} selected for AI…`
+                        : filteredCount > 0
+                          ? `Queue all ${filteredCount} matching for AI…`
+                          : "Filter or select leads first…"
+                  }
+                  placeholder="Rayan or Sara AI agent…"
                 />
               )}
             </>

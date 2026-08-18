@@ -10,7 +10,9 @@ export const ASSIGNABLE_SALES_USERNAMES = new Set([
   "sadia",
   "sadiah",
   "rayan",
+  "ryan",
   "sara",
+  "shumyle",
 ]);
 
 export function isAssignableSalesUser(user: {
@@ -90,6 +92,5 @@ export function allAssigneeSelectOptions(
   return [
     { value: UNASSIGNED, label: "Unassigned" },
     ...mapped,
-    ...AI_SALES_ASSIGN_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
   ];
 }
