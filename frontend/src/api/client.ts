@@ -162,6 +162,9 @@ function timeoutForPath(path: string): number {
     path.startsWith("/data-synthesis") ||
     path.startsWith("/inbox") ||
     path.startsWith("/email") ||
+    path.startsWith("/email-activity") ||
+    path.startsWith("/whatsapp/") ||
+    path.startsWith("/ai-mode") ||
     path.startsWith("/calls")
   ) {
     return HEAVY_FETCH_TIMEOUT_MS;
@@ -323,6 +326,7 @@ export interface InboxThreadListResponse {
   offset: number;
   limit: number;
   has_more: boolean;
+  triage_counts?: Record<string, number>;
 }
 
 export interface InboxMessageListResponse {

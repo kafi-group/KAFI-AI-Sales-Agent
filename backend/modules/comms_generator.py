@@ -494,21 +494,44 @@ class CommsGenerator:
             .all()
         )
 
+        contact_ids = [int(row.contact_id) for row in rows if row.contact_id]
+        if not contact_ids:
+            return [], total
+
+        contacts = {
+            c.id: c
+            for c in db.query(Contact).filter(Contact.id.in_(contact_ids)).all()
+        }
+        buyer_ids = {c.buyer_id for c in contacts.values() if c.buyer_id}
+        buyers = (
+            {b.id: b for b in db.query(Buyer).filter(Buyer.id.in_(buyer_ids)).all()}
+            if buyer_ids
+            else {}
+        )
+
+        last_by_contact: dict[int, Interaction] = {}
+        latest_msg_ids = [
+            row[0]
+            for row in db.query(sa_func.max(Interaction.id))
+            .filter(
+                Interaction.contact_id.in_(contact_ids),
+                Interaction.channel == Channel.whatsapp,
+            )
+            .group_by(Interaction.contact_id)
+            .all()
+            if row[0]
+        ]
+        if latest_msg_ids:
+            for msg in db.query(Interaction).filter(Interaction.id.in_(latest_msg_ids)).all():
+                last_by_contact[int(msg.contact_id)] = msg
+
         conversations: list[dict] = []
         for row in rows:
-            contact = db.get(Contact, row.contact_id)
+            contact = contacts.get(int(row.contact_id))
             if not contact:
                 continue
-            buyer = db.get(Buyer, contact.buyer_id)
-            last_message = (
-                db.query(Interaction)
-                .filter(
-                    Interaction.contact_id == contact.id,
-                    Interaction.channel == Channel.whatsapp,
-                )
-                .order_by(Interaction.created_at.desc())
-                .first()
-            )
+            buyer = buyers.get(contact.buyer_id) if contact.buyer_id else None
+            last_message = last_by_contact.get(contact.id)
             expires = contact.whatsapp_window_expires_at
             if expires is not None and expires.tzinfo is None:
                 expires = expires.replace(tzinfo=timezone.utc)

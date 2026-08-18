@@ -493,9 +493,12 @@ export function AiModePage({
   useEffect(() => {
     if (panel !== "lifecycle") return;
     void loadLifecycle();
-    // Scan mailbox so New Lead (+query) stays up to date.
-    void loadQueries(true);
-  }, [panel, loadLifecycle, loadQueries]);
+    // Show cached queries immediately; scan inbox in background (admin only).
+    void loadQueries(false);
+    if (isAdmin) {
+      window.setTimeout(() => void loadQueries(true), 400);
+    }
+  }, [panel, loadLifecycle, loadQueries, isAdmin]);
 
   useEffect(() => {
     if (panel === "lifecycle" && stageFilter === "new_lead") {
@@ -560,16 +563,15 @@ export function AiModePage({
     try {
       const data = await client.getAiModeQueryMessage(row.id);
       setQueryMessage(data.message || null);
-      // Inquiries always prefer an AI draft (template only if AI is unavailable).
-      if (isAdmin) {
-        await generateQueryReply(row.id, row);
-      }
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to open query email");
       setSelectedQuery(null);
       setReplyBody("");
     } finally {
       setQueryMessageLoading(false);
+    }
+    if (isAdmin) {
+      void generateQueryReply(row.id, row);
     }
   }
 

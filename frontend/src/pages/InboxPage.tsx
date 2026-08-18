@@ -301,6 +301,7 @@ export function InboxPage({
   const [mailAiAnswer, setMailAiAnswer] = useState<string | null>(null);
   const [mailAiLoading, setMailAiLoading] = useState(false);
   const [triageFilter, setTriageFilter] = useState("");
+  const [triageCounts, setTriageCounts] = useState<Record<string, number>>({});
 
   const pollTimerRef = useRef<number | null>(null);
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
@@ -457,6 +458,7 @@ export function InboxPage({
           setThreads(result.items);
           setThreadTotal(result.total);
           setThreadHasMore(result.has_more);
+          setTriageCounts(result.triage_counts ?? {});
           setMessages([]);
           setDrafts([]);
         } else if (isMailLabelSection(section)) {
@@ -1205,6 +1207,9 @@ export function InboxPage({
               <span className="text-[11px] text-slate-500 mr-1">Triage</span>
               {TRIAGE_FILTERS.map((f) => {
                 const active = triageFilter === f.key;
+                const count = triageCounts[f.key];
+                const countLabel =
+                  count != null && count > 0 ? ` (${count})` : count === 0 ? " (0)" : "";
                 return (
                   <button
                     key={f.key || "all"}
@@ -1221,6 +1226,7 @@ export function InboxPage({
                     }`}
                   >
                     {f.label}
+                    {countLabel}
                   </button>
                 );
               })}

@@ -8,8 +8,8 @@
 */
 html {
   color-scheme: dark;
-  /* Global +5% type and rem-based icon scale (Tailwind sizes use rem). */
-  font-size: 105%;
+  /* Global +16% type and rem-based icon scale (Tailwind sizes use rem). */
+  font-size: 116%;
 }
 
 html[data-theme="light"] {

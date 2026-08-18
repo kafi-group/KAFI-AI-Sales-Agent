@@ -1263,6 +1263,7 @@ class InboxThreadListResponse(BaseModel):
     offset: int = 0
     limit: int = 50
     has_more: bool = False
+    triage_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class InboxMessageListResponse(BaseModel):

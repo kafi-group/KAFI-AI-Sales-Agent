@@ -17,7 +17,7 @@ interface EmailActivityPageProps {
 }
 
 const PAGE_SIZE = 25;
-const POLL_MS = 12_000;
+const POLL_MS = 30_000;
 
 type InsightsPreset = 1 | 7 | 30 | 90 | null | "range";
 
@@ -169,9 +169,11 @@ export function EmailActivityPage({
   const [insights, setInsights] = useState<EmailActivityInsights | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const result = await client.listEmailActivity({
         page,
@@ -185,13 +187,14 @@ export function EmailActivityPage({
       setUnreadCount(result.unread_count);
       onUnreadChange?.(result.unread_count);
     } catch (e) {
-      onError(
+      const message =
         e instanceof Error
           ? e.message
           : isWhatsApp
             ? "Failed to load WhatsApp activity"
-            : "Failed to load email activity",
-      );
+            : "Failed to load email activity";
+      setLoadError(message);
+      onError(message);
     } finally {
       setLoading(false);
     }
@@ -237,8 +240,22 @@ export function EmailActivityPage({
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => void refresh(), POLL_MS);
-    return () => window.clearInterval(timer);
+    let timer = 0;
+    const start = () => {
+      window.clearInterval(timer);
+      timer = window.setInterval(() => void refresh(), POLL_MS);
+    };
+    const stop = () => window.clearInterval(timer);
+    const sync = () => {
+      if (document.visibilityState === "visible") start();
+      else stop();
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", sync);
+    };
   }, [refresh]);
 
   useEffect(() => {
@@ -535,7 +552,22 @@ export function EmailActivityPage({
         </div>
       )}
 
-      {loading && rows.length === 0 ? (
+      {loadError && rows.length === 0 ? (
+        <div className="rounded-xl border border-red-500/30 bg-red-950/30 p-6 text-center space-y-3">
+          <p className="text-red-200 font-medium">Could not load activity</p>
+          <p className="text-sm text-red-200/80">{loadError}</p>
+          <p className="text-xs text-slate-400">
+            The API may be restarting — wait 30 seconds, then hard refresh (Ctrl + Shift + R).
+          </p>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium"
+          >
+            Try again
+          </button>
+        </div>
+      ) : loading && rows.length === 0 ? (
         <p className="text-slate-400">
           {isWhatsApp ? "Loading WhatsApp activity…" : "Loading email activity…"}
         </p>

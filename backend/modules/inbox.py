@@ -478,6 +478,11 @@ def list_threads(
                     pass
             kept.append(t)
         visible = kept
+        triage_counts: dict[str, int] = {"": len(visible)}
+        for t in visible:
+            cat = (t.get("triage_category") or "").strip().lower()
+            if cat:
+                triage_counts[cat] = triage_counts.get(cat, 0) + 1
         triage_key = (triage_category or "").strip().lower()
         if triage_key:
             visible = [t for t in visible if (t.get("triage_category") or "") == triage_key]
@@ -495,6 +500,7 @@ def list_threads(
             "offset": offset,
             "limit": limit,
             "has_more": len(visible) > offset + limit or window < total_estimate,
+            "triage_counts": triage_counts,
         }
 
 
