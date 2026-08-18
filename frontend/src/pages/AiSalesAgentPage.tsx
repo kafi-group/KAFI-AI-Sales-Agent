@@ -3,6 +3,7 @@ import {
   client,
   setAiSalesAgentAccessCode,
   getAiSalesAgentAccessCode,
+  sanitizeUserFacingError,
   type AiSalesAgentRunner,
   type AiSalesAgentTask,
 } from "../api/client";
@@ -76,7 +77,9 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       setUnlocked(true);
       setCodeInput("");
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Invalid access code";
+      const message = sanitizeUserFacingError(
+        e instanceof Error ? e.message : "Invalid access code",
+      );
       setUnlockError(message);
       onError(message);
     } finally {

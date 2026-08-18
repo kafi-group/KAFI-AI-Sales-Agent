@@ -108,7 +108,9 @@ export function sanitizeUserFacingError(message: string): string {
 }
 
 function messageForHttpError(status: number, text: string, statusText: string): string {
-  if (status === 500) return HARD_RESTART_MESSAGE;
+  if (status === 500 || status === 502 || status === 503 || status === 504) {
+    return HARD_RESTART_MESSAGE;
+  }
   const parsed = parseErrorDetail(text, statusText || `Request failed (${status})`);
   return sanitizeUserFacingError(parsed);
 }
