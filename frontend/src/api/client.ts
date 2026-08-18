@@ -38,6 +38,26 @@ function resolveApiBase(raw: unknown): string {
 
 const API_BASE = resolveApiBase(import.meta.env.VITE_API_BASE_URL);
 
+/** Session gate for AI Sales Agent module (cleared when browser tab closes). */
+export const AI_SALES_AGENT_CODE_KEY = "kafi_ai_sales_agent_code";
+
+export function getAiSalesAgentAccessCode(): string | null {
+  try {
+    return sessionStorage.getItem(AI_SALES_AGENT_CODE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setAiSalesAgentAccessCode(code: string): void {
+  sessionStorage.setItem(AI_SALES_AGENT_CODE_KEY, code);
+}
+
+function aiSalesAgentHeaders(): HeadersInit {
+  const code = getAiSalesAgentAccessCode();
+  return code ? { "X-AI-Sales-Agent-Code": code } : {};
+}
+
 /** External quotation agent (separate app). */
 export const QUOTATION_AGENT_URL =
   import.meta.env.VITE_QUOTATION_AGENT_URL ??
@@ -3125,8 +3145,15 @@ export const client = {
     }),
 
   // ── AI Sales Agent ─────────────────────────────────────────────────────────
+  unlockAiSalesAgent: (access_code: string) =>
+    request<{ ok: boolean }>("/ai-sales-agent/unlock", {
+      method: "POST",
+      body: JSON.stringify({ access_code }),
+    }),
   listAiSalesAgentRunners: () =>
-    request<{ runners: AiSalesAgentRunner[] }>("/ai-sales-agent/runners"),
+    request<{ runners: AiSalesAgentRunner[] }>("/ai-sales-agent/runners", {
+      headers: aiSalesAgentHeaders(),
+    }),
   listAiSalesAgentTasks: (params: {
     persona?: string;
     status?: string;
@@ -3139,6 +3166,7 @@ export const client = {
     const qs = query.toString();
     return request<{ tasks: AiSalesAgentTask[] }>(
       `/ai-sales-agent/tasks${qs ? `?${qs}` : ""}`,
+      { headers: aiSalesAgentHeaders() },
     );
   },
   assignAiSalesAgentTasks: (data: {
@@ -3148,27 +3176,37 @@ export const client = {
   }) =>
     request<{ tasks: AiSalesAgentTask[] }>("/ai-sales-agent/tasks/assign", {
       method: "POST",
+      headers: aiSalesAgentHeaders(),
       body: JSON.stringify(data),
     }),
   deleteAiSalesAgentTask: (taskId: number) =>
-    request<void>(`/ai-sales-agent/tasks/${taskId}`, { method: "DELETE" }),
+    request<void>(`/ai-sales-agent/tasks/${taskId}`, {
+      method: "DELETE",
+      headers: aiSalesAgentHeaders(),
+    }),
   skipAiSalesAgentTask: (taskId: number) =>
     request<AiSalesAgentTask>(`/ai-sales-agent/tasks/${taskId}/skip`, {
       method: "POST",
+      headers: aiSalesAgentHeaders(),
     }),
   startAiSalesAgentRunner: (persona: string) =>
     request<AiSalesAgentRunner>("/ai-sales-agent/runners/start", {
       method: "POST",
+      headers: aiSalesAgentHeaders(),
       body: JSON.stringify({ persona }),
     }),
   pauseAiSalesAgentRunner: (persona: string) =>
     request<AiSalesAgentRunner>("/ai-sales-agent/runners/pause", {
       method: "POST",
+      headers: aiSalesAgentHeaders(),
       body: JSON.stringify({ persona }),
     }),
   getAiSalesAgentBriefing: (buyerId: number, contactId?: number) => {
     const qs = contactId ? `?contact_id=${contactId}` : "";
-    return request<AiSalesAgentBriefing>(`/ai-sales-agent/briefing/${buyerId}${qs}`);
+    return request<AiSalesAgentBriefing>(
+      `/ai-sales-agent/briefing/${buyerId}${qs}`,
+      { headers: aiSalesAgentHeaders() },
+    );
   },
 };
 

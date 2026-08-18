@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   client,
+  setAiSalesAgentAccessCode,
+  getAiSalesAgentAccessCode,
   type AiSalesAgentRunner,
   type AiSalesAgentTask,
 } from "../api/client";
@@ -17,6 +19,10 @@ const PERSONA_LABELS: Record<string, string> = {
 
 export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   const { isAdmin } = useAuth();
+  const [unlocked, setUnlocked] = useState(false);
+  const [codeInput, setCodeInput] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
   const [runners, setRunners] = useState<AiSalesAgentRunner[]>([]);
   const [tasks, setTasks] = useState<AiSalesAgentTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -25,7 +31,15 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   const [assigning, setAssigning] = useState(false);
   const [filterPersona, setFilterPersona] = useState<string>("");
 
+  useEffect(() => {
+    setUnlocked(Boolean(getAiSalesAgentAccessCode()));
+  }, []);
+
   const load = useCallback(async () => {
+    if (!getAiSalesAgentAccessCode()) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const [runnerRes, taskRes] = await Promise.all([
@@ -45,10 +59,30 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   }, [filterPersona, onError]);
 
   useEffect(() => {
+    if (!unlocked) return;
     void load();
     const timer = window.setInterval(() => void load(), 15000);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [load, unlocked]);
+
+  async function tryUnlock() {
+    const code = codeInput.trim();
+    if (!code) return;
+    setUnlocking(true);
+    setUnlockError(null);
+    try {
+      await client.unlockAiSalesAgent(code);
+      setAiSalesAgentAccessCode(code);
+      setUnlocked(true);
+      setCodeInput("");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Invalid access code";
+      setUnlockError(message);
+      onError(message);
+    } finally {
+      setUnlocking(false);
+    }
+  }
 
   async function handleAssign() {
     const ids = buyerIdsRaw
@@ -106,6 +140,42 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     } catch (e) {
       onError(e instanceof Error ? e.message : "Remove failed");
     }
+  }
+
+  if (!unlocked) {
+    return (
+      <section className="max-w-md space-y-4">
+        <div>
+          <h2 className="text-lg font-medium text-slate-100">AI Sales Agent</h2>
+          <p className="text-sm text-slate-400 mt-1">
+            Enter the access code to open Rayan and Sara&apos;s outbound calling queue.
+          </p>
+        </div>
+        {unlockError ? (
+          <p className="text-sm text-red-400">{unlockError}</p>
+        ) : null}
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          value={codeInput}
+          onChange={(e) => setCodeInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void tryUnlock();
+          }}
+          placeholder="Access code"
+          className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-slate-100"
+        />
+        <button
+          type="button"
+          disabled={unlocking || !codeInput.trim()}
+          onClick={() => void tryUnlock()}
+          className="px-4 py-2 text-sm rounded-lg bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40"
+        >
+          {unlocking ? "Checking…" : "Unlock"}
+        </button>
+      </section>
+    );
   }
 
   if (loading && !runners.length) {

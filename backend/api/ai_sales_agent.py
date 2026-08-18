@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -15,6 +15,7 @@ from db.models import AppUser
 from db.session import SessionLocal
 from integrations.voice_client import voice_client
 from modules.ai_sales_agent import campaign as campaign_module
+from modules.ai_sales_agent.access import access_code_valid
 from modules.ai_sales_agent.conversation import generate_reply
 from modules.ai_sales_agent.context import build_lead_context
 from modules.ai_sales_agent.personas import get_persona
@@ -42,8 +43,38 @@ class LeadBriefingResponse(BaseModel):
     context_text: str
 
 
+class AiSalesAgentUnlockRequest(BaseModel):
+    access_code: str
+
+
+class AiSalesAgentUnlockResponse(BaseModel):
+    ok: bool
+
+
+def require_ai_sales_agent_access(
+    x_ai_sales_agent_code: str | None = Header(default=None, alias="X-AI-Sales-Agent-Code"),
+) -> None:
+    if not access_code_valid(x_ai_sales_agent_code):
+        raise HTTPException(403, "Invalid or missing AI Sales Agent access code.")
+
+
+@router.post("/unlock", response_model=AiSalesAgentUnlockResponse)
+def ai_sales_agent_unlock(
+    payload: AiSalesAgentUnlockRequest,
+    user: AppUser = Depends(get_current_user),
+) -> AiSalesAgentUnlockResponse:
+    _ = user
+    if not access_code_valid(payload.access_code):
+        raise HTTPException(403, "Invalid access code.")
+    return AiSalesAgentUnlockResponse(ok=True)
+
+
 @router.get("/runners")
-def list_runners(db: Session = Depends(get_db), _user: AppUser = Depends(get_current_user)):
+def list_runners(
+    db: Session = Depends(get_db),
+    _user: AppUser = Depends(get_current_user),
+    _access: None = Depends(require_ai_sales_agent_access),
+):
     return {"runners": campaign_module.runner_snapshot(db)}
 
 
@@ -54,6 +85,7 @@ def list_tasks(
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     _user: AppUser = Depends(get_current_user),
+    _access: None = Depends(require_ai_sales_agent_access),
 ):
     return {"tasks": campaign_module.list_tasks(db, persona=persona, status=status, limit=limit)}
 
@@ -63,6 +95,7 @@ def assign_tasks(
     payload: AssignTasksRequest,
     db: Session = Depends(get_db),
     user: AppUser = Depends(require_admin),
+    _access: None = Depends(require_ai_sales_agent_access),
 ):
     try:
         tasks = campaign_module.assign_tasks(
@@ -82,6 +115,7 @@ def delete_task(
     task_id: int,
     db: Session = Depends(get_db),
     _admin: AppUser = Depends(require_admin),
+    _access: None = Depends(require_ai_sales_agent_access),
 ):
     try:
         if not campaign_module.remove_task(db, task_id):
@@ -96,6 +130,7 @@ def skip_task(
     task_id: int,
     db: Session = Depends(get_db),
     _admin: AppUser = Depends(require_admin),
+    _access: None = Depends(require_ai_sales_agent_access),
 ):
     try:
         return campaign_module.skip_task(db, task_id)
@@ -108,6 +143,7 @@ def start_runner(
     payload: PersonaActionRequest,
     db: Session = Depends(get_db),
     _admin: AppUser = Depends(require_admin),
+    _access: None = Depends(require_ai_sales_agent_access),
 ):
     try:
         return campaign_module.start_runner(db, payload.persona)
@@ -120,6 +156,7 @@ def pause_runner(
     payload: PersonaActionRequest,
     db: Session = Depends(get_db),
     _admin: AppUser = Depends(require_admin),
+    _access: None = Depends(require_ai_sales_agent_access),
 ):
     try:
         return campaign_module.pause_runner(db, payload.persona)
@@ -133,6 +170,7 @@ def lead_briefing(
     contact_id: int | None = None,
     db: Session = Depends(get_db),
     _user: AppUser = Depends(get_current_user),
+    _access: None = Depends(require_ai_sales_agent_access),
 ):
     try:
         data = build_lead_context(db, buyer_id=buyer_id, contact_id=contact_id)
