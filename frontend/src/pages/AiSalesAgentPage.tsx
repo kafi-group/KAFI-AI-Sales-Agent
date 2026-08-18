@@ -261,10 +261,14 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
 
       {isAdmin && (
         <div className="rounded-xl border border-slate-700/80 bg-slate-900/40 p-4 space-y-3">
-          <h3 className="font-medium text-slate-100">Assign calls</h3>
+          <h3 className="font-medium text-slate-100">Assign calls (optional)</h3>
           <p className="text-xs text-slate-500">
-            Copy buyer IDs from Master table. Fill company profile and contact person first
-            if warnings appear — humans research; AI reads that data before dialing.
+            Easiest: open <strong className="text-slate-300">Master Table</strong> or{" "}
+            <strong className="text-slate-300">Old clients</strong>, select rows, then{" "}
+            <strong className="text-slate-300">Assign to → Rayan</strong> or{" "}
+            <strong className="text-slate-300">Sara</strong>. The{" "}
+            <strong className="text-slate-300">#</strong> column is the lead ID if you paste
+            here manually.
           </p>
           <div className="flex flex-wrap gap-3 items-end">
             <label className="text-sm text-slate-400">
@@ -281,7 +285,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
               </select>
             </label>
             <label className="text-sm text-slate-400 flex-1 min-w-[200px]">
-              Buyer IDs (comma or space separated)
+              Lead IDs from table # column (optional)
               <input
                 value={buyerIdsRaw}
                 onChange={(e) => setBuyerIdsRaw(e.target.value)}

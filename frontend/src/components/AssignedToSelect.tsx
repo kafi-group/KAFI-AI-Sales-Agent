@@ -1,14 +1,17 @@
-import { leadAssigneeLabel, normalizeAssigneeValue, UNASSIGNED } from "../utils/leadAssignees";
+import {
+  AI_SALES_ASSIGN_OPTIONS,
+  allAssigneeSelectOptions,
+  leadAssigneeLabel,
+  normalizeAssigneeValue,
+  UNASSIGNED,
+  type LeadAssigneeOption,
+} from "../utils/leadAssignees";
 
-export type AssigneeOption = {
-  value: string;
-  label: string;
-  username?: string;
-};
+export type AssigneeOption = LeadAssigneeOption;
 
 interface AssignedToSelectProps {
   value: number | null | undefined;
-  onChange: (userId: number | null) => void;
+  onChange: (userId: number | null, rawValue: string) => void;
   options: AssigneeOption[];
   disabled?: boolean;
   className?: string;
@@ -22,7 +25,7 @@ export function AssignedToSelect({
   className = "",
 }: AssignedToSelectProps) {
   const selectValue = normalizeAssigneeValue(value);
-  const items: AssigneeOption[] = [{ value: UNASSIGNED, label: "Unassigned" }, ...options];
+  const items = allAssigneeSelectOptions(options);
 
   if (disabled) {
     return (
@@ -37,7 +40,15 @@ export function AssignedToSelect({
       value={selectValue}
       onChange={(e) => {
         const next = e.target.value;
-        onChange(next === UNASSIGNED ? null : Number(next));
+        if (next === UNASSIGNED) {
+          onChange(null, next);
+          return;
+        }
+        if (next === "ai:male" || next === "ai:female") {
+          onChange(null, next);
+          return;
+        }
+        onChange(Number(next), next);
       }}
       disabled={disabled}
       onClick={(e) => e.stopPropagation()}
@@ -51,3 +62,5 @@ export function AssignedToSelect({
     </select>
   );
 }
+
+export { AI_SALES_ASSIGN_OPTIONS };

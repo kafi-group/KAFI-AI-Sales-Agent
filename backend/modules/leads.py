@@ -65,10 +65,47 @@ _SORT_FIELDS = {
 }
 
 
+# Named export reps — assignable even if role was mis-set to admin during setup.
+ASSIGNABLE_SALES_USERNAMES = frozenset(
+    {"asim", "usmankhan", "usman", "sadia", "sadiah", "rayan", "sara"}
+)
+
+
+def is_assignable_sales_user(user: AppUser | None) -> bool:
+    if not user or not user.is_active:
+        return False
+    role = user.role.value if isinstance(user.role, AppUserRole) else str(user.role)
+    if role == AppUserRole.user.value:
+        return True
+    return (user.username or "").strip().lower() in ASSIGNABLE_SALES_USERNAMES
+
+
 def _assignee_label(user: AppUser | None) -> str:
     if not user:
         return "unassigned"
-    return (user.full_name or user.username or "unassigned").strip() or "unassigned"
+    return (user.username or user.full_name or "unassigned").strip() or "unassigned"
+
+
+def repair_assignee_labels(db: Session) -> int:
+    """Sync buyers.assigned_to text from assigned_to_user_id (fixes swapped labels)."""
+    fixed = 0
+    rows = (
+        db.query(Buyer)
+        .filter(Buyer.assigned_to_user_id.isnot(None))
+        .all()
+    )
+    for buyer in rows:
+        user = db.get(AppUser, buyer.assigned_to_user_id)
+        if not user:
+            continue
+        expected = _assignee_label(user)
+        if (buyer.assigned_to or "").strip().lower() != expected.lower():
+            buyer.assigned_to = expected
+            fixed += 1
+    if fixed:
+        db.commit()
+        invalidate_section_counts_cache()
+    return fixed
 
 
 def suggest_company_names(
@@ -124,8 +161,7 @@ def resolve_assignee_user(db: Session, user_id: int | None) -> AppUser | None:
     user = db.get(AppUser, user_id)
     if not user or not user.is_active:
         raise ValueError("Assignee not found or inactive")
-    role = user.role.value if isinstance(user.role, AppUserRole) else str(user.role)
-    if role != AppUserRole.user.value:
+    if not is_assignable_sales_user(user):
         raise ValueError("Leads can only be assigned to sales users")
     return user
 

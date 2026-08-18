@@ -144,16 +144,12 @@ def list_assignees(
     _: AppUser = Depends(get_current_user),
 ) -> Any:
     """Active sales users that can be assigned leads."""
+    from modules.leads import is_assignable_sales_user
+
     users = auth_module.list_users(db)
-    return [
-        _to_user_read(u)
-        for u in users
-        if u.is_active
-        and (
-            (u.role.value if isinstance(u.role, AppUserRole) else str(u.role))
-            == AppUserRole.user.value
-        )
-    ]
+    assignable = [u for u in users if is_assignable_sales_user(u)]
+    assignable.sort(key=lambda u: (u.username or "").lower())
+    return [_to_user_read(u) for u in assignable]
 
 
 @router.post("/users", response_model=UserRead, status_code=201)

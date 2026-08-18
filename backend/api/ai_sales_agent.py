@@ -95,7 +95,6 @@ def assign_tasks(
     payload: AssignTasksRequest,
     db: Session = Depends(get_db),
     user: AppUser = Depends(require_admin),
-    _access: None = Depends(require_ai_sales_agent_access),
 ):
     try:
         tasks = campaign_module.assign_tasks(

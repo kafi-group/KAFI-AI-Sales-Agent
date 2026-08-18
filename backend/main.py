@@ -168,6 +168,13 @@ async def lifespan(app: FastAPI):
                 )
                 invalidate_lead_table_filters_cache()
                 invalidate_section_counts_cache()
+
+            from modules.leads import repair_assignee_labels
+
+            label_repair = repair_assignee_labels(db)
+            if label_repair:
+                print(f"Startup: synced {label_repair} lead assignee label(s) to usernames.", flush=True)
+                invalidate_section_counts_cache()
         finally:
             db.close()
     except Exception as exc:

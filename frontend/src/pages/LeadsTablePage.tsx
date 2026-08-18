@@ -66,7 +66,12 @@ import {
   type ColumnDef,
 } from "../hooks/useColumnVisibility";
 import { exportLeadsTableCsv } from "../utils/exportCsv";
-import { UNASSIGNED } from "../utils/leadAssignees";
+import {
+  AI_SALES_ASSIGN_OPTIONS,
+  isAiSalesAssignValue,
+  personaFromAiAssignValue,
+  UNASSIGNED,
+} from "../utils/leadAssignees";
 
 const SORT_FILTER_OPTIONS = [
   { value: "recent", label: "Recently added" },
@@ -982,7 +987,22 @@ export function LeadsTablePage({
           })),
         ),
       )
-      .catch(() => setAssigneeOptions([]));
+      .catch(async () => {
+        try {
+          const users = await client.listUsers();
+          setAssigneeOptions(
+            users
+              .filter((u) => u.is_active && u.role === "user")
+              .map((u) => ({
+                value: String(u.id),
+                label: u.full_name || u.username,
+                username: u.username,
+              })),
+          );
+        } catch {
+          setAssigneeOptions([]);
+        }
+      });
   }, [isAdmin]);
 
   useEffect(() => {
@@ -1446,9 +1466,36 @@ export function LeadsTablePage({
     }
   }
 
-  async function saveAssignedTo(rowId: number, assignedToUserId: number | null) {
+  async function queueLeadsForAiAgent(buyerIds: number[], persona: "male" | "female") {
+    if (!buyerIds.length) return;
+    const label = persona === "male" ? "Rayan" : "Sara";
+    const confirmed = window.confirm(
+      `Queue ${buyerIds.length} lead${buyerIds.length === 1 ? "" : "s"} for ${label} (AI Sales Agent)?`,
+    );
+    if (!confirmed) return;
+    try {
+      await client.assignAiSalesAgentTasks({ persona, buyer_ids: buyerIds });
+      setSaveNotice(
+        `Queued ${buyerIds.length} lead${buyerIds.length === 1 ? "" : "s"} for ${label}. Open AI Sales Agent to start calling.`,
+      );
+      setTimeout(() => setSaveNotice(null), 5000);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to queue AI sales calls");
+    }
+  }
+
+  async function saveAssignedTo(
+    rowId: number,
+    assignedToUserId: number | null,
+    rawValue?: string,
+  ) {
     if (!isAdmin) {
       onError("Only an admin can assign leads to users.");
+      return;
+    }
+    if (rawValue && isAiSalesAssignValue(rawValue)) {
+      const persona = personaFromAiAssignValue(rawValue);
+      if (persona) await queueLeadsForAiAgent([rowId], persona);
       return;
     }
     setAssigningId(rowId);
@@ -1469,6 +1516,41 @@ export function LeadsTablePage({
   async function bulkAssignSelected(rawValue: string) {
     if (!canBulkAssign || !rawValue || bulkAssigning) {
       setBulkAssignValue("");
+      return;
+    }
+
+    if (isAiSalesAssignValue(rawValue)) {
+      const persona = personaFromAiAssignValue(rawValue);
+      if (!persona) {
+        setBulkAssignValue("");
+        return;
+      }
+      let ids = [...selected];
+      if (ids.length === 0 && filteredCount > 0) {
+        setBulkAssigning(true);
+        try {
+          const result = await client.listLeadsTableIds(tableQueryParams);
+          ids = result.ids;
+        } catch (e) {
+          onError(e instanceof Error ? e.message : "Failed to load matching leads");
+          setBulkAssignValue("");
+          setBulkAssigning(false);
+          return;
+        }
+      }
+      if (!ids.length) {
+        setBulkAssignValue("");
+        setBulkAssigning(false);
+        return;
+      }
+      setBulkAssigning(true);
+      try {
+        await queueLeadsForAiAgent(ids, persona);
+        clearSelection();
+      } finally {
+        setBulkAssignValue("");
+        setBulkAssigning(false);
+      }
       return;
     }
 
@@ -1897,12 +1979,14 @@ export function LeadsTablePage({
       <AssignedToSelect
         value={editMode ? draft.assigned_to_user_id : row.assigned_to_user_id}
         options={assigneeOptions}
-        onChange={(userId) => {
+        onChange={(userId, rawValue) => {
           if (editMode) {
+            if (isAiSalesAssignValue(rawValue)) return;
             const label =
               userId == null
                 ? "unassigned"
-                : assigneeOptions.find((o) => o.value === String(userId))?.label ||
+                : assigneeOptions.find((o) => o.value === String(userId))?.username ||
+                  assigneeOptions.find((o) => o.value === String(userId))?.label ||
                   "unassigned";
             setDrafts((prev) => ({
               ...prev,
@@ -1914,7 +1998,7 @@ export function LeadsTablePage({
             }));
             return;
           }
-          void saveAssignedTo(row.id, userId);
+          void saveAssignedTo(row.id, userId, rawValue);
         }}
         disabled={assigningId === row.id || savingId === row.id}
       />
@@ -3290,8 +3374,7 @@ export function LeadsTablePage({
                     (selected.size === 0 && filteredCount === 0) ||
                     bulkAssigning ||
                     deletingSelected ||
-                    editMode ||
-                    assigneeOptions.length === 0
+                    editMode
                   }
                   options={[
                     {
@@ -3301,6 +3384,10 @@ export function LeadsTablePage({
                     ...assigneeOptions.map((option) => ({
                       value: option.value,
                       label: option.username || option.label,
+                    })),
+                    ...AI_SALES_ASSIGN_OPTIONS.map((option) => ({
+                      value: option.value,
+                      label: option.label,
                     })),
                   ]}
                   allowEmpty
@@ -3382,8 +3469,7 @@ export function LeadsTablePage({
                     (selected.size === 0 && filteredCount === 0) ||
                     bulkAssigning ||
                     deletingSelected ||
-                    editMode ||
-                    assigneeOptions.length === 0
+                    editMode
                   }
                   options={[
                     {
@@ -3393,6 +3479,10 @@ export function LeadsTablePage({
                     ...assigneeOptions.map((option) => ({
                       value: option.value,
                       label: option.username || option.label,
+                    })),
+                    ...AI_SALES_ASSIGN_OPTIONS.map((option) => ({
+                      value: option.value,
+                      label: option.label,
                     })),
                   ]}
                   allowEmpty
@@ -3595,7 +3685,9 @@ export function LeadsTablePage({
                       className="rounded border-slate-600 bg-slate-950"
                     />
                   </th>
-                  <th data-col="serial" className={`${TH} ${COL_SERIAL}`}>S. No</th>
+                  <th data-col="serial" className={`${TH} ${COL_SERIAL}`} title="Lead ID">
+                    S. No
+                  </th>
                   <th data-col="company" className={`${TH} ${COL_COMPANY_OLD}`}>
                     <button type="button" onClick={() => toggleSort("company_name")} className="hover:text-slate-300">
                       Company Name{sortIndicator("company_name")}
@@ -4104,7 +4196,9 @@ export function LeadsTablePage({
                     className="rounded border-slate-600 bg-slate-950"
                   />
                 </th>
-                <th data-col="serial" className={`${TH} ${COL_SERIAL}`}>#</th>
+                <th data-col="serial" className={`${TH} ${COL_SERIAL}`} title="Lead ID — used when queueing AI calls">
+                  #
+                </th>
                 <th data-col="company" className={`${TH} ${COL_COMPANY}`}>
                   <button type="button" onClick={() => toggleSort("company_name")} className="hover:text-slate-300">
                     Company name{sortIndicator("company_name")}

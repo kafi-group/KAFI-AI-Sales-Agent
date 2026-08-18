@@ -3178,7 +3178,6 @@ export const client = {
   }) =>
     request<{ tasks: AiSalesAgentTask[] }>("/ai-sales-agent/tasks/assign", {
       method: "POST",
-      headers: aiSalesAgentHeaders(),
       body: JSON.stringify(data),
     }),
   deleteAiSalesAgentTask: (taskId: number) =>
