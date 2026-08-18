@@ -1,0 +1,335 @@
+import { useCallback, useEffect, useState } from "react";
+import {
+  client,
+  type AiSalesAgentRunner,
+  type AiSalesAgentTask,
+} from "../api/client";
+import { useAuth } from "../auth/AuthContext";
+
+interface AiSalesAgentPageProps {
+  onError: (message: string) => void;
+}
+
+const PERSONA_LABELS: Record<string, string> = {
+  male: "Rayan (male)",
+  female: "Sara (female)",
+};
+
+export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
+  const { isAdmin } = useAuth();
+  const [runners, setRunners] = useState<AiSalesAgentRunner[]>([]);
+  const [tasks, setTasks] = useState<AiSalesAgentTask[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [assignPersona, setAssignPersona] = useState<"male" | "female">("male");
+  const [buyerIdsRaw, setBuyerIdsRaw] = useState("");
+  const [assigning, setAssigning] = useState(false);
+  const [filterPersona, setFilterPersona] = useState<string>("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [runnerRes, taskRes] = await Promise.all([
+        client.listAiSalesAgentRunners(),
+        client.listAiSalesAgentTasks({
+          persona: filterPersona || undefined,
+          limit: 200,
+        }),
+      ]);
+      setRunners(runnerRes.runners);
+      setTasks(taskRes.tasks);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to load AI Sales Agent");
+    } finally {
+      setLoading(false);
+    }
+  }, [filterPersona, onError]);
+
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => void load(), 15000);
+    return () => window.clearInterval(timer);
+  }, [load]);
+
+  async function handleAssign() {
+    const ids = buyerIdsRaw
+      .split(/[\s,;]+/)
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (!ids.length) {
+      onError("Enter one or more buyer IDs from the Master table.");
+      return;
+    }
+    setAssigning(true);
+    try {
+      await client.assignAiSalesAgentTasks({
+        persona: assignPersona,
+        buyer_ids: ids,
+      });
+      setBuyerIdsRaw("");
+      await load();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Assign failed");
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  async function handleRunnerAction(
+    persona: string,
+    action: "start" | "pause",
+  ) {
+    try {
+      if (action === "start") {
+        await client.startAiSalesAgentRunner(persona);
+      } else {
+        await client.pauseAiSalesAgentRunner(persona);
+      }
+      await load();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Runner action failed");
+    }
+  }
+
+  async function handleSkip(taskId: number) {
+    try {
+      await client.skipAiSalesAgentTask(taskId);
+      await load();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Skip failed");
+    }
+  }
+
+  async function handleRemove(taskId: number) {
+    try {
+      await client.deleteAiSalesAgentTask(taskId);
+      await load();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Remove failed");
+    }
+  }
+
+  if (loading && !runners.length) {
+    return <p className="text-sm text-slate-400 p-6">Loading AI Sales Agent…</p>;
+  }
+
+  return (
+    <section className="space-y-6 max-w-5xl">
+      <div>
+        <h2 className="text-lg font-medium text-slate-100">AI Sales Agent</h2>
+        <p className="text-sm text-slate-400 mt-1">
+          Rayan and Sara place outbound FMCG procurement calls via Twilio. You assign the
+          queue — they do not build their own lists. After each call: email follow-up,
+          remarks, lifecycle, and KPI update automatically.
+        </p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        {runners.map((runner) => (
+          <div
+            key={runner.persona}
+            className="rounded-xl border border-slate-700/80 bg-slate-900/40 p-4 space-y-3"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h3 className="font-medium text-slate-100">
+                  {runner.display_name}{" "}
+                  <span className="text-slate-500 text-sm">({runner.gender_label})</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Mailbox / KPI: {runner.app_username} · Voice: {runner.voice}
+                </p>
+              </div>
+              <span
+                className={`text-xs px-2 py-0.5 rounded-full ${
+                  runner.status === "running"
+                    ? "bg-emerald-500/20 text-emerald-300"
+                    : runner.status === "paused"
+                      ? "bg-amber-500/20 text-amber-300"
+                      : "bg-slate-700 text-slate-300"
+                }`}
+              >
+                {runner.status}
+              </span>
+            </div>
+            <p className="text-sm text-slate-400">
+              {runner.pending_count} pending
+              {runner.current_task?.company_name
+                ? ` · Calling ${runner.current_task.company_name}`
+                : ""}
+            </p>
+            {!runner.twilio_ready && (
+              <p className="text-xs text-amber-400">
+                Twilio webhooks not ready — check Railway TWILIO_* env vars.
+              </p>
+            )}
+            {isAdmin && (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={!runner.twilio_ready || runner.status === "running"}
+                  onClick={() => void handleRunnerAction(runner.persona, "start")}
+                  className="px-3 py-1.5 text-sm rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white"
+                >
+                  Start calling
+                </button>
+                <button
+                  type="button"
+                  disabled={runner.status !== "running"}
+                  onClick={() => void handleRunnerAction(runner.persona, "pause")}
+                  className="px-3 py-1.5 text-sm rounded-lg border border-slate-600 text-slate-200 hover:bg-slate-800 disabled:opacity-40"
+                >
+                  Pause
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {isAdmin && (
+        <div className="rounded-xl border border-slate-700/80 bg-slate-900/40 p-4 space-y-3">
+          <h3 className="font-medium text-slate-100">Assign calls</h3>
+          <p className="text-xs text-slate-500">
+            Copy buyer IDs from Master table. Fill company profile and contact person first
+            if warnings appear — humans research; AI reads that data before dialing.
+          </p>
+          <div className="flex flex-wrap gap-3 items-end">
+            <label className="text-sm text-slate-400">
+              Agent
+              <select
+                value={assignPersona}
+                onChange={(e) =>
+                  setAssignPersona(e.target.value as "male" | "female")
+                }
+                className="mt-1 block w-full min-w-[140px] rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100"
+              >
+                <option value="male">Rayan (male)</option>
+                <option value="female">Sara (female)</option>
+              </select>
+            </label>
+            <label className="text-sm text-slate-400 flex-1 min-w-[200px]">
+              Buyer IDs (comma or space separated)
+              <input
+                value={buyerIdsRaw}
+                onChange={(e) => setBuyerIdsRaw(e.target.value)}
+                placeholder="e.g. 1204 1205 1206"
+                className="mt-1 block w-full rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={assigning}
+              onClick={() => void handleAssign()}
+              className="px-4 py-2 text-sm rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40"
+            >
+              {assigning ? "Assigning…" : "Assign to queue"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <h3 className="font-medium text-slate-100">Task queue</h3>
+          <select
+            value={filterPersona}
+            onChange={(e) => setFilterPersona(e.target.value)}
+            className="text-sm rounded-lg border border-slate-600 bg-slate-950 px-2 py-1 text-slate-200"
+          >
+            <option value="">All agents</option>
+            <option value="male">Rayan</option>
+            <option value="female">Sara</option>
+          </select>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="text-xs text-sky-400 hover:underline"
+          >
+            Refresh
+          </button>
+        </div>
+
+        {!tasks.length ? (
+          <p className="text-sm text-slate-500">No tasks assigned yet.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-slate-700/80">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-slate-900/60 text-slate-400">
+                <tr>
+                  <th className="px-3 py-2">Agent</th>
+                  <th className="px-3 py-2">Company</th>
+                  <th className="px-3 py-2">Contact</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">Ready</th>
+                  <th className="px-3 py-2">Outcome</th>
+                  {isAdmin && <th className="px-3 py-2">Actions</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {tasks.map((task) => (
+                  <tr key={task.id} className="text-slate-200">
+                    <td className="px-3 py-2">
+                      {PERSONA_LABELS[task.persona] ?? task.persona}
+                    </td>
+                    <td className="px-3 py-2">
+                      {task.company_name ?? `#${task.buyer_id}`}
+                      {task.country ? (
+                        <span className="text-slate-500 text-xs ml-1">
+                          ({task.country})
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2">
+                      {task.contact_name ?? "—"}
+                      {task.contact_phone ? (
+                        <div className="text-xs text-slate-500">{task.contact_phone}</div>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2 capitalize">{task.status}</td>
+                    <td className="px-3 py-2">
+                      {task.ready ? (
+                        <span className="text-emerald-400 text-xs">Yes</span>
+                      ) : (
+                        <span
+                          className="text-amber-400 text-xs"
+                          title={(task.warnings ?? []).join("; ")}
+                        >
+                          Needs data
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-slate-400">
+                      {task.outcome ?? "—"}
+                    </td>
+                    {isAdmin && (
+                      <td className="px-3 py-2 space-x-2 whitespace-nowrap">
+                        {task.status === "pending" && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => void handleSkip(task.id)}
+                              className="text-xs text-amber-400 hover:underline"
+                            >
+                              Skip
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleRemove(task.id)}
+                              className="text-xs text-red-400 hover:underline"
+                            >
+                              Remove
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}

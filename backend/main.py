@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api import (
     agent_bridge,
     ai_mode,
+    ai_sales_agent,
     auth,
     calls,
     chatbot,
@@ -341,6 +342,8 @@ app.include_router(whatsapp.router, prefix="/api")
 app.include_router(whatsapp_personal.router, prefix="/api")
 app.include_router(whatsapp.webhooks_router, prefix="/api")
 app.include_router(ai_mode.router, prefix="/api")
+app.include_router(ai_sales_agent.router, prefix="/api")
+app.include_router(ai_sales_agent.webhooks_router, prefix="/api")
 
 
 OLD_CLIENTS_IMPORT_PARSER = "old_clients_v2"

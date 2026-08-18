@@ -922,3 +922,54 @@ class BulkEmailSchedule(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class AiSalesAgentTask(Base):
+    """Admin-assigned outbound call task for an AI sales persona."""
+
+    __tablename__ = "ai_sales_agent_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    persona: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    buyer_id: Mapped[int] = mapped_column(
+        ForeignKey("buyers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    contact_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True
+    )
+    assigned_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_users.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending", index=True)
+    interaction_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("interactions.id", ondelete="SET NULL"), nullable=True
+    )
+    call_sid: Mapped[Optional[str]] = mapped_column(String(64))
+    outcome: Mapped[Optional[str]] = mapped_column(String(32))
+    remarks: Mapped[Optional[str]] = mapped_column(Text)
+    transcript: Mapped[Optional[list]] = mapped_column(JSONB)
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    buyer: Mapped["Buyer"] = relationship()
+    contact: Mapped[Optional["Contact"]] = relationship()
+
+
+class AiSalesAgentRunner(Base):
+    """Run/pause state per AI persona (male / female)."""
+
+    __tablename__ = "ai_sales_agent_runners"
+
+    persona: Mapped[str] = mapped_column(String(16), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="idle")
+    current_task_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

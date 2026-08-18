@@ -35,6 +35,7 @@ export type Tab =
   | "chatbot"
   | "kpi"
   | "ai-mode"
+  | "ai-sales-agent"
   | "users"
   | "settings";
 
