@@ -36,6 +36,12 @@ class AssignTasksRequest(BaseModel):
     contact_ids: list[int | None] | None = None
 
 
+class SelfTestCallRequest(BaseModel):
+    persona: str = Field(..., description="'male' (Rayan) or 'female' (Sara)")
+    phone: str = Field(..., min_length=8, description="Your mobile in E.164, e.g. +923001234567")
+    contact_name: str | None = Field(None, description="Name Sara/Rayan will ask for on the call")
+
+
 class PersonaActionRequest(BaseModel):
     persona: str
 
@@ -111,6 +117,27 @@ def assign_tasks(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"tasks": tasks}
+
+
+@router.post("/tasks/self-test")
+def queue_self_test(
+    payload: SelfTestCallRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(require_admin),
+):
+    """Queue a test call to your own phone — appears in the task queue immediately."""
+    try:
+        task = campaign_module.queue_self_test_call(
+            db,
+            persona=payload.persona,
+            phone=payload.phone,
+            contact_name=payload.contact_name,
+            user=user,
+            assigned_by_user_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"task": task}
 
 
 @router.delete("/tasks/{task_id}", status_code=204)

@@ -273,8 +273,14 @@ def primary_contact_with_phone(db: Session, buyer_id: int) -> Contact | None:
     from integrations.voice_client import normalize_e164
 
     for contact in list_contacts_for_buyer(db, buyer_id):
-        if normalize_e164(contact.phone):
-            return contact
+        for raw in (
+            contact.phone,
+            contact.primary_phone,
+            contact.secondary_mobile,
+            contact.secondary_phone,
+        ):
+            if normalize_e164(raw or ""):
+                return contact
     return None
 
 

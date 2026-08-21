@@ -3217,6 +3217,15 @@ export const client = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  queueAiSalesAgentSelfTest: (data: {
+    persona: string;
+    phone: string;
+    contact_name?: string;
+  }) =>
+    request<{ task: AiSalesAgentTask }>("/ai-sales-agent/tasks/self-test", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
   deleteAiSalesAgentTask: (taskId: number) =>
     request<void>(`/ai-sales-agent/tasks/${taskId}`, {
       method: "DELETE",

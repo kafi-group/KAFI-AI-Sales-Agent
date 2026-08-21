@@ -20,7 +20,7 @@ const PERSONA_LABELS: Record<string, string> = {
 };
 
 export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const [unlocked, setUnlocked] = useState(false);
   const [codeInput, setCodeInput] = useState("");
   const [unlocking, setUnlocking] = useState(false);
@@ -28,14 +28,25 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   const [runners, setRunners] = useState<AiSalesAgentRunner[]>([]);
   const [tasks, setTasks] = useState<AiSalesAgentTask[]>([]);
   const [loading, setLoading] = useState(true);
-  const [assignPersona, setAssignPersona] = useState<"male" | "female">("male");
+  const [assignPersona, setAssignPersona] = useState<"male" | "female">("female");
   const [buyerIdsRaw, setBuyerIdsRaw] = useState("");
   const [assigning, setAssigning] = useState(false);
   const [filterPersona, setFilterPersona] = useState<string>("");
+  const [selfTestPhone, setSelfTestPhone] = useState("");
+  const [selfTestName, setSelfTestName] = useState("");
+  const [selfTestPersona, setSelfTestPersona] = useState<"male" | "female">("female");
+  const [selfTesting, setSelfTesting] = useState(false);
+  const [queueNotice, setQueueNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setUnlocked(Boolean(getAiSalesAgentAccessCode()));
   }, []);
+
+  useEffect(() => {
+    if (user?.full_name && !selfTestName) {
+      setSelfTestName(user.full_name);
+    }
+  }, [user?.full_name, selfTestName]);
 
   const load = useCallback(async () => {
     if (!getAiSalesAgentAccessCode()) {
@@ -97,6 +108,36 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       onError(lastMessage);
     } finally {
       setUnlocking(false);
+    }
+  }
+
+  async function handleSelfTest() {
+    const phone = selfTestPhone.trim();
+    if (!phone) {
+      onError("Enter your mobile number in international format, e.g. +923001234567");
+      return;
+    }
+    setSelfTesting(true);
+    try {
+      const result = await client.queueAiSalesAgentSelfTest({
+        persona: selfTestPersona,
+        phone,
+        contact_name: selfTestName.trim() || undefined,
+      });
+      setFilterPersona(selfTestPersona);
+      setQueueNotice(
+        `Queued test call to ${phone} as ${selfTestPersona === "female" ? "Sara" : "Rayan"}. ` +
+          "Click Start calling below when ready.",
+      );
+      setTimeout(() => setQueueNotice(null), 10000);
+      await load();
+      if (result.task?.contact_phone) {
+        setSelfTestPhone(result.task.contact_phone);
+      }
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Self-test queue failed");
+    } finally {
+      setSelfTesting(false);
     }
   }
 
@@ -203,11 +244,18 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       <div>
         <h2 className="text-lg font-medium text-slate-100">AI Sales Agent</h2>
         <p className="text-sm text-slate-400 mt-1">
-          Rayan and Sara place outbound FMCG procurement calls via Twilio. You assign the
-          queue — they do not build their own lists. After each call: email follow-up,
-          remarks, lifecycle, and KPI update automatically.
+          Rayan and Sara dial the <strong className="text-slate-300">lead&apos;s contact phone</strong>{" "}
+          from the Master Table — not your login name. Queue rows with{" "}
+          <strong className="text-slate-300">Queue AI calls</strong>, unlock this page, filter by
+          agent, then click <strong className="text-slate-300">Start calling</strong>.
         </p>
       </div>
+
+      {queueNotice ? (
+        <p className="text-sm text-emerald-300 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2">
+          {queueNotice}
+        </p>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
         {runners.map((runner) => (
@@ -273,15 +321,68 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       </div>
 
       {isAdmin && (
+        <div className="rounded-xl border border-violet-500/40 bg-violet-500/5 p-4 space-y-3">
+          <h3 className="font-medium text-slate-100">Test call to your phone</h3>
+          <p className="text-xs text-slate-500">
+            Fastest way to hear Sara or Rayan: enter your mobile here. Your name is what they
+            will ask for on the call. Then click <strong className="text-slate-300">Start calling</strong>{" "}
+            on the agent card above.
+          </p>
+          <div className="flex flex-wrap gap-3 items-end">
+            <label className="text-sm text-slate-400">
+              Agent
+              <select
+                value={selfTestPersona}
+                onChange={(e) =>
+                  setSelfTestPersona(e.target.value as "male" | "female")
+                }
+                className="mt-1 block w-full min-w-[140px] rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100"
+              >
+                <option value="female">Sara (female)</option>
+                <option value="male">Rayan (male)</option>
+              </select>
+            </label>
+            <label className="text-sm text-slate-400 flex-1 min-w-[160px]">
+              Your name on the call
+              <input
+                value={selfTestName}
+                onChange={(e) => setSelfTestName(e.target.value)}
+                placeholder={user?.full_name || "Your name"}
+                className="mt-1 block w-full rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100"
+              />
+            </label>
+            <label className="text-sm text-slate-400 flex-1 min-w-[180px]">
+              Your mobile (E.164)
+              <input
+                value={selfTestPhone}
+                onChange={(e) => setSelfTestPhone(e.target.value)}
+                placeholder="+923001234567"
+                className="mt-1 block w-full rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={selfTesting || !selfTestPhone.trim()}
+              onClick={() => void handleSelfTest()}
+              className="px-4 py-2 text-sm rounded-lg bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40"
+            >
+              {selfTesting ? "Queueing…" : "Queue test call"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isAdmin && (
         <div className="rounded-xl border border-slate-700/80 bg-slate-900/40 p-4 space-y-3">
           <h3 className="font-medium text-slate-100">Assign calls (optional)</h3>
           <p className="text-xs text-slate-500">
             Easiest: open <strong className="text-slate-300">Master Table</strong> or{" "}
             <strong className="text-slate-300">Old clients</strong>, select rows, then{" "}
-            <strong className="text-slate-300">Assign to → Rayan</strong> or{" "}
-            <strong className="text-slate-300">Sara</strong>. The{" "}
-            <strong className="text-slate-300">#</strong> column is the lead ID if you paste
-            here manually.
+            <strong className="text-slate-300">Queue AI calls → Rayan</strong> or{" "}
+            <strong className="text-slate-300">Sara</strong>.{" "}
+            <strong className="text-slate-300">Assign to</strong> is for human reps only. The{" "}
+            <strong className="text-slate-300">#</strong> column is the lead ID if you paste here
+            manually.
           </p>
           <div className="flex flex-wrap gap-3 items-end">
             <label className="text-sm text-slate-400">
@@ -340,7 +441,10 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         </div>
 
         {!tasks.length ? (
-          <p className="text-sm text-slate-500">No tasks assigned yet.</p>
+          <p className="text-sm text-slate-500">
+            No tasks in the queue yet. Use <strong className="text-slate-400">Test call to your phone</strong>{" "}
+            above, or queue leads from Master Table → Queue AI calls.
+          </p>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-slate-700/80">
             <table className="w-full text-sm text-left">
@@ -348,7 +452,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                 <tr>
                   <th className="px-3 py-2">Agent</th>
                   <th className="px-3 py-2">Company</th>
-                  <th className="px-3 py-2">Contact</th>
+                  <th className="px-3 py-2">Contact / phone</th>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Ready</th>
                   <th className="px-3 py-2">Outcome</th>
@@ -372,8 +476,10 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                     <td className="px-3 py-2">
                       {task.contact_name ?? "—"}
                       {task.contact_phone ? (
-                        <div className="text-xs text-slate-500">{task.contact_phone}</div>
-                      ) : null}
+                        <div className="text-xs text-sky-300/90 font-mono">{task.contact_phone}</div>
+                      ) : (
+                        <div className="text-xs text-amber-400">No phone on lead</div>
+                      )}
                     </td>
                     <td className="px-3 py-2 capitalize">{task.status}</td>
                     <td className="px-3 py-2">

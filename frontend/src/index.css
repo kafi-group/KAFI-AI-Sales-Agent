@@ -118,6 +118,20 @@ html[data-theme="light"] body {
   font-size: 1.25rem;
 }
 
+/* Ensure dark/black text pasted or colored in the editor is readable in dark mode */
+.email-body-editor [style*="color: black"],
+.email-body-editor [style*="color: #000000"],
+.email-body-editor [style*="color: #000"],
+.email-body-editor [style*="color: #111827"],
+.email-body-editor [style*="color: rgb(0, 0, 0)"],
+.email-body-editor [style*="color: rgb(17, 24, 39)"],
+.email-body-editor font[color="black"],
+.email-body-editor font[color="#000000"],
+.email-body-editor font[color="#000"],
+.email-body-editor font[color="#111827"] {
+  color: #f1f5f9 !important;
+}
+
 /* WhatsApp inbox — fixed colors (immune to light-theme token remaps) */
 .wa-chat-bubble-out {
   background-color: #005c4b;

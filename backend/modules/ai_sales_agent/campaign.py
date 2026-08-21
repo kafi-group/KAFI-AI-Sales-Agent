@@ -14,7 +14,9 @@ from db.models import (
     AiSalesAgentRunner,
     AiSalesAgentTask,
     AppUser,
+    Buyer,
     Channel,
+    Contact,
     Direction,
     HandledBy,
     Interaction,
@@ -25,7 +27,12 @@ from modules import buyers as buyers_module
 from modules.ai_sales_agent.context import build_lead_context, guidance_snippet_for_persona
 from modules.ai_sales_agent.conversation import opening_history
 from modules.ai_sales_agent.personas import VALID_PERSONAS, build_system_prompt, get_persona
-from modules.calls import _lead_phone_from_contact, _prepare_call_interaction
+from modules.calls import (
+    _display_phone_from_contact,
+    _lead_phone_from_contact,
+    _prepare_call_interaction,
+    _primary_contact_for_call,
+)
 from modules.audit import log_action
 
 log = logging.getLogger(__name__)
@@ -81,7 +88,8 @@ def runner_snapshot(db: Session) -> list[dict[str, Any]]:
         )
         current_task = None
         if runner.current_task_id:
-            current_task = task_to_dict(get_task(db, runner.current_task_id))
+            current = get_task(db, runner.current_task_id)
+            current_task = task_to_dict(current, db=db) if current else None
         out.append(
             {
                 "persona": persona,
@@ -103,19 +111,35 @@ def get_task(db: Session, task_id: int) -> AiSalesAgentTask | None:
     return db.get(AiSalesAgentTask, task_id)
 
 
-def task_to_dict(task: AiSalesAgentTask | None) -> dict[str, Any] | None:
+def _resolve_task_contact(db: Session, task: AiSalesAgentTask) -> Contact | None:
+    if task.contact_id:
+        contact = task.contact or buyers_module.get_contact(db, task.contact_id)
+        if contact and contact.buyer_id == task.buyer_id:
+            return contact
+    return _primary_contact_for_call(db, task.buyer_id)
+
+
+def task_to_dict(
+    task: AiSalesAgentTask | None,
+    *,
+    db: Session | None = None,
+    contact: Contact | None = None,
+) -> dict[str, Any] | None:
     if not task:
         return None
     buyer = task.buyer
-    contact = task.contact
+    if contact is None and db is not None:
+        contact = _resolve_task_contact(db, task)
+    else:
+        contact = contact or task.contact
     return {
         "id": task.id,
         "persona": task.persona,
         "buyer_id": task.buyer_id,
-        "contact_id": task.contact_id,
+        "contact_id": contact.id if contact else task.contact_id,
         "company_name": buyer.company_name if buyer else None,
         "contact_name": contact.full_name if contact else None,
-        "contact_phone": (contact.phone or contact.primary_phone) if contact else None,
+        "contact_phone": _display_phone_from_contact(contact),
         "status": task.status,
         "interaction_id": task.interaction_id,
         "call_sid": task.call_sid,
@@ -144,11 +168,12 @@ def list_tasks(
     result: list[dict[str, Any]] = []
     for task in rows:
         buyer = task.buyer
-        contact = task.contact
-        briefing = build_lead_context(db, buyer_id=task.buyer_id, contact_id=task.contact_id)
+        contact = _resolve_task_contact(db, task)
+        contact_id = contact.id if contact else task.contact_id
+        briefing = build_lead_context(db, buyer_id=task.buyer_id, contact_id=contact_id)
         result.append(
             {
-                **(task_to_dict(task) or {}),
+                **(task_to_dict(task, db=db, contact=contact) or {}),
                 "ready": briefing["ready"],
                 "warnings": briefing["warnings"],
                 "country": buyer.country if buyer else None,
@@ -176,6 +201,13 @@ def assign_tasks(
         contact_id = None
         if contact_ids and idx < len(contact_ids):
             contact_id = contact_ids[idx]
+        if contact_id:
+            contact = buyers_module.get_contact(db, contact_id)
+            if not contact or contact.buyer_id != buyer_id:
+                contact_id = None
+        if not contact_id:
+            resolved = _primary_contact_for_call(db, buyer_id)
+            contact_id = resolved.id if resolved else None
         task = AiSalesAgentTask(
             persona=pid,
             buyer_id=buyer_id,
@@ -188,7 +220,67 @@ def assign_tasks(
     db.commit()
     for task in created:
         db.refresh(task)
-    return [task_to_dict(t) for t in created if task_to_dict(t)]
+    return [task_to_dict(t, db=db) for t in created if task_to_dict(t, db=db)]
+
+
+def queue_self_test_call(
+    db: Session,
+    *,
+    persona: str,
+    phone: str,
+    contact_name: str | None,
+    user: AppUser,
+    assigned_by_user_id: int | None = None,
+) -> dict[str, Any]:
+    """Queue a test call to the admin's own phone (creates/reuses a self-test lead row)."""
+    pid = (persona or "").strip().lower()
+    if pid not in VALID_PERSONAS:
+        raise ValueError("persona must be 'male' or 'female'")
+
+    lead_phone = normalize_e164((phone or "").strip())
+    if not lead_phone:
+        raise ValueError(
+            "Phone is not valid. Use international format, e.g. +923001234567"
+        )
+
+    display_name = (contact_name or user.full_name or user.username).strip()
+    marker = f"ai_self_test_user:{user.id}"
+
+    buyer = (
+        db.query(Buyer)
+        .filter(Buyer.remarks == marker)
+        .order_by(Buyer.id.asc())
+        .first()
+    )
+    if not buyer:
+        buyer = buyers_module.create_buyer(
+            db,
+            {
+                "company_name": f"Self test ({user.username})",
+                "country": "Pakistan",
+                "source": "ai_self_test",
+                "remarks": marker,
+                "assigned_to_user_id": user.id,
+            },
+        )
+
+    buyers_module.upsert_primary_contact(
+        db,
+        buyer.id,
+        full_name=display_name,
+        phone=lead_phone,
+        primary_phone=lead_phone,
+    )
+
+    tasks = assign_tasks(
+        db,
+        persona=pid,
+        buyer_ids=[buyer.id],
+        assigned_by_user_id=assigned_by_user_id,
+    )
+    if not tasks:
+        raise ValueError("Could not queue self-test call")
+    return tasks[0]
 
 
 def remove_task(db: Session, task_id: int) -> bool:
@@ -212,7 +304,7 @@ def skip_task(db: Session, task_id: int) -> dict[str, Any]:
     task.completed_at = _utcnow()
     db.commit()
     db.refresh(task)
-    return task_to_dict(task) or {}
+    return task_to_dict(task, db=db) or {}
 
 
 def start_runner(db: Session, persona: str) -> dict[str, Any]:

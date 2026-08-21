@@ -599,6 +599,20 @@ select.template-select {
   min-height: 160px;
 }
 
+/* Ensure dark/black text pasted or colored in the editor is readable in dark mode */
+.rte-editor [style*="color: black"],
+.rte-editor [style*="color: #000000"],
+.rte-editor [style*="color: #000"],
+.rte-editor [style*="color: #111827"],
+.rte-editor [style*="color: rgb(0, 0, 0)"],
+.rte-editor [style*="color: rgb(17, 24, 39)"],
+.rte-editor font[color="black"],
+.rte-editor font[color="#000000"],
+.rte-editor font[color="#000"],
+.rte-editor font[color="#111827"] {
+  color: var(--text) !important;
+}
+
 .rte-editor:empty:before {
   content: attr(data-placeholder);
   color: #64748b;
