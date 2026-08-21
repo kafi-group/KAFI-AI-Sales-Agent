@@ -23,6 +23,7 @@ interface LeadsTableCsvImportProps {
   tableLabel?: string;
   title?: string;
   description?: string;
+  masterType?: string;
 }
 
 interface ImportRowResult {
@@ -186,6 +187,7 @@ export function LeadsTableCsvImport({
   tableLabel,
   title = "Import leads",
   description = "Upload CSV or Excel (.xlsx). Columns are mapped to the leads table. Import only saves rows as-is — research and score later from the table.",
+  masterType = "fmcg",
 }: LeadsTableCsvImportProps) {
   const [parsing, setParsing] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -291,6 +293,7 @@ export function LeadsTableCsvImport({
         auto_onboard: false,
         replace_duplicates: true,
         skip_enrichment: true,
+        master_type: masterType,
       });
       jobId = job.job_id;
     } catch (e) {

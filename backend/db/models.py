@@ -172,6 +172,9 @@ class Buyer(Base):
     intake_method: Mapped[Optional[str]] = mapped_column(String(40), index=True)
     remarks_03: Mapped[Optional[str]] = mapped_column(Text)
     remarks_04: Mapped[Optional[str]] = mapped_column(Text)
+    master_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="fmcg", server_default="'fmcg'"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

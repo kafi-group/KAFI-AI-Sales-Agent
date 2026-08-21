@@ -11,6 +11,7 @@ class BuyerCreate(BaseModel):
     industry: Optional[str] = None
     linkedin_company_url: Optional[str] = None
     source: Optional[str] = "manual"
+    master_type: Optional[str] = "fmcg"
 
 
 class BuyerRead(BaseModel):
@@ -32,6 +33,7 @@ class BuyerRead(BaseModel):
     created_at: datetime
     latest_score: Optional[str] = None
     score_reasoning: Optional[str] = None
+    master_type: Optional[str] = None
 
 
 class BuyerListResponse(BaseModel):
@@ -499,6 +501,7 @@ class LeadTableRowRead(BaseModel):
     producer_tier: Optional[str] = None
     producer_conversion_pct: Optional[float] = None
     producer_tier_reasoning: Optional[str] = None
+    master_type: Optional[str] = None
 
 
 class LeadTableRowUpdate(BaseModel):
@@ -884,6 +887,7 @@ class DiscoverImportRequest(BaseModel):
     auto_onboard: bool = False
     replace_duplicates: bool = False
     skip_enrichment: bool = False
+    master_type: Optional[str] = "fmcg"
 
 
 class LeadTableDedupeGroup(BaseModel):
