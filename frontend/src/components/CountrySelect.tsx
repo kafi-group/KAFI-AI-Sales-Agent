@@ -9,6 +9,7 @@ interface CountrySelectProps {
   label?: string;
   labelClassName?: string;
   placeholder?: string;
+  multiple?: boolean;
 }
 
 export function CountrySelect({
@@ -19,12 +20,21 @@ export function CountrySelect({
   label,
   labelClassName = "text-xs text-slate-400",
   placeholder = "Search countries…",
+  multiple = false,
 }: CountrySelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const selected = useMemo(() => findCountry(value), [value]);
+  const selectedNames = useMemo(() => {
+    if (!value) return [];
+    return value.split(",").map(c => c.trim()).filter(Boolean);
+  }, [value]);
+
+  const selectedSingle = useMemo(() => {
+    if (multiple) return null;
+    return findCountry(value);
+  }, [value, multiple]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -47,16 +57,51 @@ export function CountrySelect({
   }, []);
 
   function choose(country: Country | null) {
-    onChange(country?.name ?? "");
-    setOpen(false);
-    setQuery("");
+    if (!multiple) {
+      onChange(country?.name ?? "");
+      setOpen(false);
+      setQuery("");
+      return;
+    }
+
+    if (country === null) {
+      onChange("");
+      setQuery("");
+      return;
+    }
+
+    const exists = selectedNames.includes(country.name);
+    let next: string[];
+    if (exists) {
+      next = selectedNames.filter((n) => n !== country.name);
+    } else {
+      next = [...selectedNames, country.name];
+    }
+    onChange(next.join(", "));
   }
 
-  const buttonLabel = selected
-    ? `${selected.flag} ${selected.name}`
-    : allowEmpty
-      ? emptyLabel
-      : "Select country";
+  const buttonLabel = useMemo(() => {
+    if (multiple) {
+      if (selectedNames.length === 0) {
+        return allowEmpty ? emptyLabel : "Select countries";
+      }
+      if (selectedNames.length === 1) {
+        const match = findCountry(selectedNames[0]);
+        return match ? `${match.flag} ${match.name}` : selectedNames[0];
+      }
+      const flags = selectedNames
+        .map((name) => findCountry(name)?.flag)
+        .filter(Boolean)
+        .join("");
+      return `${flags} (${selectedNames.length})`;
+    } else {
+      return selectedSingle
+        ? `${selectedSingle.flag} ${selectedSingle.name}`
+        : allowEmpty
+          ? emptyLabel
+          : "Select country";
+    }
+  }, [multiple, selectedNames, selectedSingle, allowEmpty, emptyLabel]);
 
   return (
     <label className="block">
@@ -72,7 +117,7 @@ export function CountrySelect({
         </button>
 
         {open && (
-          <div className="absolute z-30 mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 shadow-xl">
+          <div className="absolute z-30 mt-1 min-w-[240px] w-full rounded-lg border border-slate-700 bg-slate-950 shadow-xl">
             <div className="p-2 border-b border-slate-800">
               <input
                 type="search"
@@ -89,28 +134,49 @@ export function CountrySelect({
                   <button
                     type="button"
                     onClick={() => choose(null)}
-                    className="w-full px-3 py-2 text-left text-sm text-slate-400 hover:bg-slate-900"
+                    className="w-full px-3 py-2 text-left text-sm text-slate-400 hover:bg-slate-900 flex items-center gap-2"
                   >
+                    {multiple && (
+                      <input
+                        type="checkbox"
+                        checked={selectedNames.length === 0}
+                        readOnly
+                        className="h-4 w-4 shrink-0 rounded border-slate-600 accent-emerald-500"
+                      />
+                    )}
                     {emptyLabel}
                   </button>
                 </li>
               )}
-              {filtered.map((country) => (
-                <li key={country.code}>
-                  <button
-                    type="button"
-                    onClick={() => choose(country)}
-                    className={`w-full px-3 py-2 text-left text-sm hover:bg-slate-900 ${
-                      selected?.code === country.code
-                        ? "bg-emerald-500/10 text-emerald-300"
-                        : "text-slate-200"
-                    }`}
-                  >
-                    <span className="mr-2">{country.flag}</span>
-                    {country.name}
-                  </button>
-                </li>
-              ))}
+              {filtered.map((country) => {
+                const isSelected = multiple
+                  ? selectedNames.includes(country.name)
+                  : selectedSingle?.code === country.code;
+                return (
+                  <li key={country.code}>
+                    <button
+                      type="button"
+                      onClick={() => choose(country)}
+                      className={`w-full px-3 py-2 text-left text-sm hover:bg-slate-900 flex items-center gap-2 ${
+                        isSelected
+                          ? "bg-emerald-500/10 text-emerald-300 font-medium"
+                          : "text-slate-200"
+                      }`}
+                    >
+                      {multiple && (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          readOnly
+                          className="h-4 w-4 shrink-0 rounded border-slate-600 accent-emerald-500"
+                        />
+                      )}
+                      <span className="mr-1">{country.flag}</span>
+                      {country.name}
+                    </button>
+                  </li>
+                );
+              })}
               {filtered.length === 0 && (
                 <li className="px-3 py-2 text-sm text-slate-500">No countries found</li>
               )}

@@ -878,16 +878,21 @@ def _filtered_lead_table_rows(
     if country:
         from modules.countries import country_search_terms
 
-        terms = [term for term in country_search_terms(country) if term]
-        if terms:
-            buyer_query = buyer_query.filter(
-                or_(
-                    *[
-                        sa_func.lower(sa_func.coalesce(Buyer.country, "")).like(f"%{term}%")
-                        for term in terms
-                    ]
+        country_names = [c.strip() for c in country.split(",") if c.strip()]
+        all_country_filters = []
+        for c_name in country_names:
+            terms = [term for term in country_search_terms(c_name) if term]
+            if terms:
+                all_country_filters.append(
+                    or_(
+                        *[
+                            sa_func.lower(sa_func.coalesce(Buyer.country, "")).like(f"%{term}%")
+                            for term in terms
+                        ]
+                    )
                 )
-            )
+        if all_country_filters:
+            buyer_query = buyer_query.filter(or_(*all_country_filters))
 
     query_text = (q or "").strip().lower()
     if query_text:

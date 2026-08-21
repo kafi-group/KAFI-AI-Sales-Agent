@@ -1506,19 +1506,32 @@ export function LeadsTablePage({
     }
   }
 
-  async function queueLeadsForAiAgent(buyerIds: number[], persona: "male" | "female") {
+  async function queueLeadsForAiAgent(
+    buyerIds: number[],
+    persona: "male" | "female",
+    contactIds?: (number | null)[],
+  ) {
     if (!buyerIds.length) return;
     const label = persona === "male" ? "Rayan" : "Sara";
     const confirmed = window.confirm(
-      `Queue ${buyerIds.length} lead${buyerIds.length === 1 ? "" : "s"} for ${label} (AI Sales Agent)?`,
+      `Queue ${buyerIds.length} lead${buyerIds.length === 1 ? "" : "s"} for ${label} (AI Sales Agent)?\n\n` +
+        "Each row must have a contact name and phone (Primary Mobile or Phone). " +
+        "Open AI Sales Agent, enter the access code, filter by " +
+        `${label}, then click Start calling.`,
     );
     if (!confirmed) return;
     try {
-      await client.assignAiSalesAgentTasks({ persona, buyer_ids: buyerIds });
+      await client.assignAiSalesAgentTasks({
+        persona,
+        buyer_ids: buyerIds,
+        contact_ids: contactIds,
+      });
       setSaveNotice(
-        `Queued ${buyerIds.length} lead${buyerIds.length === 1 ? "" : "s"} for ${label}. Open AI Sales Agent to start calling.`,
+        `Queued ${buyerIds.length} lead${buyerIds.length === 1 ? "" : "s"} for ${label}. ` +
+          "Open AI Sales Agent → unlock → filter " +
+          `${label} → Start calling.`,
       );
-      setTimeout(() => setSaveNotice(null), 5000);
+      setTimeout(() => setSaveNotice(null), 8000);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to queue AI sales calls");
     }
@@ -1535,7 +1548,10 @@ export function LeadsTablePage({
     }
     if (rawValue && isAiSalesAssignValue(rawValue)) {
       const persona = personaFromAiAssignValue(rawValue);
-      if (persona) await queueLeadsForAiAgent([rowId], persona);
+      if (persona) {
+        const row = rows.find((r) => r.id === rowId);
+        await queueLeadsForAiAgent([rowId], persona, [row?.contact_id ?? null]);
+      }
       return;
     }
     const previousRow = rows.find((r) => r.id === rowId);
@@ -1619,7 +1635,8 @@ export function LeadsTablePage({
     }
     setBulkAssigning(true);
     try {
-      await queueLeadsForAiAgent(ids, persona);
+      const contactIds = ids.map((id) => rows.find((r) => r.id === id)?.contact_id ?? null);
+      await queueLeadsForAiAgent(ids, persona, contactIds);
       clearSelection();
     } finally {
       setBulkAiQueueValue("");
@@ -3385,6 +3402,7 @@ export function LeadsTablePage({
                 onChange={setCountry}
                 allowEmpty
                 emptyLabel="All countries"
+                multiple
               />
 
               <SearchableSelect
@@ -3551,6 +3569,7 @@ export function LeadsTablePage({
                 onChange={setCountry}
                 allowEmpty
                 emptyLabel="All countries"
+                multiple
               />
 
               <label className="block text-xs text-slate-400">

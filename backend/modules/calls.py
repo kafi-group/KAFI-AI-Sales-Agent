@@ -379,12 +379,39 @@ def purge_old_call_logs(
     return deleted
 
 
+def _contact_has_dialable_phone(contact: Contact) -> bool:
+    for raw in (
+        contact.phone,
+        contact.primary_phone,
+        contact.secondary_mobile,
+        contact.secondary_phone,
+    ):
+        if normalize_e164(raw or ""):
+            return True
+    return False
+
+
+def _display_phone_from_contact(contact: Contact | None) -> str | None:
+    if not contact:
+        return None
+    for raw in (
+        contact.phone,
+        contact.primary_phone,
+        contact.secondary_mobile,
+        contact.secondary_phone,
+    ):
+        text = (raw or "").strip()
+        if text:
+            return text
+    return None
+
+
 def _primary_contact_for_call(db: Session, buyer_id: int) -> Contact | None:
     contact = buyers_module.primary_contact_with_email(db, buyer_id)
-    if contact and contact.phone and contact.phone.strip():
+    if contact and _contact_has_dialable_phone(contact):
         return contact
     for row in buyers_module.list_contacts_for_buyer(db, buyer_id):
-        if row.phone and row.phone.strip():
+        if _contact_has_dialable_phone(row):
             return row
     return None
 
@@ -1010,16 +1037,21 @@ def list_dialable_leads(
     if country:
         from modules.countries import country_search_terms
 
-        terms = [term for term in country_search_terms(country) if term]
-        if terms:
-            buyer_query = buyer_query.filter(
-                or_(
-                    *[
-                        sa_func.lower(sa_func.coalesce(Buyer.country, "")).like(f"%{term}%")
-                        for term in terms
-                    ]
+        country_names = [c.strip() for c in country.split(",") if c.strip()]
+        all_country_filters = []
+        for c_name in country_names:
+            terms = [term for term in country_search_terms(c_name) if term]
+            if terms:
+                all_country_filters.append(
+                    or_(
+                        *[
+                            sa_func.lower(sa_func.coalesce(Buyer.country, "")).like(f"%{term}%")
+                            for term in terms
+                        ]
+                    )
                 )
-            )
+        if all_country_filters:
+            buyer_query = buyer_query.filter(or_(*all_country_filters))
 
     light_rows = buyer_query.with_entities(
         Buyer.id, Buyer.company_name, Buyer.country, Buyer.created_at
