@@ -448,19 +448,7 @@ def list_threads(
         threads = group_messages_into_threads(stamped, mailbox_email=account.email)
         if unread_only:
             threads = [t for t in threads if t.get("unread_count", 0) > 0]
-        from modules import mail_labels as labels_module
-        from db.session import SessionLocal
-
-        db = SessionLocal()
-        try:
-            labels = labels_module.list_labels(db, user.id)
-            visible = [
-                t
-                for t in threads
-                if not labels_module.thread_matches_label_rules(t, labels)
-            ]
-        finally:
-            db.close()
+        visible = threads
         from modules.inbox_triage import enrich_thread_with_triage
 
         visible = [enrich_thread_with_triage(t) for t in visible]
