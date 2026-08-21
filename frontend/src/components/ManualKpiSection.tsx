@@ -348,6 +348,7 @@ export function ManualKpiSection({
                       allowEmpty
                       emptyLabel="—"
                       placeholder="Bulk country…"
+                      multiple
                     />
                   </td>
                   <td className="px-2 py-1">
