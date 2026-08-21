@@ -15,6 +15,7 @@ interface SearchableSelectProps {
   labelClassName?: string;
   placeholder?: string;
   disabled?: boolean;
+  multiple?: boolean;
 }
 
 export function SearchableSelect({
@@ -27,10 +28,16 @@ export function SearchableSelect({
   labelClassName = "text-xs text-slate-400",
   placeholder = "Search…",
   disabled = false,
+  multiple = false,
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const selectedValues = useMemo(() => {
+    if (!value) return [];
+    return value.split(",").map(v => v.trim()).filter(Boolean);
+  }, [value]);
 
   const selected = useMemo(
     () => options.find((option) => option.value === value) ?? null,
@@ -57,13 +64,45 @@ export function SearchableSelect({
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  function choose(next: string) {
-    onChange(next);
-    setOpen(false);
-    setQuery("");
+  function choose(optValue: string | null) {
+    if (!multiple) {
+      onChange(optValue ?? "");
+      setOpen(false);
+      setQuery("");
+      return;
+    }
+
+    if (optValue === null || optValue === "") {
+      onChange("");
+      setQuery("");
+      return;
+    }
+
+    const exists = selectedValues.includes(optValue);
+    let next: string[];
+    if (exists) {
+      next = selectedValues.filter((v) => v !== optValue);
+    } else {
+      next = [...selectedValues, optValue];
+    }
+    onChange(next.join(", "));
   }
 
-  const buttonLabel = selected?.label ?? (allowEmpty ? emptyLabel : "Select…");
+  const buttonLabel = useMemo(() => {
+    if (multiple) {
+      if (selectedValues.length === 0) {
+        return allowEmpty ? emptyLabel : "Select…";
+      }
+      const selectedLabels = selectedValues
+        .map((v) => options.find((o) => o.value === v)?.label || v);
+      if (selectedLabels.length <= 2) {
+        return selectedLabels.join(", ");
+      }
+      return `${selectedLabels.slice(0, 2).join(", ")} (+${selectedLabels.length - 2})`;
+    } else {
+      return selected?.label ?? (allowEmpty ? emptyLabel : "Select…");
+    }
+  }, [multiple, selectedValues, selected, allowEmpty, emptyLabel, options]);
 
   return (
     <label className="block">
@@ -80,7 +119,7 @@ export function SearchableSelect({
         </button>
 
         {open && !disabled && (
-          <div className="absolute z-30 mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 shadow-xl">
+          <div className="absolute z-30 mt-1 min-w-[240px] w-full rounded-lg border border-slate-700 bg-slate-950 shadow-xl">
             <div className="p-2 border-b border-slate-800">
               <input
                 type="search"
@@ -97,27 +136,48 @@ export function SearchableSelect({
                   <button
                     type="button"
                     onClick={() => choose("")}
-                    className="w-full px-3 py-2 text-left text-sm text-slate-400 hover:bg-slate-900"
+                    className="w-full px-3 py-2 text-left text-sm text-slate-400 hover:bg-slate-900 flex items-center gap-2"
                   >
+                    {multiple && (
+                      <input
+                        type="checkbox"
+                        checked={selectedValues.length === 0}
+                        readOnly
+                        className="h-4 w-4 shrink-0 rounded border-slate-600 accent-emerald-500"
+                      />
+                    )}
                     {emptyLabel}
                   </button>
                 </li>
               )}
-              {filtered.map((option) => (
-                <li key={option.value}>
-                  <button
-                    type="button"
-                    onClick={() => choose(option.value)}
-                    className={`w-full px-3 py-2 text-left text-sm hover:bg-slate-900 ${
-                      value === option.value
-                        ? "bg-emerald-500/10 text-emerald-300"
-                        : "text-slate-200"
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                </li>
-              ))}
+              {filtered.map((option) => {
+                const isSelected = multiple
+                  ? selectedValues.includes(option.value)
+                  : value === option.value;
+                return (
+                  <li key={option.value}>
+                    <button
+                      type="button"
+                      onClick={() => choose(option.value)}
+                      className={`w-full px-3 py-2 text-left text-sm hover:bg-slate-900 flex items-center gap-2 ${
+                        isSelected
+                          ? "bg-emerald-500/10 text-emerald-300 font-medium"
+                          : "text-slate-200"
+                      }`}
+                    >
+                      {multiple && (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          readOnly
+                          className="h-4 w-4 shrink-0 rounded border-slate-600 accent-emerald-500"
+                        />
+                      )}
+                      {option.label}
+                    </button>
+                  </li>
+                );
+              })}
               {filtered.length === 0 && (
                 <li className="px-3 py-2 text-sm text-slate-500">No matches</li>
               )}

@@ -543,23 +543,30 @@ def _apply_product_category_filter(buyer_query, product_interest: str):
     (e.g. "Rice, Oil") matches every category it mentions, so it shows up
     under both the "Rice" and "Oil" filters.
     """
-    label = product_interest.strip()
-    keywords = keywords_for_category(label)
-    if keywords:
-        return buyer_query.filter(Buyer.product_interest.op("~*")(_regex_or_pattern(keywords)))
+    from sqlalchemy import or_, and_
+    categories = [cat.strip() for cat in product_interest.split(",") if cat.strip()]
+    if not categories:
+        return buyer_query
 
-    if label.lower() == OTHER_CATEGORY_LABEL.lower():
-        all_keywords = [kw for kws in PRODUCT_CATEGORIES.values() for kw in kws]
-        return buyer_query.filter(
-            sa_func.coalesce(Buyer.product_interest, "") != "",
-            ~Buyer.product_interest.op("~*")(_regex_or_pattern(all_keywords)),
-        )
+    clauses = []
+    for label in categories:
+        keywords = keywords_for_category(label)
+        if keywords:
+            clauses.append(Buyer.product_interest.op("~*")(_regex_or_pattern(keywords)))
+        elif label.lower() == OTHER_CATEGORY_LABEL.lower():
+            all_keywords = [kw for kws in PRODUCT_CATEGORIES.values() for kw in kws]
+            clauses.append(
+                and_(
+                    sa_func.coalesce(Buyer.product_interest, "") != "",
+                    ~Buyer.product_interest.op("~*")(_regex_or_pattern(all_keywords))
+                )
+            )
+        else:
+            clauses.append(
+                sa_func.lower(sa_func.coalesce(Buyer.product_interest, "")) == label.lower()
+            )
 
-    # Unknown label (e.g. a stale saved view with a raw legacy value) — fall
-    # back to the old exact-match behavior instead of returning nothing.
-    return buyer_query.filter(
-        sa_func.lower(sa_func.coalesce(Buyer.product_interest, "")) == label.lower()
-    )
+    return buyer_query.filter(or_(*clauses))
 
 
 def _apply_lead_table_scope(
@@ -853,27 +860,35 @@ def _filtered_lead_table_rows(
 
     # Push cheap column filters to SQL so we never hydrate the whole section.
     if industry:
-        buyer_query = buyer_query.filter(
-            sa_func.lower(sa_func.coalesce(Buyer.industry, "")) == industry.strip().lower()
-        )
+        industries = [ind.strip().lower() for ind in industry.split(",") if ind.strip()]
+        if industries:
+            buyer_query = buyer_query.filter(
+                sa_func.lower(sa_func.coalesce(Buyer.industry, "")).in_(industries)
+            )
     if company_grading:
-        buyer_query = buyer_query.filter(
-            sa_func.lower(sa_func.coalesce(Buyer.company_grading, ""))
-            == company_grading.strip().lower()
-        )
+        gradings = [cg.strip().lower() for cg in company_grading.split(",") if cg.strip()]
+        if gradings:
+            buyer_query = buyer_query.filter(
+                sa_func.lower(sa_func.coalesce(Buyer.company_grading, "")).in_(gradings)
+            )
     if product_interest:
         buyer_query = _apply_product_category_filter(buyer_query, product_interest)
     if city:
-        buyer_query = buyer_query.filter(
-            sa_func.lower(sa_func.coalesce(Buyer.city, "")) == city.strip().lower()
-        )
+        cities = [c.strip().lower() for c in city.split(",") if c.strip()]
+        if cities:
+            buyer_query = buyer_query.filter(
+                sa_func.lower(sa_func.coalesce(Buyer.city, "")).in_(cities)
+            )
     if market_role:
-        try:
-            role_value = MarketRole(market_role)
-        except ValueError:
-            role_value = None
-        if role_value is not None:
-            buyer_query = buyer_query.filter(Buyer.market_role == role_value)
+        roles = []
+        for r in market_role.split(","):
+            r_strip = r.strip()
+            try:
+                roles.append(MarketRole(r_strip))
+            except ValueError:
+                pass
+        if roles:
+            buyer_query = buyer_query.filter(Buyer.market_role.in_(roles))
 
     if country:
         from modules.countries import country_search_terms
@@ -930,40 +945,48 @@ def _filtered_lead_table_rows(
         )
 
     if score:
-        grade = score.strip().upper()
-        legacy = {"HOT": "AAA", "WARM": "AA", "COLD": "A"}
-        grade = legacy.get(grade, grade)
-        ranked_score_ids = (
-            db.query(
-                LeadScore.buyer_id.label("buyer_id"),
-                LeadScore.score.label("score"),
-                sa_func.row_number()
-                .over(partition_by=LeadScore.buyer_id, order_by=LeadScore.scored_at.desc())
-                .label("rn"),
+        grades = [s.strip().upper() for s in score.split(",") if s.strip()]
+        if grades:
+            ranked_score_ids = (
+                db.query(
+                    LeadScore.buyer_id.label("buyer_id"),
+                    LeadScore.score.label("score"),
+                    sa_func.row_number()
+                    .over(partition_by=LeadScore.buyer_id, order_by=LeadScore.scored_at.desc())
+                    .label("rn"),
+                )
+                .subquery()
             )
-            .subquery()
-        )
-        latest_scores = (
-            db.query(ranked_score_ids.c.buyer_id, ranked_score_ids.c.score)
-            .filter(ranked_score_ids.c.rn == 1)
-            .subquery()
-        )
-        if grade == "UNSCORED":
-            buyer_query = buyer_query.outerjoin(
-                latest_scores, Buyer.id == latest_scores.c.buyer_id
-            ).filter(
-                latest_scores.c.buyer_id.is_(None),
+            latest_scores = (
+                db.query(ranked_score_ids.c.buyer_id, ranked_score_ids.c.score)
+                .filter(ranked_score_ids.c.rn == 1)
+                .subquery()
             )
-        else:
-            try:
-                score_label = LeadScoreLabel(grade)
-            except ValueError:
-                score_label = None
-            if score_label is not None:
-                # AI grade filter uses lead_scores only (never spreadsheet company_grading)
-                buyer_query = buyer_query.outerjoin(
-                    latest_scores, Buyer.id == latest_scores.c.buyer_id
-                ).filter(latest_scores.c.score == score_label)
+            
+            score_clauses = []
+            has_unscored = False
+            legacy = {"HOT": "AAA", "WARM": "AA", "COLD": "A"}
+            score_labels = []
+            
+            for g in grades:
+                g = legacy.get(g, g)
+                if g == "UNSCORED":
+                    has_unscored = True
+                else:
+                    try:
+                        sl = LeadScoreLabel(g)
+                        score_labels.append(sl)
+                    except ValueError:
+                        pass
+            
+            buyer_query = buyer_query.outerjoin(latest_scores, Buyer.id == latest_scores.c.buyer_id)
+            if score_labels:
+                score_clauses.append(latest_scores.c.score.in_(score_labels))
+            if has_unscored:
+                score_clauses.append(latest_scores.c.buyer_id.is_(None))
+                
+            if score_clauses:
+                buyer_query = buyer_query.filter(or_(*score_clauses))
 
     sort_field = sort_by if sort_by in _SORT_FIELDS else "created_at"
     reverse = sort_dir.lower() != "asc"
@@ -1015,18 +1038,22 @@ def _filtered_lead_table_rows(
     ).all()
 
     if call_recommended:
-        want = call_recommended.strip().lower()
+        wants = {w.strip().lower() for w in call_recommended.split(",") if w.strip()}
         filtered_light = []
         for buyer_id, country_val, company_name, created_at, role in light_rows:
             timing = get_call_recommendation(country_val)
             recommended = timing["call_recommended"]
             keep = False
-            if want in {"yes", "true", "recommended"}:
-                keep = recommended is True
-            elif want in {"no", "false", "not_now", "not-now"}:
-                keep = recommended is False
-            elif want in {"unknown", "none"}:
-                keep = recommended is None
+            for want in wants:
+                if want in {"yes", "true", "recommended"} and recommended is True:
+                    keep = True
+                    break
+                elif want in {"no", "false", "not_now", "not-now"} and recommended is False:
+                    keep = True
+                    break
+                elif want in {"unknown", "none"} and recommended is None:
+                    keep = True
+                    break
             if keep:
                 filtered_light.append(
                     (buyer_id, country_val, company_name, created_at, role)

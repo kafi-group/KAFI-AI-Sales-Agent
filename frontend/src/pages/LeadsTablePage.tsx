@@ -3384,6 +3384,7 @@ export function LeadsTablePage({
                 allowEmpty
                 emptyLabel="All types"
                 placeholder="Search business types…"
+                multiple
               />
 
               <SearchableSelect
@@ -3394,6 +3395,7 @@ export function LeadsTablePage({
                 allowEmpty
                 emptyLabel="All gradings"
                 placeholder="Search gradings…"
+                multiple
               />
 
               <CountrySelect
@@ -3411,6 +3413,7 @@ export function LeadsTablePage({
                 onChange={setCallRecommended}
                 options={CALL_RECOMMENDED_OPTIONS}
                 placeholder="Search…"
+                multiple
               />
 
               <SearchableSelect
@@ -3421,6 +3424,7 @@ export function LeadsTablePage({
                 allowEmpty
                 emptyLabel="All products"
                 placeholder="Search products…"
+                multiple
               />
 
               <SearchableSelect
@@ -3431,6 +3435,7 @@ export function LeadsTablePage({
                 allowEmpty
                 emptyLabel="All cities"
                 placeholder="Search cities…"
+                multiple
               />
 
               {isTargetedPool && intakeMethodFilter === "discover" && isAdmin ? (
@@ -3546,6 +3551,7 @@ export function LeadsTablePage({
                 allowEmpty
                 emptyLabel="All grades"
                 placeholder="Search grades…"
+                multiple
               />
 
               <SearchableSelect
@@ -3561,6 +3567,7 @@ export function LeadsTablePage({
                 allowEmpty
                 emptyLabel="All roles"
                 placeholder="Search roles…"
+                multiple
               />
 
               <CountrySelect
