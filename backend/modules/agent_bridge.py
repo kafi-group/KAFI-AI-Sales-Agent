@@ -207,6 +207,38 @@ def bridge_calls(db: Session, *, limit: int = 20) -> dict[str, Any]:
     return {"calls": calls}
 
 
+def _rep_revenue_usd(db: Session, user_id: int | None) -> float:
+    if not user_id:
+        return 0.0
+    open_statuses = (QuotationStatus.sent, QuotationStatus.approved)
+    line_total = func.coalesce(QuotationLineItem.quantity, 0) * func.coalesce(
+        QuotationLineItem.unit_price, 0
+    )
+    rev_lines = (
+        db.query(func.coalesce(func.sum(line_total), 0))
+        .join(Quotation, Quotation.id == QuotationLineItem.quotation_id)
+        .join(Buyer, Quotation.buyer_id == Buyer.id)
+        .filter(
+            Quotation.status.in_(open_statuses),
+            Buyer.assigned_to_user_id == user_id,
+        )
+        .scalar()
+    )
+    header_total = func.coalesce(Quotation.quantity, 0) * func.coalesce(Quotation.unit_price, 0)
+    rev_headers = (
+        db.query(func.coalesce(func.sum(header_total), 0))
+        .join(Buyer, Quotation.buyer_id == Buyer.id)
+        .outerjoin(QuotationLineItem, QuotationLineItem.quotation_id == Quotation.id)
+        .filter(
+            Quotation.status.in_(open_statuses),
+            Buyer.assigned_to_user_id == user_id,
+            QuotationLineItem.id.is_(None),
+        )
+        .scalar()
+    )
+    return round(float(rev_lines or 0) + float(rev_headers or 0), 2)
+
+
 def bridge_performance(db: Session) -> dict[str, Any]:
     today = date.today()
     start_date, _, start_utc, _ = activity_module.period_bounds(today, "week")
@@ -221,6 +253,15 @@ def bridge_performance(db: Session) -> dict[str, Any]:
         user = bucket.get("user") or {}
         counts = bucket.get("counts") or {}
         name = user.get("full_name") or user.get("username") or "Unknown"
+        uid = user.get("id")
+
+        rep_rev = _rep_revenue_usd(db, uid)
+        rep_meetings = (
+            int(counts.get("outcomes_follow_up") or 0)
+            + int(counts.get("outcomes_interested") or 0)
+            + int(counts.get("outcomes_call_back") or 0)
+        )
+
         by_rep.append(
             {
                 "repName": name,
@@ -228,6 +269,9 @@ def bridge_performance(db: Session) -> dict[str, Any]:
                 "leadsWorked": int(counts.get("table_edits") or 0)
                 + int(counts.get("leads_imported") or 0),
                 "followUpsCompleted": int(counts.get("outcomes_follow_up") or 0),
+                "revenue": rep_rev,
+                "target": 50000.0,
+                "meetings": rep_meetings,
             }
         )
     by_rep.sort(key=lambda r: (r["callsMade"], r["leadsWorked"]), reverse=True)
