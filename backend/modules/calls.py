@@ -1136,14 +1136,16 @@ def suggest_dialable_contacts(
             sa_func.trim(sa_func.coalesce(Contact.phone, "")) != "",
             sa_func.trim(sa_func.coalesce(Contact.primary_phone, "")) != "",
             sa_func.trim(sa_func.coalesce(Contact.secondary_mobile, "")) != "",
+            sa_func.trim(sa_func.coalesce(Contact.secondary_phone, "")) != "",
         )
     ).filter(
         or_(
             Buyer.company_name.ilike(pattern, escape="\\"),
-            Contact.name.ilike(pattern, escape="\\"),
+            Contact.full_name.ilike(pattern, escape="\\"),
             Contact.phone.ilike(pattern, escape="\\"),
             Contact.primary_phone.ilike(pattern, escape="\\"),
             Contact.secondary_mobile.ilike(pattern, escape="\\"),
+            Contact.secondary_phone.ilike(pattern, escape="\\"),
         )
     )
 
