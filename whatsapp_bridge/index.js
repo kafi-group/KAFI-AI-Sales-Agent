@@ -163,6 +163,11 @@ async function initBaileysSession(sessionId, forceNew = false) {
 function formatJid(phone) {
   let cleaned = String(phone || "").replace(/\D/g, "");
   if (!cleaned) throw new Error("Invalid phone number");
+  if (cleaned.startsWith("03") && cleaned.length === 11) {
+    cleaned = "92" + cleaned.slice(1);
+  } else if (cleaned.startsWith("0") && (cleaned.length === 10 || cleaned.length === 11)) {
+    cleaned = "92" + cleaned.slice(1);
+  }
   if (!cleaned.endsWith("@s.whatsapp.net")) {
     cleaned = `${cleaned}@s.whatsapp.net`;
   }
@@ -273,7 +278,16 @@ app.post("/send", async (req, res) => {
       });
     }
 
-    const jid = formatJid(toPhone);
+    let jid = formatJid(toPhone);
+    try {
+      const [onWa] = await sessionObj.sock.onWhatsApp(jid);
+      if (onWa && onWa.jid) {
+        jid = onWa.jid;
+      }
+    } catch (e) {
+      console.warn(`[Session ${sessionId}] onWhatsApp lookup check fallback for ${jid}:`, e?.message);
+    }
+
     const sent = await sessionObj.sock.sendMessage(jid, { text: message });
 
     return res.json({
