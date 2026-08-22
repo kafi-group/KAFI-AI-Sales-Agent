@@ -12,8 +12,6 @@ interface UsersPageProps {
   onUsersChanged?: () => void;
 }
 
-const SWITCH_USER_CODE = "07860";
-
 const USERS_COLUMNS: ColumnDef[] = [
   { id: "username", label: "Username", locked: true },
   { id: "name", label: "Name" },
@@ -25,7 +23,13 @@ const USERS_COLUMNS: ColumnDef[] = [
 ];
 
 export function UsersPage({ onError, onUsersChanged }: UsersPageProps) {
-  const { user: authUser, switchToUser, impersonating } = useAuth();
+  const {
+    user: authUser,
+    switchToUser,
+    switchBackToAdmin,
+    impersonating,
+    impersonatorLabel,
+  } = useAuth();
   const columnsUi = useColumnVisibility("users", USERS_COLUMNS, authUser?.id);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,10 +51,7 @@ export function UsersPage({ onError, onUsersChanged }: UsersPageProps) {
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [switchTarget, setSwitchTarget] = useState<AppUser | null>(null);
-  const [switchCode, setSwitchCode] = useState("");
-  const [switchError, setSwitchError] = useState<string | null>(null);
-  const [switchBusy, setSwitchBusy] = useState(false);
+  const [switchingId, setSwitchingId] = useState<number | null>(null);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -155,36 +156,13 @@ export function UsersPage({ onError, onUsersChanged }: UsersPageProps) {
     }
   }
 
-  function openSwitchModal(user: AppUser) {
-    setSwitchTarget(user);
-    setSwitchCode("");
-    setSwitchError(null);
-  }
-
-  function closeSwitchModal() {
-    if (switchBusy) return;
-    setSwitchTarget(null);
-    setSwitchCode("");
-    setSwitchError(null);
-  }
-
-  async function handleConfirmSwitch(e: FormEvent) {
-    e.preventDefault();
-    if (!switchTarget) return;
-    const code = switchCode.trim();
-    if (code !== SWITCH_USER_CODE) {
-      setSwitchError("Incorrect code — switch user is restricted to administrators.");
-      return;
-    }
-    setSwitchBusy(true);
-    setSwitchError(null);
+  async function handleDirectSwitch(targetUser: AppUser) {
+    setSwitchingId(targetUser.id);
     try {
-      await switchToUser(switchTarget.id);
-      closeSwitchModal();
+      await switchToUser(targetUser.id);
     } catch (err) {
-      setSwitchError(err instanceof Error ? err.message : "Could not switch user");
-    } finally {
-      setSwitchBusy(false);
+      onError(err instanceof Error ? err.message : "Could not switch user");
+      setSwitchingId(null);
     }
   }
 
@@ -208,6 +186,22 @@ export function UsersPage({ onError, onUsersChanged }: UsersPageProps) {
 
   return (
     <div className="space-y-8 w-full min-w-0">
+      {impersonating && impersonatorLabel && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 flex flex-wrap items-center justify-between gap-3 text-amber-100">
+          <div>
+            <p className="text-sm font-medium">Currently viewing dashboard as {authUser?.full_name || authUser?.username}</p>
+            <p className="text-xs text-amber-300/80 mt-0.5">Admin session saved ({impersonatorLabel})</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void switchBackToAdmin()}
+            className="rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-medium text-xs px-3 py-2 transition"
+          >
+            Return to Admin ({impersonatorLabel})
+          </button>
+        </div>
+      )}
+
       <div>
         <h2 className="text-xl font-semibold tracking-tight text-slate-100">Users</h2>
         <p className="mt-1 text-sm text-slate-400">
@@ -439,11 +433,12 @@ export function UsersPage({ onError, onUsersChanged }: UsersPageProps) {
                         ) : (
                           <button
                             type="button"
-                            onClick={() => openSwitchModal(user)}
-                            className="text-xs px-2.5 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-200"
-                            title={`View dashboard as ${user.full_name || user.username}`}
+                            onClick={() => void handleDirectSwitch(user)}
+                            disabled={switchingId === user.id}
+                            className="text-xs px-2.5 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-200 disabled:opacity-50 transition"
+                            title={`Switch directly to ${user.full_name || user.username}`}
                           >
-                            Switch
+                            {switchingId === user.id ? "Switching…" : "Switch"}
                           </button>
                         )}
                       </td>
@@ -488,68 +483,6 @@ export function UsersPage({ onError, onUsersChanged }: UsersPageProps) {
           </tbody>
         </table>
       </div>
-
-      {switchTarget ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="switch-user-title"
-        >
-          <form
-            onSubmit={handleConfirmSwitch}
-            className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-xl space-y-4"
-          >
-            <div>
-              <h3 id="switch-user-title" className="text-base font-medium text-slate-100">
-                Switch user
-              </h3>
-              <p className="mt-1 text-sm text-slate-400">
-                View the dashboard as{" "}
-                <span className="text-slate-200 font-medium">
-                  {switchTarget.full_name || switchTarget.username}
-                </span>
-                . Enter the admin code to continue.
-              </p>
-            </div>
-            <label className="block">
-              <span className="text-xs text-slate-400">Access code</span>
-              <input
-                type="password"
-                inputMode="numeric"
-                autoComplete="off"
-                value={switchCode}
-                onChange={(e) => setSwitchCode(e.target.value)}
-                autoFocus
-                placeholder="Enter code"
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"
-              />
-            </label>
-            {switchError ? (
-              <p className="text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
-                {switchError}
-              </p>
-            ) : null}
-            <div className="flex flex-wrap gap-2 justify-end">
-              <button
-                type="button"
-                onClick={closeSwitchModal}
-                disabled={switchBusy}
-                className="rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 px-3 py-2 text-sm text-slate-300 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={switchBusy || !switchCode.trim()}
-                className="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-3 py-2 text-sm font-medium"
-              >
-                {switchBusy ? "Switching…" : "Switch user"}
-              </button>
-            </div>
-          </form>
-        </div>
-      ) : null}
     </div>
   );
 }
