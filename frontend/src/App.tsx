@@ -994,7 +994,7 @@ function DashboardApp() {
     },
     { id: "calls", label: "Call Center", count: 0 },
     { id: "client-history", label: "Client History", count: 0 },
-    { id: "helpful-guidance", label: "Helpful Guidance", count: 0 },
+    { id: "helpful-guidance", label: "SALES HELP MANAGER", count: 0 },
     {
       id: "quotation-agent",
       label: "CNF or FOB",

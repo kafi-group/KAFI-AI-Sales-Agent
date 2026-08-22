@@ -69,7 +69,7 @@ export function HelpfulGuidancePage({ onError }: HelpfulGuidancePageProps) {
   return (
     <section className="space-y-6 max-w-4xl">
       <div>
-        <h2 className="text-lg font-medium text-slate-100">Helpful Guidance</h2>
+        <h2 className="text-lg font-medium text-slate-100">SALES HELP MANAGER</h2>
         <p className="text-sm text-slate-400 mt-1">
           Coaching from client history, call outcomes, and the last {data.months} months of KPI
           {data.is_team_view ? " (team view)" : ""}.

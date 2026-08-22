@@ -279,7 +279,7 @@ export const INDEX_SECTIONS: IndexSection[] = [
       },
       {
         id: "5.5",
-        title: "Helpful Guidance",
+        title: "SALES HELP MANAGER",
         description: "Coaching from call history, KPI trends, and voicemail cost tips.",
         icon: "chart",
         action: { type: "tab", tab: "helpful-guidance" },
