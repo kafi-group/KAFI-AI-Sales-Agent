@@ -38,6 +38,7 @@ import { BuyerProfile } from "./pages/BuyerProfile";
 import { CallsPage } from "./pages/CallsPage";
 import { InboxPage } from "./pages/InboxPage";
 import { AiModePage } from "./pages/AiModePage";
+import { AiSalesAgentPage } from "./pages/AiSalesAgentPage";
 import { IndexesPage } from "./pages/IndexesPage";
 import { UserManualPage } from "./pages/UserManualPage";
 import { LeadsPage } from "./pages/LeadsPage";
@@ -1014,6 +1015,7 @@ function DashboardApp() {
       count: personalizedEmailCount,
       alert: personalizedEmailCount > 0,
     },
+    { id: "ai-sales-agent", label: "AI Sales Agent", count: 0 },
     { id: "kpi", label: "KPI", count: 0 },
     ...(isAdmin ? [{ id: "users" as const, label: "Users", count: 0 }] : []),
     ...(isAdmin ? [{ id: "settings" as const, label: "Settings", count: 0 }] : []),
@@ -1285,6 +1287,9 @@ function DashboardApp() {
                   setLeadsTableRefreshToken((token) => token + 1);
                 }}
               />
+            )}
+            {tab === "ai-sales-agent" && (
+              <AiSalesAgentPage onError={setError} />
             )}
             {tab === "kpi" && <KpiPage onError={setError} />}
             {tab === "users" && isAdmin && (
