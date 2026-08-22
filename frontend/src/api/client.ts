@@ -38,6 +38,26 @@ function resolveApiBase(raw: unknown): string {
 
 const API_BASE = resolveApiBase(import.meta.env.VITE_API_BASE_URL);
 
+/** Session gate for AI Sales Agent module (cleared when browser tab closes). */
+export const AI_SALES_AGENT_CODE_KEY = "kafi_ai_sales_agent_code";
+
+export function getAiSalesAgentAccessCode(): string | null {
+  try {
+    return sessionStorage.getItem(AI_SALES_AGENT_CODE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setAiSalesAgentAccessCode(code: string): void {
+  sessionStorage.setItem(AI_SALES_AGENT_CODE_KEY, code);
+}
+
+function aiSalesAgentHeaders(): HeadersInit {
+  const code = getAiSalesAgentAccessCode();
+  return code ? { "X-AI-Sales-Agent-Code": code } : {};
+}
+
 /** External quotation agent (separate app). */
 export const QUOTATION_AGENT_URL =
   import.meta.env.VITE_QUOTATION_AGENT_URL ??
@@ -3146,7 +3166,124 @@ export const client = {
       method: "POST",
       body: JSON.stringify({ buyer_id: buyerId }),
     }),
+
+  // ── AI Sales Agent ─────────────────────────────────────────────────────────
+  unlockAiSalesAgent: (access_code: string) =>
+    request<{ ok: boolean }>("/ai-sales-agent/unlock", {
+      method: "POST",
+      body: JSON.stringify({ access_code }),
+      retryTransient: true,
+      timeoutMs: 45_000,
+    }),
+  listAiSalesAgentRunners: () =>
+    request<{ runners: AiSalesAgentRunner[] }>("/ai-sales-agent/runners", {
+      headers: aiSalesAgentHeaders(),
+    }),
+  listAiSalesAgentTasks: (params: {
+    persona?: string;
+    status?: string;
+    limit?: number;
+  } = {}) => {
+    const query = new URLSearchParams();
+    if (params.persona) query.set("persona", params.persona);
+    if (params.status) query.set("status", params.status);
+    if (params.limit) query.set("limit", String(params.limit));
+    const qs = query.toString();
+    return request<{ tasks: AiSalesAgentTask[] }>(
+      `/ai-sales-agent/tasks${qs ? `?${qs}` : ""}`,
+      { headers: aiSalesAgentHeaders() },
+    );
+  },
+  assignAiSalesAgentTasks: (data: {
+    persona: string;
+    buyer_ids: number[];
+    contact_ids?: (number | null)[];
+  }) =>
+    request<{ tasks: AiSalesAgentTask[] }>("/ai-sales-agent/tasks/assign", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  queueAiSalesAgentSelfTest: (data: {
+    persona: string;
+    phone: string;
+    contact_name?: string;
+  }) =>
+    request<{ task: AiSalesAgentTask }>("/ai-sales-agent/tasks/self-test", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  deleteAiSalesAgentTask: (taskId: number) =>
+    request<void>(`/ai-sales-agent/tasks/${taskId}`, {
+      method: "DELETE",
+      headers: aiSalesAgentHeaders(),
+    }),
+  skipAiSalesAgentTask: (taskId: number) =>
+    request<AiSalesAgentTask>(`/ai-sales-agent/tasks/${taskId}/skip`, {
+      method: "POST",
+      headers: aiSalesAgentHeaders(),
+    }),
+  startAiSalesAgentRunner: (persona: string) =>
+    request<AiSalesAgentRunner>("/ai-sales-agent/runners/start", {
+      method: "POST",
+      headers: aiSalesAgentHeaders(),
+      body: JSON.stringify({ persona }),
+    }),
+  pauseAiSalesAgentRunner: (persona: string) =>
+    request<AiSalesAgentRunner>("/ai-sales-agent/runners/pause", {
+      method: "POST",
+      headers: aiSalesAgentHeaders(),
+      body: JSON.stringify({ persona }),
+    }),
+  getAiSalesAgentBriefing: (buyerId: number, contactId?: number) => {
+    const qs = contactId ? `?contact_id=${contactId}` : "";
+    return request<AiSalesAgentBriefing>(
+      `/ai-sales-agent/briefing/${buyerId}${qs}`,
+      { headers: aiSalesAgentHeaders() },
+    );
+  },
 };
+
+export interface AiSalesAgentRunner {
+  persona: string;
+  display_name: string;
+  gender_label: string;
+  app_username: string;
+  voice: string;
+  status: string;
+  current_task_id: number | null;
+  current_task: AiSalesAgentTask | null;
+  pending_count: number;
+  twilio_ready: boolean;
+}
+
+export interface AiSalesAgentTask {
+  id: number;
+  persona: string;
+  buyer_id: number;
+  contact_id: number | null;
+  company_name: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  country?: string | null;
+  status: string;
+  interaction_id: number | null;
+  call_sid: string | null;
+  outcome: string | null;
+  remarks: string | null;
+  error_message: string | null;
+  ready?: boolean;
+  warnings?: string[];
+  created_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface AiSalesAgentBriefing {
+  buyer_id: number;
+  ready: boolean;
+  warnings: string[];
+  context_text: string;
+}
 
 export interface AiModeSettings {
   user_id: number;
