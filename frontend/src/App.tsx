@@ -33,6 +33,7 @@ import { EmailActivityPage } from "./pages/EmailActivityPage";
 import { EmailTemplatesPage } from "./pages/EmailTemplatesPage";
 import { WhatsAppTemplatesPage } from "./pages/WhatsAppTemplatesPage";
 import { WhatsAppInboxPage } from "./pages/WhatsAppInboxPage";
+import { WhatsAppMobilePage } from "./pages/WhatsAppMobilePage";
 import { WhatsAppQrPage } from "./pages/WhatsAppQrPage";
 import { BuyerProfile } from "./pages/BuyerProfile";
 import { CallsPage } from "./pages/CallsPage";
@@ -958,6 +959,11 @@ function DashboardApp() {
           alert: whatsappInboxUnread > 0,
         },
         {
+          id: "whatsapp-mobile",
+          label: "WhatsApp Mobile",
+          count: 0,
+        },
+        {
           id: "whatsapp-templates",
           label: "WhatsApp templates",
           count: whatsappTemplateCount,
@@ -1232,7 +1238,9 @@ function DashboardApp() {
                 onUnreadChange={setWhatsappActivityUnread}
               />
             )}
-            {tab === "whatsapp-qr" && <WhatsAppQrPage onError={setError} />}
+            {(tab === "whatsapp-mobile" || tab === "whatsapp-qr") && (
+              <WhatsAppMobilePage onError={setError} />
+            )}
             {tab === "whatsapp-inbox" && (
               <WhatsAppInboxPage
                 onError={setError}

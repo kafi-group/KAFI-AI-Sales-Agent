@@ -618,9 +618,9 @@ export function PersonalizedEmailsPage({
                         selected.status === "generating" ||
                         !selected.contact_phone
                       }
-                      title="Send from your personal WhatsApp (scan QR in WhatsApp QR module)"
+                      title="Send from your mobile WhatsApp account (scan QR code in WhatsApp Mobile module)"
                     >
-                      {sending === "whatsapp_personal" ? "Sending…" : "WhatsApp Personal"}
+                      {sending === "whatsapp_personal" ? "Sending…" : "WhatsApp Mobile"}
                     </ActionButton>
                   )}
                   {!emailAlreadySent && !waAlreadySent && !waPersonalAlreadySent && (

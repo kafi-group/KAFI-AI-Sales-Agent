@@ -422,9 +422,10 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                     disabled={Boolean(sendingChannel) || savingDraft}
                     onClick={() => void sendDraft("whatsapp_personal")}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 px-3 py-2 text-sm font-medium"
+                    title="Send post-call follow-up via your mobile WhatsApp number"
                   >
                     <IconWhatsApp size="md" className="text-white !h-7 !w-7" />
-                    {sendingChannel === "whatsapp_personal" ? "Sending…" : "WhatsApp Personal"}
+                    {sendingChannel === "whatsapp_personal" ? "Sending…" : "WhatsApp Mobile"}
                   </button>
                   <button
                     type="button"

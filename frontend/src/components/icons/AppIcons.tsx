@@ -629,6 +629,7 @@ export function NavIcon({
   if (navId === "interested_clients") return <IconFollowUp {...props} />;
   if (navId === "not_interested_clients") return <IconXCircle {...props} />;
   if (navId === "not_received_call_clients") return <IconPhoneMissed {...props} />;
+  if (navId === "whatsapp-mobile") return <IconWhatsApp {...props} />;
   if (navId === "hyperstore_targeted" || navId === "targeted_distributor" || navId === "targeted_client" || navId === "khalid_focused_sales")
     return <IconSearch {...props} />;
   if (navId.startsWith("assigned:")) return <IconUser {...props} />;

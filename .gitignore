@@ -26,9 +26,11 @@ backend/credentials.json
 # Database
 *.db
 
-# Node / frontend
+# Node / frontend & bridge
 frontend/node_modules/
 frontend/dist/
+whatsapp_bridge/node_modules/
+whatsapp_bridge/sessions/
 backend/static/
 
 # OS

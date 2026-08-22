@@ -24,6 +24,7 @@ export type Tab =
   | "whatsapp-templates"
   | "whatsapp-activity"
   | "whatsapp-inbox"
+  | "whatsapp-mobile"
   | "leads"
   | "data-synthesis"
   | "table"
