@@ -443,7 +443,7 @@ def _import_scope_for_source(import_source: str | None) -> dict[str, str | None]
     if normalized == "csv":
         # Leads-table spreadsheet imports only collide with other leads-table rows.
         return {"source": "csv", "exclude_source": None}
-    if normalized in {"hyperstore_targeted", "targeted_distributor", "targeted_client"}:
+    if normalized in {"hyperstore_targeted", "targeted_distributor", "targeted_client", "khalid_focused_sales"}:
         return {"source": normalized, "exclude_source": None}
     return {"source": None, "exclude_source": "old_clients"}
 
@@ -3855,13 +3855,14 @@ def import_candidates(
                             "hyperstore_targeted",
                             "targeted_distributor",
                             "targeted_client",
+                            "khalid_focused_sales",
                             "old_clients",
                             "incomplete_archives",
                         }
                         else (
                             "discover"
                             if batch_source_norm
-                            in {"hyperstore_targeted", "targeted_distributor", "targeted_client"}
+                            in {"hyperstore_targeted", "targeted_distributor", "targeted_client", "khalid_focused_sales"}
                             else None
                         )
                     ),

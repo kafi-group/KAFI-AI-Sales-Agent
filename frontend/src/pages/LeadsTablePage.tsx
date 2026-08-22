@@ -300,8 +300,7 @@ function ExpandableCell({
   className,
   detail,
   empty = "—",
-  title = "Details",
-  /** Allow opening the dialog when text is empty (e.g. view remarks history). */
+  title = "Know Your Customer",
   openWhenEmpty = false,
 }: {
   text: string | null | undefined;
@@ -332,6 +331,8 @@ function ExpandableCell({
     return <span className="text-slate-500">{empty}</span>;
   }
 
+  const modalTitle = title === "Details" || !title || title === "Company name" ? "Know Your Customer" : title;
+
   return (
     <>
       <button
@@ -350,7 +351,7 @@ function ExpandableCell({
       {open &&
         createPortal(
           <div
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60"
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-sm"
             onClick={(e) => {
               e.stopPropagation();
               setOpen(false);
@@ -360,29 +361,29 @@ function ExpandableCell({
             <div
               role="dialog"
               aria-modal="true"
-              aria-label={title}
-              className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 shadow-2xl"
+              aria-label={modalTitle}
+              className="w-full max-w-2xl rounded-2xl border-2 border-emerald-500/40 bg-slate-900 shadow-2xl overflow-hidden p-2"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
-                <h3 className="text-sm font-medium text-slate-200">{title}</h3>
+              <div className="flex items-center justify-between gap-4 border-b border-slate-800 px-6 py-4 bg-slate-950/60">
+                <h3 className="text-xl font-bold tracking-wide text-emerald-400">{modalTitle}</h3>
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
-                  className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                  className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800 hover:text-white bg-slate-800/80 border border-slate-700 transition"
                 >
                   Close
                 </button>
               </div>
-              <div className="px-4 py-4">
+              <div className="px-8 py-8 max-h-[70vh] overflow-y-auto">
                 {value ? (
-                  <p className="break-all whitespace-pre-wrap text-sm leading-relaxed text-slate-100">
+                  <p className="break-all whitespace-pre-wrap text-2xl font-bold leading-relaxed text-slate-100 selection:bg-emerald-500 selection:text-white">
                     {value}
                   </p>
                 ) : (
-                  <p className="text-sm text-slate-500">No current remarks.</p>
+                  <p className="text-xl text-slate-500">No current text.</p>
                 )}
-                {detail ? <div className="mt-3">{detail}</div> : null}
+                {detail ? <div className="mt-6">{detail}</div> : null}
               </div>
             </div>
           </div>,
@@ -485,6 +486,12 @@ function sectionTableParams(
       ...(intakeMethod !== "all" ? { intake_method: intakeMethod } : {}),
     };
   }
+  if (section === "khalid_focused_sales") {
+    return {
+      source: "khalid_focused_sales",
+      ...(intakeMethod !== "all" ? { intake_method: intakeMethod } : {}),
+    };
+  }
   if (section === "incomplete_archives") return { source: "incomplete_archives" };
   if (section === "interested_clients") return { call_outcome: "follow_up" };
   if (section === "sales_interested_clients") return { in_interested_clients: true };
@@ -514,6 +521,7 @@ function sectionTitle(
       : "Master Table (FMCG)";
   }
   if (section === "old_clients") return isAdmin ? "Old clients" : "Clients";
+  if (section === "khalid_focused_sales") return "Khalid Focused Sales";
   if (section === "my_assigned") return "Assigned";
   if (section === "hyperstore_targeted") return "Hyperstore Target";
   if (section === "targeted_distributor") return "Targeted Distributors";
@@ -536,6 +544,9 @@ function sectionDescription(
 ): string {
   if (section === "master") {
     return "Overview of every lead in the system — including leads sent to Asim, Usman, Sadia, or any other user.";
+  }
+  if (section === "khalid_focused_sales") {
+    return "Leads specially selected for Mr. Khalid's focused sales outreach. Select any contact from Old clients, Master table, or New search lead and add them here.";
   }
   if (section === "hyperstore_targeted") {
     return "Hypermarkets and multi-branch retailers (10+ branches) — auto-classified from Old clients by name keywords, or add manually from any table.";
@@ -584,13 +595,14 @@ function targetPoolIntakeMethod(section: LeadsTableSection): "upload" | "discove
 }
 
 function targetPoolLabels(): Record<
-  "hyperstore_targeted" | "targeted_distributor" | "targeted_client",
+  "hyperstore_targeted" | "targeted_distributor" | "targeted_client" | "khalid_focused_sales",
   string
 > {
   return {
     hyperstore_targeted: "Hyperstore Target",
     targeted_distributor: "Targeted Distributors",
     targeted_client: "Targeted Client",
+    khalid_focused_sales: "Khalid Focused Sales",
   };
 }
 
@@ -1565,7 +1577,7 @@ export function LeadsTablePage({
   }
 
   async function moveSelectedToTargetPool(
-    pool: "hyperstore_targeted" | "targeted_distributor" | "targeted_client",
+    pool: "hyperstore_targeted" | "targeted_distributor" | "targeted_client" | "khalid_focused_sales",
   ) {
     if (!isAdmin || selected.size === 0 || movingToPool) return;
     const labels = targetPoolLabels();
@@ -2690,6 +2702,17 @@ export function LeadsTablePage({
           ) : null}
           {isAdmin && selected.size > 0 ? (
             <>
+              {section !== "khalid_focused_sales" ? (
+                <ActionButton
+                  icon={IconSearch}
+                  variant="emerald"
+                  onClick={() => void moveSelectedToTargetPool("khalid_focused_sales")}
+                  disabled={movingToPool || bulkOnboarding || editMode}
+                  title="Add selected leads to Khalid Focused Sales"
+                >
+                  {movingToPool ? "Moving…" : "→ Khalid Focused"}
+                </ActionButton>
+              ) : null}
               {section !== "hyperstore_targeted" ? (
                 <ActionButton
                   icon={IconSearch}

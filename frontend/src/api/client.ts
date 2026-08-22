@@ -1352,6 +1352,7 @@ export interface LeadTableSectionCountsResponse {
   hyperstore_targeted?: number;
   targeted_distributor?: number;
   targeted_client?: number;
+  khalid_focused_sales?: number;
   incomplete_archives?: number;
   my_assigned?: number;
 }

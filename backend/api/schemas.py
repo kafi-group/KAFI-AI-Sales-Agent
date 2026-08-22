@@ -615,6 +615,7 @@ class LeadTableSectionCountsResponse(BaseModel):
     hyperstore_targeted: int = 0
     targeted_distributor: int = 0
     targeted_client: int = 0
+    khalid_focused_sales: int = 0
     incomplete_archives: int = 0
     my_assigned: int = 0
 

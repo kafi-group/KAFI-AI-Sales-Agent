@@ -51,19 +51,21 @@ export type LeadsTableSection =
   | "hyperstore_targeted"
   | "targeted_distributor"
   | "targeted_client"
+  | "khalid_focused_sales"
   | "incomplete_archives"
   | `assigned:${number}`;
 
 export const TARGETED_POOL_EXCLUDE =
-  "old_clients,incomplete_archives,hyperstore_targeted,targeted_distributor,targeted_client";
+  "old_clients,incomplete_archives,hyperstore_targeted,targeted_distributor,targeted_client,khalid_focused_sales";
 
 export function isTargetedPoolSection(
   section: LeadsTableSection,
-): section is "hyperstore_targeted" | "targeted_distributor" | "targeted_client" {
+): section is "hyperstore_targeted" | "targeted_distributor" | "targeted_client" | "khalid_focused_sales" {
   return (
     section === "hyperstore_targeted" ||
     section === "targeted_distributor" ||
-    section === "targeted_client"
+    section === "targeted_client" ||
+    section === "khalid_focused_sales"
   );
 }
 

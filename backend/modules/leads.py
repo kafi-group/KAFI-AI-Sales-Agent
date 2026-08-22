@@ -24,7 +24,12 @@ _orchestrator = Orchestrator()
 _research = ResearchModule()
 
 TARGETED_POOL_SOURCES = frozenset(
-    {"hyperstore_targeted", "targeted_distributor", "targeted_client"}
+    {
+        "hyperstore_targeted",
+        "targeted_distributor",
+        "targeted_client",
+        "khalid_focused_sales",
+    }
 )
 
 ARCHIVES_POOL_SOURCES = frozenset({INCOMPLETE_ARCHIVES_SOURCE, "old_clients"})
@@ -1368,6 +1373,7 @@ def _compute_section_counts(
         "hyperstore_targeted": pool_counts.get("hyperstore_targeted", 0),
         "targeted_distributor": pool_counts.get("targeted_distributor", 0),
         "targeted_client": pool_counts.get("targeted_client", 0),
+        "khalid_focused_sales": pool_counts.get("khalid_focused_sales", 0),
         "incomplete_archives": len(incomplete_archives_ids),
     }
 

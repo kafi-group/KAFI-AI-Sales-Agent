@@ -159,6 +159,7 @@ function DashboardApp() {
     hyperstore_targeted: 0,
     targeted_distributor: 0,
     targeted_client: 0,
+    khalid_focused_sales: 0,
     incomplete_archives: 0,
     my_assigned: 0,
     by_assignee: {},
@@ -859,6 +860,11 @@ function DashboardApp() {
           id: "old_clients" as const,
           label: "Old clients",
           count: tableCounts.old_clients,
+        },
+        {
+          id: "khalid_focused_sales" as const,
+          label: "Khalid Focused Sales",
+          count: tableCounts.khalid_focused_sales ?? 0,
         },
         {
           id: "interested_clients" as const,
