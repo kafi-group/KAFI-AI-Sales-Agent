@@ -3172,7 +3172,6 @@ export const client = {
     request<{ ok: boolean }>("/ai-sales-agent/unlock", {
       method: "POST",
       body: JSON.stringify({ access_code }),
-      retryTransient: true,
       timeoutMs: 45_000,
     }),
   listAiSalesAgentRunners: () =>

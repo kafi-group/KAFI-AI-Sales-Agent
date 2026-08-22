@@ -4,7 +4,6 @@ import {
   setAiSalesAgentAccessCode,
   getAiSalesAgentAccessCode,
   sanitizeUserFacingError,
-  isTransientApiError,
   type AiSalesAgentRunner,
   type AiSalesAgentTask,
 } from "../api/client";
