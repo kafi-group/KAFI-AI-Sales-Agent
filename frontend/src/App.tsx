@@ -1040,6 +1040,7 @@ function DashboardApp() {
       <CallingCardOverlay />
       <BulkCallQueueHost onError={setError} />
       <FloatingDialpad onError={setError} />
+      <FloatingSalesAssistant onNavigate={handleIndexNavigate} onError={setError} />
       {impersonating && impersonatorLabel && (
         <div className="sticky top-0 z-50 bg-amber-500 text-slate-950 px-4 py-2 flex items-center justify-between shadow-lg text-xs sm:text-sm font-semibold border-b border-amber-600">
           <div className="flex items-center gap-2.5 min-w-0">
