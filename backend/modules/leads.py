@@ -505,28 +505,34 @@ def _regex_or_pattern(keywords: list[str]) -> str:
 
 
 def _apply_product_category_filter(buyer_query, product_interest: str):
-    """Match a canonical product category (e.g. "Rice", "Oil") against the
-    free-text product_interest column. A record mentioning several products
-    (e.g. "Rice, Oil") matches every category it mentions, so it shows up
-    under both the "Rice" and "Oil" filters.
-    """
-    label = product_interest.strip()
-    keywords = keywords_for_category(label)
-    if keywords:
-        return buyer_query.filter(Buyer.product_interest.op("~*")(_regex_or_pattern(keywords)))
+    """Match one or multiple canonical product categories against product_interest."""
+    from sqlalchemy import and_ as sa_and, or_
 
-    if label.lower() == OTHER_CATEGORY_LABEL.lower():
-        all_keywords = [kw for kws in PRODUCT_CATEGORIES.values() for kw in kws]
-        return buyer_query.filter(
-            sa_func.coalesce(Buyer.product_interest, "") != "",
-            ~Buyer.product_interest.op("~*")(_regex_or_pattern(all_keywords)),
-        )
+    items = [p.strip() for p in product_interest.split(",") if p.strip()]
+    if not items:
+        return buyer_query
 
-    # Unknown label (e.g. a stale saved view with a raw legacy value) — fall
-    # back to the old exact-match behavior instead of returning nothing.
-    return buyer_query.filter(
-        sa_func.lower(sa_func.coalesce(Buyer.product_interest, "")) == label.lower()
-    )
+    conditions = []
+    for label in items:
+        keywords = keywords_for_category(label)
+        if keywords:
+            conditions.append(Buyer.product_interest.op("~*")(_regex_or_pattern(keywords)))
+        elif label.lower() == OTHER_CATEGORY_LABEL.lower():
+            all_keywords = [kw for kws in PRODUCT_CATEGORIES.values() for kw in kws]
+            conditions.append(
+                sa_and(
+                    sa_func.coalesce(Buyer.product_interest, "") != "",
+                    ~Buyer.product_interest.op("~*")(_regex_or_pattern(all_keywords)),
+                )
+            )
+        else:
+            conditions.append(
+                sa_func.lower(sa_func.coalesce(Buyer.product_interest, "")) == label.lower()
+            )
+
+    if conditions:
+        return buyer_query.filter(or_(*conditions))
+    return buyer_query
 
 
 def _apply_lead_table_scope(
@@ -818,20 +824,25 @@ def _filtered_lead_table_rows(
 
     # Push cheap column filters to SQL so we never hydrate the whole section.
     if industry:
-        buyer_query = buyer_query.filter(
-            sa_func.lower(sa_func.coalesce(Buyer.industry, "")) == industry.strip().lower()
-        )
+        ind_list = [i.strip().lower() for i in industry.split(",") if i.strip()]
+        if ind_list:
+            buyer_query = buyer_query.filter(
+                sa_func.lower(sa_func.coalesce(Buyer.industry, "")).in_(ind_list)
+            )
     if company_grading:
-        buyer_query = buyer_query.filter(
-            sa_func.lower(sa_func.coalesce(Buyer.company_grading, ""))
-            == company_grading.strip().lower()
-        )
+        cg_list = [g.strip().lower() for g in company_grading.split(",") if g.strip()]
+        if cg_list:
+            buyer_query = buyer_query.filter(
+                sa_func.lower(sa_func.coalesce(Buyer.company_grading, "")).in_(cg_list)
+            )
     if product_interest:
         buyer_query = _apply_product_category_filter(buyer_query, product_interest)
     if city:
-        buyer_query = buyer_query.filter(
-            sa_func.lower(sa_func.coalesce(Buyer.city, "")) == city.strip().lower()
-        )
+        city_list = [c.strip().lower() for c in city.split(",") if c.strip()]
+        if city_list:
+            buyer_query = buyer_query.filter(
+                sa_func.lower(sa_func.coalesce(Buyer.city, "")).in_(city_list)
+            )
     if market_role:
         try:
             role_value = MarketRole(market_role)
@@ -843,13 +854,16 @@ def _filtered_lead_table_rows(
     if country:
         from modules.countries import country_search_terms
 
-        terms = [term for term in country_search_terms(country) if term]
-        if terms:
+        country_items = [c.strip() for c in country.split(",") if c.strip()]
+        all_terms = []
+        for c_item in country_items:
+            all_terms.extend([term for term in country_search_terms(c_item) if term])
+        if all_terms:
             buyer_query = buyer_query.filter(
                 or_(
                     *[
                         sa_func.lower(sa_func.coalesce(Buyer.country, "")).like(f"%{term}%")
-                        for term in terms
+                        for term in all_terms
                     ]
                 )
             )

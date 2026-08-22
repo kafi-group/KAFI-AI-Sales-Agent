@@ -3292,6 +3292,7 @@ export function LeadsTablePage({
               {canBulkAssign && (
                 <SearchableSelect
                   label="Assign to"
+                  multiSelect={false}
                   value={bulkAssignValue}
                   onChange={(next) => {
                     setBulkAssignValue(next);
@@ -3332,6 +3333,7 @@ export function LeadsTablePage({
             <>
               <SearchableSelect
                 label="Sort by"
+                multiSelect={false}
                 value={sortSelectValue()}
                 onChange={applySortSelect}
                 options={SORT_FILTER_OPTIONS}
@@ -4103,7 +4105,7 @@ export function LeadsTablePage({
           <table className="w-full text-sm border-collapse min-w-[1400px]">
             <thead>
               <tr className={`text-slate-500 border-b border-slate-800 bg-slate-950 ${theadStickyClass}`}>
-                <th data-col="select" className={`${TH} w-12`}>
+                <th data-col="select" className={`${TH} w-12 sticky left-0 bg-slate-950 z-[1]`}>
                   <input
                     type="checkbox"
                     checked={allOnPageSelected}
@@ -4167,7 +4169,7 @@ export function LeadsTablePage({
                       editMode ? "" : "cursor-pointer hover:bg-slate-900/80"
                     } ${dirty ? "bg-amber-500/5" : ""} ${selected.has(row.id) ? "bg-slate-900/40" : ""}`}
                   >
-                    <td data-col="select" className={TD} onClick={(e) => e.stopPropagation()}>
+                    <td data-col="select" className={`${TD} sticky left-0 bg-slate-900 z-[1]`} onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={selected.has(row.id)}
