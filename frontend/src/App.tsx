@@ -130,7 +130,14 @@ function CallInitBanner() {
 }
 
 function DashboardApp() {
-  const { user, isAdmin, logout } = useAuth();
+  const {
+    user,
+    isAdmin,
+    logout,
+    impersonating,
+    impersonatorLabel,
+    switchBackToAdmin,
+  } = useAuth();
   const [tab, setTab] = useState<Tab>("inbox");
   const [tableSection, setTableSection] = useState<LeadsTableSection>("master");
   const [mailSection, setMailSection] = useState<MailSection>("inbox");
@@ -1033,7 +1040,25 @@ function DashboardApp() {
       <CallingCardOverlay />
       <BulkCallQueueHost onError={setError} />
       <FloatingDialpad onError={setError} />
-      <FloatingSalesAssistant onNavigate={handleIndexNavigate} onError={setError} />
+      {impersonating && impersonatorLabel && (
+        <div className="sticky top-0 z-50 bg-amber-500 text-slate-950 px-4 py-2 flex items-center justify-between shadow-lg text-xs sm:text-sm font-semibold border-b border-amber-600">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="font-bold shrink-0 bg-slate-950 text-amber-400 px-2 py-0.5 rounded text-[11px] uppercase tracking-wider">
+              Switched View
+            </span>
+            <span className="truncate">
+              Viewing dashboard as <strong>{displayDashboardUserLabel(user)}</strong> (Admin: {impersonatorLabel})
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void switchBackToAdmin()}
+            className="shrink-0 rounded-lg bg-slate-950 hover:bg-slate-900 text-amber-300 font-bold px-3 py-1.5 text-xs transition border border-amber-400/40 shadow-sm"
+          >
+            Return to Admin ({impersonatorLabel})
+          </button>
+        </div>
+      )}
       <div className="min-h-dvh flex">
         <InboxAlertToasts
           onOpenInbox={() => {
