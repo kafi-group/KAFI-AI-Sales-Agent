@@ -91,9 +91,9 @@ def _assignee_scope(user: AppUser) -> int | None:
     return None if _is_admin(user) else user.id
 
 
-def _team_read_scope(_user: AppUser) -> int | None:
-    """Shared read scope for team-visible feeds (client history, etc.)."""
-    return None
+def _team_read_scope(user: AppUser) -> int | None:
+    """Read scope for feeds (client history, etc.). Non-admins only see assigned leads."""
+    return None if _is_admin(user) else user.id
 
 
 def _table_assignment_filters(
@@ -107,21 +107,11 @@ def _table_assignment_filters(
     master: bool = False,
     in_interested_clients: bool = False,
 ) -> tuple[int | None, bool, bool, int | None, bool]:
-    """Resolve assignee scope for leads-table list/count queries.
+    """Resolve assignee scope for leads-table list/count queries."""
+    if not _is_admin(user):
+        # Non-admin sales user (e.g. Asim): strictly force their assigned user ID scope.
+        return (user.id, False, True, None, False)
 
-    Returns
-    -------
-    assigned_to_user_id
-        Exact assignee filter for "Leads Sent To {user}" sections.
-    unassigned_only
-        Pool sections — hide leads already sent to a sales user.
-    include_placed_outcomes
-        Whether call-outcome sections should include already-placed leads.
-    pool_for_user_id
-        Legacy shared-pool flag. Always None.
-    admin_sent_only
-        True for admin "Leads Sent To" — exclude the user's self-imports.
-    """
     placed_section = bool(call_outcome) or in_interested_clients
 
     if master:
@@ -161,13 +151,20 @@ router = APIRouter(prefix="/leads", tags=["leads"])
 
 
 @router.get("", response_model=BuyerListResponse)
-def list_leads(page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
+def list_leads(
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
     """Discover Leads list — excludes old_clients (those live only in Old clients)."""
+    assigned_id = None if _is_admin(user) else user.id
     return leads_module.list_buyers_with_scores(
         db,
         page=page,
         page_size=page_size,
         exclude_source="old_clients",
+        assigned_to_user_id=assigned_id,
     )
 
 
@@ -179,7 +176,8 @@ def company_name_suggestions(
     _user: AppUser = Depends(get_current_user),
 ):
     """Autocomplete company names from the master buyers table (all sections)."""
-    rows = leads_module.suggest_company_names(db, q=q, limit=limit)
+    assigned_id = None if _is_admin(_user) else _user.id
+    rows = leads_module.suggest_company_names(db, q=q, limit=limit, assigned_to_user_id=assigned_id)
     return CompanyNameSuggestionsResponse(
         q=q.strip(),
         rows=[CompanyNameSuggestion(**row) for row in rows],
@@ -499,7 +497,6 @@ def list_leads_table(
     master: bool = False,
     intake_method: str | None = None,
     new_search_lead_only: bool = False,
-    master_type: str = "fmcg",
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -541,7 +538,6 @@ def list_leads_table(
         admin_sent_only=admin_sent_only,
         intake_method=intake_method,
         new_search_lead_only=new_search_lead_only,
-        master_type=master_type,
     )
     return LeadTableResponse(**result)
 
@@ -568,7 +564,6 @@ def list_leads_table_ids(
     master: bool = False,
     intake_method: str | None = None,
     new_search_lead_only: bool = False,
-    master_type: str = "fmcg",
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -608,22 +603,20 @@ def list_leads_table_ids(
         admin_sent_only=admin_sent_only,
         intake_method=intake_method,
         new_search_lead_only=new_search_lead_only,
-        master_type=master_type,
     )
     return LeadTableIdsResponse(**result)
 
 
 @router.get("/table/section-counts", response_model=LeadTableSectionCountsResponse)
 def get_leads_table_section_counts(
-    master_type: str = "fmcg",
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
+    assigned_id = None if _is_admin(user) else user.id
     counts = leads_module.count_leads_table_sections(
         db,
-        assigned_to_user_id=None,
+        assigned_to_user_id=assigned_id,
         pool_for_user_id=None,
-        master_type=master_type,
     )
     counts["my_assigned"] = leads_module.count_my_assigned_leads(db, user.id)
     return LeadTableSectionCountsResponse(**counts)
@@ -1151,7 +1144,6 @@ def import_discovered_leads(
         replace_duplicates=payload.replace_duplicates,
         skip_enrichment=payload.skip_enrichment,
         assigned_to_user_id=assignee,
-        master_type=payload.master_type or "fmcg",
     )
     created_count = int(result.get("created_count") or 0)
     if created_count > 0:
@@ -1204,7 +1196,6 @@ def import_discovered_leads_async(
             skip_enrichment=payload.skip_enrichment,
             assigned_to_user_id=assignee,
             user_id=user.id,
-            master_type=payload.master_type or "fmcg",
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

@@ -1407,9 +1407,6 @@ class OutlookClient:
                     html=bool(html_body),
                     cc=cc,
                     bcc=bcc,
-                    send_mode=send_mode,
-                    record_activity=send_mode != "bulk",
-                    skip_sent_copy=send_mode == "bulk",
                 )
             if self._use_resend():
                 return self._send_resend(

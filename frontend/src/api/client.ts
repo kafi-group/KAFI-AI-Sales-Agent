@@ -38,26 +38,6 @@ function resolveApiBase(raw: unknown): string {
 
 const API_BASE = resolveApiBase(import.meta.env.VITE_API_BASE_URL);
 
-/** Session gate for AI Sales Agent module (cleared when browser tab closes). */
-export const AI_SALES_AGENT_CODE_KEY = "kafi_ai_sales_agent_code";
-
-export function getAiSalesAgentAccessCode(): string | null {
-  try {
-    return sessionStorage.getItem(AI_SALES_AGENT_CODE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setAiSalesAgentAccessCode(code: string): void {
-  sessionStorage.setItem(AI_SALES_AGENT_CODE_KEY, code);
-}
-
-function aiSalesAgentHeaders(): HeadersInit {
-  const code = getAiSalesAgentAccessCode();
-  return code ? { "X-AI-Sales-Agent-Code": code } : {};
-}
-
 /** External quotation agent (separate app). */
 export const QUOTATION_AGENT_URL =
   import.meta.env.VITE_QUOTATION_AGENT_URL ??
@@ -108,9 +88,7 @@ export function sanitizeUserFacingError(message: string): string {
 }
 
 function messageForHttpError(status: number, text: string, statusText: string): string {
-  if (status === 500 || status === 502 || status === 503 || status === 504) {
-    return HARD_RESTART_MESSAGE;
-  }
+  if (status === 500) return HARD_RESTART_MESSAGE;
   const parsed = parseErrorDetail(text, statusText || `Request failed (${status})`);
   return sanitizeUserFacingError(parsed);
 }
@@ -132,8 +110,6 @@ const RETRY_BACKOFF_MS = [600, 1_800, 3_500] as const;
 export type ApiRequestOptions = RequestInit & {
   /** Override the path-based client abort timeout. */
   timeoutMs?: number;
-  /** Retry POST/PUT/PATCH on 502/503/504 and network faults (e.g. unlock during deploy). */
-  retryTransient?: boolean;
 };
 
 function timeoutForPath(path: string): number {
@@ -162,9 +138,6 @@ function timeoutForPath(path: string): number {
     path.startsWith("/data-synthesis") ||
     path.startsWith("/inbox") ||
     path.startsWith("/email") ||
-    path.startsWith("/email-activity") ||
-    path.startsWith("/whatsapp/") ||
-    path.startsWith("/ai-mode") ||
     path.startsWith("/calls")
   ) {
     return HEAVY_FETCH_TIMEOUT_MS;
@@ -178,23 +151,13 @@ function isRetryableStatus(status: number): boolean {
 
 function networkErrorMessage(isTimeout: boolean): string {
   if (isTimeout) {
-    return "The API is taking too long — it may be restarting after deploy. Wait 30 seconds, then Ctrl + Shift + R and try again.";
+    return "Internet slow, wait a few seconds and refresh again.";
   }
   return "Cannot reach the API right now. Check your connection, then refresh. If this keeps happening, Railway may be restarting.";
 }
 
-/** True for deploy/restart/network faults — safe to retry unlock or show warm-up copy. */
-export function isTransientApiError(message: string): boolean {
-  const m = message.toLowerCase();
-  return (
-    /hard restart|taking too long|cannot reach the api|internet slow|railway may be restarting|upstream 50[234]|502|503|504/.test(
-      m,
-    )
-  );
-}
-
 async function request<T>(path: string, options?: ApiRequestOptions): Promise<T> {
-  const { timeoutMs: timeoutOverride, retryTransient, ...fetchOptions } = options ?? {};
+  const { timeoutMs: timeoutOverride, ...fetchOptions } = options ?? {};
   const headers = new Headers(authHeaders({ "Content-Type": "application/json" }));
   if (fetchOptions.headers) {
     const extra = new Headers(fetchOptions.headers);
@@ -202,8 +165,7 @@ async function request<T>(path: string, options?: ApiRequestOptions): Promise<T>
   }
 
   const method = (fetchOptions.method || "GET").toUpperCase();
-  const canRetry =
-    method === "GET" || method === "HEAD" || (Boolean(retryTransient) && method === "POST");
+  const canRetry = method === "GET" || method === "HEAD";
   const timeoutMs = timeoutOverride ?? timeoutForPath(path);
   const maxAttempts = canRetry ? RETRY_BACKOFF_MS.length + 1 : 1;
   let lastNetworkError: Error | null = null;
@@ -326,7 +288,6 @@ export interface InboxThreadListResponse {
   offset: number;
   limit: number;
   has_more: boolean;
-  triage_counts?: Record<string, number>;
 }
 
 export interface InboxMessageListResponse {
@@ -442,7 +403,6 @@ export interface KpiCounts {
   emails_after_calls?: number;
   emails_other_personal?: number;
   bulk_emails_sent: number;
-  test_emails_sent?: number;
   personal_whatsapp_sent?: number;
   bulk_whatsapp_sent?: number;
   inbox_replies: number;
@@ -490,9 +450,6 @@ export interface ManualKpiEntry {
   contact_type: string | null;
   follow_up_type: string | null;
   wechat_contacts: string | null;
-  whatsapp_status: string | null;
-  bulk_emails_sent: number | null;
-  bulk_email_country: string | null;
   remarks: string | null;
   created_at: string;
   updated_at: string;
@@ -984,11 +941,6 @@ export interface EmailActivityModeStats {
   batches_failed?: number | null;
 }
 
-export interface EmailActivityFailedReason {
-  label: string;
-  count: number;
-}
-
 export interface EmailActivityInsights {
   period_days: number | null;
   since: string | null;
@@ -997,11 +949,8 @@ export interface EmailActivityInsights {
   tracking_base_url?: string | null;
   tracking_pixel_path?: string | null;
   totals: EmailActivityModeStats;
-  regular: EmailActivityModeStats;
-  bulk: EmailActivityModeStats;
-  test: EmailActivityModeStats;
   individual: EmailActivityModeStats;
-  failed_by_reason?: EmailActivityFailedReason[];
+  bulk: EmailActivityModeStats;
   event_count: number;
 }
 
@@ -1222,7 +1171,6 @@ export interface DiscoverImportRequest {
   auto_onboard?: boolean;
   replace_duplicates?: boolean;
   skip_enrichment?: boolean;
-  master_type?: string;
 }
 
 export interface DiscoverImportResponse {
@@ -1559,12 +1507,11 @@ export interface LeadTableQuery {
   master?: boolean;
   intake_method?: string;
   new_search_lead_only?: boolean;
-  master_type?: string;
 }
 
 export type LeadTableSectionScope = Pick<
   LeadTableQuery,
-  "source" | "exclude_source" | "assigned_to_user_id" | "my_assigned" | "master" | "master_type"
+  "source" | "exclude_source" | "assigned_to_user_id" | "my_assigned" | "master"
 >;
 
 export interface WhatsAppConfig {
@@ -1807,7 +1754,6 @@ export const client = {
     if (params.master) search.set("master", "true");
     if (params.intake_method) search.set("intake_method", params.intake_method);
     if (params.new_search_lead_only) search.set("new_search_lead_only", "true");
-    if (params.master_type) search.set("master_type", params.master_type);
     const query = search.toString();
     return request<LeadTableResponse>(`/leads/table${query ? `?${query}` : ""}`);
   },
@@ -1835,7 +1781,6 @@ export const client = {
     if (params.master) search.set("master", "true");
     if (params.intake_method) search.set("intake_method", params.intake_method);
     if (params.new_search_lead_only) search.set("new_search_lead_only", "true");
-    if (params.master_type) search.set("master_type", params.master_type);
     const query = search.toString();
     return request<LeadTableIdsResponse>(`/leads/table/ids${query ? `?${query}` : ""}`);
   },
@@ -1953,8 +1898,8 @@ export const client = {
         body: JSON.stringify({ lead_ids: leadIds, in_list: inList }),
       },
     ),
-  getLeadsTableSectionCounts: (masterType?: string) =>
-    request<LeadTableSectionCountsResponse>(`/leads/table/section-counts${masterType ? `?master_type=${encodeURIComponent(masterType)}` : ""}`),
+  getLeadsTableSectionCounts: () =>
+    request<LeadTableSectionCountsResponse>("/leads/table/section-counts"),
   dedupeLeadsTable: (params: LeadTableSectionScope = {}) => {
     const search = new URLSearchParams();
     if (params.source) search.set("source", params.source);
@@ -2430,9 +2375,6 @@ export const client = {
     contact_type?: string | null;
     follow_up_type?: string | null;
     wechat_contacts?: string | null;
-    whatsapp_status?: string | null;
-    bulk_emails_sent?: number | null;
-    bulk_email_country?: string | null;
     remarks?: string | null;
   }) =>
     request<ManualKpiEntry>("/kpi/manual", {
@@ -2449,9 +2391,6 @@ export const client = {
       contact_type: string | null;
       follow_up_type: string | null;
       wechat_contacts: string | null;
-      whatsapp_status: string | null;
-      bulk_emails_sent: number | null;
-      bulk_email_country: string | null;
       remarks: string | null;
     }>,
   ) =>
@@ -3184,124 +3123,7 @@ export const client = {
       method: "POST",
       body: JSON.stringify({ buyer_id: buyerId }),
     }),
-
-  // ── AI Sales Agent ─────────────────────────────────────────────────────────
-  unlockAiSalesAgent: (access_code: string) =>
-    request<{ ok: boolean }>("/ai-sales-agent/unlock", {
-      method: "POST",
-      body: JSON.stringify({ access_code }),
-      retryTransient: true,
-      timeoutMs: 45_000,
-    }),
-  listAiSalesAgentRunners: () =>
-    request<{ runners: AiSalesAgentRunner[] }>("/ai-sales-agent/runners", {
-      headers: aiSalesAgentHeaders(),
-    }),
-  listAiSalesAgentTasks: (params: {
-    persona?: string;
-    status?: string;
-    limit?: number;
-  } = {}) => {
-    const query = new URLSearchParams();
-    if (params.persona) query.set("persona", params.persona);
-    if (params.status) query.set("status", params.status);
-    if (params.limit) query.set("limit", String(params.limit));
-    const qs = query.toString();
-    return request<{ tasks: AiSalesAgentTask[] }>(
-      `/ai-sales-agent/tasks${qs ? `?${qs}` : ""}`,
-      { headers: aiSalesAgentHeaders() },
-    );
-  },
-  assignAiSalesAgentTasks: (data: {
-    persona: string;
-    buyer_ids: number[];
-    contact_ids?: (number | null)[];
-  }) =>
-    request<{ tasks: AiSalesAgentTask[] }>("/ai-sales-agent/tasks/assign", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  queueAiSalesAgentSelfTest: (data: {
-    persona: string;
-    phone: string;
-    contact_name?: string;
-  }) =>
-    request<{ task: AiSalesAgentTask }>("/ai-sales-agent/tasks/self-test", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  deleteAiSalesAgentTask: (taskId: number) =>
-    request<void>(`/ai-sales-agent/tasks/${taskId}`, {
-      method: "DELETE",
-      headers: aiSalesAgentHeaders(),
-    }),
-  skipAiSalesAgentTask: (taskId: number) =>
-    request<AiSalesAgentTask>(`/ai-sales-agent/tasks/${taskId}/skip`, {
-      method: "POST",
-      headers: aiSalesAgentHeaders(),
-    }),
-  startAiSalesAgentRunner: (persona: string) =>
-    request<AiSalesAgentRunner>("/ai-sales-agent/runners/start", {
-      method: "POST",
-      headers: aiSalesAgentHeaders(),
-      body: JSON.stringify({ persona }),
-    }),
-  pauseAiSalesAgentRunner: (persona: string) =>
-    request<AiSalesAgentRunner>("/ai-sales-agent/runners/pause", {
-      method: "POST",
-      headers: aiSalesAgentHeaders(),
-      body: JSON.stringify({ persona }),
-    }),
-  getAiSalesAgentBriefing: (buyerId: number, contactId?: number) => {
-    const qs = contactId ? `?contact_id=${contactId}` : "";
-    return request<AiSalesAgentBriefing>(
-      `/ai-sales-agent/briefing/${buyerId}${qs}`,
-      { headers: aiSalesAgentHeaders() },
-    );
-  },
 };
-
-export interface AiSalesAgentRunner {
-  persona: string;
-  display_name: string;
-  gender_label: string;
-  app_username: string;
-  voice: string;
-  status: string;
-  current_task_id: number | null;
-  current_task: AiSalesAgentTask | null;
-  pending_count: number;
-  twilio_ready: boolean;
-}
-
-export interface AiSalesAgentTask {
-  id: number;
-  persona: string;
-  buyer_id: number;
-  contact_id: number | null;
-  company_name: string | null;
-  contact_name: string | null;
-  contact_phone: string | null;
-  country?: string | null;
-  status: string;
-  interaction_id: number | null;
-  call_sid: string | null;
-  outcome: string | null;
-  remarks: string | null;
-  error_message: string | null;
-  ready?: boolean;
-  warnings?: string[];
-  created_at: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-}
-
-export interface AiSalesAgentBriefing {
-  buyer_id: number;
-  ready: boolean;
-  warnings: string[];
-  context_text: string;
-}
 
 export interface AiModeSettings {
   user_id: number;

@@ -5,7 +5,6 @@ import {
   type ManualKpiEntry,
   type ManualKpiPeriod,
 } from "../api/client";
-import { CountrySelect } from "./CountrySelect";
 
 interface ManualKpiSectionProps {
   anchorDate: string;
@@ -24,7 +23,6 @@ const MANUAL_PERIOD_OPTIONS: { value: ManualKpiPeriod; label: string }[] = [
 const CONTACT_TYPES = ["Phone", "Call", "WhatsApp", "Email", "No"];
 const FOLLOW_UP_TYPES = ["Email", "WhatsApp", "Call", "No"];
 const WECHAT_OPTIONS = ["No", "Yes"];
-const WHATSAPP_STATUS_OPTIONS = ["", "Updated"];
 
 type DraftRow = ManualKpiEntry & { _dirty?: boolean };
 
@@ -73,16 +71,9 @@ export function ManualKpiSection({
 
   function updateLocal(id: number, field: keyof ManualKpiEntry, value: string) {
     setRows((prev) =>
-      prev.map((row) => {
-        if (row.id !== id) return row;
-        if (field === "bulk_emails_sent") {
-          const trimmed = value.trim();
-          const parsed =
-            trimmed === "" ? null : Number.isFinite(Number(trimmed)) ? Number(trimmed) : row.bulk_emails_sent;
-          return { ...row, bulk_emails_sent: parsed, _dirty: true };
-        }
-        return { ...row, [field]: value, _dirty: true };
-      }),
+      prev.map((row) =>
+        row.id === id ? { ...row, [field]: value, _dirty: true } : row,
+      ),
     );
   }
 
@@ -97,9 +88,6 @@ export function ManualKpiSection({
         contact_type: row.contact_type || null,
         follow_up_type: row.follow_up_type || null,
         wechat_contacts: row.wechat_contacts || null,
-        whatsapp_status: row.whatsapp_status || null,
-        bulk_emails_sent: row.bulk_emails_sent,
-        bulk_email_country: row.bulk_email_country || null,
         remarks: row.remarks || null,
       });
       setRows((prev) =>
@@ -219,20 +207,17 @@ export function ManualKpiSection({
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-slate-800">
-          <table className="min-w-[1400px] w-full text-sm border-collapse">
+          <table className="min-w-[1100px] w-full text-sm border-collapse">
             <thead>
               <tr className="border-b border-slate-800 bg-slate-950 text-xs uppercase text-slate-500">
                 {isAdmin && <th className="px-2 py-2 text-left font-medium">User</th>}
                 <th className="px-2 py-2 text-left font-medium w-28">Date</th>
                 <th className="px-2 py-2 text-left font-medium min-w-[120px]">Person Name</th>
                 <th className="px-2 py-2 text-left font-medium min-w-[160px]">Company</th>
-                <th className="px-2 py-2 text-left font-medium w-36">Country</th>
+                <th className="px-2 py-2 text-left font-medium w-28">Country</th>
                 <th className="px-2 py-2 text-left font-medium w-28">Contact Type</th>
                 <th className="px-2 py-2 text-left font-medium w-28">Follow Up Type</th>
                 <th className="px-2 py-2 text-left font-medium w-24">WeChat</th>
-                <th className="px-2 py-2 text-left font-medium w-32">WhatsApp status</th>
-                <th className="px-2 py-2 text-left font-medium w-24">Bulk emails</th>
-                <th className="px-2 py-2 text-left font-medium w-36">Bulk email country</th>
                 <th className="px-2 py-2 text-left font-medium min-w-[240px]">Remarks</th>
                 <th className="px-2 py-2 text-left font-medium w-28">Actions</th>
               </tr>
@@ -270,12 +255,11 @@ export function ManualKpiSection({
                     />
                   </td>
                   <td className="px-2 py-1">
-                    <CountrySelect
+                    <input
                       value={row.country || ""}
-                      onChange={(v) => updateLocal(row.id, "country", v)}
-                      allowEmpty
-                      emptyLabel="—"
-                      placeholder="Country…"
+                      onChange={(e) => updateLocal(row.id, "country", e.target.value)}
+                      className={inputClass}
+                      placeholder="Country"
                     />
                   </td>
                   <td className="px-2 py-1">
@@ -316,40 +300,6 @@ export function ManualKpiSection({
                         </option>
                       ))}
                     </select>
-                  </td>
-                  <td className="px-2 py-1">
-                    <select
-                      value={row.whatsapp_status || ""}
-                      onChange={(e) => updateLocal(row.id, "whatsapp_status", e.target.value)}
-                      className={inputClass}
-                    >
-                      <option value="">—</option>
-                      {WHATSAPP_STATUS_OPTIONS.filter(Boolean).map((v) => (
-                        <option key={v} value={v}>
-                          {v}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-2 py-1">
-                    <input
-                      type="number"
-                      min={0}
-                      value={row.bulk_emails_sent ?? ""}
-                      onChange={(e) => updateLocal(row.id, "bulk_emails_sent", e.target.value)}
-                      className={inputClass}
-                      placeholder="0"
-                    />
-                  </td>
-                  <td className="px-2 py-1">
-                    <CountrySelect
-                      value={row.bulk_email_country || ""}
-                      onChange={(v) => updateLocal(row.id, "bulk_email_country", v)}
-                      allowEmpty
-                      emptyLabel="—"
-                      placeholder="Bulk country…"
-                      multiple
-                    />
                   </td>
                   <td className="px-2 py-1">
                     <textarea

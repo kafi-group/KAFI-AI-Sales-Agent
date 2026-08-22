@@ -424,12 +424,10 @@ def resolve_contact_salutation_name(
     contact_name: str | None = None,
     company_name: str | None = None,
 ) -> str:
-    from modules.salutation import resolve_salutation_name
-
-    return resolve_salutation_name(
-        contact_name=contact_name,
-        company_name=company_name,
-    )
+    for value in (contact_name, company_name):
+        if value and str(value).strip():
+            return str(value).strip()
+    return "Sir/Madam"
 
 
 def suggest_template_variables(

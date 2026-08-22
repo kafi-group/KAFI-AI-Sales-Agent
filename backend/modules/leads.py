@@ -65,47 +65,10 @@ _SORT_FIELDS = {
 }
 
 
-# Named export reps — assignable even if role was mis-set to admin during setup.
-ASSIGNABLE_SALES_USERNAMES = frozenset(
-    {"asim", "usmankhan", "usman", "sadia", "sadiah", "rayan", "ryan", "sara", "shumyle"}
-)
-
-
-def is_assignable_sales_user(user: AppUser | None) -> bool:
-    if not user or not user.is_active:
-        return False
-    role = user.role.value if isinstance(user.role, AppUserRole) else str(user.role)
-    if role == AppUserRole.user.value:
-        return True
-    return (user.username or "").strip().lower() in ASSIGNABLE_SALES_USERNAMES
-
-
 def _assignee_label(user: AppUser | None) -> str:
     if not user:
         return "unassigned"
-    return (user.username or user.full_name or "unassigned").strip() or "unassigned"
-
-
-def repair_assignee_labels(db: Session) -> int:
-    """Sync buyers.assigned_to text from assigned_to_user_id (fixes swapped labels)."""
-    from sqlalchemy import text
-
-    result = db.execute(
-        text(
-            """
-            UPDATE buyers AS b
-            SET assigned_to = u.username
-            FROM app_users AS u
-            WHERE b.assigned_to_user_id = u.id
-              AND LOWER(TRIM(COALESCE(b.assigned_to, ''))) <> LOWER(TRIM(u.username))
-            """
-        )
-    )
-    fixed = int(result.rowcount or 0)
-    if fixed:
-        db.commit()
-        invalidate_section_counts_cache()
-    return fixed
+    return (user.full_name or user.username or "unassigned").strip() or "unassigned"
 
 
 def suggest_company_names(
@@ -113,6 +76,7 @@ def suggest_company_names(
     *,
     q: str,
     limit: int = 12,
+    assigned_to_user_id: int | None = None,
 ) -> list[dict]:
     """Typeahead from the master buyers table — helps avoid duplicate company names."""
     from sqlalchemy import case
@@ -129,12 +93,16 @@ def suggest_company_names(
     )
     pattern = f"%{safe}%"
     starts = f"{safe}%"
-    rows = (
+    q_builder = (
         db.query(Buyer)
         .filter(Buyer.company_name.isnot(None))
         .filter(Buyer.company_name != "")
         .filter(Buyer.company_name.ilike(pattern, escape="\\"))
-        .order_by(
+    )
+    if assigned_to_user_id is not None:
+        q_builder = q_builder.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
+    rows = (
+        q_builder.order_by(
             # Prefer names that start with the typed text, then alphabetical.
             case((Buyer.company_name.ilike(starts, escape="\\"), 0), else_=1),
             sa_func.lower(Buyer.company_name).asc(),
@@ -145,13 +113,11 @@ def suggest_company_names(
     )
     return [
         {
-            "id": buyer.id,
-            "company_name": buyer.company_name,
-            "country": buyer.country,
-            "industry": buyer.industry,
-            "source": buyer.source,
+            "id": b.id,
+            "company_name": b.company_name,
+            "country": b.country,
         }
-        for buyer in rows
+        for b in rows
     ]
 
 
@@ -161,7 +127,8 @@ def resolve_assignee_user(db: Session, user_id: int | None) -> AppUser | None:
     user = db.get(AppUser, user_id)
     if not user or not user.is_active:
         raise ValueError("Assignee not found or inactive")
-    if not is_assignable_sales_user(user):
+    role = user.role.value if isinstance(user.role, AppUserRole) else str(user.role)
+    if role != AppUserRole.user.value:
         raise ValueError("Leads can only be assigned to sales users")
     return user
 
@@ -543,30 +510,23 @@ def _apply_product_category_filter(buyer_query, product_interest: str):
     (e.g. "Rice, Oil") matches every category it mentions, so it shows up
     under both the "Rice" and "Oil" filters.
     """
-    from sqlalchemy import or_, and_
-    categories = [cat.strip() for cat in product_interest.split(",") if cat.strip()]
-    if not categories:
-        return buyer_query
+    label = product_interest.strip()
+    keywords = keywords_for_category(label)
+    if keywords:
+        return buyer_query.filter(Buyer.product_interest.op("~*")(_regex_or_pattern(keywords)))
 
-    clauses = []
-    for label in categories:
-        keywords = keywords_for_category(label)
-        if keywords:
-            clauses.append(Buyer.product_interest.op("~*")(_regex_or_pattern(keywords)))
-        elif label.lower() == OTHER_CATEGORY_LABEL.lower():
-            all_keywords = [kw for kws in PRODUCT_CATEGORIES.values() for kw in kws]
-            clauses.append(
-                and_(
-                    sa_func.coalesce(Buyer.product_interest, "") != "",
-                    ~Buyer.product_interest.op("~*")(_regex_or_pattern(all_keywords))
-                )
-            )
-        else:
-            clauses.append(
-                sa_func.lower(sa_func.coalesce(Buyer.product_interest, "")) == label.lower()
-            )
+    if label.lower() == OTHER_CATEGORY_LABEL.lower():
+        all_keywords = [kw for kws in PRODUCT_CATEGORIES.values() for kw in kws]
+        return buyer_query.filter(
+            sa_func.coalesce(Buyer.product_interest, "") != "",
+            ~Buyer.product_interest.op("~*")(_regex_or_pattern(all_keywords)),
+        )
 
-    return buyer_query.filter(or_(*clauses))
+    # Unknown label (e.g. a stale saved view with a raw legacy value) — fall
+    # back to the old exact-match behavior instead of returning nothing.
+    return buyer_query.filter(
+        sa_func.lower(sa_func.coalesce(Buyer.product_interest, "")) == label.lower()
+    )
 
 
 def _apply_lead_table_scope(
@@ -578,12 +538,8 @@ def _apply_lead_table_scope(
     unassigned_only: bool,
     pool_for_user_id: int | None = None,
     admin_sent_only: bool = False,
-    master_type: str | None = None,
 ):
     from sqlalchemy import or_
-
-    if master_type:
-        buyer_query = buyer_query.filter(Buyer.master_type == master_type)
 
     if assigned_to_user_id is not None:
         buyer_query = buyer_query.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
@@ -645,14 +601,6 @@ def _apply_call_outcome_scope(
     include_placed_outcomes: bool,
     in_interested_clients: bool = False,
 ):
-    # Master table and other "show everything" views skip placed-call filtering.
-    if (
-        not in_interested_clients
-        and not call_outcome
-        and include_placed_outcomes
-    ):
-        return buyer_query, set()
-
     scoped_buyer_ids = {
         row[0] for row in buyer_query.with_entities(Buyer.id).all()
     }
@@ -831,7 +779,6 @@ def _filtered_lead_table_rows(
     page: int | None = None,
     page_size: int | None = None,
     ids_only: bool = False,
-    master_type: str | None = None,
 ) -> tuple[list[dict[str, object]], int, int]:
     """Filter leads for the table.
 
@@ -848,7 +795,6 @@ def _filtered_lead_table_rows(
         unassigned_only=unassigned_only,
         pool_for_user_id=pool_for_user_id,
         admin_sent_only=admin_sent_only,
-        master_type=master_type,
     )
     buyer_query = _apply_intake_method_scope(buyer_query, intake_method=intake_method)
     if new_search_lead_only:
@@ -866,54 +812,41 @@ def _filtered_lead_table_rows(
 
     # Push cheap column filters to SQL so we never hydrate the whole section.
     if industry:
-        industries = [ind.strip().lower() for ind in industry.split(",") if ind.strip()]
-        if industries:
-            buyer_query = buyer_query.filter(
-                sa_func.lower(sa_func.coalesce(Buyer.industry, "")).in_(industries)
-            )
+        buyer_query = buyer_query.filter(
+            sa_func.lower(sa_func.coalesce(Buyer.industry, "")) == industry.strip().lower()
+        )
     if company_grading:
-        gradings = [cg.strip().lower() for cg in company_grading.split(",") if cg.strip()]
-        if gradings:
-            buyer_query = buyer_query.filter(
-                sa_func.lower(sa_func.coalesce(Buyer.company_grading, "")).in_(gradings)
-            )
+        buyer_query = buyer_query.filter(
+            sa_func.lower(sa_func.coalesce(Buyer.company_grading, ""))
+            == company_grading.strip().lower()
+        )
     if product_interest:
         buyer_query = _apply_product_category_filter(buyer_query, product_interest)
     if city:
-        cities = [c.strip().lower() for c in city.split(",") if c.strip()]
-        if cities:
-            buyer_query = buyer_query.filter(
-                sa_func.lower(sa_func.coalesce(Buyer.city, "")).in_(cities)
-            )
+        buyer_query = buyer_query.filter(
+            sa_func.lower(sa_func.coalesce(Buyer.city, "")) == city.strip().lower()
+        )
     if market_role:
-        roles = []
-        for r in market_role.split(","):
-            r_strip = r.strip()
-            try:
-                roles.append(MarketRole(r_strip))
-            except ValueError:
-                pass
-        if roles:
-            buyer_query = buyer_query.filter(Buyer.market_role.in_(roles))
+        try:
+            role_value = MarketRole(market_role)
+        except ValueError:
+            role_value = None
+        if role_value is not None:
+            buyer_query = buyer_query.filter(Buyer.market_role == role_value)
 
     if country:
         from modules.countries import country_search_terms
 
-        country_names = [c.strip() for c in country.split(",") if c.strip()]
-        all_country_filters = []
-        for c_name in country_names:
-            terms = [term for term in country_search_terms(c_name) if term]
-            if terms:
-                all_country_filters.append(
-                    or_(
-                        *[
-                            sa_func.lower(sa_func.coalesce(Buyer.country, "")).like(f"%{term}%")
-                            for term in terms
-                        ]
-                    )
+        terms = [term for term in country_search_terms(country) if term]
+        if terms:
+            buyer_query = buyer_query.filter(
+                or_(
+                    *[
+                        sa_func.lower(sa_func.coalesce(Buyer.country, "")).like(f"%{term}%")
+                        for term in terms
+                    ]
                 )
-        if all_country_filters:
-            buyer_query = buyer_query.filter(or_(*all_country_filters))
+            )
 
     query_text = (q or "").strip().lower()
     if query_text:
@@ -951,48 +884,40 @@ def _filtered_lead_table_rows(
         )
 
     if score:
-        grades = [s.strip().upper() for s in score.split(",") if s.strip()]
-        if grades:
-            ranked_score_ids = (
-                db.query(
-                    LeadScore.buyer_id.label("buyer_id"),
-                    LeadScore.score.label("score"),
-                    sa_func.row_number()
-                    .over(partition_by=LeadScore.buyer_id, order_by=LeadScore.scored_at.desc())
-                    .label("rn"),
-                )
-                .subquery()
+        grade = score.strip().upper()
+        legacy = {"HOT": "AAA", "WARM": "AA", "COLD": "A"}
+        grade = legacy.get(grade, grade)
+        ranked_score_ids = (
+            db.query(
+                LeadScore.buyer_id.label("buyer_id"),
+                LeadScore.score.label("score"),
+                sa_func.row_number()
+                .over(partition_by=LeadScore.buyer_id, order_by=LeadScore.scored_at.desc())
+                .label("rn"),
             )
-            latest_scores = (
-                db.query(ranked_score_ids.c.buyer_id, ranked_score_ids.c.score)
-                .filter(ranked_score_ids.c.rn == 1)
-                .subquery()
+            .subquery()
+        )
+        latest_scores = (
+            db.query(ranked_score_ids.c.buyer_id, ranked_score_ids.c.score)
+            .filter(ranked_score_ids.c.rn == 1)
+            .subquery()
+        )
+        if grade == "UNSCORED":
+            buyer_query = buyer_query.outerjoin(
+                latest_scores, Buyer.id == latest_scores.c.buyer_id
+            ).filter(
+                latest_scores.c.buyer_id.is_(None),
             )
-            
-            score_clauses = []
-            has_unscored = False
-            legacy = {"HOT": "AAA", "WARM": "AA", "COLD": "A"}
-            score_labels = []
-            
-            for g in grades:
-                g = legacy.get(g, g)
-                if g == "UNSCORED":
-                    has_unscored = True
-                else:
-                    try:
-                        sl = LeadScoreLabel(g)
-                        score_labels.append(sl)
-                    except ValueError:
-                        pass
-            
-            buyer_query = buyer_query.outerjoin(latest_scores, Buyer.id == latest_scores.c.buyer_id)
-            if score_labels:
-                score_clauses.append(latest_scores.c.score.in_(score_labels))
-            if has_unscored:
-                score_clauses.append(latest_scores.c.buyer_id.is_(None))
-                
-            if score_clauses:
-                buyer_query = buyer_query.filter(or_(*score_clauses))
+        else:
+            try:
+                score_label = LeadScoreLabel(grade)
+            except ValueError:
+                score_label = None
+            if score_label is not None:
+                # AI grade filter uses lead_scores only (never spreadsheet company_grading)
+                buyer_query = buyer_query.outerjoin(
+                    latest_scores, Buyer.id == latest_scores.c.buyer_id
+                ).filter(latest_scores.c.score == score_label)
 
     sort_field = sort_by if sort_by in _SORT_FIELDS else "created_at"
     reverse = sort_dir.lower() != "asc"
@@ -1044,22 +969,18 @@ def _filtered_lead_table_rows(
     ).all()
 
     if call_recommended:
-        wants = {w.strip().lower() for w in call_recommended.split(",") if w.strip()}
+        want = call_recommended.strip().lower()
         filtered_light = []
         for buyer_id, country_val, company_name, created_at, role in light_rows:
             timing = get_call_recommendation(country_val)
             recommended = timing["call_recommended"]
             keep = False
-            for want in wants:
-                if want in {"yes", "true", "recommended"} and recommended is True:
-                    keep = True
-                    break
-                elif want in {"no", "false", "not_now", "not-now"} and recommended is False:
-                    keep = True
-                    break
-                elif want in {"unknown", "none"} and recommended is None:
-                    keep = True
-                    break
+            if want in {"yes", "true", "recommended"}:
+                keep = recommended is True
+            elif want in {"no", "false", "not_now", "not-now"}:
+                keep = recommended is False
+            elif want in {"unknown", "none"}:
+                keep = recommended is None
             if keep:
                 filtered_light.append(
                     (buyer_id, country_val, company_name, created_at, role)
@@ -1169,7 +1090,6 @@ def list_leads_table_ids(
     admin_sent_only: bool = False,
     intake_method: str | None = None,
     new_search_lead_only: bool = False,
-    master_type: str | None = None,
 ) -> dict[str, object]:
     rows, _section_total, filtered_count = _filtered_lead_table_rows(
         db,
@@ -1196,7 +1116,6 @@ def list_leads_table_ids(
         intake_method=intake_method,
         new_search_lead_only=new_search_lead_only,
         ids_only=True,
-        master_type=master_type,
     )
     return {
         "filtered_count": filtered_count,
@@ -1231,7 +1150,6 @@ def list_leads_table(
     admin_sent_only: bool = False,
     intake_method: str | None = None,
     new_search_lead_only: bool = False,
-    master_type: str | None = None,
 ) -> dict[str, object]:
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
@@ -1262,7 +1180,6 @@ def list_leads_table(
         new_search_lead_only=new_search_lead_only,
         page=page,
         page_size=page_size,
-        master_type=master_type,
     )
 
     total_pages = max(1, (filtered_count + page_size - 1) // page_size) if filtered_count else 1
@@ -1279,7 +1196,7 @@ def list_leads_table(
     }
 
 
-_SECTION_COUNTS_TTL = 120.0
+_SECTION_COUNTS_TTL = 20.0
 _SECTION_COUNTS_PREFIX = "section_counts:"
 
 
@@ -1302,7 +1219,6 @@ def count_leads_table_sections(
     *,
     assigned_to_user_id: int | None = None,
     pool_for_user_id: int | None = None,
-    master_type: str = "fmcg",
 ) -> dict[str, object]:
     """Row counts for every leads-table section in a handful of cheap queries.
 
@@ -1319,7 +1235,7 @@ def count_leads_table_sections(
 
     Results are TTL-cached for 20 s per user scope and invalidated on writes.
     """
-    cache_key = f"{_SECTION_COUNTS_PREFIX}{assigned_to_user_id}:{pool_for_user_id}:{master_type}"
+    cache_key = f"{_SECTION_COUNTS_PREFIX}{assigned_to_user_id}:{pool_for_user_id}"
     cached = cache.get(cache_key)
     if cached is not MISS:
         return cached  # type: ignore[return-value]
@@ -1328,7 +1244,6 @@ def count_leads_table_sections(
         db,
         assigned_to_user_id=assigned_to_user_id,
         pool_for_user_id=pool_for_user_id,
-        master_type=master_type,
     )
     cache.set(cache_key, result, ttl=_SECTION_COUNTS_TTL)
     return result
@@ -1339,96 +1254,72 @@ def _compute_section_counts(
     *,
     assigned_to_user_id: int | None = None,
     pool_for_user_id: int | None = None,
-    master_type: str = "fmcg",
 ) -> dict[str, object]:
-    from sqlalchemy import case, or_
-
     from modules.calls import latest_call_outcomes_by_buyer
 
-    src = sa_func.lower(sa_func.coalesce(Buyer.source, ""))
-    incomplete = INCOMPLETE_ARCHIVES_SOURCE.lower()
-    scraped = [s.lower() for s in SCRAPED_LEAD_SOURCES]
-
-    base = db.query(Buyer)
-    if master_type:
-        base = base.filter(Buyer.master_type == master_type)
+    buyer_query = db.query(
+        Buyer.id, Buyer.source, Buyer.assigned_to_user_id, Buyer.assigned_by_user_id
+    )
     if pool_for_user_id is not None:
-        base = base.filter(
+        from sqlalchemy import or_
+
+        # Legacy shared-pool mode (kept for callers); prefer exact assignee.
+        buyer_query = buyer_query.filter(
             or_(
                 Buyer.assigned_to_user_id.is_(None),
                 Buyer.assigned_to_user_id == pool_for_user_id,
             )
         )
     elif assigned_to_user_id is not None:
-        base = base.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
+        buyer_query = buyer_query.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
 
-    agg = base.with_entities(
-        sa_func.sum(case((src == incomplete, 1), else_=0)).label("incomplete"),
-        sa_func.sum(case((src == "old_clients", 1), else_=0)).label("old_clients"),
-        sa_func.sum(case((src == "hyperstore_targeted", 1), else_=0)).label("hyperstore"),
-        sa_func.sum(case((src == "targeted_distributor", 1), else_=0)).label(
-            "targeted_distributor"
-        ),
-        sa_func.sum(case((src == "targeted_client", 1), else_=0)).label("targeted_client"),
-        sa_func.sum(case((src != incomplete, 1), else_=0)).label("master"),
-    ).one()
-
+    incomplete_archives_ids: set[int] = set()
+    old_client_ids: set[int] = set()
+    other_ids: set[int] = set()
+    unassigned_old_ids: set[int] = set()
+    unassigned_other_ids: set[int] = set()
+    new_search_lead_ids: set[int] = set()
     by_assignee: dict[str, int] = {}
-    if pool_for_user_id is None:
-        assignee_rows = (
-            base.filter(
-                Buyer.assigned_to_user_id.isnot(None),
-                Buyer.assigned_by_user_id.isnot(None),
-            )
-            .with_entities(Buyer.assigned_to_user_id, sa_func.count(Buyer.id))
-            .group_by(Buyer.assigned_to_user_id)
-            .all()
-        )
-        by_assignee = {
-            str(uid): int(cnt) for uid, cnt in assignee_rows if uid is not None
-        }
+    pool_counts = {key: 0 for key in TARGETED_POOL_SOURCES}
 
-    new_search_lead_ids = {
-        int(row[0])
-        for row in base.filter(
-            Buyer.assigned_to_user_id.is_(None),
-            src.in_(scraped),
-        )
-        .with_entities(Buyer.id)
-        .all()
-    }
+    for buyer_id, source, assignee_id, assigned_by_id in buyer_query.all():
+        source_key = (source or "").strip().lower()
+        if source_key in pool_counts:
+            pool_counts[source_key] += 1
+        is_incomplete = source_key == INCOMPLETE_ARCHIVES_SOURCE
+        is_old = source_key == "old_clients"
+        if is_incomplete:
+            incomplete_archives_ids.add(buyer_id)
+        elif is_old:
+            old_client_ids.add(buyer_id)
+        else:
+            other_ids.add(buyer_id)
 
-    all_ids = {
-        int(row[0])
-        for row in base.with_entities(Buyer.id).filter(src != incomplete).all()
-    }
-    old_client_ids = {
-        int(row[0])
-        for row in base.with_entities(Buyer.id).filter(src == "old_clients").all()
-    }
-    other_ids = all_ids - old_client_ids
+        if assignee_id is None:
+            if is_old:
+                unassigned_old_ids.add(buyer_id)
+            else:
+                unassigned_other_ids.add(buyer_id)
+            if is_new_search_lead_source(source):
+                new_search_lead_ids.add(buyer_id)
+        elif pool_for_user_id is None and assigned_by_id is not None:
+            # Admin "Leads Sent To" badges — only admin-sent leads, not self-imports.
+            key = str(assignee_id)
+            by_assignee[key] = by_assignee.get(key, 0) + 1
 
-    # Global latest outcomes (no huge IN clause) — filter to scoped ids in Python.
-    outcomes = latest_call_outcomes_by_buyer(db, buyer_ids=None)
+    all_ids = old_client_ids | other_ids
+    outcomes = latest_call_outcomes_by_buyer(db, buyer_ids=all_ids)
 
-    interested_ids = {
-        bid for bid, v in outcomes.items() if v == "interested" and bid in all_ids
-    }
-    follow_up_ids = {
-        bid for bid, v in outcomes.items() if v == "follow_up" and bid in all_ids
-    }
-    not_interested_ids = {
-        bid for bid, v in outcomes.items() if v == "not_interested" and bid in all_ids
-    }
-    not_received_ids = {
-        bid for bid, v in outcomes.items() if v == "not_received_call" and bid in all_ids
-    }
+    interested_ids = {bid for bid, v in outcomes.items() if v == "interested"}
+    follow_up_ids = {bid for bid, v in outcomes.items() if v == "follow_up"}
+    not_interested_ids = {bid for bid, v in outcomes.items() if v == "not_interested"}
+    not_received_ids = {bid for bid, v in outcomes.items() if v == "not_received_call"}
     placed_ids = interested_ids | follow_up_ids | not_interested_ids | not_received_ids
 
     listed_interested_ids: set[int] = set()
     if all_ids:
         listed_interested_ids = {
-            int(row[0])
+            row[0]
             for row in db.query(Buyer.id)
             .filter(
                 Buyer.id.in_(all_ids),
@@ -1439,11 +1330,13 @@ def _compute_section_counts(
     placed_ids |= listed_interested_ids
 
     if pool_for_user_id is not None:
+        # Sales user scope already filtered to unassigned + own assignments.
         all_count = len(other_ids - placed_ids)
         old_count = len(old_client_ids - placed_ids)
     elif assigned_to_user_id is None:
+        # Admin: New search lead = unassigned AI/scraped only; Old clients = all rows.
         all_count = len(new_search_lead_ids - placed_ids)
-        old_count = int(agg.old_clients or 0)
+        old_count = len(old_client_ids)
     else:
         all_count = len(other_ids - placed_ids)
         old_count = len(old_client_ids - placed_ids)
@@ -1455,14 +1348,13 @@ def _compute_section_counts(
         "sales_interested_clients": len(listed_interested_ids),
         "not_interested_clients": len(not_interested_ids),
         "not_received_call_clients": len(not_received_ids),
-        "master": int(agg.master or 0)
-        if pool_for_user_id is None and assigned_to_user_id is None
-        else 0,
+        # Admin master table: every lead (assigned + unassigned, all sources).
+        "master": len(all_ids) if pool_for_user_id is None and assigned_to_user_id is None else 0,
         "by_assignee": by_assignee if pool_for_user_id is None else {},
-        "hyperstore_targeted": int(agg.hyperstore or 0),
-        "targeted_distributor": int(agg.targeted_distributor or 0),
-        "targeted_client": int(agg.targeted_client or 0),
-        "incomplete_archives": int(agg.incomplete or 0),
+        "hyperstore_targeted": pool_counts.get("hyperstore_targeted", 0),
+        "targeted_distributor": pool_counts.get("targeted_distributor", 0),
+        "targeted_client": pool_counts.get("targeted_client", 0),
+        "incomplete_archives": len(incomplete_archives_ids),
     }
 
 
@@ -1559,20 +1451,16 @@ def update_lead_table_row(
         ):
             from modules import ai_mode as ai_mode_module
 
-            try:
-                ai_mode_module.record_lead_transfer(
-                    db,
-                    buyer_ids=[buyer_id],
-                    to_user_id=int(new_assignee_id),
-                    to_label=buyer.assigned_to or _assignee_label(
-                        resolve_assignee_user(db, int(new_assignee_id))
-                    ),
-                    by_user_id=by_user_id,
-                    commit=False,
-                )
-            except Exception:
-                # Lead assignee is already set — don't fail the admin assign action.
-                pass
+            ai_mode_module.record_lead_transfer(
+                db,
+                buyer_ids=[buyer_id],
+                to_user_id=int(new_assignee_id),
+                to_label=buyer.assigned_to or _assignee_label(
+                    resolve_assignee_user(db, int(new_assignee_id))
+                ),
+                by_user_id=by_user_id,
+                commit=False,
+            )
         db.commit()
         db.refresh(buyer)
         data = {k: v for k, v in data.items() if k not in {"assigned_to_user_id", "assigned_to"}}
@@ -2151,17 +2039,14 @@ def bulk_assign_lead_table_rows(
     if assigned_ids and assigned_to_user_id is not None:
         from modules import ai_mode as ai_mode_module
 
-        try:
-            transfer_event = ai_mode_module.record_lead_transfer(
-                db,
-                buyer_ids=assigned_ids,
-                to_user_id=assigned_to_user_id,
-                to_label=label,
-                by_user_id=by_user_id,
-                commit=False,
-            )
-        except Exception:
-            transfer_event = None
+        transfer_event = ai_mode_module.record_lead_transfer(
+            db,
+            buyer_ids=assigned_ids,
+            to_user_id=assigned_to_user_id,
+            to_label=label,
+            by_user_id=by_user_id,
+            commit=False,
+        )
 
     db.commit()
 

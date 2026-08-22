@@ -17,7 +17,7 @@ interface EmailActivityPageProps {
 }
 
 const PAGE_SIZE = 25;
-const POLL_MS = 30_000;
+const POLL_MS = 12_000;
 
 type InsightsPreset = 1 | 7 | 30 | 90 | null | "range";
 
@@ -169,11 +169,9 @@ export function EmailActivityPage({
   const [insights, setInsights] = useState<EmailActivityInsights | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    setLoadError(null);
     try {
       const result = await client.listEmailActivity({
         page,
@@ -187,14 +185,13 @@ export function EmailActivityPage({
       setUnreadCount(result.unread_count);
       onUnreadChange?.(result.unread_count);
     } catch (e) {
-      const message =
+      onError(
         e instanceof Error
           ? e.message
           : isWhatsApp
             ? "Failed to load WhatsApp activity"
-            : "Failed to load email activity";
-      setLoadError(message);
-      onError(message);
+            : "Failed to load email activity",
+      );
     } finally {
       setLoading(false);
     }
@@ -240,22 +237,8 @@ export function EmailActivityPage({
 
   useEffect(() => {
     void refresh();
-    let timer = 0;
-    const start = () => {
-      window.clearInterval(timer);
-      timer = window.setInterval(() => void refresh(), POLL_MS);
-    };
-    const stop = () => window.clearInterval(timer);
-    const sync = () => {
-      if (document.visibilityState === "visible") start();
-      else stop();
-    };
-    sync();
-    document.addEventListener("visibilitychange", sync);
-    return () => {
-      stop();
-      document.removeEventListener("visibilitychange", sync);
-    };
+    const timer = window.setInterval(() => void refresh(), POLL_MS);
+    return () => window.clearInterval(timer);
   }, [refresh]);
 
   useEffect(() => {
@@ -466,24 +449,19 @@ export function EmailActivityPage({
                 <StatTile
                   label="Success rate"
                   value={`${insights.totals.success_rate_pct}%`}
-                  hint={`${insights.totals.attempted} attempted (sent + failed)`}
+                  hint={`${insights.totals.attempted} attempted`}
                 />
               </div>
 
-              <p className="text-xs text-slate-500 -mt-1">
-                <strong>Attempted</strong> = messages we tried to send (successful + failed).
-                Opens and in-progress sends are not included.
-              </p>
-
-              <div className="grid gap-3 lg:grid-cols-3">
+              <div className="grid gap-3 lg:grid-cols-2">
                 <ModeBlock
-                  title={isWhatsApp ? "Regular WhatsApp" : "Regular emails"}
+                  title={isWhatsApp ? "Individual WhatsApp" : "Individual emails"}
                   subtitle={
                     isWhatsApp
                       ? "One-off replies and personal messages"
-                      : "Compose, inbox reply, Cc/Bcc — not bulk campaigns"
+                      : "One-off sends to a single lead"
                   }
-                  stats={insights.regular ?? insights.individual}
+                  stats={insights.individual}
                   showOpens={!isWhatsApp}
                 />
                 <ModeBlock
@@ -491,38 +469,13 @@ export function EmailActivityPage({
                   subtitle={
                     isWhatsApp
                       ? "Template campaigns from Leads / WhatsApp compose"
-                      : "Bulk Email Sender batches from Leads"
+                      : "Multi-recipient campaigns from Leads"
                   }
                   stats={insights.bulk}
                   showBatches
                   showOpens={!isWhatsApp}
                 />
-                {!isWhatsApp ? (
-                  <ModeBlock
-                    title="Test emails"
-                    subtitle="Safe test sends from mailer compose (not counted as regular or bulk)"
-                    stats={insights.test ?? insights.individual}
-                    showOpens
-                  />
-                ) : null}
               </div>
-
-              {!isWhatsApp && (insights.failed_by_reason?.length ?? 0) > 0 ? (
-                <div className="rounded-2xl border border-red-500/20 bg-red-950/20 p-4">
-                  <h4 className="text-sm font-medium text-red-100 mb-2">Why emails failed</h4>
-                  <ul className="space-y-1 text-sm text-red-200/90">
-                    {insights.failed_by_reason!.map((row) => (
-                      <li key={row.label} className="flex justify-between gap-4">
-                        <span>{row.label}</span>
-                        <span className="tabular-nums font-medium">{row.count}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="text-xs text-slate-500 mt-2">
-                    Open the activity list below for per-message error details.
-                  </p>
-                </div>
-              ) : null}
 
               {isWhatsApp ? (
                 <p className="text-xs text-slate-500">
@@ -582,22 +535,7 @@ export function EmailActivityPage({
         </div>
       )}
 
-      {loadError && rows.length === 0 ? (
-        <div className="rounded-xl border border-red-500/30 bg-red-950/30 p-6 text-center space-y-3">
-          <p className="text-red-200 font-medium">Could not load activity</p>
-          <p className="text-sm text-red-200/80">{loadError}</p>
-          <p className="text-xs text-slate-400">
-            The API may be restarting — wait 30 seconds, then hard refresh (Ctrl + Shift + R).
-          </p>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium"
-          >
-            Try again
-          </button>
-        </div>
-      ) : loading && rows.length === 0 ? (
+      {loading && rows.length === 0 ? (
         <p className="text-slate-400">
           {isWhatsApp ? "Loading WhatsApp activity…" : "Loading email activity…"}
         </p>

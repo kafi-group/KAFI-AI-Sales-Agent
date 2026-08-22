@@ -24,8 +24,6 @@ const FONT_SIZES = [
 ] as const;
 
 const COLORS = [
-  { label: "Default", value: "inherit" },
-  { label: "White", value: "#ffffff" },
   { label: "Black", value: "#111827" },
   { label: "Gray", value: "#4b5563" },
   { label: "Red", value: "#b91c1c" },
@@ -150,58 +148,6 @@ export function EmailBodyEditor({
     run(command, commandValue);
   }
 
-  function onPaste(e: React.ClipboardEvent<HTMLDivElement>) {
-    if (disabled) return;
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const item of items) {
-      if (!item.type.startsWith("image/")) continue;
-      e.preventDefault();
-      const file = item.getAsFile();
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        const src = typeof reader.result === "string" ? reader.result : "";
-        if (!src) return;
-        editorRef.current?.focus();
-        document.execCommand(
-          "insertHTML",
-          false,
-          `<p><img src="${src}" alt="Pasted image" class="rte-pasted-img" style="max-width:min(320px,100%);height:auto;" /></p><p><br></p>`,
-        );
-        emitChange();
-      };
-      reader.readAsDataURL(file);
-      return;
-    }
-  }
-
-  function onEditorClick(e: React.MouseEvent<HTMLDivElement>) {
-    const target = e.target;
-    if (!(target instanceof HTMLImageElement)) return;
-    const el = editorRef.current;
-    if (!el) return;
-    el.querySelectorAll("img.rte-img-selected").forEach((img) => {
-      img.classList.remove("rte-img-selected");
-    });
-    target.classList.add("rte-img-selected");
-  }
-
-  function onEditorKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
-    if (e.key !== "Delete" && e.key !== "Backspace") return;
-    const el = editorRef.current;
-    if (!el) return;
-    const selectedImg = el.querySelector("img.rte-img-selected");
-    if (!selectedImg) return;
-    e.preventDefault();
-    const parent = selectedImg.parentElement;
-    selectedImg.remove();
-    if (parent && parent.tagName === "P" && !parent.textContent?.trim() && parent.childElementCount === 0) {
-      parent.remove();
-    }
-    emitChange();
-  }
-
   const minHeight = Math.max(8, rows) * 1.5;
 
   return (
@@ -306,15 +252,9 @@ export function EmailBodyEditor({
         data-placeholder={placeholder}
         onInput={emitChange}
         onBlur={emitChange}
-        onPaste={onPaste}
-        onClick={onEditorClick}
-        onKeyDown={onEditorKeyDown}
         className="rte-editor"
         style={{ minHeight: `${minHeight}rem` }}
       />
-      <p className="rte-hint text-xs opacity-70 mt-1">
-        Paste images from clipboard — they stay small. Click an image, then press Delete to remove it.
-      </p>
     </div>
   );
 }

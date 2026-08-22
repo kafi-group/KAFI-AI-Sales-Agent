@@ -35,7 +35,6 @@ export type Tab =
   | "chatbot"
   | "kpi"
   | "ai-mode"
-  | "ai-sales-agent"
   | "users"
   | "settings";
 
@@ -163,8 +162,6 @@ interface AppSidebarProps {
   /** Desktop sidebar visible (< lg always uses mobile drawer). */
   desktopOpen?: boolean;
   onToggleDesktop?: () => void;
-  masterType?: string;
-  onMasterTypeChange?: (masterType: string) => void;
 }
 
 export function AppSidebar({
@@ -182,12 +179,10 @@ export function AppSidebar({
   onOpenSalesAssistant,
   userLabel,
   userRole,
-  desktopOpen = true,
-  onToggleDesktop,
   mobileOpen = false,
   onMobileClose,
-  masterType = "fmcg",
-  onMasterTypeChange,
+  desktopOpen = true,
+  onToggleDesktop,
 }: AppSidebarProps) {
   const {
     isAdmin,
@@ -317,21 +312,6 @@ export function AppSidebar({
         </div>
 
         <nav className="flex-1 overflow-y-auto overscroll-contain px-3 py-4 space-y-1">
-          {/* Active Workspace / Master Selection */}
-          <div className="px-3 py-2 bg-slate-950/40 rounded-lg border border-slate-800/80 mb-3">
-            <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-1">
-              Active Master List
-            </label>
-            <select
-              value={masterType}
-              onChange={(e) => onMasterTypeChange?.(e.target.value)}
-              className="w-full bg-slate-900 text-slate-100 text-xs rounded-md border border-slate-700 px-2 py-1.5 focus:outline-none focus:border-violet-600 focus:ring-1 focus:ring-violet-600 cursor-pointer"
-            >
-              <option value="fmcg">FMCG</option>
-              <option value="minerals_ores">Minerals & Ores</option>
-              <option value="other_items">Other Items</option>
-            </select>
-          </div>
           {navItems.map((item) => {
             if ("openMailer" in item && item.openMailer) {
               return (

@@ -448,7 +448,19 @@ def list_threads(
         threads = group_messages_into_threads(stamped, mailbox_email=account.email)
         if unread_only:
             threads = [t for t in threads if t.get("unread_count", 0) > 0]
-        visible = threads
+        from modules import mail_labels as labels_module
+        from db.session import SessionLocal
+
+        db = SessionLocal()
+        try:
+            labels = labels_module.list_labels(db, user.id)
+            visible = [
+                t
+                for t in threads
+                if not labels_module.thread_matches_label_rules(t, labels)
+            ]
+        finally:
+            db.close()
         from modules.inbox_triage import enrich_thread_with_triage
 
         visible = [enrich_thread_with_triage(t) for t in visible]
@@ -466,11 +478,6 @@ def list_threads(
                     pass
             kept.append(t)
         visible = kept
-        triage_counts: dict[str, int] = {"": len(visible)}
-        for t in visible:
-            cat = (t.get("triage_category") or "").strip().lower()
-            if cat:
-                triage_counts[cat] = triage_counts.get(cat, 0) + 1
         triage_key = (triage_category or "").strip().lower()
         if triage_key:
             visible = [t for t in visible if (t.get("triage_category") or "") == triage_key]
@@ -488,7 +495,6 @@ def list_threads(
             "offset": offset,
             "limit": limit,
             "has_more": len(visible) > offset + limit or window < total_estimate,
-            "triage_counts": triage_counts,
         }
 
 

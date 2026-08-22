@@ -11,7 +11,6 @@ class BuyerCreate(BaseModel):
     industry: Optional[str] = None
     linkedin_company_url: Optional[str] = None
     source: Optional[str] = "manual"
-    master_type: Optional[str] = "fmcg"
 
 
 class BuyerRead(BaseModel):
@@ -33,7 +32,6 @@ class BuyerRead(BaseModel):
     created_at: datetime
     latest_score: Optional[str] = None
     score_reasoning: Optional[str] = None
-    master_type: Optional[str] = None
 
 
 class BuyerListResponse(BaseModel):
@@ -501,7 +499,6 @@ class LeadTableRowRead(BaseModel):
     producer_tier: Optional[str] = None
     producer_conversion_pct: Optional[float] = None
     producer_tier_reasoning: Optional[str] = None
-    master_type: Optional[str] = None
 
 
 class LeadTableRowUpdate(BaseModel):
@@ -742,11 +739,8 @@ class EmailActivityInsights(BaseModel):
     tracking_base_url: str | None = None
     tracking_pixel_path: str | None = None
     totals: EmailActivityModeStats
-    regular: EmailActivityModeStats
+    individual: EmailActivityModeStats
     bulk: EmailActivityModeStats
-    test: EmailActivityModeStats
-    individual: EmailActivityModeStats  # legacy alias for regular
-    failed_by_reason: list[dict[str, Any]] = Field(default_factory=list)
     event_count: int = 0
 
 
@@ -887,7 +881,6 @@ class DiscoverImportRequest(BaseModel):
     auto_onboard: bool = False
     replace_duplicates: bool = False
     skip_enrichment: bool = False
-    master_type: Optional[str] = "fmcg"
 
 
 class LeadTableDedupeGroup(BaseModel):
@@ -1270,7 +1263,6 @@ class InboxThreadListResponse(BaseModel):
     offset: int = 0
     limit: int = 50
     has_more: bool = False
-    triage_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class InboxMessageListResponse(BaseModel):
@@ -1490,9 +1482,6 @@ class ManualKpiEntryRead(BaseModel):
     contact_type: Optional[str] = None
     follow_up_type: Optional[str] = None
     wechat_contacts: Optional[str] = None
-    whatsapp_status: Optional[str] = None
-    bulk_emails_sent: Optional[int] = None
-    bulk_email_country: Optional[str] = None
     remarks: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -1506,9 +1495,6 @@ class ManualKpiEntryCreate(BaseModel):
     contact_type: Optional[str] = None
     follow_up_type: Optional[str] = None
     wechat_contacts: Optional[str] = None
-    whatsapp_status: Optional[str] = None
-    bulk_emails_sent: Optional[int] = None
-    bulk_email_country: Optional[str] = None
     remarks: Optional[str] = None
 
 
@@ -1520,9 +1506,6 @@ class ManualKpiEntryUpdate(BaseModel):
     contact_type: Optional[str] = None
     follow_up_type: Optional[str] = None
     wechat_contacts: Optional[str] = None
-    whatsapp_status: Optional[str] = None
-    bulk_emails_sent: Optional[int] = None
-    bulk_email_country: Optional[str] = None
     remarks: Optional[str] = None
 
 

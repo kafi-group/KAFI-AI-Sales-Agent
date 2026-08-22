@@ -3555,7 +3555,6 @@ def import_candidates(
     skip_enrichment: bool = False,
     assigned_to_user_id: int | None = None,
     progress_callback: Callable[[int, str, dict[str, int]], None] | None = None,
-    master_type: str = "fmcg",
 ) -> dict[str, Any]:
     from modules import leads as leads_module
     from modules.audit import log_action
@@ -3874,7 +3873,6 @@ def import_candidates(
                     "remarks": (raw.get("remarks") or None),
                     "remarks_03": (raw.get("remarks_03") or None),
                     "remarks_04": (raw.get("remarks_04") or None),
-                    "master_type": master_type,
                 },
                 commit=persist_each_row,
                 flush=True,

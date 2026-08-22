@@ -190,9 +190,12 @@ def list_call_history(
     page_size: int = Query(5, ge=1, le=50),
     since_days: int = Query(calls_module.CALL_HISTORY_RETENTION_DAYS, ge=1, le=366),
     db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
 ):
+    assigned_id = None if _is_admin(user) else user.id
     result = calls_module.list_call_history(
         db,
+        assigned_to_user_id=assigned_id,
         page=page,
         page_size=page_size,
         since_days=since_days,

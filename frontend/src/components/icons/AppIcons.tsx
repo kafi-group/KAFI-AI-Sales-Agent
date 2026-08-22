@@ -660,8 +660,6 @@ export function NavIcon({
   if (navId === "sales-assistant")
     return <IconBookClosed size={size} className="text-violet-400" />;
   if (navId === "ai-mode") return <IconSparkles {...props} />;
-  if (navId === "ai-sales-agent")
-    return <IconPhone size={size} className="text-violet-400" />;
   if (navId === "kpi") return <IconChart {...props} />;
   if (navId === "users") return <IconUser {...props} />;
   if (navId === "settings")

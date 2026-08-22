@@ -84,7 +84,6 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
   const [templateSearch, setTemplateSearch] = useState("");
 
   const [editingTemplateId, setEditingTemplateId] = useState<number | null>(null);
-  const [viewingTemplate, setViewingTemplate] = useState<WhatsAppTemplate | null>(null);
   const [editForm, setEditForm] = useState<WhatsAppTemplateCreateForm | null>(null);
   const [resubmitting, setResubmitting] = useState(false);
 
@@ -644,13 +643,6 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
                     )}
                   </div>
                   <div className="flex flex-col gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setViewingTemplate(template)}
-                      className="text-xs px-2.5 py-1.5 rounded-md border border-slate-600 bg-slate-800/60 text-slate-200 hover:bg-slate-700/80"
-                    >
-                      View
-                    </button>
                     {canResubmitStatus(template.status) ? (
                       <button
                         type="button"
@@ -752,83 +744,6 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
           )}
         </div>
       </div>
-
-      {viewingTemplate ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="wa-template-view-title"
-          onClick={() => setViewingTemplate(null)}
-        >
-          <div
-            className="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3 mb-4">
-              <div>
-                <h2 id="wa-template-view-title" className="text-lg font-semibold text-slate-100">
-                  {viewingTemplate.name}
-                </h2>
-                <div className="flex flex-wrap items-center gap-2 mt-2">
-                  <StatusBadge status={viewingTemplate.status} />
-                  {viewingTemplate.category ? (
-                    <span className="px-2 py-0.5 rounded text-xs border border-slate-700 bg-slate-800 text-slate-400">
-                      {viewingTemplate.category}
-                    </span>
-                  ) : null}
-                  <span className="text-xs text-slate-500">{viewingTemplate.language}</span>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setViewingTemplate(null)}
-                className="text-slate-400 hover:text-slate-200 text-sm px-2 py-1"
-              >
-                Close
-              </button>
-            </div>
-            <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-4 max-h-[50vh] overflow-y-auto">
-              <p className="text-xs uppercase tracking-wide text-slate-500 mb-2">Message body</p>
-              <p className="text-sm text-slate-200 whitespace-pre-wrap">
-                {viewingTemplate.body_text || "(No body text stored for this template.)"}
-              </p>
-            </div>
-            {viewingTemplate.rejection_reason ? (
-              <p className="text-xs text-red-300/90 mt-3">
-                Rejection reason: {viewingTemplate.rejection_reason}
-              </p>
-            ) : null}
-            {viewingTemplate.variable_count > 0 ? (
-              <p className="text-xs text-slate-500 mt-2">
-                {viewingTemplate.variable_count} variable
-                {viewingTemplate.variable_count === 1 ? "" : "s"} (e.g. {"{{1}}"}, {"{{2}}"})
-              </p>
-            ) : null}
-            <div className="flex justify-end gap-2 mt-4">
-              {viewingTemplate.status === "approved" ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    startDuplicateFromTemplate(viewingTemplate);
-                    setViewingTemplate(null);
-                  }}
-                  className="text-xs px-3 py-1.5 rounded-md border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20"
-                >
-                  Duplicate & edit
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => setViewingTemplate(null)}
-                className="text-xs px-3 py-1.5 rounded-md border border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }

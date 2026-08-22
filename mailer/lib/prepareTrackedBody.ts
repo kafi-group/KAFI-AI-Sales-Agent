@@ -27,7 +27,7 @@ export async function prepareTrackedBody(options: {
   subject: string;
   body: string;
   buyer_id?: number;
-  send_mode?: "individual" | "regular" | "bulk" | "test";
+  send_mode?: "individual" | "bulk";
 }): Promise<PrepareTrackedResult> {
   const base = apiBase();
   if (!base) {
@@ -55,7 +55,7 @@ export async function prepareTrackedBody(options: {
         subject: options.subject,
         body: options.body,
         buyer_id: options.buyer_id,
-        send_mode: options.send_mode || "regular",
+        send_mode: options.send_mode || "individual",
       }),
       cache: "no-store",
     });

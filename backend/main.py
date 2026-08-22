@@ -8,7 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from api import (
     agent_bridge,
     ai_mode,
-    ai_sales_agent,
     auth,
     calls,
     chatbot,
@@ -174,29 +173,6 @@ async def lifespan(app: FastAPI):
         print(f"WARNING: startup seed/admin failed: {exc}", flush=True)
 
     print("Application startup complete.", flush=True)
-
-    def _deferred_startup_tasks() -> None:
-        db = SessionLocal()
-        try:
-            from modules.leads import repair_assignee_labels
-
-            label_repair = repair_assignee_labels(db)
-            if label_repair:
-                print(
-                    f"Background: synced {label_repair} lead assignee label(s) to usernames.",
-                    flush=True,
-                )
-                from modules.leads import invalidate_section_counts_cache
-
-                invalidate_section_counts_cache()
-        except Exception as exc:
-            print(f"WARNING: deferred startup tasks failed: {exc}", flush=True)
-        finally:
-            db.close()
-
-    import threading
-
-    threading.Thread(target=_deferred_startup_tasks, daemon=True).start()
 
     # With --workers >1, only one process should own the daily scheduler.
     lock_path = Path("/tmp/kafi_apscheduler.lock")
@@ -365,8 +341,6 @@ app.include_router(whatsapp.router, prefix="/api")
 app.include_router(whatsapp_personal.router, prefix="/api")
 app.include_router(whatsapp.webhooks_router, prefix="/api")
 app.include_router(ai_mode.router, prefix="/api")
-app.include_router(ai_sales_agent.router, prefix="/api")
-app.include_router(ai_sales_agent.webhooks_router, prefix="/api")
 
 
 OLD_CLIENTS_IMPORT_PARSER = "old_clients_v2"

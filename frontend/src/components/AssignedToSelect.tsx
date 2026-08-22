@@ -1,19 +1,14 @@
-import {
-  AI_SALES_ASSIGN_OPTIONS,
-  allAssigneeSelectOptions,
-  leadAssigneeLabel,
-  normalizeAssigneeValue,
-  UNASSIGNED,
-  type LeadAssigneeOption,
-} from "../utils/leadAssignees";
+import { leadAssigneeLabel, normalizeAssigneeValue, UNASSIGNED } from "../utils/leadAssignees";
 
-export type AssigneeOption = LeadAssigneeOption;
+export type AssigneeOption = {
+  value: string;
+  label: string;
+  username?: string;
+};
 
 interface AssignedToSelectProps {
   value: number | null | undefined;
-  /** Display label when assignee id is not in the options list yet. */
-  currentLabel?: string | null;
-  onChange: (userId: number | null, rawValue: string) => void;
+  onChange: (userId: number | null) => void;
   options: AssigneeOption[];
   disabled?: boolean;
   className?: string;
@@ -21,17 +16,13 @@ interface AssignedToSelectProps {
 
 export function AssignedToSelect({
   value,
-  currentLabel,
   onChange,
   options,
   disabled = false,
   className = "",
 }: AssignedToSelectProps) {
   const selectValue = normalizeAssigneeValue(value);
-  const items = allAssigneeSelectOptions(options, {
-    userId: value,
-    label: currentLabel,
-  });
+  const items: AssigneeOption[] = [{ value: UNASSIGNED, label: "Unassigned" }, ...options];
 
   if (disabled) {
     return (
@@ -46,21 +37,11 @@ export function AssignedToSelect({
       value={selectValue}
       onChange={(e) => {
         const next = e.target.value;
-        if (next === UNASSIGNED) {
-          onChange(null, next);
-          return;
-        }
-        if (next === "ai:male" || next === "ai:female") {
-          onChange(null, next);
-          return;
-        }
-        onChange(Number(next), next);
+        onChange(next === UNASSIGNED ? null : Number(next));
       }}
       disabled={disabled}
       onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-      aria-label="Assign lead to user"
-      className={`w-full rounded-md bg-slate-950 border border-slate-700 px-2 py-1.5 text-sm text-slate-200 cursor-pointer ${className}`}
+      className={`w-full rounded-md bg-slate-950 border border-slate-700 px-2 py-1.5 text-sm text-slate-200 ${className}`}
     >
       {items.map((item) => (
         <option key={item.value} value={item.value}>
@@ -70,5 +51,3 @@ export function AssignedToSelect({
     </select>
   );
 }
-
-export { AI_SALES_ASSIGN_OPTIONS };

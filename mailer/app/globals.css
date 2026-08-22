@@ -16,7 +16,7 @@
 
 html {
   /* Global +5% type / rem-based icon scale. */
-  font-size: 116%;
+  font-size: 105%;
 }
 
 html,
@@ -391,29 +391,8 @@ textarea {
   flex-shrink: 0;
 }
 
-.compose-send-mode {
-  margin: 0.75rem 0 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.compose-send-mode-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-}
-
-.compose-send-mode-options label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.9rem;
-}
-
 .compose-page {
-  max-width: min(1200px, 100%);
-  width: 100%;
+  max-width: 720px;
 }
 
 .compose-to-row {
@@ -599,39 +578,14 @@ select.template-select {
   min-height: 160px;
 }
 
-/* Ensure dark/black text pasted or colored in the editor is readable in dark mode */
-.rte-editor [style*="color: black"],
-.rte-editor [style*="color: #000000"],
-.rte-editor [style*="color: #000"],
-.rte-editor [style*="color: #111827"],
-.rte-editor [style*="color: rgb(0, 0, 0)"],
-.rte-editor [style*="color: rgb(17, 24, 39)"],
-.rte-editor font[color="black"],
-.rte-editor font[color="#000000"],
-.rte-editor font[color="#000"],
-.rte-editor font[color="#111827"] {
-  color: var(--text) !important;
-}
-
 .rte-editor:empty:before {
   content: attr(data-placeholder);
   color: #64748b;
   pointer-events: none;
 }
 
-.rte-editor img {
-  max-width: min(320px, 100%);
-  height: auto;
-  display: inline-block;
-  margin: 0.35rem 0;
-  border-radius: 6px;
-  border: 1px solid #374151;
-  cursor: pointer;
-}
-
-.rte-editor img.rte-img-selected {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.rte-editor p {
+  margin: 0 0 0.5em;
 }
 
 .rte-editor ul {

@@ -48,8 +48,6 @@ interface TwilioVoiceContextValue {
     options?: { contactName?: string; country?: string },
   ) => Promise<CallInitiateResult>;
   hangUp: () => void;
-  /** Send DTMF tones during a live call (IVR: press 1, 2, 3…). */
-  sendDigits: (digits: string) => void;
   retryInit: () => Promise<void>;
 }
 
@@ -229,19 +227,6 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
     setActiveCall(null);
   }, []);
 
-  const sendDigits = useCallback((digits: string) => {
-    const tone = (digits || "").trim();
-    if (!tone) return;
-    const call = callRef.current;
-    if (!call) return;
-    try {
-      call.sendDigits(tone);
-    } catch (err) {
-      console.error("Twilio sendDigits failed:", err);
-      setCallError(friendlyCallError(err));
-    }
-  }, []);
-
   const connectPreparedCall = useCallback((activeDevice: Device, prep: CallInitiateResult) => {
     activePrepRef.current = prep;
     setCallError(null);
@@ -382,7 +367,6 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
         placeCall,
         placeManualCall,
         hangUp,
-        sendDigits,
         retryInit,
       }}
     >

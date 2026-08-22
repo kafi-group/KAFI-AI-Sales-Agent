@@ -113,9 +113,6 @@ class Settings(BaseSettings):
     sales_assistant_gemini_fallback_models: str | None = None
     sales_assistant_gemini_max_output_tokens: int = 1024
 
-    # AI Sales Agent — assigned outbound FMCG callers (Rayan / Sara)
-    ai_sales_agent_access_code: str = "786786"
-
     # KPI Generation summaries only — separate key from GEMINI_API_KEY / chatbot
     kpi_gemini_api_key: str | None = None
     kpi_gemini_api_keys: str | None = None  # optional comma-separated extra keys

@@ -53,9 +53,6 @@ def _entry_dict(entry: ManualKpiEntry, user: AppUser | None) -> dict[str, Any]:
         "contact_type": entry.contact_type,
         "follow_up_type": entry.follow_up_type,
         "wechat_contacts": entry.wechat_contacts,
-        "whatsapp_status": entry.whatsapp_status,
-        "bulk_emails_sent": entry.bulk_emails_sent,
-        "bulk_email_country": entry.bulk_email_country,
         "remarks": entry.remarks,
         "created_at": entry.created_at,
         "updated_at": entry.updated_at,
@@ -118,9 +115,6 @@ def create_manual_kpi_entry(
     contact_type: str | None = None,
     follow_up_type: str | None = None,
     wechat_contacts: str | None = None,
-    whatsapp_status: str | None = None,
-    bulk_emails_sent: int | None = None,
-    bulk_email_country: str | None = None,
     remarks: str | None = None,
 ) -> dict[str, Any]:
     entry = ManualKpiEntry(
@@ -132,9 +126,6 @@ def create_manual_kpi_entry(
         contact_type=(contact_type or "").strip() or None,
         follow_up_type=(follow_up_type or "").strip() or None,
         wechat_contacts=(wechat_contacts or "").strip() or None,
-        whatsapp_status=(whatsapp_status or "").strip() or None,
-        bulk_emails_sent=bulk_emails_sent,
-        bulk_email_country=(bulk_email_country or "").strip() or None,
         remarks=(remarks or "").strip() or None,
     )
     db.add(entry)
@@ -165,9 +156,6 @@ def update_manual_kpi_entry(
         "contact_type",
         "follow_up_type",
         "wechat_contacts",
-        "whatsapp_status",
-        "bulk_emails_sent",
-        "bulk_email_country",
         "remarks",
     ):
         if key not in fields or fields[key] is None:
@@ -175,11 +163,6 @@ def update_manual_kpi_entry(
         value = fields[key]
         if key == "activity_date" and isinstance(value, str):
             value = date.fromisoformat(value)
-        elif key == "bulk_emails_sent":
-            if value == "" or value is None:
-                value = None
-            else:
-                value = int(value)
         elif isinstance(value, str):
             value = value.strip() or None
         setattr(entry, key, value)

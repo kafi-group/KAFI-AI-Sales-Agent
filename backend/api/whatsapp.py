@@ -371,8 +371,19 @@ def list_whatsapp_conversations(
     page: int = 1,
     page_size: int = 20,
     db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
 ):
-    rows, total = comms.list_whatsapp_conversations(db, page=page, page_size=page_size)
+    def _is_admin(u: AppUser) -> bool:
+        role = u.role.value if isinstance(u.role, AppUserRole) else str(u.role)
+        return role == AppUserRole.admin.value
+
+    assigned_id = None if _is_admin(user) else user.id
+    rows, total = comms.list_whatsapp_conversations(
+        db,
+        assigned_to_user_id=assigned_id,
+        page=page,
+        page_size=page_size,
+    )
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     total_pages = max(1, (total + page_size - 1) // page_size)

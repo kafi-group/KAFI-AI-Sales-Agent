@@ -75,7 +75,6 @@ def start_import_job(
     skip_enrichment: bool = False,
     assigned_to_user_id: int | None = None,
     user_id: int | None = None,
-    master_type: str = "fmcg",
 ) -> str:
     """Register a job and kick off the import thread. Returns the job id."""
     if len(candidates) > _MAX_RESULT_ROWS:
@@ -119,7 +118,6 @@ def start_import_job(
             "assigned_to_user_id": assigned_to_user_id,
             "user_id": user_id,
             "import_source": import_source,
-            "master_type": master_type,
         },
         daemon=True,
         name=f"lead-import-{job_id[:8]}",
@@ -138,7 +136,6 @@ def _run_import(
     assigned_to_user_id: int | None,
     user_id: int | None,
     import_source: str | None,
-    master_type: str,
 ) -> None:
     from db.session import SessionLocal
     from modules.lead_discovery import import_candidates
@@ -170,7 +167,6 @@ def _run_import(
             skip_enrichment=skip_enrichment,
             assigned_to_user_id=assigned_to_user_id,
             progress_callback=on_progress,
-            master_type=master_type,
         )
 
         _update(job_id, status="verifying")

@@ -66,13 +66,7 @@ import {
   type ColumnDef,
 } from "../hooks/useColumnVisibility";
 import { exportLeadsTableCsv } from "../utils/exportCsv";
-import {
-  AI_SALES_ASSIGN_OPTIONS,
-  isAiSalesAssignValue,
-  isAssignableSalesUser,
-  personaFromAiAssignValue,
-  UNASSIGNED,
-} from "../utils/leadAssignees";
+import { UNASSIGNED } from "../utils/leadAssignees";
 
 const SORT_FILTER_OPTIONS = [
   { value: "recent", label: "Recently added" },
@@ -113,7 +107,6 @@ interface LeadsTablePageProps {
   onError: (message: string) => void;
   onSelectLead: (leadId: number) => void;
   onSectionCountsChange?: (counts: LeadTableSectionCountsResponse) => void;
-  masterType?: string;
 }
 
 type SortField =
@@ -510,15 +503,8 @@ function sectionTitle(
   section: LeadsTableSection,
   assigneeUsername?: string | null,
   isAdmin = true,
-  masterType?: string,
 ): string {
-  if (section === "master") {
-    return masterType === "minerals_ores"
-      ? "Master Table (Minerals & Ores)"
-      : masterType === "other_items"
-      ? "Master Table (Other Items)"
-      : "Master Table (FMCG)";
-  }
+  if (section === "master") return "Master Table";
   if (section === "old_clients") return isAdmin ? "Old clients" : "Clients";
   if (section === "my_assigned") return "Assigned";
   if (section === "hyperstore_targeted") return "Hyperstore Target";
@@ -792,13 +778,11 @@ export function LeadsTablePage({
   onError,
   onSelectLead,
   onSectionCountsChange,
-  masterType = "fmcg",
 }: LeadsTablePageProps) {
   const { isAdmin, user } = useAuth();
   const initialTableViewRef = useRef(readStoredTableView(user?.id, section));
   const restoringSectionRef = useRef(false);
   const previousSectionRef = useRef(section);
-  const tableLoadSeqRef = useRef(0);
   const [assigneeOptions, setAssigneeOptions] = useState<AssigneeOption[]>([]);
   const [filters, setFilters] = useState<LeadTableFilters | null>(null);
   const [rows, setRows] = useState<LeadTableRow[]>([]);
@@ -807,7 +791,6 @@ export function LeadsTablePage({
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [loadSlowHint, setLoadSlowHint] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [drafts, setDrafts] = useState<Record<number, LeadTableRow>>({});
   const draftsRef = useRef(drafts);
@@ -816,7 +799,6 @@ export function LeadsTablePage({
   const [savingId, setSavingId] = useState<number | null>(null);
   const [assigningId, setAssigningId] = useState<number | null>(null);
   const [bulkAssignValue, setBulkAssignValue] = useState("");
-  const [bulkAiQueueValue, setBulkAiQueueValue] = useState("");
   const [bulkAssigning, setBulkAssigning] = useState(false);
   const [savingAll, setSavingAll] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
@@ -1000,22 +982,7 @@ export function LeadsTablePage({
           })),
         ),
       )
-      .catch(async () => {
-        try {
-          const users = await client.listUsers();
-          setAssigneeOptions(
-            users
-              .filter((u) => isAssignableSalesUser(u))
-              .map((u) => ({
-                value: String(u.id),
-                label: u.full_name || u.username,
-                username: u.username,
-              })),
-          );
-        } catch {
-          setAssigneeOptions([]);
-        }
-      });
+      .catch(() => setAssigneeOptions([]));
   }, [isAdmin]);
 
   useEffect(() => {
@@ -1191,7 +1158,6 @@ export function LeadsTablePage({
       q: debouncedSearch.trim() || undefined,
       sort_by: sortBy,
       sort_dir: sortDir,
-      master_type: masterType,
       ...sectionTableParams(section, intakeMethodFilter),
     }),
     [
@@ -1209,7 +1175,6 @@ export function LeadsTablePage({
       sortBy,
       sortDir,
       intakeMethodFilter,
-      masterType,
     ],
   );
 
@@ -1221,7 +1186,7 @@ export function LeadsTablePage({
   const loadSectionCounts = useCallback(async () => {
     if (!onSectionCountsChange) return;
     try {
-      const counts = await client.getLeadsTableSectionCounts(masterType);
+      const counts = await client.getLeadsTableSectionCounts();
       onSectionCountsChange({
         ...counts,
         by_assignee: counts.by_assignee ?? {},
@@ -1229,56 +1194,25 @@ export function LeadsTablePage({
     } catch {
       /* optional */
     }
-  }, [masterType, onSectionCountsChange]);
-
-  const sectionCountsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduleSectionCountsRefresh = useCallback(() => {
-    if (!onSectionCountsChange) return;
-    if (sectionCountsTimerRef.current) {
-      window.clearTimeout(sectionCountsTimerRef.current);
-    }
-    sectionCountsTimerRef.current = window.setTimeout(() => {
-      sectionCountsTimerRef.current = null;
-      void loadSectionCounts();
-    }, 2500);
-  }, [loadSectionCounts, onSectionCountsChange]);
-
-  useEffect(() => {
-    return () => {
-      if (sectionCountsTimerRef.current) {
-        window.clearTimeout(sectionCountsTimerRef.current);
-      }
-    };
-  }, []);
+  }, [onSectionCountsChange]);
 
   const loadTable = useCallback(async () => {
-    const seq = ++tableLoadSeqRef.current;
     setLoading(true);
-    setLoadSlowHint(false);
-    const slowTimer = window.setTimeout(() => {
-      if (tableLoadSeqRef.current === seq) setLoadSlowHint(true);
-    }, 12_000);
     try {
       const result = await client.listLeadsTable({
         ...tableQueryParams,
         page,
         page_size: TABLE_PAGE_SIZE,
       });
-      if (tableLoadSeqRef.current !== seq) return;
       setRows(result.rows);
       setTotal(result.total);
       setFilteredCount(result.filtered_count);
       setTotalPages(result.total_pages);
       setPage(result.page);
     } catch (e) {
-      if (tableLoadSeqRef.current !== seq) return;
       onError(e instanceof Error ? e.message : "Failed to load leads table");
     } finally {
-      window.clearTimeout(slowTimer);
-      if (tableLoadSeqRef.current === seq) {
-        setLoading(false);
-        setLoadSlowHint(false);
-      }
+      setLoading(false);
     }
   }, [onError, page, tableQueryParams]);
 
@@ -1365,7 +1299,8 @@ export function LeadsTablePage({
       .listLeadTableFilters(isOldClients || isMyAssigned ? { source: "old_clients" } : {})
       .then(setFilters)
       .catch(() => onError("Failed to load lead filters"));
-  }, [isOldClients, isMyAssigned, isMaster, onError]);
+    void loadSectionCounts();
+  }, [isOldClients, isMyAssigned, isMaster, loadSectionCounts, onError]);
 
   useEffect(() => {
     void loadTable();
@@ -1440,13 +1375,6 @@ export function LeadsTablePage({
     [drafts, originalKeys],
   );
 
-  function shouldRemoveRowOnAssign(assignedToUserId: number | null): boolean {
-    return (
-      assignedToUserId != null &&
-      (section === "all" || section === "old_clients")
-    );
-  }
-
   function applyAssigneeMove(
     rowId: number,
     updated: LeadTableRow,
@@ -1456,7 +1384,8 @@ export function LeadsTablePage({
     const assigneeChanged = previousAssigneeId !== assignedToUserId;
     const leavesPoolSection =
       assigneeChanged &&
-      shouldRemoveRowOnAssign(assignedToUserId);
+      (section === "all" || section === "old_clients") &&
+      assignedToUserId != null;
     const leavesAssignedSection =
       assigneeChanged &&
       isAssignedSection &&
@@ -1507,7 +1436,7 @@ export function LeadsTablePage({
       }
       const updated = await client.updateLeadTableRow(rowId, payload);
       applyAssigneeMove(rowId, updated, previousAssigneeId);
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
       setSaveNotice("Row saved.");
       setTimeout(() => setSaveNotice(null), 3000);
     } catch (e) {
@@ -1517,141 +1446,23 @@ export function LeadsTablePage({
     }
   }
 
-  async function queueLeadsForAiAgent(
-    buyerIds: number[],
-    persona: "male" | "female",
-    contactIds?: (number | null)[],
-  ) {
-    if (!buyerIds.length) return;
-    const label = persona === "male" ? "Rayan" : "Sara";
-    const confirmed = window.confirm(
-      `Queue ${buyerIds.length} lead${buyerIds.length === 1 ? "" : "s"} for ${label} (AI Sales Agent)?\n\n` +
-        "Each row must have a contact name and phone (Primary Mobile or Phone). " +
-        "Open AI Sales Agent, enter the access code, filter by " +
-        `${label}, then click Start calling.`,
-    );
-    if (!confirmed) return;
-    try {
-      await client.assignAiSalesAgentTasks({
-        persona,
-        buyer_ids: buyerIds,
-        contact_ids: contactIds,
-      });
-      setSaveNotice(
-        `Queued ${buyerIds.length} lead${buyerIds.length === 1 ? "" : "s"} for ${label}. ` +
-          "Open AI Sales Agent → unlock → filter " +
-          `${label} → Start calling.`,
-      );
-      setTimeout(() => setSaveNotice(null), 8000);
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to queue AI sales calls");
-    }
-  }
-
-  async function saveAssignedTo(
-    rowId: number,
-    assignedToUserId: number | null,
-    rawValue?: string,
-  ) {
+  async function saveAssignedTo(rowId: number, assignedToUserId: number | null) {
     if (!isAdmin) {
       onError("Only an admin can assign leads to users.");
       return;
     }
-    if (rawValue && isAiSalesAssignValue(rawValue)) {
-      const persona = personaFromAiAssignValue(rawValue);
-      if (persona) {
-        const row = rows.find((r) => r.id === rowId);
-        await queueLeadsForAiAgent([rowId], persona, [row?.contact_id ?? null]);
-      }
-      return;
-    }
-    const previousRow = rows.find((r) => r.id === rowId);
-    const previousAssigneeId = previousRow?.assigned_to_user_id ?? null;
-    const assigneeLabel =
-      assignedToUserId == null
-        ? "unassigned"
-        : assigneeOptions.find((o) => o.value === String(assignedToUserId))?.username ||
-          assigneeOptions.find((o) => o.value === String(assignedToUserId))?.label ||
-          "assignee";
-
-    // Optimistic UI — dropdown reflects choice immediately.
-    setRows((prev) =>
-      prev.map((row) =>
-        row.id === rowId
-          ? {
-              ...row,
-              assigned_to_user_id: assignedToUserId,
-              assigned_to: assigneeLabel,
-            }
-          : row,
-      ),
-    );
-
     setAssigningId(rowId);
     try {
+      const previousAssigneeId = rows.find((r) => r.id === rowId)?.assigned_to_user_id ?? null;
       const updated = await client.updateLeadTableRow(rowId, {
         assigned_to_user_id: assignedToUserId,
       });
       applyAssigneeMove(rowId, updated, previousAssigneeId);
-      scheduleSectionCountsRefresh();
-      const label =
-        assignedToUserId == null
-          ? "Unassigned"
-          : updated.assigned_to && updated.assigned_to !== "unassigned"
-            ? updated.assigned_to
-            : assigneeOptions.find((o) => o.value === String(assignedToUserId))?.username ||
-              assigneeOptions.find((o) => o.value === String(assignedToUserId))?.label ||
-              "assignee";
-      setSaveNotice(`Assigned to ${label}.`);
-      setTimeout(() => setSaveNotice(null), 3000);
+      await loadSectionCounts();
     } catch (e) {
-      if (previousRow) {
-        setRows((prev) =>
-          prev.map((row) => (row.id === rowId ? previousRow : row)),
-        );
-      }
       onError(e instanceof Error ? e.message : "Failed to update assignee");
     } finally {
       setAssigningId(null);
-    }
-  }
-
-  async function bulkQueueAiSelected(rawValue: string) {
-    if (!canBulkAssign || !rawValue || bulkAssigning) {
-      setBulkAiQueueValue("");
-      return;
-    }
-    const persona = personaFromAiAssignValue(rawValue);
-    if (!persona) {
-      setBulkAiQueueValue("");
-      return;
-    }
-    let ids = [...selected];
-    if (ids.length === 0 && filteredCount > 0) {
-      setBulkAssigning(true);
-      try {
-        const result = await client.listLeadsTableIds(tableQueryParams);
-        ids = result.ids;
-      } catch (e) {
-        onError(e instanceof Error ? e.message : "Failed to load matching leads");
-        setBulkAiQueueValue("");
-        setBulkAssigning(false);
-        return;
-      }
-    }
-    if (!ids.length) {
-      setBulkAiQueueValue("");
-      setBulkAssigning(false);
-      return;
-    }
-    setBulkAssigning(true);
-    try {
-      const contactIds = ids.map((id) => rows.find((r) => r.id === id)?.contact_id ?? null);
-      await queueLeadsForAiAgent(ids, persona, contactIds);
-      clearSelection();
-    } finally {
-      setBulkAiQueueValue("");
-      setBulkAssigning(false);
     }
   }
 
@@ -1710,39 +1521,23 @@ export function LeadsTablePage({
     try {
       const result = await client.bulkAssignLeadTableRows(ids, assignedToUserId);
       const movedIds = new Set(result.assigned_ids);
-      const removeFromView = shouldRemoveRowOnAssign(assignedToUserId);
       if (movedIds.size > 0) {
-        if (removeFromView) {
-          setRows((prev) => prev.filter((row) => !movedIds.has(row.id)));
-          setDrafts((prev) => {
-            const next = { ...prev };
-            for (const id of movedIds) delete next[id];
-            return next;
-          });
-          setOriginalKeys((prev) => {
-            const next = { ...prev };
-            for (const id of movedIds) delete next[id];
-            return next;
-          });
-          setTotal((prev) => Math.max(0, prev - movedIds.size));
-          setFilteredCount((prev) => Math.max(0, prev - movedIds.size));
-        } else {
-          const nextLabel = result.assigned_to || label;
-          setRows((prev) =>
-            prev.map((row) =>
-              movedIds.has(row.id)
-                ? {
-                    ...row,
-                    assigned_to_user_id: assignedToUserId,
-                    assigned_to: nextLabel,
-                  }
-                : row,
-            ),
-          );
-        }
+        setRows((prev) => prev.filter((row) => !movedIds.has(row.id)));
+        setDrafts((prev) => {
+          const next = { ...prev };
+          for (const id of movedIds) delete next[id];
+          return next;
+        });
+        setOriginalKeys((prev) => {
+          const next = { ...prev };
+          for (const id of movedIds) delete next[id];
+          return next;
+        });
+        setTotal((prev) => Math.max(0, prev - movedIds.size));
+        setFilteredCount((prev) => Math.max(0, prev - movedIds.size));
       }
       clearSelection();
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
       setSaveNotice(
         assignedToUserId == null
           ? `Unassigned ${result.assigned_count} lead${result.assigned_count === 1 ? "" : "s"}.`
@@ -1781,7 +1576,7 @@ export function LeadsTablePage({
         setFilteredCount((prev) => Math.max(0, prev - movedIds.size));
         clearSelection();
       }
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
       setSaveNotice(
         `Moved ${result.updated_count} lead${result.updated_count === 1 ? "" : "s"} to ${labels[pool]}.`,
       );
@@ -1806,7 +1601,7 @@ export function LeadsTablePage({
           : "New search leads";
     const confirmed = window.confirm(
       fromSource === "discover_leads"
-        ? `Fetch up to 50 matching leads from Discover Leads into ${sectionTitle(section, assigneeUsername, isAdmin, masterType)}? Existing rows stay — only new matches are added as AI / search leads.`
+        ? `Fetch up to 50 matching leads from Discover Leads into ${sectionTitle(section, assigneeUsername, isAdmin)}? Existing rows stay — only new matches are added as AI / search leads.`
         : `Intelligently add up to 50 matching leads from ${label} into this targeted pool? Existing rows stay — only new matches are added.`,
     );
     if (!confirmed) return;
@@ -1816,7 +1611,7 @@ export function LeadsTablePage({
     try {
       const result = await client.populateTargetPool(section, fromSource, 50);
       await loadTable();
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
       setSaveNotice(
         result.updated_count > 0
           ? fromSource === "discover_leads"
@@ -1859,7 +1654,7 @@ export function LeadsTablePage({
         setFilteredCount((prev) => Math.max(0, prev - moved.size));
         clearSelection();
       }
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
       setSaveNotice(
         `Promoted ${result.promoted_count} row${result.promoted_count === 1 ? "" : "s"} to Old clients.`,
       );
@@ -1886,7 +1681,7 @@ export function LeadsTablePage({
     try {
       const result = await client.classifyTargetPoolsFromOldClients();
       await loadTable();
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
       const hyper = result.hyperstore_targeted?.updated_count ?? 0;
       const dist = result.targeted_distributor?.updated_count ?? 0;
       setSaveNotice(
@@ -1919,7 +1714,7 @@ export function LeadsTablePage({
         setFilteredCount((prev) => Math.max(0, prev - removed.size));
         clearSelection();
       }
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
       setSaveNotice(
         `Removed ${result.updated_count} lead${result.updated_count === 1 ? "" : "s"} from this pool.`,
       );
@@ -1961,7 +1756,7 @@ export function LeadsTablePage({
         setFilteredCount((prev) => Math.max(0, prev - movedIds.size));
       }
       clearSelection();
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
       setSaveNotice(
         inList
           ? `Moved ${result.updated_count} lead${result.updated_count === 1 ? "" : "s"} to Interested Clients.`
@@ -2088,7 +1883,7 @@ export function LeadsTablePage({
     }
   }
 
-  function renderAssignedToCell(row: LeadTableRow, _draft: LeadTableRow) {
+  function renderAssignedToCell(row: LeadTableRow, draft: LeadTableRow) {
     if (!isAdmin) {
       return (
         <span className="text-sm text-slate-300">
@@ -2100,11 +1895,26 @@ export function LeadsTablePage({
     }
     return (
       <AssignedToSelect
-        value={row.assigned_to_user_id}
-        currentLabel={row.assigned_to}
+        value={editMode ? draft.assigned_to_user_id : row.assigned_to_user_id}
         options={assigneeOptions}
-        onChange={(userId, rawValue) => {
-          void saveAssignedTo(row.id, userId, rawValue);
+        onChange={(userId) => {
+          if (editMode) {
+            const label =
+              userId == null
+                ? "unassigned"
+                : assigneeOptions.find((o) => o.value === String(userId))?.label ||
+                  "unassigned";
+            setDrafts((prev) => ({
+              ...prev,
+              [row.id]: {
+                ...(prev[row.id] ?? row),
+                assigned_to_user_id: userId,
+                assigned_to: label,
+              },
+            }));
+            return;
+          }
+          void saveAssignedTo(row.id, userId);
         }}
         disabled={assigningId === row.id || savingId === row.id}
       />
@@ -2280,7 +2090,7 @@ export function LeadsTablePage({
     try {
       const result = await client.postImportClean(sectionTableScope(section));
       await loadTable();
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
       const s = result.summary;
       setSaveNotice(
         `Post-import clean — emails ${s.emails_fixed}, company fields ${s.company_fields_fixed}, ` +
@@ -2319,7 +2129,7 @@ export function LeadsTablePage({
     try {
       const result = await client.cleanCompanyFields(sectionTableScope(section));
       await loadTable();
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
       const ruleSummary = Object.entries(result.by_rule)
         .map(([rule, count]) => `${rule}: ${count}`)
         .join(", ");
@@ -2362,7 +2172,7 @@ export function LeadsTablePage({
     try {
       const result = await client.cleanupSparseCsvLeads(sectionTableScope(section));
       await loadTable();
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
       setSaveNotice(
         result.removed_count > 0
           ? `Removed ${result.removed_count} empty import${result.removed_count === 1 ? "" : "s"}`
@@ -2399,7 +2209,7 @@ export function LeadsTablePage({
     try {
       const result = await client.dedupeLeadsTable(sectionTableScope(section));
       await loadTable();
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
       setSaveNotice(
         result.removed_count > 0
           ? `Removed ${result.removed_count} duplicate lead${result.removed_count === 1 ? "" : "s"} (${result.groups.length} group${result.groups.length === 1 ? "" : "s"})`
@@ -2436,7 +2246,7 @@ export function LeadsTablePage({
     try {
       const result = await client.repairLocationCompanyNames(sectionTableScope(section));
       await loadTable();
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
       const fixed = result.repaired_with_name + result.relocated_name_empty;
       setSaveNotice(
         fixed > 0
@@ -2476,7 +2286,7 @@ export function LeadsTablePage({
     try {
       const result = await client.removeOldClientOverlaps();
       await loadTable();
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
       setSaveNotice(
         result.removed_count > 0
           ? `Removed ${result.removed_count} lead${result.removed_count === 1 ? "" : "s"} that matched Old clients (${result.kept_count} discovery lead${result.kept_count === 1 ? "" : "s"} kept)`
@@ -2580,7 +2390,7 @@ export function LeadsTablePage({
       setSaveNotice(`Deleted ${removed.size} lead${removed.size === 1 ? "" : "s"}`);
       const updatedFilters = await client.listLeadTableFilters();
       setFilters(updatedFilters);
-      scheduleSectionCountsRefresh();
+      await loadSectionCounts();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to delete lead(s)");
     } finally {
@@ -2731,7 +2541,7 @@ export function LeadsTablePage({
       <div className="flex items-start justify-between gap-4 flex-wrap shrink-0">
         <div>
           <h2 className="text-lg font-medium text-slate-100">
-            {sectionTitle(section, assigneeUsername, isAdmin, masterType)}
+            {sectionTitle(section, assigneeUsername, isAdmin)}
           </h2>
           <p className="text-sm text-slate-500 mt-1">
             {sectionDescription(section, assigneeUsername, isAdmin)}
@@ -2790,8 +2600,7 @@ export function LeadsTablePage({
             </div>
           ) : null}
           <p className="text-sm text-slate-500 mt-1">
-            {loading && rows.length === 0 ? "…" : filteredCount} matching ·{" "}
-            {loading && rows.length === 0 ? "…" : total} in section · {TABLE_PAGE_SIZE} per page
+            {filteredCount} matching · {total} in section · {TABLE_PAGE_SIZE} per page
             {selected.size > 0 ? (
               <span className="text-sky-400">
                 {" "}
@@ -3251,7 +3060,7 @@ export function LeadsTablePage({
             clearFilters();
             setPage(1);
             await loadTable();
-            scheduleSectionCountsRefresh();
+            await loadSectionCounts();
             onSelectLead(leadId);
           }}
         />
@@ -3395,7 +3204,6 @@ export function LeadsTablePage({
                 allowEmpty
                 emptyLabel="All types"
                 placeholder="Search business types…"
-                multiple
               />
 
               <SearchableSelect
@@ -3406,7 +3214,6 @@ export function LeadsTablePage({
                 allowEmpty
                 emptyLabel="All gradings"
                 placeholder="Search gradings…"
-                multiple
               />
 
               <CountrySelect
@@ -3415,7 +3222,6 @@ export function LeadsTablePage({
                 onChange={setCountry}
                 allowEmpty
                 emptyLabel="All countries"
-                multiple
               />
 
               <SearchableSelect
@@ -3424,7 +3230,6 @@ export function LeadsTablePage({
                 onChange={setCallRecommended}
                 options={CALL_RECOMMENDED_OPTIONS}
                 placeholder="Search…"
-                multiple
               />
 
               <SearchableSelect
@@ -3435,7 +3240,6 @@ export function LeadsTablePage({
                 allowEmpty
                 emptyLabel="All products"
                 placeholder="Search products…"
-                multiple
               />
 
               <SearchableSelect
@@ -3446,7 +3250,6 @@ export function LeadsTablePage({
                 allowEmpty
                 emptyLabel="All cities"
                 placeholder="Search cities…"
-                multiple
               />
 
               {isTargetedPool && intakeMethodFilter === "discover" && isAdmin ? (
@@ -3487,7 +3290,8 @@ export function LeadsTablePage({
                     (selected.size === 0 && filteredCount === 0) ||
                     bulkAssigning ||
                     deletingSelected ||
-                    editMode
+                    editMode ||
+                    assigneeOptions.length === 0
                   }
                   options={[
                     {
@@ -3512,37 +3316,6 @@ export function LeadsTablePage({
                   placeholder="Search team members…"
                 />
               )}
-              {canBulkAssign && (
-                <SearchableSelect
-                  label="Queue AI calls"
-                  value={bulkAiQueueValue}
-                  onChange={(next) => {
-                    setBulkAiQueueValue(next);
-                    void bulkQueueAiSelected(next);
-                  }}
-                  disabled={
-                    (selected.size === 0 && filteredCount === 0) ||
-                    bulkAssigning ||
-                    deletingSelected ||
-                    editMode
-                  }
-                  options={AI_SALES_ASSIGN_OPTIONS.map((option) => ({
-                    value: option.value,
-                    label: option.label,
-                  }))}
-                  allowEmpty
-                  emptyLabel={
-                    bulkAssigning
-                      ? "Queuing…"
-                      : selected.size > 0
-                        ? `Queue ${selected.size} selected for AI…`
-                        : filteredCount > 0
-                          ? `Queue all ${filteredCount} matching for AI…`
-                          : "Filter or select leads first…"
-                  }
-                  placeholder="Rayan or Sara AI agent…"
-                />
-              )}
             </>
           ) : (
             <>
@@ -3562,7 +3335,6 @@ export function LeadsTablePage({
                 allowEmpty
                 emptyLabel="All grades"
                 placeholder="Search grades…"
-                multiple
               />
 
               <SearchableSelect
@@ -3578,7 +3350,6 @@ export function LeadsTablePage({
                 allowEmpty
                 emptyLabel="All roles"
                 placeholder="Search roles…"
-                multiple
               />
 
               <CountrySelect
@@ -3587,7 +3358,6 @@ export function LeadsTablePage({
                 onChange={setCountry}
                 allowEmpty
                 emptyLabel="All countries"
-                multiple
               />
 
               <label className="block text-xs text-slate-400">
@@ -3612,7 +3382,8 @@ export function LeadsTablePage({
                     (selected.size === 0 && filteredCount === 0) ||
                     bulkAssigning ||
                     deletingSelected ||
-                    editMode
+                    editMode ||
+                    assigneeOptions.length === 0
                   }
                   options={[
                     {
@@ -3637,37 +3408,6 @@ export function LeadsTablePage({
                   placeholder="Search team members…"
                 />
               )}
-              {canBulkAssign && (
-                <SearchableSelect
-                  label="Queue AI calls"
-                  value={bulkAiQueueValue}
-                  onChange={(next) => {
-                    setBulkAiQueueValue(next);
-                    void bulkQueueAiSelected(next);
-                  }}
-                  disabled={
-                    (selected.size === 0 && filteredCount === 0) ||
-                    bulkAssigning ||
-                    deletingSelected ||
-                    editMode
-                  }
-                  options={AI_SALES_ASSIGN_OPTIONS.map((option) => ({
-                    value: option.value,
-                    label: option.label,
-                  }))}
-                  allowEmpty
-                  emptyLabel={
-                    bulkAssigning
-                      ? "Queuing…"
-                      : selected.size > 0
-                        ? `Queue ${selected.size} selected for AI…`
-                        : filteredCount > 0
-                          ? `Queue all ${filteredCount} matching for AI…`
-                          : "Filter or select leads first…"
-                  }
-                  placeholder="Rayan or Sara AI agent…"
-                />
-              )}
             </>
           )}
         </div>
@@ -3684,15 +3424,7 @@ export function LeadsTablePage({
       </div>
 
       {loading ? (
-        <div className="text-slate-400 text-sm space-y-1">
-          <p>Loading leads table…</p>
-          {loadSlowHint ? (
-            <p className="text-amber-300/90 text-xs max-w-xl">
-              Still loading — the API may be restarting after a deploy. Retrying automatically;
-              if this continues, wait 30 seconds then press Ctrl + Shift + R.
-            </p>
-          ) : null}
-        </div>
+        <p className="text-slate-400 text-sm">Loading leads table…</p>
       ) : rows.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/50 p-8 text-center space-y-3">
           <p className="text-slate-400 text-sm">
@@ -3863,9 +3595,7 @@ export function LeadsTablePage({
                       className="rounded border-slate-600 bg-slate-950"
                     />
                   </th>
-                  <th data-col="serial" className={`${TH} ${COL_SERIAL}`} title="Lead ID">
-                    S. No
-                  </th>
+                  <th data-col="serial" className={`${TH} ${COL_SERIAL}`}>S. No</th>
                   <th data-col="company" className={`${TH} ${COL_COMPANY_OLD}`}>
                     <button type="button" onClick={() => toggleSort("company_name")} className="hover:text-slate-300">
                       Company Name{sortIndicator("company_name")}
@@ -4374,9 +4104,7 @@ export function LeadsTablePage({
                     className="rounded border-slate-600 bg-slate-950"
                   />
                 </th>
-                <th data-col="serial" className={`${TH} ${COL_SERIAL}`} title="Lead ID — used when queueing AI calls">
-                  #
-                </th>
+                <th data-col="serial" className={`${TH} ${COL_SERIAL}`}>#</th>
                 <th data-col="company" className={`${TH} ${COL_COMPANY}`}>
                   <button type="button" onClick={() => toggleSort("company_name")} className="hover:text-slate-300">
                     Company name{sortIndicator("company_name")}
@@ -4762,14 +4490,13 @@ export function LeadsTablePage({
           }}
           onError={onError}
           importSource={importSource}
-          masterType={masterType}
           tableLabel={
             isOldClients
               ? isAdmin
                 ? "Old clients"
                 : "Clients"
               : isTargetedPool
-                ? sectionTitle(section, assigneeUsername, isAdmin, masterType)
+                ? sectionTitle(section, assigneeUsername, isAdmin)
                 : undefined
           }
           title={
@@ -4778,7 +4505,7 @@ export function LeadsTablePage({
                 ? "Import old clients"
                 : "Import clients"
               : isTargetedPool
-                ? `Import ${sectionTitle(section, assigneeUsername, isAdmin, masterType)}`
+                ? `Import ${sectionTitle(section, assigneeUsername, isAdmin)}`
                 : "Import leads"
           }
           description={

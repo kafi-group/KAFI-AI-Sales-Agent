@@ -38,7 +38,6 @@ import { BuyerProfile } from "./pages/BuyerProfile";
 import { CallsPage } from "./pages/CallsPage";
 import { InboxPage } from "./pages/InboxPage";
 import { AiModePage } from "./pages/AiModePage";
-import { AiSalesAgentPage } from "./pages/AiSalesAgentPage";
 import { IndexesPage } from "./pages/IndexesPage";
 import { UserManualPage } from "./pages/UserManualPage";
 import { LeadsPage } from "./pages/LeadsPage";
@@ -69,8 +68,8 @@ import {
 } from "./utils/notify";
 
 
-const INBOX_POLL_INTERVAL_MS = 30_000;
-const WHATSAPP_POLL_INTERVAL_MS = 25_000;
+const INBOX_POLL_INTERVAL_MS = 20_000;
+const WHATSAPP_POLL_INTERVAL_MS = 15_000;
 const FOLLOW_UP_POLL_INTERVAL_MS = 60_000;
 const MEETING_POLL_INTERVAL_MS = 60_000;
 const INTERESTED_ACTIVITY_POLL_INTERVAL_MS = 30_000;
@@ -116,7 +115,6 @@ function CallInitBanner() {
 
   if (!voice.initError) return null;
   const micFail = /31402|AcquisitionFailed|getting the media failed/i.test(voice.initError);
-  const warmingUp = /warming up|cannot reach the api|hard restart/i.test(voice.initError);
   return (
     <div className="mb-7 p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-100 text-sm">
       <p className="font-medium">Browser calling is not ready</p>
@@ -124,9 +122,7 @@ function CallInitBanner() {
       <p className="mt-2 text-xs text-amber-200/60">
         {micFail
           ? "Microphone access failed after permission was granted. Close other apps using the mic (Zoom/Teams/WhatsApp), use Chrome/Edge on HTTPS, unplug/replug the headset, then refresh and try again."
-          : warmingUp
-            ? "The API is restarting after deploy — wait 30–60 seconds, then Ctrl + Shift + R. Inbox and tables work without browser calling."
-            : "Refresh the page, or open Calls and try again in a moment."}
+          : "Refresh the page, or open Calls and try again in a moment. Railway may still be warming up."}
       </p>
     </div>
   );
@@ -183,7 +179,6 @@ function DashboardApp() {
   const [discoverLeadsCount, setDiscoverLeadsCount] = useState(0);
 
   const [inboxUnread, setInboxUnread] = useState(0);
-  const [masterType, setMasterType] = useState<string>("fmcg");
   const seenMessageUidsRef = useRef<Set<string> | null>(null);
   const lastInboxUnreadRef = useRef(0);
   const seenWhatsAppKeysRef = useRef<Set<string> | null>(null);
@@ -244,7 +239,7 @@ function DashboardApp() {
 
   const loadTableCounts = useCallback(async () => {
     try {
-      const counts = await client.getLeadsTableSectionCounts(masterType);
+      const counts = await client.getLeadsTableSectionCounts();
       setTableCounts({
         ...counts,
         by_assignee: counts.by_assignee ?? {},
@@ -252,11 +247,7 @@ function DashboardApp() {
     } catch {
       /* optional badges */
     }
-  }, [masterType]);
-
-  useEffect(() => {
-    void loadTableCounts();
-  }, [masterType, loadTableCounts]);
+  }, []);
 
   const loadAssigneeNavUsers = useCallback(async () => {
     try {
@@ -598,64 +589,31 @@ function DashboardApp() {
       .getEmailActivityUnreadCount("whatsapp")
       .then((r) => setWhatsappActivityUnread(r.unread_count))
       .catch(() => setWhatsappActivityUnread(0));
-
-    let inboxTimer = 0;
-    let whatsappTimer = 0;
-    let followUpTimer = 0;
-    let meetingTimer = 0;
-    let interestedActivityTimer = 0;
-    let activityTimer = 0;
-
-    function startPollers() {
-      window.clearInterval(inboxTimer);
-      window.clearInterval(whatsappTimer);
-      window.clearInterval(followUpTimer);
-      window.clearInterval(meetingTimer);
-      window.clearInterval(interestedActivityTimer);
-      window.clearInterval(activityTimer);
-      inboxTimer = window.setInterval(pollInbox, INBOX_POLL_INTERVAL_MS);
-      whatsappTimer = window.setInterval(pollWhatsAppInbox, WHATSAPP_POLL_INTERVAL_MS);
-      followUpTimer = window.setInterval(pollInterestedFollowUps, FOLLOW_UP_POLL_INTERVAL_MS);
-      meetingTimer = window.setInterval(pollQuotationMeetings, MEETING_POLL_INTERVAL_MS);
-      interestedActivityTimer = window.setInterval(
-        pollInterestedClientsActivity,
-        INTERESTED_ACTIVITY_POLL_INTERVAL_MS,
-      );
-      activityTimer = window.setInterval(() => {
-        client
-          .getEmailActivityUnreadCount("email")
-          .then((r) => setEmailActivityUnread(r.unread_count))
-          .catch(() => undefined);
-        client
-          .getEmailActivityUnreadCount("whatsapp")
-          .then((r) => setWhatsappActivityUnread(r.unread_count))
-          .catch(() => undefined);
-      }, INBOX_POLL_INTERVAL_MS);
-    }
-
-    function stopPollers() {
-      window.clearInterval(inboxTimer);
-      window.clearInterval(whatsappTimer);
-      window.clearInterval(followUpTimer);
-      window.clearInterval(meetingTimer);
-      window.clearInterval(interestedActivityTimer);
-      window.clearInterval(activityTimer);
-    }
-
-    function syncPollers() {
-      if (document.visibilityState === "visible") {
-        startPollers();
-      } else {
-        stopPollers();
-      }
-    }
-
-    syncPollers();
-    document.addEventListener("visibilitychange", syncPollers);
-
+    const inboxTimer = window.setInterval(pollInbox, INBOX_POLL_INTERVAL_MS);
+    const whatsappTimer = window.setInterval(pollWhatsAppInbox, WHATSAPP_POLL_INTERVAL_MS);
+    const followUpTimer = window.setInterval(pollInterestedFollowUps, FOLLOW_UP_POLL_INTERVAL_MS);
+    const meetingTimer = window.setInterval(pollQuotationMeetings, MEETING_POLL_INTERVAL_MS);
+    const interestedActivityTimer = window.setInterval(
+      pollInterestedClientsActivity,
+      INTERESTED_ACTIVITY_POLL_INTERVAL_MS,
+    );
+    const activityTimer = window.setInterval(() => {
+      client
+        .getEmailActivityUnreadCount("email")
+        .then((r) => setEmailActivityUnread(r.unread_count))
+        .catch(() => undefined);
+      client
+        .getEmailActivityUnreadCount("whatsapp")
+        .then((r) => setWhatsappActivityUnread(r.unread_count))
+        .catch(() => undefined);
+    }, INBOX_POLL_INTERVAL_MS);
     return () => {
-      stopPollers();
-      document.removeEventListener("visibilitychange", syncPollers);
+      window.clearInterval(inboxTimer);
+      window.clearInterval(whatsappTimer);
+      window.clearInterval(followUpTimer);
+      window.clearInterval(meetingTimer);
+      window.clearInterval(interestedActivityTimer);
+      window.clearInterval(activityTimer);
       window.removeEventListener("click", unlock);
       window.removeEventListener("keydown", unlock);
     };
@@ -861,87 +819,101 @@ function DashboardApp() {
     }
   }, [assigneeSectionUsers, tableSection]);
 
-  const assigneeNavChildren = assigneeSectionUsers.map((u) => ({
-    id: `assigned:${u.id}`,
-    label: `Leads Sent To ${u.username}`,
-    count: tableCounts.by_assignee?.[String(u.id)] ?? 0,
-  }));
+  const assigneeNavChildren = isAdmin
+    ? assigneeSectionUsers.map((u) => ({
+        id: `assigned:${u.id}`,
+        label: `Leads Sent To ${u.username}`,
+        count: tableCounts.by_assignee?.[String(u.id)] ?? 0,
+      }))
+    : [];
 
-  const masterTableLabel =
-    masterType === "minerals_ores"
-      ? "Master Table (Minerals & Ores)"
-      : masterType === "other_items"
-      ? "Master Table (Other Items)"
-      : "Master Table (FMCG)";
+  const clientSectionNavChildren = isAdmin
+    ? [
+        {
+          id: "master" as const,
+          label: "Master Table",
+          count: tableCounts.master ?? 0,
+        },
+        {
+          id: "all" as const,
+          label: "New search lead",
+          count: tableCounts.all,
+        },
+        {
+          id: "old_clients" as const,
+          label: "Old clients",
+          count: tableCounts.old_clients,
+        },
+        {
+          id: "interested_clients" as const,
+          label: "Follow up clients",
+          count: tableCounts.interested_clients,
+        },
+        {
+          id: "sales_interested_clients" as const,
+          label: "Interested Clients",
+          count: tableCounts.sales_interested_clients ?? 0,
+        },
+        {
+          id: "not_interested_clients" as const,
+          label: "Not interested",
+          count: tableCounts.not_interested_clients,
+        },
+        {
+          id: "not_received_call_clients" as const,
+          label: "Did not receive call",
+          count: tableCounts.not_received_call_clients,
+        },
+        {
+          id: "hyperstore_targeted" as const,
+          label: "Hyperstore Target",
+          count: tableCounts.hyperstore_targeted ?? 0,
+        },
+        {
+          id: "targeted_distributor" as const,
+          label: "Targeted Distributors",
+          count: tableCounts.targeted_distributor ?? 0,
+        },
+        {
+          id: "targeted_client" as const,
+          label: "Targeted Client",
+          count: tableCounts.targeted_client ?? 0,
+        },
+        {
+          id: "incomplete_archives" as const,
+          label: "Incomplete Data from Archives",
+          count: tableCounts.incomplete_archives ?? 0,
+        },
+      ]
+    : [
+        {
+          id: "my_assigned" as const,
+          label: "My Assigned Leads",
+          count: tableCounts.my_assigned ?? 0,
+        },
+        {
+          id: "sales_interested_clients" as const,
+          label: "Interested Clients",
+          count: tableCounts.sales_interested_clients ?? 0,
+        },
+        {
+          id: "interested_clients" as const,
+          label: "Follow up clients",
+          count: tableCounts.interested_clients,
+        },
+        {
+          id: "not_interested_clients" as const,
+          label: "Not interested",
+          count: tableCounts.not_interested_clients,
+        },
+        {
+          id: "not_received_call_clients" as const,
+          label: "Did not receive call",
+          count: tableCounts.not_received_call_clients,
+        },
+      ];
 
-  const clientSectionNavChildren = [
-    {
-      id: "master" as const,
-      label: masterTableLabel,
-      count: tableCounts.master ?? 0,
-    },
-    {
-      id: "all" as const,
-      label: "New search lead",
-      count: tableCounts.all,
-    },
-    {
-      id: "old_clients" as const,
-      label: "Old clients",
-      count: tableCounts.old_clients,
-    },
-    ...(!isAdmin
-      ? [
-          {
-            id: "my_assigned" as const,
-            label: "Assigned",
-            count: tableCounts.my_assigned ?? 0,
-          },
-        ]
-      : []),
-    {
-      id: "interested_clients" as const,
-      label: "Follow up clients",
-      count: tableCounts.interested_clients,
-    },
-    {
-      id: "sales_interested_clients" as const,
-      label: "Interested Clients",
-      count: tableCounts.sales_interested_clients ?? 0,
-    },
-    {
-      id: "not_interested_clients" as const,
-      label: "Not interested",
-      count: tableCounts.not_interested_clients,
-    },
-    {
-      id: "not_received_call_clients" as const,
-      label: "Did not receive call",
-      count: tableCounts.not_received_call_clients,
-    },
-    {
-      id: "hyperstore_targeted" as const,
-      label: "Hyperstore Target",
-      count: tableCounts.hyperstore_targeted ?? 0,
-    },
-    {
-      id: "targeted_distributor" as const,
-      label: "Targeted Distributors",
-      count: tableCounts.targeted_distributor ?? 0,
-    },
-    {
-      id: "targeted_client" as const,
-      label: "Targeted Client",
-      count: tableCounts.targeted_client ?? 0,
-    },
-    {
-      id: "incomplete_archives" as const,
-      label: "Incomplete Data from Archives",
-      count: tableCounts.incomplete_archives ?? 0,
-    },
-  ];
-
-  const defaultTableSection: LeadsTableSection = "master";
+  const defaultTableSection: LeadsTableSection = isAdmin ? "master" : "my_assigned";
 
   const indexAssignees = assigneeSectionUsers.map((u) => ({
     id: u.id,
@@ -979,8 +951,8 @@ function DashboardApp() {
     ...(isAdmin ? [{ id: "data-synthesis" as const, label: "Smart Data Clean & Merge", count: 0 }] : []),
     {
       id: "table",
-      label: masterTableLabel,
-      count: tableCounts.master ?? 0,
+      label: isAdmin ? "Master Table" : "My Assigned Leads",
+      count: isAdmin ? (tableCounts.master ?? 0) : (tableCounts.my_assigned ?? 0),
       children: [
         ...clientSectionNavChildren,
         ...assigneeNavChildren,
@@ -1042,7 +1014,6 @@ function DashboardApp() {
       count: personalizedEmailCount,
       alert: personalizedEmailCount > 0,
     },
-    { id: "ai-sales-agent", label: "AI Sales Agent", count: 0 },
     { id: "kpi", label: "KPI", count: 0 },
     ...(isAdmin ? [{ id: "users" as const, label: "Users", count: 0 }] : []),
     ...(isAdmin ? [{ id: "settings" as const, label: "Settings", count: 0 }] : []),
@@ -1100,8 +1071,6 @@ function DashboardApp() {
           onMobileClose={() => setMobileNavOpen(false)}
           desktopOpen={sidebarOpen}
           onToggleDesktop={toggleSidebar}
-          masterType={masterType}
-          onMasterTypeChange={setMasterType}
         />
 
         <div className="flex-1 min-w-0 flex flex-col overflow-x-hidden transition-[margin] duration-200">
@@ -1264,7 +1233,6 @@ function DashboardApp() {
                 onError={setError}
                 onSelectLead={handleSelectLead}
                 onSectionCountsChange={setTableCounts}
-                masterType={masterType}
               />
             )}
             {tab === "inbox" && (
@@ -1317,9 +1285,6 @@ function DashboardApp() {
                   setLeadsTableRefreshToken((token) => token + 1);
                 }}
               />
-            )}
-            {tab === "ai-sales-agent" && (
-              <AiSalesAgentPage onError={setError} />
             )}
             {tab === "kpi" && <KpiPage onError={setError} />}
             {tab === "users" && isAdmin && (

@@ -21,7 +21,7 @@ interface WhatsAppInboxPageProps {
   onInitialContactConsumed?: () => void;
 }
 
-const POLL_MS = 20_000;
+const POLL_MS = 12_000;
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return "";
@@ -124,6 +124,14 @@ export function WhatsAppInboxPage({
     void loadConfig();
   }, [refreshConversations, loadConfig]);
 
+  // Live refresh so inbound webhook messages appear without a manual reload.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void refreshConversations({ silent: true });
+    }, POLL_MS);
+    return () => window.clearInterval(id);
+  }, [refreshConversations]);
+
   const loadThread = useCallback(
     async (conversation: WhatsAppConversation, options?: { silent?: boolean }) => {
       if (!options?.silent) {
@@ -147,30 +155,6 @@ export function WhatsAppInboxPage({
     },
     [onError, refreshConversations],
   );
-
-  // Live refresh so inbound webhook messages appear without a manual reload.
-  useEffect(() => {
-    let timer = 0;
-    const tick = () => {
-      void refreshConversations({ silent: true });
-      if (selected) void loadThread(selected, { silent: true });
-    };
-    const start = () => {
-      window.clearInterval(timer);
-      timer = window.setInterval(tick, POLL_MS);
-    };
-    const stop = () => window.clearInterval(timer);
-    const sync = () => {
-      if (document.visibilityState === "visible") start();
-      else stop();
-    };
-    sync();
-    document.addEventListener("visibilitychange", sync);
-    return () => {
-      stop();
-      document.removeEventListener("visibilitychange", sync);
-    };
-  }, [refreshConversations, selected, loadThread]);
 
   // Deep-link from buyer profile: open a specific contact thread once.
   useEffect(() => {

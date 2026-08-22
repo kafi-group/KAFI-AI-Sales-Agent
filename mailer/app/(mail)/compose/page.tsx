@@ -27,16 +27,6 @@ function defaultComposeBody(contactName: string, companyName: string): string {
   return plainTextToEditorHtml(`Dear ${name},\n\n`);
 }
 
-type ComposeSendMode = "regular" | "test";
-
-const TEST_EMAIL_OPTIONS = (
-  process.env.NEXT_PUBLIC_TEST_EMAIL_RECIPIENTS ||
-  "khalid.paracha@kafi-group.com,izaanmujeeb420@gmail.com"
-)
-  .split(",")
-  .map((s) => s.trim())
-  .filter((s) => s.includes("@"));
-
 function ComposeInner() {
   const params = useSearchParams();
   const router = useRouter();
@@ -59,8 +49,6 @@ function ComposeInner() {
   });
   const [templateId, setTemplateId] = useState("");
   const [writeMode, setWriteMode] = useState<ComposeWriteMode>("free");
-  const [sendMode, setSendMode] = useState<ComposeSendMode>("regular");
-  const [testRecipient, setTestRecipient] = useState(TEST_EMAIL_OPTIONS[0] || "");
   const [sending, setSending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [attachments, setAttachments] = useState<
@@ -149,28 +137,22 @@ function ComposeInner() {
       setError("To, subject, and body are required");
       return;
     }
-    const effectiveTo = sendMode === "test" ? testRecipient.trim() : to.trim();
-    if (!effectiveTo.includes("@")) {
-      setError("Pick a valid test email address");
-      return;
-    }
     setSending(true);
     setError(null);
     try {
       const payload = {
         auth_token: auth,
-        to: effectiveTo,
-        cc: sendMode === "test" ? undefined : cc.trim() || undefined,
-        bcc: sendMode === "test" ? undefined : bcc.trim() || undefined,
-        subject: sendMode === "test" ? `[TEST] ${subject.trim()}` : subject.trim(),
+        to: to.trim(),
+        cc: cc.trim() || undefined,
+        bcc: bcc.trim() || undefined,
+        subject: subject.trim(),
         body,
         html: true,
-        buyer_id: sendMode === "test" ? undefined : buyerId,
+        buyer_id: buyerId,
         company_name: mergeCompany.trim() || undefined,
         contact_name: mergeContact.trim() || undefined,
         designation: mergeDesignation.trim() || undefined,
         attachments: attachments.length ? attachments : undefined,
-        send_mode: sendMode,
       };
       const tooLarge = attachmentSizeMessage(estimateSendPayloadBytes(payload));
       if (tooLarge) {
@@ -251,51 +233,6 @@ function ComposeInner() {
           ) : null}
         </p>
       )}
-
-      <div className="compose-send-mode">
-        <span className="muted small">Send as</span>
-        <div className="compose-send-mode-options">
-          <label>
-            <input
-              type="radio"
-              name="send-mode"
-              checked={sendMode === "regular"}
-              onChange={() => setSendMode("regular")}
-            />
-            Regular
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="send-mode"
-              checked={sendMode === "test"}
-              onChange={() => setSendMode("test")}
-            />
-            Test
-          </label>
-        </div>
-        <p className="muted small">
-          Regular = one-off email (Cc/Bcc OK). Bulk campaigns use the Bulk Email Sender from
-          Leads. Test sends to a safe inbox and is tracked separately in KPI.
-        </p>
-      </div>
-
-      {sendMode === "test" ? (
-        <label className="block">
-          <span className="muted small">Test recipient</span>
-          <select
-            value={testRecipient}
-            onChange={(e) => setTestRecipient(e.target.value)}
-            className="w-full"
-          >
-            {TEST_EMAIL_OPTIONS.map((email) => (
-              <option key={email} value={email}>
-                {email}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
 
       <div className="compose-to-row">
         <label className="compose-to-label">To</label>

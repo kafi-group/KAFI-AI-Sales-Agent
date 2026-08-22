@@ -18,8 +18,6 @@ const FONT_SIZES = [
 ] as const;
 
 const COLORS = [
-  { label: "Default", value: "inherit" },
-  { label: "White", value: "#ffffff" },
   { label: "Black", value: "#111827" },
   { label: "Gray", value: "#4b5563" },
   { label: "Red", value: "#b91c1c" },

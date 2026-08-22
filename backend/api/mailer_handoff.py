@@ -19,7 +19,6 @@ from modules import auth as auth_module
 from modules import buyers as buyers_module
 from modules import email_activity
 from modules.mailbox_accounts import resolve_user_mailbox
-from modules.salutation import is_real_contact_name
 
 router = APIRouter(prefix="/mailer", tags=["mailer"])
 
@@ -100,14 +99,13 @@ class MailerActivityReportRequest(BaseModel):
     buyer_id: Optional[int] = None
     interaction_id: Optional[int] = None
     error_message: Optional[str] = None
-    send_mode: Literal["individual", "regular", "bulk", "test"] = "regular"
+    send_mode: Literal["individual", "bulk"] = "individual"
     # When False, skip per-message rows (bulk summary events only).
     record_send: bool = True
     selected_count: Optional[int] = None
     sent_count: Optional[int] = None
     failed_count: Optional[int] = None
     skipped_count: Optional[int] = None
-    recipient_emails: list[str] = Field(default_factory=list, max_length=500)
 
 
 class MailerPrepareTrackedRequest(BaseModel):
@@ -118,7 +116,7 @@ class MailerPrepareTrackedRequest(BaseModel):
     subject: str = Field(min_length=1)
     body: str = Field(min_length=1)
     buyer_id: Optional[int] = None
-    send_mode: Literal["individual", "regular", "bulk", "test"] = "regular"
+    send_mode: Literal["individual", "bulk"] = "individual"
 
 
 class MailerPrepareTrackedResponse(BaseModel):
@@ -316,9 +314,7 @@ def create_mailer_handoff(
             {
                 "buyer_id": buyer_id,
                 "company_name": buyer.company_name,
-                "contact_name": contact.full_name
-                if is_real_contact_name(contact.full_name)
-                else "",
+                "contact_name": contact.full_name,
                 "contact_email": contact.email.strip(),
             }
         )
@@ -418,7 +414,7 @@ def prepare_mailer_tracked_body(
     to_email = (payload.to or "").strip()
     subject = (payload.subject or "").strip()
     body = payload.body or ""
-    mode = email_activity.normalize_send_mode(payload.send_mode)
+    mode = "bulk" if payload.send_mode == "bulk" else "individual"
 
     interaction = email_tracking.ensure_outbound_tracking_interaction(
         db,
@@ -439,11 +435,10 @@ def prepare_mailer_tracked_body(
     plain, html_body = email_tracking.build_tracked_bodies(
         body,
         interaction_id=interaction.id,
-        send_mode="bulk" if mode == "bulk" else "individual",
+        send_mode=mode,
     )
     pixel = email_tracking.open_pixel_url(
-        interaction_id=interaction.id,
-        send_mode="bulk" if mode == "bulk" else "individual",
+        interaction_id=interaction.id, send_mode=mode
     )
     return MailerPrepareTrackedResponse(
         body=html_body or plain or body,
@@ -537,36 +532,19 @@ def report_mailer_activity(
                 "selected_count": selected,
                 "mode": "mailer",
                 "send_mode": "bulk",
-                "sent_by": user.username,
-                "subject": (payload.subject or "").strip() or None,
-                "recipient_emails": (payload.recipient_emails or [])[:500],
             },
         )
         if sent_count > 0:
-            recipient_preview = ", ".join((payload.recipient_emails or [])[:5])
-            if len(payload.recipient_emails or []) > 5:
-                recipient_preview += f" (+{len(payload.recipient_emails) - 5} more)"
             activity_module.log_activity(
                 db,
                 user_id=user.id,
                 activity_type=activity_module.BULK_EMAILS_SENT,
                 title="Bulk emails sent",
-                summary=(
-                    f"{user.username} sent {sent_count} bulk email"
-                    f"{'s' if sent_count != 1 else ''}"
-                    f"{(' to ' + recipient_preview) if recipient_preview else ''}"
-                ),
+                summary=f"Sent {sent_count} bulk email{'s' if sent_count != 1 else ''} (mailer)",
                 quantity=sent_count,
                 entity_type="email_activity",
                 entity_id=event.id,
-                details={
-                    "mode": "mailer",
-                    "sent_count": sent_count,
-                    "failed_count": failed_count,
-                    "sent_by": user.username,
-                    "recipient_emails": (payload.recipient_emails or [])[:100],
-                    "subject": (payload.subject or "").strip() or None,
-                },
+                details={"mode": "mailer", "sent_count": sent_count},
             )
         return MailerActivityReportResponse(
             recorded=True, event_id=event.id, event_type=event.event_type
@@ -576,7 +554,7 @@ def report_mailer_activity(
     if not payload.record_send:
         return MailerActivityReportResponse(recorded=False)
 
-    mode = email_activity.normalize_send_mode(payload.send_mode)
+    mode = "bulk" if payload.send_mode == "bulk" else "individual"
     to_email = (payload.to_email or "").strip() or None
     subject = (payload.subject or "").strip() or None
     company_name = company or (to_email.split("@")[-1] if to_email else "recipient")

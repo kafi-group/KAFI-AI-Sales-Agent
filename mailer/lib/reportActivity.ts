@@ -11,14 +11,13 @@ export type ActivityReport = {
   buyer_id?: number;
   interaction_id?: number;
   error_message?: string;
-  send_mode?: "individual" | "regular" | "bulk" | "test";
+  send_mode?: "individual" | "bulk";
   /** When false, skip per-message rows (bulk uses summary events only). */
   record_send?: boolean;
   selected_count?: number;
   sent_count?: number;
   failed_count?: number;
   skipped_count?: number;
-  recipient_emails?: string[];
 };
 
 function apiBase(): string {
@@ -61,13 +60,12 @@ export async function reportMailerActivity(
     buyer_id: report.buyer_id,
     interaction_id: report.interaction_id,
     error_message: report.error_message,
-    send_mode: report.send_mode || "regular",
+    send_mode: report.send_mode || "individual",
     record_send: report.record_send !== false,
     selected_count: report.selected_count,
     sent_count: report.sent_count,
     failed_count: report.failed_count,
     skipped_count: report.skipped_count,
-    recipient_emails: report.recipient_emails,
   };
 
   try {
