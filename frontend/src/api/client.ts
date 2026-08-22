@@ -53,6 +53,10 @@ export function setAiSalesAgentAccessCode(code: string): void {
   sessionStorage.setItem(AI_SALES_AGENT_CODE_KEY, code);
 }
 
+export function isTransientApiError(message: string): boolean {
+  return /502|503|504|networkerror|fetch failed|timeout/i.test(message);
+}
+
 function aiSalesAgentHeaders(): HeadersInit {
   const code = getAiSalesAgentAccessCode();
   return code ? { "X-AI-Sales-Agent-Code": code } : {};
