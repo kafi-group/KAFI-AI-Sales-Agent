@@ -31,7 +31,7 @@ from api.schemas import (
     WhatsAppTestSendResponse,
 )
 from config import settings
-from db.models import AppUser, InteractionStatus
+from db.models import AppUser, AppUserRole, InteractionStatus
 from integrations.voice_client import normalize_e164
 from integrations.whatsapp_client import whatsapp_client
 from modules.audit import log_action
