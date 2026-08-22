@@ -4,6 +4,7 @@ import { COUNTRIES, findCountry } from "../data/countries";
 import { buildE164, formatDialCode, getDialCode, parsePhoneForDialpad } from "../data/countryDialCodes";
 import { useTwilioVoiceOptional } from "../hooks/useTwilioVoice";
 import { subscribeFloatingDialpadNumber } from "../utils/dialpadEvents";
+import { DialerContactInput } from "./DialerContactInput";
 
 const DIAL_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"] as const;
 
@@ -290,16 +291,19 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
           </div>
 
           <div className="p-3 space-y-3">
-            <label className="block text-xs text-slate-500">
-              Contact name (optional)
-              <input
-                type="text"
+            <div className="space-y-1">
+              <span className="block text-xs text-slate-400">Contact name (optional)</span>
+              <DialerContactInput
                 value={contactName}
-                onChange={(e) => setContactName(e.target.value)}
-                placeholder="Optional name"
-                className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600"
+                onChange={setContactName}
+                onSelectContact={({ name, countryCode: code, digits: num }) => {
+                  setContactName(name);
+                  setCountryCode(code);
+                  setDigits(num);
+                }}
+                placeholder="Type contact or company name…"
               />
-            </label>
+            </div>
 
             <div className="relative">
               <div className="flex gap-2">

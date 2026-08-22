@@ -55,6 +55,21 @@ class CompanyNameSuggestionsResponse(BaseModel):
     rows: list[CompanyNameSuggestion]
 
 
+class DialableContactSuggestion(BaseModel):
+    buyer_id: int
+    contact_id: Optional[int] = None
+    company_name: str
+    contact_name: str
+    phone: str
+    country: Optional[str] = None
+    label: str
+
+
+class DialableContactSuggestionsResponse(BaseModel):
+    q: str
+    rows: list[DialableContactSuggestion]
+
+
 class QuotationEligibleLeadRead(BuyerRead):
     latest_score: str
     score_reasoning: str

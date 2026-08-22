@@ -1042,6 +1042,21 @@ export interface CompanyNameSuggestionsResponse {
   rows: CompanyNameSuggestion[];
 }
 
+export interface DialableContactSuggestion {
+  buyer_id: number;
+  contact_id: number | null;
+  company_name: string;
+  contact_name: string;
+  phone: string;
+  country: string | null;
+  label: string;
+}
+
+export interface DialableContactSuggestionsResponse {
+  q: string;
+  rows: DialableContactSuggestion[];
+}
+
 export interface Contact {
   id: number;
   buyer_id: number;
@@ -1995,6 +2010,14 @@ export const client = {
     if (limit) query.set("limit", String(limit));
     return request<CompanyNameSuggestionsResponse>(
       `/leads/company-suggestions?${query.toString()}`,
+    );
+  },
+  suggestDialableContacts: (q: string, limit = 15) => {
+    const query = new URLSearchParams();
+    query.set("q", q);
+    if (limit) query.set("limit", String(limit));
+    return request<DialableContactSuggestionsResponse>(
+      `/calls/contact-suggestions?${query.toString()}`,
     );
   },
   getLead: (id: number) => request<Lead>(`/leads/${id}`),

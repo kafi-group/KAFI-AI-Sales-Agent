@@ -1103,3 +1103,91 @@ def list_dialable_leads(
         "countries": sorted(country_set, key=lambda c: c.lower()),
         "countries_valid_now": countries_valid_to_call_now(),
     }
+
+
+def suggest_dialable_contacts(
+    db: Session,
+    *,
+    q: str,
+    limit: int = 15,
+    assigned_to_user_id: int | None = None,
+) -> list[dict[str, object]]:
+    """Typeahead search for contacts/companies with phone numbers for dialer autocomplete."""
+    from sqlalchemy import or_, func as sa_func
+
+    query_str = (q or "").strip()
+    if len(query_str) < 1:
+        return []
+    limit = max(1, min(int(limit or 15), 30))
+
+    safe = (
+        query_str.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    pattern = f"%{safe}%"
+
+    b_query = db.query(Buyer).join(Contact, Contact.buyer_id == Buyer.id)
+    if assigned_to_user_id is not None:
+        b_query = b_query.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
+
+    b_query = b_query.filter(
+        or_(
+            sa_func.trim(sa_func.coalesce(Contact.phone, "")) != "",
+            sa_func.trim(sa_func.coalesce(Contact.primary_phone, "")) != "",
+            sa_func.trim(sa_func.coalesce(Contact.secondary_mobile, "")) != "",
+        )
+    ).filter(
+        or_(
+            Buyer.company_name.ilike(pattern, escape="\\"),
+            Contact.name.ilike(pattern, escape="\\"),
+            Contact.phone.ilike(pattern, escape="\\"),
+            Contact.primary_phone.ilike(pattern, escape="\\"),
+            Contact.secondary_mobile.ilike(pattern, escape="\\"),
+        )
+    )
+
+    matching_buyers = b_query.order_by(
+        sa_func.lower(Buyer.company_name).asc()
+    ).limit(limit * 2).all()
+
+    items: list[dict[str, object]] = []
+    seen_keys: set[str] = set()
+
+    for buyer in matching_buyers:
+        phone_opts = _dial_phone_options_for_buyer(db, buyer.id)
+        if not phone_opts:
+            continue
+        primary_phone = str(phone_opts[0]["phone"])
+        contact_id = phone_opts[0].get("contact_id")
+        contact_obj = db.get(Contact, contact_id) if contact_id else None
+
+        contact_name = (contact_obj.full_name if contact_obj else None) or buyer.company_name
+        company_name = buyer.company_name
+
+        key = f"{buyer.id}:{primary_phone}"
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+
+        label = (
+            f"{company_name} — {contact_name} ({primary_phone})"
+            if contact_name != company_name
+            else f"{company_name} ({primary_phone})"
+        )
+
+        items.append(
+            {
+                "buyer_id": buyer.id,
+                "contact_id": contact_id,
+                "company_name": company_name,
+                "contact_name": contact_name,
+                "phone": primary_phone,
+                "country": buyer.country or (contact_obj.country if contact_obj else None),
+                "label": label,
+            }
+        )
+        if len(items) >= limit:
+            break
+
+    return items

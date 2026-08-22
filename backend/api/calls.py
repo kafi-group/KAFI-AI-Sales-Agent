@@ -10,6 +10,8 @@ from api.schemas import (
     CallInitiateRequest,
     CallInitiateResponse,
     CallNotesRequest,
+    DialableContactSuggestion,
+    DialableContactSuggestionsResponse,
     DialableLeadsResponse,
     ManualCallRequest,
     TwilioBalanceRead,
@@ -34,6 +36,24 @@ def _require_lead_access(db: Session, user: AppUser, lead_id: int) -> None:
         raise HTTPException(403, "You do not have access to this lead")
 
 router = APIRouter(tags=["calls"])
+
+
+@router.get("/calls/contact-suggestions", response_model=DialableContactSuggestionsResponse)
+def suggest_dialable_contacts(
+    q: str = Query("", min_length=0, max_length=200),
+    limit: int = Query(15, ge=1, le=30),
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """Typeahead search for contacts/companies with phone numbers for dialer autocomplete."""
+    assigned_id = None if _is_admin(user) else user.id
+    rows = calls_module.suggest_dialable_contacts(
+        db, q=q, limit=limit, assigned_to_user_id=assigned_id
+    )
+    return DialableContactSuggestionsResponse(
+        q=q.strip(),
+        rows=[DialableContactSuggestion(**row) for row in rows],
+    )
 
 
 def _twilio_webhook_url(request: Request) -> str:
