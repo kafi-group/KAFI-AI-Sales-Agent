@@ -351,7 +351,7 @@ function ExpandableCell({
       {open &&
         createPortal(
           <div
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-sm"
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md"
             onClick={(e) => {
               e.stopPropagation();
               setOpen(false);
@@ -362,28 +362,38 @@ function ExpandableCell({
               role="dialog"
               aria-modal="true"
               aria-label={modalTitle}
-              className="w-full max-w-2xl rounded-2xl border-2 border-emerald-500/40 bg-slate-900 shadow-2xl overflow-hidden p-2"
+              className="w-full max-w-4xl rounded-3xl border-2 border-emerald-500/40 bg-slate-900 shadow-2xl overflow-hidden p-2"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between gap-4 border-b border-slate-800 px-6 py-4 bg-slate-950/60">
-                <h3 className="text-xl font-bold tracking-wide text-emerald-400">{modalTitle}</h3>
+              <div className="flex items-center justify-between gap-4 border-b border-slate-800 px-8 py-5 bg-slate-950/80">
+                <h3 className="text-2xl font-extrabold tracking-wide text-emerald-400">{modalTitle}</h3>
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
-                  className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800 hover:text-white bg-slate-800/80 border border-slate-700 transition"
+                  className="rounded-xl px-5 py-2.5 text-base font-bold text-slate-200 hover:bg-slate-800 hover:text-white bg-slate-800/80 border border-slate-700 transition"
                 >
                   Close
                 </button>
               </div>
-              <div className="px-8 py-8 max-h-[70vh] overflow-y-auto">
+              <div className="px-8 py-8 max-h-[80vh] overflow-y-auto space-y-6">
                 {value ? (
-                  <p className="break-all whitespace-pre-wrap text-2xl font-bold leading-relaxed text-slate-100 selection:bg-emerald-500 selection:text-white">
-                    {value}
-                  </p>
-                ) : (
-                  <p className="text-xl text-slate-500">No current text.</p>
-                )}
-                {detail ? <div className="mt-6">{detail}</div> : null}
+                  <div>
+                    {detail ? (
+                      <h4 className="text-base font-semibold text-slate-300">
+                        {value}
+                      </h4>
+                    ) : (
+                      <p className="break-all whitespace-pre-wrap text-2xl sm:text-3xl font-bold leading-relaxed text-slate-100 selection:bg-emerald-500 selection:text-white">
+                        {value}
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+                {detail ? (
+                  <div className={value ? "border-t border-slate-800 pt-6" : ""}>
+                    {detail}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>,
@@ -3746,8 +3756,15 @@ export function LeadsTablePage({
                         ) : (
                           <ExpandableCell
                             text={row.company_name}
-                            title="Company name"
+                            title="Know Your Customer"
                             className="text-slate-200 font-medium hover:text-white"
+                            detail={
+                              row.score_reasoning ? (
+                                <p className="text-xl sm:text-2xl font-semibold leading-relaxed text-slate-100 break-words">
+                                  {row.score_reasoning}
+                                </p>
+                              ) : undefined
+                            }
                           />
                         )}
                       </td>
@@ -4237,11 +4254,11 @@ export function LeadsTablePage({
                       ) : (
                         <ExpandableCell
                           text={row.company_name}
-                          title="Company name"
+                          title="Know Your Customer"
                           className="text-slate-200 font-medium hover:text-white"
                           detail={
                             row.score_reasoning ? (
-                              <p className="text-xs text-slate-400 border-t border-slate-700 pt-2">
+                              <p className="text-xl sm:text-2xl font-semibold leading-relaxed text-slate-100 break-words">
                                 {row.score_reasoning}
                               </p>
                             ) : undefined
