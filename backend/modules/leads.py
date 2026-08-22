@@ -538,8 +538,12 @@ def _apply_lead_table_scope(
     unassigned_only: bool,
     pool_for_user_id: int | None = None,
     admin_sent_only: bool = False,
+    master_type: str | None = None,
 ):
     from sqlalchemy import or_
+
+    if master_type:
+        buyer_query = buyer_query.filter(Buyer.master_type == master_type)
 
     if assigned_to_user_id is not None:
         buyer_query = buyer_query.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
@@ -779,6 +783,7 @@ def _filtered_lead_table_rows(
     page: int | None = None,
     page_size: int | None = None,
     ids_only: bool = False,
+    master_type: str | None = None,
 ) -> tuple[list[dict[str, object]], int, int]:
     """Filter leads for the table.
 
@@ -795,6 +800,7 @@ def _filtered_lead_table_rows(
         unassigned_only=unassigned_only,
         pool_for_user_id=pool_for_user_id,
         admin_sent_only=admin_sent_only,
+        master_type=master_type,
     )
     buyer_query = _apply_intake_method_scope(buyer_query, intake_method=intake_method)
     if new_search_lead_only:
@@ -1090,6 +1096,7 @@ def list_leads_table_ids(
     admin_sent_only: bool = False,
     intake_method: str | None = None,
     new_search_lead_only: bool = False,
+    master_type: str | None = None,
 ) -> dict[str, object]:
     rows, _section_total, filtered_count = _filtered_lead_table_rows(
         db,
@@ -1116,6 +1123,7 @@ def list_leads_table_ids(
         intake_method=intake_method,
         new_search_lead_only=new_search_lead_only,
         ids_only=True,
+        master_type=master_type,
     )
     return {
         "filtered_count": filtered_count,
@@ -1150,6 +1158,7 @@ def list_leads_table(
     admin_sent_only: bool = False,
     intake_method: str | None = None,
     new_search_lead_only: bool = False,
+    master_type: str | None = None,
 ) -> dict[str, object]:
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
@@ -1180,6 +1189,7 @@ def list_leads_table(
         new_search_lead_only=new_search_lead_only,
         page=page,
         page_size=page_size,
+        master_type=master_type,
     )
 
     total_pages = max(1, (filtered_count + page_size - 1) // page_size) if filtered_count else 1
@@ -1219,23 +1229,9 @@ def count_leads_table_sections(
     *,
     assigned_to_user_id: int | None = None,
     pool_for_user_id: int | None = None,
+    master_type: str = "fmcg",
 ) -> dict[str, object]:
-    """Row counts for every leads-table section in a handful of cheap queries.
-
-    Replaces the pattern of calling list_leads_table() once per section just
-    to read `.total` off a page_size=1 response — that used to run the full
-    (expensive) row-building pipeline five times on every table view.
-
-    Admin (assigned_to_user_id=None, pool_for_user_id=None): all / old_clients
-    counts. old_clients badge = all buyers with source old_clients (assigned +
-    unassigned). by_assignee maps user_id string → total leads sent to that user.
-
-    Sales user (assigned_to_user_id=user.id): only leads assigned to them.
-    by_assignee is empty — that nav is admin-only.
-
-    Results are TTL-cached for 20 s per user scope and invalidated on writes.
-    """
-    cache_key = f"{_SECTION_COUNTS_PREFIX}{assigned_to_user_id}:{pool_for_user_id}"
+    cache_key = f"{_SECTION_COUNTS_PREFIX}{assigned_to_user_id}:{pool_for_user_id}:{master_type}"
     cached = cache.get(cache_key)
     if cached is not MISS:
         return cached  # type: ignore[return-value]
@@ -1244,6 +1240,7 @@ def count_leads_table_sections(
         db,
         assigned_to_user_id=assigned_to_user_id,
         pool_for_user_id=pool_for_user_id,
+        master_type=master_type,
     )
     cache.set(cache_key, result, ttl=_SECTION_COUNTS_TTL)
     return result
@@ -1254,12 +1251,15 @@ def _compute_section_counts(
     *,
     assigned_to_user_id: int | None = None,
     pool_for_user_id: int | None = None,
+    master_type: str = "fmcg",
 ) -> dict[str, object]:
     from modules.calls import latest_call_outcomes_by_buyer
 
     buyer_query = db.query(
         Buyer.id, Buyer.source, Buyer.assigned_to_user_id, Buyer.assigned_by_user_id
     )
+    if master_type:
+        buyer_query = buyer_query.filter(Buyer.master_type == master_type)
     if pool_for_user_id is not None:
         from sqlalchemy import or_
 

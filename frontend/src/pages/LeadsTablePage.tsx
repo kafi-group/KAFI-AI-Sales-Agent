@@ -107,6 +107,7 @@ interface LeadsTablePageProps {
   onError: (message: string) => void;
   onSelectLead: (leadId: number) => void;
   onSectionCountsChange?: (counts: LeadTableSectionCountsResponse) => void;
+  masterType?: string;
 }
 
 type SortField =
@@ -503,8 +504,15 @@ function sectionTitle(
   section: LeadsTableSection,
   assigneeUsername?: string | null,
   isAdmin = true,
+  masterType?: string,
 ): string {
-  if (section === "master") return "Master Table";
+  if (section === "master") {
+    return masterType === "minerals_ores"
+      ? "Master Table (Minerals & Ores)"
+      : masterType === "other_items"
+      ? "Master Table (Other Items)"
+      : "Master Table (FMCG)";
+  }
   if (section === "old_clients") return isAdmin ? "Old clients" : "Clients";
   if (section === "my_assigned") return "Assigned";
   if (section === "hyperstore_targeted") return "Hyperstore Target";
@@ -778,6 +786,7 @@ export function LeadsTablePage({
   onError,
   onSelectLead,
   onSectionCountsChange,
+  masterType = "fmcg",
 }: LeadsTablePageProps) {
   const { isAdmin, user } = useAuth();
   const initialTableViewRef = useRef(readStoredTableView(user?.id, section));
@@ -1158,6 +1167,7 @@ export function LeadsTablePage({
       q: debouncedSearch.trim() || undefined,
       sort_by: sortBy,
       sort_dir: sortDir,
+      master_type: masterType,
       ...sectionTableParams(section, intakeMethodFilter),
     }),
     [
@@ -1175,6 +1185,7 @@ export function LeadsTablePage({
       sortBy,
       sortDir,
       intakeMethodFilter,
+      masterType,
     ],
   );
 
@@ -1186,7 +1197,7 @@ export function LeadsTablePage({
   const loadSectionCounts = useCallback(async () => {
     if (!onSectionCountsChange) return;
     try {
-      const counts = await client.getLeadsTableSectionCounts();
+      const counts = await client.getLeadsTableSectionCounts(masterType);
       onSectionCountsChange({
         ...counts,
         by_assignee: counts.by_assignee ?? {},
@@ -1194,7 +1205,7 @@ export function LeadsTablePage({
     } catch {
       /* optional */
     }
-  }, [onSectionCountsChange]);
+  }, [onSectionCountsChange, masterType]);
 
   const loadTable = useCallback(async () => {
     setLoading(true);
@@ -2541,7 +2552,7 @@ export function LeadsTablePage({
       <div className="flex items-start justify-between gap-4 flex-wrap shrink-0">
         <div>
           <h2 className="text-lg font-medium text-slate-100">
-            {sectionTitle(section, assigneeUsername, isAdmin)}
+            {sectionTitle(section, assigneeUsername, isAdmin, masterType)}
           </h2>
           <p className="text-sm text-slate-500 mt-1">
             {sectionDescription(section, assigneeUsername, isAdmin)}

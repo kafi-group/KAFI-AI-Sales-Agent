@@ -1546,6 +1546,7 @@ export interface LeadTableQuery {
   master?: boolean;
   intake_method?: string;
   new_search_lead_only?: boolean;
+  master_type?: string;
 }
 
 export type LeadTableSectionScope = Pick<
@@ -1793,6 +1794,7 @@ export const client = {
     if (params.master) search.set("master", "true");
     if (params.intake_method) search.set("intake_method", params.intake_method);
     if (params.new_search_lead_only) search.set("new_search_lead_only", "true");
+    if (params.master_type) search.set("master_type", params.master_type);
     const query = search.toString();
     return request<LeadTableResponse>(`/leads/table${query ? `?${query}` : ""}`);
   },
@@ -1820,6 +1822,7 @@ export const client = {
     if (params.master) search.set("master", "true");
     if (params.intake_method) search.set("intake_method", params.intake_method);
     if (params.new_search_lead_only) search.set("new_search_lead_only", "true");
+    if (params.master_type) search.set("master_type", params.master_type);
     const query = search.toString();
     return request<LeadTableIdsResponse>(`/leads/table/ids${query ? `?${query}` : ""}`);
   },
@@ -1937,8 +1940,10 @@ export const client = {
         body: JSON.stringify({ lead_ids: leadIds, in_list: inList }),
       },
     ),
-  getLeadsTableSectionCounts: () =>
-    request<LeadTableSectionCountsResponse>("/leads/table/section-counts"),
+  getLeadsTableSectionCounts: (masterType = "fmcg") =>
+    request<LeadTableSectionCountsResponse>(
+      `/leads/table/section-counts?master_type=${encodeURIComponent(masterType)}`,
+    ),
   dedupeLeadsTable: (params: LeadTableSectionScope = {}) => {
     const search = new URLSearchParams();
     if (params.source) search.set("source", params.source);

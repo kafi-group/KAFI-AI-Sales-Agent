@@ -140,6 +140,7 @@ function DashboardApp() {
   } = useAuth();
   const [tab, setTab] = useState<Tab>("inbox");
   const [tableSection, setTableSection] = useState<LeadsTableSection>("master");
+  const [masterType, setMasterType] = useState<string>("fmcg");
   const [mailSection, setMailSection] = useState<MailSection>("inbox");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpenPreference);
@@ -247,7 +248,7 @@ function DashboardApp() {
 
   const loadTableCounts = useCallback(async () => {
     try {
-      const counts = await client.getLeadsTableSectionCounts();
+      const counts = await client.getLeadsTableSectionCounts(masterType);
       setTableCounts({
         ...counts,
         by_assignee: counts.by_assignee ?? {},
@@ -255,7 +256,7 @@ function DashboardApp() {
     } catch {
       /* optional badges */
     }
-  }, []);
+  }, [masterType]);
 
   const loadAssigneeNavUsers = useCallback(async () => {
     try {
@@ -835,11 +836,18 @@ function DashboardApp() {
       }))
     : [];
 
+  const masterTableLabel =
+    masterType === "minerals_ores"
+      ? "Master Table (Minerals & Ores)"
+      : masterType === "other_items"
+      ? "Master Table (Other Items)"
+      : "Master Table (FMCG)";
+
   const clientSectionNavChildren = isAdmin
     ? [
         {
           id: "master" as const,
-          label: "Master Table",
+          label: masterTableLabel,
           count: tableCounts.master ?? 0,
         },
         {
@@ -959,7 +967,7 @@ function DashboardApp() {
     ...(isAdmin ? [{ id: "data-synthesis" as const, label: "Smart Data Clean & Merge", count: 0 }] : []),
     {
       id: "table",
-      label: isAdmin ? "Master Table" : "My Assigned Leads",
+      label: isAdmin ? masterTableLabel : "My Assigned Leads",
       count: isAdmin ? (tableCounts.master ?? 0) : (tableCounts.my_assigned ?? 0),
       children: [
         ...clientSectionNavChildren,
@@ -1099,6 +1107,8 @@ function DashboardApp() {
           onMobileClose={() => setMobileNavOpen(false)}
           desktopOpen={sidebarOpen}
           onToggleDesktop={toggleSidebar}
+          masterType={masterType}
+          onMasterTypeChange={setMasterType}
         />
 
         <div className="flex-1 min-w-0 flex flex-col overflow-x-hidden transition-[margin] duration-200">
@@ -1261,6 +1271,7 @@ function DashboardApp() {
                 onError={setError}
                 onSelectLead={handleSelectLead}
                 onSectionCountsChange={setTableCounts}
+                masterType={masterType}
               />
             )}
             {tab === "inbox" && (

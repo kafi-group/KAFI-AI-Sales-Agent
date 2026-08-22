@@ -57,7 +57,7 @@ export function LeadsPage({ onError, onSelectLead, onTotalChange }: LeadsPagePro
     <section className="space-y-4 w-full min-w-0">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-slate-100">Discover Leads</h2>
+          <h2 className="text-lg font-semibold text-slate-100">Searched by AI</h2>
           <p className="text-sm text-slate-400 mt-1 max-w-2xl">
             New prospects found via web discovery or manual add. Old clients stay in the{" "}
             <span className="text-slate-300">Old clients</span> table and never appear here.

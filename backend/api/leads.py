@@ -497,6 +497,7 @@ def list_leads_table(
     master: bool = False,
     intake_method: str | None = None,
     new_search_lead_only: bool = False,
+    master_type: str | None = None,
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -538,6 +539,7 @@ def list_leads_table(
         admin_sent_only=admin_sent_only,
         intake_method=intake_method,
         new_search_lead_only=new_search_lead_only,
+        master_type=master_type,
     )
     return LeadTableResponse(**result)
 
@@ -609,6 +611,7 @@ def list_leads_table_ids(
 
 @router.get("/table/section-counts", response_model=LeadTableSectionCountsResponse)
 def get_leads_table_section_counts(
+    master_type: str = "fmcg",
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -617,6 +620,7 @@ def get_leads_table_section_counts(
         db,
         assigned_to_user_id=assigned_id,
         pool_for_user_id=None,
+        master_type=master_type,
     )
     counts["my_assigned"] = leads_module.count_my_assigned_leads(db, user.id)
     return LeadTableSectionCountsResponse(**counts)
