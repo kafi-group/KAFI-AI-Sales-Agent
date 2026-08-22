@@ -171,7 +171,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                    <IconCheck size={24} />
+                    <IconCheck size="lg" />
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-emerald-300">WhatsApp Mobile Connected</h4>
@@ -220,7 +220,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                   <ActionButton
                     icon={IconWhatsApp}
                     variant="primary"
-                    size="lg"
+                    size="md"
                     disabled={pairing}
                     onClick={() => void handlePair()}
                     title="Generate QR code"

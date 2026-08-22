@@ -34,7 +34,6 @@ import { EmailTemplatesPage } from "./pages/EmailTemplatesPage";
 import { WhatsAppTemplatesPage } from "./pages/WhatsAppTemplatesPage";
 import { WhatsAppInboxPage } from "./pages/WhatsAppInboxPage";
 import { WhatsAppMobilePage } from "./pages/WhatsAppMobilePage";
-import { WhatsAppQrPage } from "./pages/WhatsAppQrPage";
 import { BuyerProfile } from "./pages/BuyerProfile";
 import { CallsPage } from "./pages/CallsPage";
 import { InboxPage } from "./pages/InboxPage";
