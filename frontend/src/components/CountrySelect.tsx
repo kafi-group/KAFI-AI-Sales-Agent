@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { COUNTRIES, type Country } from "../data/countries";
+import { COUNTRIES } from "../data/countries";
 
 interface CountrySelectProps {
   value: string;
@@ -9,6 +9,7 @@ interface CountrySelectProps {
   label?: string;
   labelClassName?: string;
   placeholder?: string;
+  multiSelect?: boolean;
 }
 
 export function CountrySelect({
@@ -19,6 +20,7 @@ export function CountrySelect({
   label,
   labelClassName = "text-xs text-slate-400",
   placeholder = "Search countries…",
+  multiSelect = true,
 }: CountrySelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -50,6 +52,12 @@ export function CountrySelect({
   }, []);
 
   function toggleCountry(countryName: string) {
+    if (!multiSelect) {
+      onChange(countryName);
+      setOpen(false);
+      setQuery("");
+      return;
+    }
     const next = new Set(selectedNames);
     if (next.has(countryName)) {
       next.delete(countryName);
@@ -64,8 +72,12 @@ export function CountrySelect({
   }
 
   const count = selectedNames.size;
-  const buttonLabel =
-    count === 0
+  const buttonLabel = !multiSelect
+    ? (() => {
+        const found = COUNTRIES.find((c) => c.name === value);
+        return found ? `${found.flag} ${found.name}` : value || (allowEmpty ? emptyLabel : "Select country");
+      })()
+    : count === 0
       ? allowEmpty
         ? emptyLabel
         : "Select country"
@@ -87,7 +99,7 @@ export function CountrySelect({
           className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200 text-left flex items-center justify-between gap-2"
         >
           <span className="truncate flex items-center gap-1.5">
-            {count > 1 && (
+            {multiSelect && count > 1 && (
               <span className="inline-flex items-center justify-center bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 rounded">
                 {count}
               </span>
@@ -108,18 +120,20 @@ export function CountrySelect({
                 autoFocus
                 className="w-full rounded-md bg-slate-900 border border-slate-700 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500"
               />
-              <div className="flex items-center justify-between text-xs px-1 text-slate-400">
-                <span>{count > 0 ? `${count} selected` : "Tick boxes to filter"}</span>
-                {count > 0 && (
-                  <button
-                    type="button"
-                    onClick={clearAll}
-                    className="text-emerald-400 hover:underline font-medium"
-                  >
-                    Clear all
-                  </button>
-                )}
-              </div>
+              {multiSelect && (
+                <div className="flex items-center justify-between text-xs px-1 text-slate-400">
+                  <span>{count > 0 ? `${count} selected` : "Tick boxes to filter"}</span>
+                  {count > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearAll}
+                      className="text-emerald-400 hover:underline font-medium"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
             <ul className="max-h-56 overflow-y-auto py-1">
               {allowEmpty && (
@@ -128,24 +142,30 @@ export function CountrySelect({
                     type="button"
                     onClick={() => {
                       clearAll();
-                      setOpen(false);
+                      if (!multiSelect) setOpen(false);
                     }}
                     className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2.5 hover:bg-slate-900 ${
-                      count === 0 ? "bg-emerald-500/10 text-emerald-300 font-medium" : "text-slate-400"
+                      count === 0 && (!value || multiSelect)
+                        ? "bg-emerald-500/10 text-emerald-300 font-medium"
+                        : "text-slate-400"
                     }`}
                   >
-                    <input
-                      type="checkbox"
-                      checked={count === 0}
-                      readOnly
-                      className="rounded border-slate-600 bg-slate-950 text-emerald-500 pointer-events-none"
-                    />
+                    {multiSelect && (
+                      <input
+                        type="checkbox"
+                        checked={count === 0}
+                        readOnly
+                        className="rounded border-slate-600 bg-slate-950 text-emerald-500 pointer-events-none"
+                      />
+                    )}
                     <span>{emptyLabel}</span>
                   </button>
                 </li>
               )}
               {filtered.map((country) => {
-                const checked = selectedNames.has(country.name);
+                const checked = multiSelect
+                  ? selectedNames.has(country.name)
+                  : value === country.name;
                 return (
                   <li key={country.code}>
                     <button
@@ -155,12 +175,14 @@ export function CountrySelect({
                         checked ? "bg-emerald-500/10 text-emerald-300 font-medium" : "text-slate-200"
                       }`}
                     >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleCountry(country.name)}
-                        className="rounded border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500 cursor-pointer shrink-0"
-                      />
+                      {multiSelect && (
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleCountry(country.name)}
+                          className="rounded border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500 cursor-pointer shrink-0"
+                        />
+                      )}
                       <span className="mr-1">{country.flag}</span>
                       <span className="truncate">{country.name}</span>
                     </button>

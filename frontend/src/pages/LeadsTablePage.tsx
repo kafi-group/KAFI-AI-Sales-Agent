@@ -3904,6 +3904,7 @@ export function LeadsTablePage({
                         {editMode ? (
                           <div onClick={(e) => e.stopPropagation()}>
                             <CountrySelect
+                              multiSelect={false}
                               value={draft.country ?? ""}
                               onChange={(value) => updateDraft(row.id, "country", value)}
                             />
@@ -4417,6 +4418,7 @@ export function LeadsTablePage({
                       {editMode ? (
                         <div onClick={(e) => e.stopPropagation()}>
                           <CountrySelect
+                            multiSelect={false}
                             value={draft.country ?? ""}
                             onChange={(value) => updateDraft(row.id, "country", value)}
                           />

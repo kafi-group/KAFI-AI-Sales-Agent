@@ -189,6 +189,7 @@ export function CreateLeadForm({
 
         <CountrySelect
           label="Country"
+          multiSelect={false}
           labelClassName="text-sm text-slate-400"
           value={form.country}
           onChange={(value) => updateField("country", value)}
