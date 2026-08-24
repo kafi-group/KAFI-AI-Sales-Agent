@@ -1094,6 +1094,39 @@ export function LeadsTablePage({
   const [sortBy, setSortBy] = useState<SortField>(initialTableViewRef.current.sortBy);
   const [sortDir, setSortDir] = useState<"asc" | "desc">(initialTableViewRef.current.sortDir);
 
+  const [colFilterModal, setColFilterModal] = useState<{ field: SortField; label: string } | null>(null);
+  const [colModalSearch, setColModalSearch] = useState("");
+  const [selectedColValues, setSelectedColValues] = useState<Record<string, string[]>>({});
+  const [pendingColSelections, setPendingColSelections] = useState<string[]>([]);
+
+  function openColFilter(field: SortField, label: string) {
+    setColFilterModal({ field, label });
+    setColModalSearch("");
+    setPendingColSelections(selectedColValues[field] || []);
+  }
+
+  function renderColHeaderBtn(field: SortField, label: string) {
+    const activeCount = selectedColValues[field]?.length || 0;
+    return (
+      <button
+        type="button"
+        onClick={() => openColFilter(field, label)}
+        className="hover:text-emerald-300 flex items-center gap-1.5 font-bold transition-colors"
+        title={`Click to filter & sort ${label}`}
+      >
+        <span>{label}</span>
+        {sortIndicator(field)}
+        {activeCount > 0 ? (
+          <span className="bg-emerald-500 text-slate-950 text-[10px] font-extrabold px-1.5 py-0.5 rounded-full shadow-sm">
+            {activeCount}
+          </span>
+        ) : (
+          <span className="text-slate-500 text-xs">▼</span>
+        )}
+      </button>
+    );
+  }
+
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(search), 300);
     return () => window.clearTimeout(timer);
@@ -3679,116 +3712,28 @@ export function LeadsTablePage({
                       className="rounded border-slate-600 bg-slate-950"
                     />
                   </th>
-                  <th data-col="serial" className={`${TH} ${COL_SERIAL}`}>
-                    <button type="button" onClick={() => toggleSort("id")} className="hover:text-slate-300 flex items-center gap-1">
-                      S. No{sortIndicator("id")}
-                    </button>
-                  </th>
-                  <th data-col="company" className={`${TH} ${COL_COMPANY_OLD}`}>
-                    <button type="button" onClick={() => toggleSort("company_name")} className="hover:text-slate-300 flex items-center gap-1">
-                      Company Name{sortIndicator("company_name")}
-                    </button>
-                  </th>
-                  <th data-col="business_type" className={`${TH} min-w-[140px]`}>
-                    <button type="button" onClick={() => toggleSort("business_type")} className="hover:text-slate-300 flex items-center gap-1">
-                      Business Type{sortIndicator("business_type")}
-                    </button>
-                  </th>
-                  <th data-col="grading" className={`${TH} min-w-[140px]`}>
-                    <button type="button" onClick={() => toggleSort("excel_file_grading")} className="hover:text-slate-300 flex items-center gap-1">
-                      Companies Grading{sortIndicator("excel_file_grading")}
-                    </button>
-                  </th>
-                  <th data-col="designation" className={`${TH} min-w-[130px]`}>
-                    <button type="button" onClick={() => toggleSort("designation")} className="hover:text-slate-300 flex items-center gap-1">
-                      Designation{sortIndicator("designation")}
-                    </button>
-                  </th>
-                  <th data-col="contact_person" className={`${TH} min-w-[150px]`}>
-                    <button type="button" onClick={() => toggleSort("contact_person")} className="hover:text-slate-300 flex items-center gap-1">
-                      Contact Person{sortIndicator("contact_person")}
-                    </button>
-                  </th>
-                  <th data-col="primary_mobile" className={`${TH} min-w-[160px]`}>
-                    <button type="button" onClick={() => toggleSort("primary_mobile")} className="hover:text-slate-300 flex items-center gap-1">
-                      Primary Mobile No.{sortIndicator("primary_mobile")}
-                    </button>
-                  </th>
-                  <th data-col="secondary_mobile" className={`${TH} min-w-[160px]`}>
-                    <button type="button" onClick={() => toggleSort("secondary_mobile")} className="hover:text-slate-300 flex items-center gap-1">
-                      Secondary Mobile No.{sortIndicator("secondary_mobile")}
-                    </button>
-                  </th>
-                  <th data-col="primary_phone" className={`${TH} min-w-[160px]`}>
-                    <button type="button" onClick={() => toggleSort("phone")} className="hover:text-slate-300 flex items-center gap-1">
-                      Primary Phone No.{sortIndicator("phone")}
-                    </button>
-                  </th>
-                  <th data-col="secondary_phone" className={`${TH} min-w-[160px]`}>
-                    <button type="button" onClick={() => toggleSort("secondary_phone")} className="hover:text-slate-300 flex items-center gap-1">
-                      Secondary Phone No.{sortIndicator("secondary_phone")}
-                    </button>
-                  </th>
-                  <th data-col="primary_email" className={`${TH} ${COL_EMAIL}`}>
-                    <button type="button" onClick={() => toggleSort("email")} className="hover:text-slate-300 flex items-center gap-1">
-                      Primary Email{sortIndicator("email")}
-                    </button>
-                  </th>
-                  <th data-col="secondary_email" className={`${TH} ${COL_EMAIL2}`}>
-                    <button type="button" onClick={() => toggleSort("secondary_email")} className="hover:text-slate-300 flex items-center gap-1">
-                      Secondary Email{sortIndicator("secondary_email")}
-                    </button>
-                  </th>
-                  <th data-col="country" className={`${TH} min-w-[130px]`}>
-                    <button type="button" onClick={() => toggleSort("country")} className="hover:text-slate-300 flex items-center gap-1">
-                      Country{sortIndicator("country")}
-                    </button>
-                  </th>
-                  <th data-col="product" className={`${TH} min-w-[140px]`}>
-                    <button type="button" onClick={() => toggleSort("product")} className="hover:text-slate-300 flex items-center gap-1">
-                      Product{sortIndicator("product")}
-                    </button>
-                  </th>
-                  <th data-col="website" className={`${TH} ${COL_WEBSITE}`}>
-                    <button type="button" onClick={() => toggleSort("website")} className="hover:text-slate-300 flex items-center gap-1">
-                      Website{sortIndicator("website")}
-                    </button>
-                  </th>
-                  <th data-col="city" className={`${TH} min-w-[120px]`}>
-                    <button type="button" onClick={() => toggleSort("city")} className="hover:text-slate-300 flex items-center gap-1">
-                      City{sortIndicator("city")}
-                    </button>
-                  </th>
-                  <th data-col="ai_grading" className={`${TH} min-w-[120px]`}>
-                    <button type="button" onClick={() => toggleSort("ai_grading")} className="hover:text-slate-300 flex items-center gap-1">
-                      AI grading{sortIndicator("ai_grading")}
-                    </button>
-                  </th>
-                  <th data-col="address" className={`${TH} min-w-[200px]`}>
-                    <button type="button" onClick={() => toggleSort("address")} className="hover:text-slate-300 flex items-center gap-1">
-                      Address{sortIndicator("address")}
-                    </button>
-                  </th>
-                  <th data-col="added" className={`${TH} min-w-[120px]`}>
-                    <button type="button" onClick={() => toggleSort("created_at")} className="hover:text-slate-300 flex items-center gap-1">
-                      Added{sortIndicator("created_at")}
-                    </button>
-                  </th>
-                  <th data-col="calling_time" className={`${TH} ${COL_CALLING}`}>
-                    <button type="button" onClick={() => toggleSort("calling_time")} className="hover:text-slate-300 flex items-center gap-1">
-                      Calling time{sortIndicator("calling_time")}
-                    </button>
-                  </th>
-                  <th data-col="remarks" className={`${TH} min-w-[180px]`}>
-                    <button type="button" onClick={() => toggleSort("remarks")} className="hover:text-slate-300 flex items-center gap-1">
-                      Remarks{sortIndicator("remarks")}
-                    </button>
-                  </th>
-                  <th data-col="assigned_to" className={`${TH} min-w-[150px]`}>
-                    <button type="button" onClick={() => toggleSort("assigned_to_user_id")} className="hover:text-slate-300 flex items-center gap-1">
-                      Assigned To{sortIndicator("assigned_to_user_id")}
-                    </button>
-                  </th>
+                  <th data-col="serial" className={`${TH} ${COL_SERIAL}`}>{renderColHeaderBtn("id", "S. No")}</th>
+                  <th data-col="company" className={`${TH} ${COL_COMPANY_OLD}`}>{renderColHeaderBtn("company_name", "Company Name")}</th>
+                  <th data-col="business_type" className={`${TH} min-w-[140px]`}>{renderColHeaderBtn("business_type", "Business Type")}</th>
+                  <th data-col="grading" className={`${TH} min-w-[140px]`}>{renderColHeaderBtn("excel_file_grading", "Companies Grading")}</th>
+                  <th data-col="designation" className={`${TH} min-w-[130px]`}>{renderColHeaderBtn("designation", "Designation")}</th>
+                  <th data-col="contact_person" className={`${TH} min-w-[150px]`}>{renderColHeaderBtn("contact_person", "Contact Person")}</th>
+                  <th data-col="primary_mobile" className={`${TH} min-w-[160px]`}>{renderColHeaderBtn("primary_mobile", "Primary Mobile No.")}</th>
+                  <th data-col="secondary_mobile" className={`${TH} min-w-[160px]`}>{renderColHeaderBtn("secondary_mobile", "Secondary Mobile No.")}</th>
+                  <th data-col="primary_phone" className={`${TH} min-w-[160px]`}>{renderColHeaderBtn("phone", "Primary Phone No.")}</th>
+                  <th data-col="secondary_phone" className={`${TH} min-w-[160px]`}>{renderColHeaderBtn("secondary_phone", "Secondary Phone No.")}</th>
+                  <th data-col="primary_email" className={`${TH} ${COL_EMAIL}`}>{renderColHeaderBtn("email", "Primary Email")}</th>
+                  <th data-col="secondary_email" className={`${TH} ${COL_EMAIL2}`}>{renderColHeaderBtn("secondary_email", "Secondary Email")}</th>
+                  <th data-col="country" className={`${TH} min-w-[130px]`}>{renderColHeaderBtn("country", "Country")}</th>
+                  <th data-col="product" className={`${TH} min-w-[140px]`}>{renderColHeaderBtn("product", "Product")}</th>
+                  <th data-col="website" className={`${TH} ${COL_WEBSITE}`}>{renderColHeaderBtn("website", "Website")}</th>
+                  <th data-col="city" className={`${TH} min-w-[120px]`}>{renderColHeaderBtn("city", "City")}</th>
+                  <th data-col="ai_grading" className={`${TH} min-w-[120px]`}>{renderColHeaderBtn("ai_grading", "AI grading")}</th>
+                  <th data-col="address" className={`${TH} min-w-[200px]`}>{renderColHeaderBtn("address", "Address")}</th>
+                  <th data-col="added" className={`${TH} min-w-[120px]`}>{renderColHeaderBtn("created_at", "Added")}</th>
+                  <th data-col="calling_time" className={`${TH} ${COL_CALLING}`}>{renderColHeaderBtn("calling_time", "Calling time")}</th>
+                  <th data-col="remarks" className={`${TH} min-w-[180px]`}>{renderColHeaderBtn("remarks", "Remarks")}</th>
+                  <th data-col="assigned_to" className={`${TH} min-w-[150px]`}>{renderColHeaderBtn("assigned_to_user_id", "Assigned To")}</th>
                   <th data-col="socials" className={`${TH} min-w-[120px]`}>Socials</th>
                   {isCallOutcomeSection && (
                     <th data-col="call_remarks" className={`${TH} min-w-[220px]`}>Call remarks</th>
@@ -4272,39 +4217,19 @@ export function LeadsTablePage({
                     className="rounded border-slate-600 bg-slate-950"
                   />
                 </th>
-                <th data-col="serial" className={`${TH} ${COL_SERIAL}`}>#</th>
-                <th data-col="company" className={`${TH} ${COL_COMPANY}`}>
-                  <button type="button" onClick={() => toggleSort("company_name")} className="hover:text-slate-300">
-                    Company name{sortIndicator("company_name")}
-                  </button>
-                </th>
-                <th data-col="website" className={`${TH} ${COL_WEBSITE}`}>Website</th>
-                <th data-col="email" className={`${TH} ${COL_EMAIL}`}>Email</th>
-                <th data-col="phone1" className={`${TH} min-w-[160px]`}>Ph#1</th>
-                <th data-col="phone2" className={`${TH} min-w-[160px]`}>Ph#2</th>
-                <th data-col="calling_time" className={`${TH} ${COL_CALLING}`}>Calling time</th>
-                <th data-col="role" className={`${TH} ${COL_ROLE}`}>
-                  <button type="button" onClick={() => toggleSort("market_role")} className="hover:text-slate-300">
-                    Role{sortIndicator("market_role")}
-                  </button>
-                </th>
-                <th data-col="ai_grading" className={`${TH} min-w-[110px]`}>
-                  <button type="button" onClick={() => toggleSort("latest_score")} className="hover:text-slate-300">
-                    AI grading{sortIndicator("latest_score")}
-                  </button>
-                </th>
+                <th data-col="serial" className={`${TH} ${COL_SERIAL}`}>{renderColHeaderBtn("id", "S. No")}</th>
+                <th data-col="company" className={`${TH} ${COL_COMPANY}`}>{renderColHeaderBtn("company_name", "Company name")}</th>
+                <th data-col="website" className={`${TH} ${COL_WEBSITE}`}>{renderColHeaderBtn("website", "Website")}</th>
+                <th data-col="email" className={`${TH} ${COL_EMAIL}`}>{renderColHeaderBtn("email", "Email")}</th>
+                <th data-col="phone1" className={`${TH} min-w-[160px]`}>{renderColHeaderBtn("phone", "Primary Phone")}</th>
+                <th data-col="phone2" className={`${TH} min-w-[160px]`}>{renderColHeaderBtn("secondary_phone", "Secondary Phone")}</th>
+                <th data-col="calling_time" className={`${TH} ${COL_CALLING}`}>{renderColHeaderBtn("calling_time", "Calling time")}</th>
+                <th data-col="role" className={`${TH} ${COL_ROLE}`}>{renderColHeaderBtn("market_role", "Role")}</th>
+                <th data-col="ai_grading" className={`${TH} min-w-[110px]`}>{renderColHeaderBtn("ai_grading", "AI grading")}</th>
                 <th data-col="socials" className={`${TH} min-w-[120px]`}>Socials</th>
-                <th data-col="added" className={`${TH} min-w-[120px]`}>
-                  <button type="button" onClick={() => toggleSort("created_at")} className="hover:text-slate-300">
-                    Added{sortIndicator("created_at")}
-                  </button>
-                </th>
-                <th data-col="country" className={`${TH} min-w-[130px]`}>
-                  <button type="button" onClick={() => toggleSort("country")} className="hover:text-slate-300">
-                    Country{sortIndicator("country")}
-                  </button>
-                </th>
-                <th data-col="assigned_to" className={`${TH} min-w-[150px]`}>Assigned To</th>
+                <th data-col="added" className={`${TH} min-w-[120px]`}>{renderColHeaderBtn("created_at", "Added")}</th>
+                <th data-col="country" className={`${TH} min-w-[130px]`}>{renderColHeaderBtn("country", "Country")}</th>
+                <th data-col="assigned_to" className={`${TH} min-w-[150px]`}>{renderColHeaderBtn("assigned_to_user_id", "Assigned To")}</th>
                 {editMode && <th data-col="edit" className={`${TH} min-w-[120px]`}>Edit</th>}
                 <th data-col="actions" className={`${TH} min-w-[100px]`}>Actions</th>
               </tr>
@@ -4756,6 +4681,230 @@ export function LeadsTablePage({
             setWhatsappTargetIds(null);
           }}
         />
+      )}
+      {colFilterModal && (
+        <div className="fixed inset-0 z-[999] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6">
+          <div className="bg-slate-900 border-2 border-slate-700 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in duration-150">
+            {/* Modal Header */}
+            <div className="bg-slate-950 border-b border-slate-800 p-6 flex items-center justify-between shrink-0">
+              <div>
+                <h2 className="text-2xl font-extrabold text-slate-100 flex items-center gap-3">
+                  <span className="text-emerald-400">🔍 Filter &amp; Sort:</span>
+                  <span>{colFilterModal.label}</span>
+                </h2>
+                <p className="text-sm text-slate-400 mt-1">
+                  Multi-select values or search across all rows to filter this column view.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setColFilterModal(null)}
+                className="w-10 h-10 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-lg font-bold transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-6 flex-1 overflow-y-auto">
+              {/* Sort Action Bar */}
+              <div className="flex items-center gap-3 bg-slate-950/60 border border-slate-800 p-3.5 rounded-2xl">
+                <span className="text-sm font-semibold text-slate-300 shrink-0">Sort Order:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSortBy(colFilterModal.field);
+                    setSortDir("asc");
+                  }}
+                  className={`px-4 py-2 rounded-xl text-sm font-bold border transition-colors flex items-center gap-1.5 ${
+                    sortBy === colFilterModal.field && sortDir === "asc"
+                      ? "bg-emerald-500/20 border-emerald-500 text-emerald-300"
+                      : "border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  <span>Sort A → Z</span>
+                  <span>↑</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSortBy(colFilterModal.field);
+                    setSortDir("desc");
+                  }}
+                  className={`px-4 py-2 rounded-xl text-sm font-bold border transition-colors flex items-center gap-1.5 ${
+                    sortBy === colFilterModal.field && sortDir === "desc"
+                      ? "bg-emerald-500/20 border-emerald-500 text-emerald-300"
+                      : "border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  <span>Sort Z → A</span>
+                  <span>↓</span>
+                </button>
+              </div>
+
+              {/* Search Bar inside Modal */}
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-slate-200 block">
+                  Search values in {colFilterModal.label}:
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={colModalSearch}
+                    onChange={(e) => setColModalSearch(e.target.value)}
+                    placeholder={`Type to search ${colFilterModal.label}...`}
+                    className="w-full text-base bg-slate-950 border-2 border-slate-700 focus:border-emerald-500 rounded-2xl px-4 py-3 text-slate-100 placeholder:text-slate-500 focus:outline-none font-medium shadow-inner"
+                  />
+                  {colModalSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setColModalSearch("")}
+                      className="absolute right-4 top-3.5 text-slate-400 hover:text-white text-xs font-semibold"
+                    >
+                      Clear Search
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Multi-Select Value Options List */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-slate-300">
+                    Select options ({pendingColSelections.length} selected):
+                  </span>
+                  <div className="flex items-center gap-3 text-sm">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allVals = Array.from(
+                          new Set(
+                            rows
+                              .map((r) => String((r as any)[colFilterModal.field] || "").trim())
+                              .filter(Boolean),
+                          ),
+                        );
+                        setPendingColSelections(allVals);
+                      }}
+                      className="text-emerald-400 hover:underline font-semibold"
+                    >
+                      Select All
+                    </button>
+                    <span className="text-slate-600">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setPendingColSelections([])}
+                      className="text-slate-400 hover:text-white font-semibold"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                </div>
+
+                {/* Scrollable Container with large text and vertical/horizontal scrolling */}
+                <div className="max-h-[380px] overflow-y-auto overflow-x-auto border-2 border-slate-800 bg-slate-950/80 rounded-2xl p-3 space-y-1.5 divide-y divide-slate-800/40">
+                  {(() => {
+                    const uniqueValuesMap = new Map<string, number>();
+                    rows.forEach((r) => {
+                      const val = String((r as any)[colFilterModal.field] || "").trim();
+                      if (val) {
+                        uniqueValuesMap.set(val, (uniqueValuesMap.get(val) || 0) + 1);
+                      }
+                    });
+
+                    const sortedUniqueVals = Array.from(uniqueValuesMap.entries())
+                      .sort((a, b) => b[1] - a[1]);
+
+                    const filteredUniqueVals = sortedUniqueVals.filter(([val]) =>
+                      val.toLowerCase().includes(colModalSearch.trim().toLowerCase()),
+                    );
+
+                    if (filteredUniqueVals.length === 0) {
+                      return (
+                        <div className="py-8 text-center text-slate-500 text-sm font-medium">
+                          No matching values found for &quot;{colModalSearch}&quot;
+                        </div>
+                      );
+                    }
+
+                    return filteredUniqueVals.map(([val, count]) => {
+                      const checked = pendingColSelections.includes(val);
+                      return (
+                        <label
+                          key={val}
+                          className="flex items-center justify-between gap-4 p-3 rounded-xl hover:bg-slate-900/90 cursor-pointer transition-colors group pt-2.5"
+                        >
+                          <div className="flex items-center gap-3.5 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setPendingColSelections((prev) => [...prev, val]);
+                                } else {
+                                  setPendingColSelections((prev) =>
+                                    prev.filter((v) => v !== val),
+                                  );
+                                }
+                              }}
+                              className="w-5 h-5 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500 shrink-0"
+                            />
+                            <span className="text-base text-slate-200 font-semibold group-hover:text-white truncate">
+                              {val}
+                            </span>
+                          </div>
+                          <span className="text-xs font-mono font-bold bg-slate-800/80 text-emerald-400 px-2.5 py-1 rounded-full shrink-0">
+                            {count} rows
+                          </span>
+                        </label>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-slate-950 border-t border-slate-800 p-6 flex items-center justify-between shrink-0 gap-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedColValues((prev) => ({
+                    ...prev,
+                    [colFilterModal.field]: [],
+                  }));
+                  setColFilterModal(null);
+                }}
+                className="px-5 py-3 rounded-2xl border border-slate-700 text-slate-300 hover:bg-slate-900 hover:text-white font-bold text-sm transition-colors"
+              >
+                Reset Column Filter
+              </button>
+              
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setColFilterModal(null)}
+                  className="px-5 py-3 rounded-2xl border border-slate-800 text-slate-400 hover:text-white font-semibold text-sm transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedColValues((prev) => ({
+                      ...prev,
+                      [colFilterModal.field]: pendingColSelections,
+                    }));
+                    setColFilterModal(null);
+                  }}
+                  className="px-7 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-base shadow-xl transition-colors"
+                >
+                  Apply Filter
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );
