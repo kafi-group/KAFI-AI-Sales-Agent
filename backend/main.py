@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api import (
     agent_bridge,
     ai_mode,
+    ai_sales_agent,
     auth,
     calls,
     chatbot,
@@ -335,6 +336,7 @@ app.include_router(mailer_handoff.router, prefix="/api")
 app.include_router(calls.webhooks_router, prefix="/api")
 app.include_router(chatbot.router, prefix="/api")
 app.include_router(sales_assistant.router, prefix="/api")
+app.include_router(ai_sales_agent.router, prefix="/api")
 app.include_router(kpi.router, prefix="/api")
 app.include_router(guidance.router, prefix="/api")
 app.include_router(whatsapp.router, prefix="/api")
