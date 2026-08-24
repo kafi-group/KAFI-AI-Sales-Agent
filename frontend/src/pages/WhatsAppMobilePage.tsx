@@ -39,6 +39,13 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const avatarStorageKey = `whatsapp_avatar_${user?.id || "default"}`;
+  const [customAvatar, setCustomAvatar] = useState<string | null>(() => {
+    return localStorage.getItem(avatarStorageKey) || null;
+  });
+  const [editingAvatar, setEditingAvatar] = useState(false);
+  const [avatarInput, setAvatarInput] = useState("");
+
   const [imgFailed, setImgFailed] = useState(false);
   const connected = isConnectedStatus(status);
   const statusLabel = String(status?.status ?? (connected ? "connected" : "disconnected"));
@@ -47,9 +54,37 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
     (status?.profilePictureUrl || status?.profile_picture_url || status?.profilePic) as string
   ) || null;
 
+  const displayAvatarUrl = customAvatar || (!imgFailed ? profilePictureUrl : null);
+
   useEffect(() => {
     setImgFailed(false);
   }, [profilePictureUrl]);
+
+  function handleSaveCustomAvatar(url: string) {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      localStorage.removeItem(avatarStorageKey);
+      setCustomAvatar(null);
+    } else {
+      localStorage.setItem(avatarStorageKey, trimmed);
+      setCustomAvatar(trimmed);
+    }
+    setEditingAvatar(false);
+    setImgFailed(false);
+  }
+
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const res = evt.target?.result as string;
+      if (res) {
+        handleSaveCustomAvatar(res);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
   const qrPending = statusLabel.toLowerCase() === "qr-pending";
   const qrImage = qrImageFromPayload(qr);
 
@@ -183,27 +218,43 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
             {connected ? (
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 space-y-3">
                 <div className="flex items-center gap-3.5">
-                  {profilePictureUrl && !imgFailed ? (
-                    <div className="relative shrink-0">
+                  <div className="relative shrink-0 group">
+                    {displayAvatarUrl ? (
                       <img
-                        src={profilePictureUrl}
+                        src={displayAvatarUrl}
                         alt={`${userName}'s WhatsApp profile`}
                         referrerPolicy="no-referrer"
                         onError={() => setImgFailed(true)}
                         className="w-14 h-14 rounded-full object-cover border-2 border-emerald-400 shadow-md ring-2 ring-emerald-500/20"
                       />
-                      <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-slate-900 rounded-full" />
-                    </div>
-                  ) : (
-                    <div className="relative shrink-0">
+                    ) : (
                       <div className="w-14 h-14 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-lg flex items-center justify-center border-2 border-emerald-400/80 shadow-md ring-2 ring-emerald-500/20">
                         {userName.charAt(0).toUpperCase()}
                       </div>
-                      <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-slate-900 rounded-full" />
-                    </div>
-                  )}
+                    )}
+                    <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-slate-900 rounded-full" />
+                    
+                    <button
+                      type="button"
+                      onClick={() => setEditingAvatar(true)}
+                      className="absolute inset-0 bg-slate-950/75 text-white rounded-full flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity font-medium"
+                      title="Change or upload profile picture"
+                    >
+                      Edit
+                    </button>
+                  </div>
+
                   <div>
-                    <h4 className="text-sm font-bold text-emerald-300">WhatsApp Mobile Connected</h4>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-bold text-emerald-300">WhatsApp Mobile Connected</h4>
+                      <button
+                        type="button"
+                        onClick={() => setEditingAvatar(true)}
+                        className="text-[11px] text-emerald-400/70 hover:text-emerald-300 underline"
+                      >
+                        Set photo
+                      </button>
+                    </div>
                     <p className="text-xs text-slate-300 font-mono mt-0.5">
                       {connectedPhone || "Linked via mobile WhatsApp"}
                     </p>
@@ -212,6 +263,50 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                     </p>
                   </div>
                 </div>
+
+                {editingAvatar && (
+                  <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-700 text-xs space-y-2">
+                    <p className="text-slate-300 font-medium">Set WhatsApp Profile Picture</p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Paste image URL..."
+                        value={avatarInput}
+                        onChange={(e) => setAvatarInput(e.target.value)}
+                        className="flex-1 rounded bg-slate-900 border border-slate-700 px-2 py-1 text-slate-200 text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSaveCustomAvatar(avatarInput)}
+                        className="px-2.5 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-500 font-medium"
+                      >
+                        Save
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800">
+                      <label className="cursor-pointer text-emerald-400 hover:underline">
+                        Upload image file
+                        <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
+                      </label>
+                      {customAvatar && (
+                        <button
+                          type="button"
+                          onClick={() => handleSaveCustomAvatar("")}
+                          className="text-red-400 hover:underline"
+                        >
+                          Remove custom photo
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setEditingAvatar(false)}
+                        className="text-slate-400 hover:text-white"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <p className="text-xs text-slate-400 border-t border-emerald-500/20 pt-2.5">
                   Your mobile WhatsApp is active. Post-call follow-ups and 2-way inbox messages sync directly with this account.
                 </p>
