@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { client } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { ActionButton } from "../components/ui/ActionButton";
 import { IconCheck, IconRefresh, IconSend, IconWhatsApp } from "../components/icons/AppIcons";
 
@@ -25,6 +26,9 @@ function isConnectedStatus(st: Record<string, unknown> | null): boolean {
 }
 
 export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
+  const { user } = useAuth();
+  const userName = user?.full_name || user?.username || "Your account";
+
   const [status, setStatus] = useState<Record<string, unknown> | null>(null);
   const [qr, setQr] = useState<Record<string, unknown> | null>(null);
   const [sessionId, setSessionId] = useState("");
@@ -91,7 +95,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
       const qrData = await client.pairWhatsAppPersonal();
       setQr(qrData);
       setStatus((prev) => ({ ...(prev ?? {}), connected: false, status: "qr-pending" }));
-      setNotice("Scan this QR with your mobile phone WhatsApp → Linked devices.");
+      setNotice(`Scan this QR code with WhatsApp on ${userName}'s mobile phone.`);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Could not generate QR code");
     } finally {
@@ -100,13 +104,17 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   }
 
   async function handleDisconnect() {
-    if (!window.confirm("Disconnect your personal mobile WhatsApp account? You can scan a new QR code anytime.")) {
+    if (
+      !window.confirm(
+        `Disconnect mobile WhatsApp for ${userName}? This will ONLY disconnect ${userName}'s session (${sessionId}). Other team members' WhatsApp accounts will remain connected.`
+      )
+    ) {
       return;
     }
     setLoading(true);
     try {
       await client.disconnectWhatsAppPersonal();
-      setNotice("Disconnected. Click Generate QR Code to link a mobile WhatsApp number.");
+      setNotice(`Disconnected ${userName}'s mobile WhatsApp. Click Generate QR Code to link a number.`);
       setQr(null);
       await refresh();
     } catch (e) {
@@ -261,8 +269,8 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
           )}
 
           <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-800/60 flex items-center justify-between">
-            <span>Session ID: <code className="text-slate-400">{sessionId || "…"}</code></span>
-            <span>Mode: Baileys Multi-Device</span>
+            <span>Session: <code className="text-emerald-400 font-mono">{sessionId || "…"}</code> ({userName})</span>
+            <span>Isolated Multi-User Session</span>
           </div>
         </div>
 
