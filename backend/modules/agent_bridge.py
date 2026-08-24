@@ -304,8 +304,8 @@ def bridge_emails(db: Session, *, limit: int = 20) -> dict[str, Any]:
             contact = db.get(Contact, inter.contact_id) if inter.contact_id else None
             buyer = db.get(Buyer, contact.buyer_id) if contact and contact.buyer_id else None
             sender_str = contact.email if contact and contact.email else (buyer.company_name if buyer else "Unknown")
-            if contact and contact.name:
-                sender_str = f"{contact.name} <{contact.email}>" if contact.email else contact.name
+            if contact and contact.full_name:
+                sender_str = f"{contact.full_name} <{contact.email}>" if contact.email else contact.full_name
 
             emails.append(
                 {
@@ -314,7 +314,7 @@ def bridge_emails(db: Session, *, limit: int = 20) -> dict[str, Any]:
                     "subject": inter.subject or "Email Conversation",
                     "receivedAt": _iso_z(inter.created_at),
                     "snippet": (inter.content or "")[:200] or None,
-                    "leadName": buyer.company_name if buyer else (contact.name if contact else "Unknown"),
+                    "leadName": buyer.company_name if buyer else (contact.full_name if contact and contact.full_name else "Unknown"),
                     "status": "unread" if inter.status == InteractionStatus.received else "read",
                 }
             )
