@@ -40,16 +40,26 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   const [notice, setNotice] = useState<string | null>(null);
 
   const avatarStorageKey = `whatsapp_avatar_${user?.id || "default"}`;
+  const phoneStorageKey = `whatsapp_phone_number_${user?.id || "default"}`;
   const [customAvatar, setCustomAvatar] = useState<string | null>(() => {
     return localStorage.getItem(avatarStorageKey) || null;
   });
+  const [customPhone, setCustomPhone] = useState<string | null>(() => {
+    return localStorage.getItem(phoneStorageKey) || null;
+  });
   const [editingAvatar, setEditingAvatar] = useState(false);
   const [avatarInput, setAvatarInput] = useState("");
+  const [editingPhone, setEditingPhone] = useState(false);
+  const [phoneInput, setPhoneInput] = useState("");
 
   const [imgFailed, setImgFailed] = useState(false);
   const connected = isConnectedStatus(status);
   const statusLabel = String(status?.status ?? (connected ? "connected" : "disconnected"));
-  const connectedPhone = status?.phone ? String(status.phone) : null;
+  const connectedPhone = status?.phone
+    ? String(status.phone)
+    : status?.connectedPhone
+      ? String(status.connectedPhone)
+      : null;
   const profilePictureUrl = (
     (status?.profilePictureUrl || status?.profile_picture_url || status?.profilePic) as string
   ) || null;
@@ -250,7 +260,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                     </button>
                   </div>
 
-                  <div className="space-y-2 pt-2">
+                  <div className="space-y-3 pt-2">
                     <div className="flex flex-wrap items-center gap-3">
                       <h4 className="text-2xl font-extrabold text-emerald-300 tracking-tight">WhatsApp Mobile Connected</h4>
                       <button
@@ -261,13 +271,71 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                         Set / Change Photo
                       </button>
                     </div>
-                    <p className="text-lg text-slate-100 font-mono font-medium">
-                      {connectedPhone || "Linked via mobile WhatsApp"}
-                    </p>
+
+                    {/* Prominent Connected Phone Number Badge */}
+                    <div className="bg-slate-950/80 border-2 border-emerald-500/40 rounded-2xl p-4 space-y-3 shadow-inner my-2">
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="space-y-0.5">
+                          <span className="text-xs text-emerald-400 font-extrabold uppercase tracking-wider block">
+                            📱 Connected Mobile Phone Number
+                          </span>
+                          <span className="text-2xl font-extrabold font-mono text-white tracking-wide block">
+                            {customPhone || connectedPhone || "Phone Number Linked"}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPhoneInput(customPhone || connectedPhone || "");
+                            setEditingPhone(true);
+                          }}
+                          className="text-xs bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 px-3 py-1.5 rounded-xl font-bold transition-colors shadow-sm"
+                        >
+                          ✏️ Label / Edit Number
+                        </button>
+                      </div>
+
+                      {editingPhone && (
+                        <div className="pt-3 border-t border-slate-800 flex items-center gap-3 flex-wrap">
+                          <input
+                            type="text"
+                            value={phoneInput}
+                            onChange={(e) => setPhoneInput(e.target.value)}
+                            placeholder="Type phone number or SIM label (e.g. +923142867152)..."
+                            className="flex-1 min-w-[200px] text-base bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white font-mono"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const val = phoneInput.trim();
+                              if (val) {
+                                localStorage.setItem(phoneStorageKey, val);
+                                setCustomPhone(val);
+                              } else {
+                                localStorage.removeItem(phoneStorageKey);
+                                setCustomPhone(null);
+                              }
+                              setEditingPhone(false);
+                            }}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold shadow-md"
+                          >
+                            Save Number
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingPhone(false)}
+                            className="px-3 py-2 text-slate-400 hover:text-white text-xs font-semibold"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
                     <p className="text-base text-emerald-400 font-semibold">
                       Account Session: {userName}
                     </p>
-                    <p className="text-sm text-slate-300 leading-relaxed pt-2">
+                    <p className="text-sm text-slate-300 leading-relaxed pt-1">
                       Your mobile WhatsApp is active. Post-call follow-ups and 2-way inbox messages sync directly with this account.
                     </p>
                   </div>
@@ -380,23 +448,35 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
               ) : null}
             </div>
           ) : (
-            <div className="pt-6 border-t border-slate-800">
+            <div className="pt-6 border-t border-slate-800 space-y-3">
+              <ActionButton
+                icon={IconWhatsApp}
+                variant="primary"
+                size="md"
+                disabled={pairing}
+                onClick={() => void handlePair()}
+                title="Re-pair or refresh QR code for this account"
+                className="w-full justify-center text-base py-3 font-bold bg-emerald-600 hover:bg-emerald-500 text-white"
+              >
+                {pairing ? "Generating Fresh QR Code…" : "Re-Pair WhatsApp (Generate Fresh QR Code)"}
+              </ActionButton>
+              
               <ActionButton
                 icon={IconRefresh}
                 variant="ghost"
                 size="md"
                 onClick={() => void handleDisconnect()}
                 title="Disconnect personal mobile WhatsApp"
-                className="w-full justify-center text-slate-400 hover:text-red-400 text-base py-3"
+                className="w-full justify-center text-slate-400 hover:text-red-400 text-base py-3 border border-slate-800"
               >
                 Disconnect / Unpair Mobile
               </ActionButton>
             </div>
           )}
 
-          <div className="text-xs text-slate-400 pt-3 border-t border-slate-800/80 flex items-center justify-between">
+          <div className="text-xs text-slate-300 pt-3 border-t border-slate-800/80 flex items-center justify-between flex-wrap gap-2">
             <span>Account Session: <span className="text-emerald-400 font-bold text-sm">{userName}</span></span>
-            <span className="bg-slate-800/80 px-2.5 py-1 rounded-full text-slate-300">Isolated Multi-User Session</span>
+            <span className="bg-slate-800/80 px-2.5 py-1 rounded-full text-emerald-300 font-semibold border border-slate-700">Isolated Multi-User Session</span>
           </div>
         </div>
 

@@ -31,6 +31,20 @@ def _base_url() -> str:
     return url
 
 
+def _extract_phone_number(data: dict[str, Any]) -> str | None:
+    for key in ("phone", "connectedPhone", "number", "wa_number", "waNumber", "jid", "wid"):
+        val = data.get(key)
+        if isinstance(val, str) and val.strip():
+            raw = val.split("@")[0].split(":")[0].strip()
+            digits = "".join(ch for ch in raw if ch.isdigit())
+            if len(digits) >= 8:
+                return f"+{digits}"
+    user_obj = data.get("user") or data.get("me") or data.get("info")
+    if isinstance(user_obj, dict):
+        return _extract_phone_number(user_obj)
+    return None
+
+
 def _normalize_status(data: dict[str, Any]) -> dict[str, Any]:
     """Bridge uses status: connected | qr-pending | disconnected — normalize for UI."""
     if "connected" not in data:
@@ -39,6 +53,10 @@ def _normalize_status(data: dict[str, Any]) -> dict[str, Any]:
             data["connected"] = False
         else:
             data["connected"] = raw in {"connected", "open", "ready"}
+    phone = _extract_phone_number(data)
+    if phone:
+        data["phone"] = phone
+        data["connectedPhone"] = phone
     return data
 
 
