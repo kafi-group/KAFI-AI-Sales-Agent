@@ -115,7 +115,26 @@ type SortField =
   | "company_name"
   | "country"
   | "latest_score"
-  | "market_role";
+  | "market_role"
+  | "id"
+  | "business_type"
+  | "excel_file_grading"
+  | "designation"
+  | "contact_person"
+  | "primary_mobile"
+  | "secondary_mobile"
+  | "phone"
+  | "secondary_phone"
+  | "email"
+  | "secondary_email"
+  | "product"
+  | "website"
+  | "city"
+  | "ai_grading"
+  | "address"
+  | "calling_time"
+  | "remarks"
+  | "assigned_to_user_id";
 
 interface StoredTableView {
   score: string;
@@ -249,6 +268,25 @@ function readStoredTableView(
       "country",
       "latest_score",
       "market_role",
+      "id",
+      "business_type",
+      "excel_file_grading",
+      "designation",
+      "contact_person",
+      "primary_mobile",
+      "secondary_mobile",
+      "phone",
+      "secondary_phone",
+      "email",
+      "secondary_email",
+      "product",
+      "website",
+      "city",
+      "ai_grading",
+      "address",
+      "calling_time",
+      "remarks",
+      "assigned_to_user_id",
     ];
     return {
       score: typeof parsed.score === "string" ? parsed.score : "",
@@ -3641,40 +3679,116 @@ export function LeadsTablePage({
                       className="rounded border-slate-600 bg-slate-950"
                     />
                   </th>
-                  <th data-col="serial" className={`${TH} ${COL_SERIAL}`}>S. No</th>
+                  <th data-col="serial" className={`${TH} ${COL_SERIAL}`}>
+                    <button type="button" onClick={() => toggleSort("id")} className="hover:text-slate-300 flex items-center gap-1">
+                      S. No{sortIndicator("id")}
+                    </button>
+                  </th>
                   <th data-col="company" className={`${TH} ${COL_COMPANY_OLD}`}>
-                    <button type="button" onClick={() => toggleSort("company_name")} className="hover:text-slate-300">
+                    <button type="button" onClick={() => toggleSort("company_name")} className="hover:text-slate-300 flex items-center gap-1">
                       Company Name{sortIndicator("company_name")}
                     </button>
                   </th>
-                  <th data-col="business_type" className={`${TH} min-w-[140px]`}>Business Type</th>
-                  <th data-col="grading" className={`${TH} min-w-[140px]`}>Companies Grading</th>
-                  <th data-col="designation" className={`${TH} min-w-[130px]`}>Designation</th>
-                  <th data-col="contact_person" className={`${TH} min-w-[150px]`}>Contact Person</th>
-                  <th data-col="primary_mobile" className={`${TH} min-w-[160px]`}>Primary Mobile No.</th>
-                  <th data-col="secondary_mobile" className={`${TH} min-w-[160px]`}>Secondary Mobile No.</th>
-                  <th data-col="primary_phone" className={`${TH} min-w-[160px]`}>Primary Phone No.</th>
-                  <th data-col="secondary_phone" className={`${TH} min-w-[160px]`}>Secondary Phone No.</th>
-                  <th data-col="primary_email" className={`${TH} ${COL_EMAIL}`}>Primary Email</th>
-                  <th data-col="secondary_email" className={`${TH} ${COL_EMAIL2}`}>Secondary Email</th>
+                  <th data-col="business_type" className={`${TH} min-w-[140px]`}>
+                    <button type="button" onClick={() => toggleSort("business_type")} className="hover:text-slate-300 flex items-center gap-1">
+                      Business Type{sortIndicator("business_type")}
+                    </button>
+                  </th>
+                  <th data-col="grading" className={`${TH} min-w-[140px]`}>
+                    <button type="button" onClick={() => toggleSort("excel_file_grading")} className="hover:text-slate-300 flex items-center gap-1">
+                      Companies Grading{sortIndicator("excel_file_grading")}
+                    </button>
+                  </th>
+                  <th data-col="designation" className={`${TH} min-w-[130px]`}>
+                    <button type="button" onClick={() => toggleSort("designation")} className="hover:text-slate-300 flex items-center gap-1">
+                      Designation{sortIndicator("designation")}
+                    </button>
+                  </th>
+                  <th data-col="contact_person" className={`${TH} min-w-[150px]`}>
+                    <button type="button" onClick={() => toggleSort("contact_person")} className="hover:text-slate-300 flex items-center gap-1">
+                      Contact Person{sortIndicator("contact_person")}
+                    </button>
+                  </th>
+                  <th data-col="primary_mobile" className={`${TH} min-w-[160px]`}>
+                    <button type="button" onClick={() => toggleSort("primary_mobile")} className="hover:text-slate-300 flex items-center gap-1">
+                      Primary Mobile No.{sortIndicator("primary_mobile")}
+                    </button>
+                  </th>
+                  <th data-col="secondary_mobile" className={`${TH} min-w-[160px]`}>
+                    <button type="button" onClick={() => toggleSort("secondary_mobile")} className="hover:text-slate-300 flex items-center gap-1">
+                      Secondary Mobile No.{sortIndicator("secondary_mobile")}
+                    </button>
+                  </th>
+                  <th data-col="primary_phone" className={`${TH} min-w-[160px]`}>
+                    <button type="button" onClick={() => toggleSort("phone")} className="hover:text-slate-300 flex items-center gap-1">
+                      Primary Phone No.{sortIndicator("phone")}
+                    </button>
+                  </th>
+                  <th data-col="secondary_phone" className={`${TH} min-w-[160px]`}>
+                    <button type="button" onClick={() => toggleSort("secondary_phone")} className="hover:text-slate-300 flex items-center gap-1">
+                      Secondary Phone No.{sortIndicator("secondary_phone")}
+                    </button>
+                  </th>
+                  <th data-col="primary_email" className={`${TH} ${COL_EMAIL}`}>
+                    <button type="button" onClick={() => toggleSort("email")} className="hover:text-slate-300 flex items-center gap-1">
+                      Primary Email{sortIndicator("email")}
+                    </button>
+                  </th>
+                  <th data-col="secondary_email" className={`${TH} ${COL_EMAIL2}`}>
+                    <button type="button" onClick={() => toggleSort("secondary_email")} className="hover:text-slate-300 flex items-center gap-1">
+                      Secondary Email{sortIndicator("secondary_email")}
+                    </button>
+                  </th>
                   <th data-col="country" className={`${TH} min-w-[130px]`}>
-                    <button type="button" onClick={() => toggleSort("country")} className="hover:text-slate-300">
+                    <button type="button" onClick={() => toggleSort("country")} className="hover:text-slate-300 flex items-center gap-1">
                       Country{sortIndicator("country")}
                     </button>
                   </th>
-                  <th data-col="product" className={`${TH} min-w-[140px]`}>Product</th>
-                  <th data-col="website" className={`${TH} ${COL_WEBSITE}`}>Website</th>
-                  <th data-col="city" className={`${TH} min-w-[120px]`}>City</th>
-                  <th data-col="ai_grading" className={`${TH} min-w-[120px]`}>AI grading</th>
-                  <th data-col="address" className={`${TH} min-w-[200px]`}>Address</th>
+                  <th data-col="product" className={`${TH} min-w-[140px]`}>
+                    <button type="button" onClick={() => toggleSort("product")} className="hover:text-slate-300 flex items-center gap-1">
+                      Product{sortIndicator("product")}
+                    </button>
+                  </th>
+                  <th data-col="website" className={`${TH} ${COL_WEBSITE}`}>
+                    <button type="button" onClick={() => toggleSort("website")} className="hover:text-slate-300 flex items-center gap-1">
+                      Website{sortIndicator("website")}
+                    </button>
+                  </th>
+                  <th data-col="city" className={`${TH} min-w-[120px]`}>
+                    <button type="button" onClick={() => toggleSort("city")} className="hover:text-slate-300 flex items-center gap-1">
+                      City{sortIndicator("city")}
+                    </button>
+                  </th>
+                  <th data-col="ai_grading" className={`${TH} min-w-[120px]`}>
+                    <button type="button" onClick={() => toggleSort("ai_grading")} className="hover:text-slate-300 flex items-center gap-1">
+                      AI grading{sortIndicator("ai_grading")}
+                    </button>
+                  </th>
+                  <th data-col="address" className={`${TH} min-w-[200px]`}>
+                    <button type="button" onClick={() => toggleSort("address")} className="hover:text-slate-300 flex items-center gap-1">
+                      Address{sortIndicator("address")}
+                    </button>
+                  </th>
                   <th data-col="added" className={`${TH} min-w-[120px]`}>
-                    <button type="button" onClick={() => toggleSort("created_at")} className="hover:text-slate-300">
+                    <button type="button" onClick={() => toggleSort("created_at")} className="hover:text-slate-300 flex items-center gap-1">
                       Added{sortIndicator("created_at")}
                     </button>
                   </th>
-                  <th data-col="calling_time" className={`${TH} ${COL_CALLING}`}>Calling time</th>
-                  <th data-col="remarks" className={`${TH} min-w-[180px]`}>Remarks</th>
-                  <th data-col="assigned_to" className={`${TH} min-w-[150px]`}>Assigned To</th>
+                  <th data-col="calling_time" className={`${TH} ${COL_CALLING}`}>
+                    <button type="button" onClick={() => toggleSort("calling_time")} className="hover:text-slate-300 flex items-center gap-1">
+                      Calling time{sortIndicator("calling_time")}
+                    </button>
+                  </th>
+                  <th data-col="remarks" className={`${TH} min-w-[180px]`}>
+                    <button type="button" onClick={() => toggleSort("remarks")} className="hover:text-slate-300 flex items-center gap-1">
+                      Remarks{sortIndicator("remarks")}
+                    </button>
+                  </th>
+                  <th data-col="assigned_to" className={`${TH} min-w-[150px]`}>
+                    <button type="button" onClick={() => toggleSort("assigned_to_user_id")} className="hover:text-slate-300 flex items-center gap-1">
+                      Assigned To{sortIndicator("assigned_to_user_id")}
+                    </button>
+                  </th>
                   <th data-col="socials" className={`${TH} min-w-[120px]`}>Socials</th>
                   {isCallOutcomeSection && (
                     <th data-col="call_remarks" className={`${TH} min-w-[220px]`}>Call remarks</th>

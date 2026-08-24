@@ -15,6 +15,7 @@ from db.models import (
     Buyer,
     Channel,
     Contact,
+    Direction,
     Interaction,
     InteractionStatus,
     Quotation,
@@ -317,7 +318,7 @@ def bridge_emails(db: Session, *, limit: int = 20) -> dict[str, Any]:
                     "receivedAt": _iso_z(inter.created_at),
                     "snippet": (inter.content or "")[:200] or None,
                     "leadName": buyer.company_name if buyer else (contact.full_name if contact and contact.full_name else "Unknown"),
-                    "status": "unread" if inter.status == InteractionStatus.received else "read",
+                    "status": "unread" if getattr(inter, "direction", None) == Direction.inbound else "read",
                 }
             )
 

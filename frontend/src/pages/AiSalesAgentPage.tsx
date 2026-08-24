@@ -141,6 +141,31 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     }
   }
 
+  async function handleDirectCall() {
+    const phone = selfTestPhone.trim();
+    if (!phone) {
+      onError("Enter phone number in international format, e.g. +923001234567");
+      return;
+    }
+    setSelfTesting(true);
+    try {
+      await client.queueAiSalesAgentSelfTest({
+        persona: selfTestPersona,
+        phone,
+        contact_name: selfTestName.trim() || undefined,
+      });
+      await client.startAiSalesAgentRunner(selfTestPersona);
+      const agentName = selfTestPersona === "female" ? "Sara" : "Rayan";
+      setQueueNotice(`📞 ${agentName} is initiating an AI call to ${phone} right now!`);
+      setTimeout(() => setQueueNotice(null), 12000);
+      await load();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Direct call failed");
+    } finally {
+      setSelfTesting(false);
+    }
+  }
+
   async function handleAssign() {
     const ids = buyerIdsRaw
       .split(/[\s,;]+/)
@@ -360,14 +385,25 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                 className="mt-1 block w-full rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100"
               />
             </label>
-            <button
-              type="button"
-              disabled={selfTesting || !selfTestPhone.trim()}
-              onClick={() => void handleSelfTest()}
-              className="px-4 py-2 text-sm rounded-lg bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40"
-            >
-              {selfTesting ? "Queueing…" : "Queue test call"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={selfTesting || !selfTestPhone.trim()}
+                onClick={() => void handleDirectCall()}
+                className="px-4 py-2 text-sm rounded-lg bg-emerald-600 hover:bg-emerald-500 font-bold text-white shadow-md disabled:opacity-40 flex items-center gap-1.5"
+                title="Initiate direct call to this phone number immediately"
+              >
+                <span>📞 Call Now</span>
+              </button>
+              <button
+                type="button"
+                disabled={selfTesting || !selfTestPhone.trim()}
+                onClick={() => void handleSelfTest()}
+                className="px-3.5 py-2 text-sm rounded-lg border border-slate-600 text-slate-200 hover:bg-slate-800 disabled:opacity-40"
+              >
+                {selfTesting ? "Queueing…" : "Queue test call"}
+              </button>
+            </div>
           </div>
         </div>
       )}
