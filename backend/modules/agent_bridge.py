@@ -53,9 +53,11 @@ def _admin_viewer(db: Session) -> AppUser:
     return fallback
 
 
-def _iso_z(dt: datetime | None) -> str | None:
+def _iso_z(dt: datetime | str | None) -> str | None:
     if dt is None:
         return None
+    if isinstance(dt, str):
+        return dt
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
