@@ -144,11 +144,13 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   async function handlePair() {
     setPairing(true);
     setNotice(null);
+    setStatus({ connected: false, status: "qr-pending" });
+    setQr(null);
     try {
       const qrData = await client.pairWhatsAppPersonal();
       setQr(qrData);
-      setStatus((prev) => ({ ...(prev ?? {}), connected: false, status: "qr-pending" }));
-      setNotice(`Scan this QR code with WhatsApp on ${userName}'s mobile phone.`);
+      setStatus({ connected: false, status: "qr-pending" });
+      setNotice(`Scan this fresh QR code with WhatsApp on ${userName}'s mobile phone.`);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Could not generate QR code");
     } finally {
@@ -165,11 +167,16 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
       return;
     }
     setLoading(true);
+    setStatus({ connected: false, status: "disconnected" });
+    setQr(null);
+    localStorage.removeItem(phoneStorageKey);
+    setCustomPhone(null);
     try {
       await client.disconnectWhatsAppPersonal();
-      setNotice(`Disconnected ${userName}'s mobile WhatsApp. Click Generate QR Code to link a number.`);
-      setQr(null);
-      await refresh();
+      setNotice(`Disconnected ${userName}'s mobile WhatsApp session. Generating fresh QR Code...`);
+      const qrData = await client.pairWhatsAppPersonal();
+      setQr(qrData);
+      setStatus({ connected: false, status: "qr-pending" });
     } catch (e) {
       onError(e instanceof Error ? e.message : "Disconnect failed");
     } finally {

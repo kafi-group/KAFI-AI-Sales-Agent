@@ -139,18 +139,24 @@ def bridge_qr(user_id: int) -> dict[str, Any]:
 
 def bridge_disconnect(user_id: int) -> dict[str, Any]:
     session = bridge_session_id(user_id)
-    with httpx.Client(timeout=20.0) as client:
-        resp = client.post(
-            f"{_base_url()}/disconnect",
-            json={"session": session, "sessionId": session},
-            headers=_headers(),
-        )
-        resp.raise_for_status()
-        data = resp.json() if resp.content else {"ok": True}
-        if isinstance(data, dict):
-            data.setdefault("session", session)
-            data["connected"] = False
-        return data if isinstance(data, dict) else {"ok": True, "session": session, "connected": False}
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            client.post(
+                f"{_base_url()}/disconnect",
+                json={"session": session, "sessionId": session},
+                headers=_headers(),
+            )
+            try:
+                client.post(
+                    f"{_base_url()}/logout",
+                    json={"session": session, "sessionId": session},
+                    headers=_headers(),
+                )
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "session": session, "connected": False, "status": "disconnected"}
 
 
 def bridge_send(user_id: int, *, to_phone: str, message: str) -> dict[str, Any]:
