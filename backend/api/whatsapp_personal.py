@@ -69,14 +69,50 @@ def whatsapp_personal_pair(user: AppUser = Depends(get_current_user)) -> Any:
         raise HTTPException(502, f"Could not start WhatsApp pairing: {exc}") from exc
 
 
-@router.post("/disconnect")
-def whatsapp_personal_disconnect(user: AppUser = Depends(get_current_user)) -> Any:
+@router.get("/team-status")
+def whatsapp_personal_team_status(
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """Return active WhatsApp mobile connection status for all registered sales team members."""
+    users = db.query(AppUser).filter(AppUser.is_active == True).all()  # noqa: E712
+    team_status = []
+    for u in users:
+        try:
+            st = bridge.bridge_status(u.id)
+        except Exception:  # noqa: BLE001
+            st = {"connected": False, "status": "disconnected"}
+        
+        team_status.append({
+            "user_id": u.id,
+            "username": u.username,
+            "full_name": u.full_name or u.username,
+            "role": u.role,
+            "session_id": bridge.bridge_session_id(u.id),
+            "connected": bool(st.get("connected")),
+            "phone": st.get("phone") or st.get("connectedPhone"),
+            "profile_picture_url": st.get("profilePictureUrl") or st.get("profile_picture_url"),
+            "status": st.get("status", "disconnected"),
+            "is_current_user": u.id == user.id,
+        })
+    return team_status
+
+
+@router.post("/disconnect-user/{target_user_id}")
+def whatsapp_personal_disconnect_target_user(
+    target_user_id: int,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> Any:
+    """Disconnect specific user's WhatsApp session. Only Admin can disconnect other users."""
+    if user.id != target_user_id and str(user.role).lower() != "admin":
+        raise HTTPException(403, "Only Admin can disconnect another user's WhatsApp session.")
     try:
-        return bridge.bridge_disconnect(user.id)
+        return bridge.bridge_disconnect(target_user_id)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(502, f"Could not disconnect WhatsApp bridge: {exc}") from exc
+        raise HTTPException(502, f"Could not disconnect target user WhatsApp bridge: {exc}") from exc
 
 
 @router.post("/send")

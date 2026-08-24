@@ -329,21 +329,39 @@ app.get("/qr", async (req, res) => {
   const sessionId = req.query.session || req.query.sessionId || "default";
   try {
     let sessionObj = activeSessions.get(sessionId);
-    if (!sessionObj || sessionObj.connected) {
-      sessionObj = await initBaileysSession(sessionId, !sessionObj);
+    if (!sessionObj) {
+      sessionObj = await initBaileysSession(sessionId, false);
     }
 
-    if (sessionObj.connected) {
+    if (sessionObj && sessionObj.connected) {
       return res.json({
         session: sessionId,
         connected: true,
         status: "connected",
         phone: sessionObj.phone,
+        profilePictureUrl: sessionObj.profilePictureUrl || null,
         qr: null,
         qrDataUrl: null,
       });
     }
 
+    return res.json({
+      session: sessionId,
+      connected: false,
+      status: sessionObj.status || "qr-pending",
+      qr: sessionObj.qr,
+      qrDataUrl: sessionObj.qrDataUrl,
+      phone: sessionObj.phone || null,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message, session: sessionId });
+  }
+});
+
+app.post("/pair", async (req, res) => {
+  const sessionId = req.body?.session || req.body?.sessionId || req.query?.session || "default";
+  try {
+    const sessionObj = await initBaileysSession(sessionId, true);
     return res.json({
       session: sessionId,
       connected: false,
@@ -368,7 +386,11 @@ app.post("/disconnect", async (req, res) => {
       }
     }
     const sessionDir = path.join(SESSIONS_DIR, String(sessionId).replace(/[^a-zA-Z0-9_-]/g, "_"));
-    fs.rmSync(sessionDir, { recursive: true, force: true });
+    try {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+    } catch (e) {
+      // Ignore directory removal errors
+    }
     activeSessions.delete(sessionId);
     return res.json({ ok: true, session: sessionId, connected: false, status: "disconnected" });
   } catch (err) {

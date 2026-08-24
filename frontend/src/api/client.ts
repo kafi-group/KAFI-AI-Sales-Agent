@@ -2554,11 +2554,17 @@ export const client = {
     }),
   getWhatsAppPersonalStatus: () =>
     request<Record<string, unknown>>("/whatsapp-personal/status"),
+  getWhatsAppPersonalTeamStatus: () =>
+    request<Array<Record<string, unknown>>>("/whatsapp-personal/team-status"),
   getWhatsAppPersonalQr: () => request<Record<string, unknown>>("/whatsapp-personal/qr"),
   getWhatsAppPersonalSession: () =>
     request<{ session_id: string }>("/whatsapp-personal/session"),
   disconnectWhatsAppPersonal: () =>
     request<Record<string, unknown>>("/whatsapp-personal/disconnect", { method: "POST" }),
+  disconnectWhatsAppPersonalUser: (targetUserId: number) =>
+    request<Record<string, unknown>>(`/whatsapp-personal/disconnect-user/${targetUserId}`, {
+      method: "POST",
+    }),
   pairWhatsAppPersonal: () =>
     request<Record<string, unknown>>("/whatsapp-personal/pair", { method: "POST" }),
   sendWhatsAppPersonal: (payload: { to_phone: string; message: string }) =>

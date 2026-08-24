@@ -38,6 +38,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   const [pairing, setPairing] = useState(false);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [teamStatus, setTeamStatus] = useState<Array<Record<string, unknown>>>([]);
 
   const avatarStorageKey = `whatsapp_avatar_${user?.id || "default"}`;
   const phoneStorageKey = `whatsapp_phone_number_${user?.id || "default"}`;
@@ -101,12 +102,16 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [st, session] = await Promise.all([
+      const [st, session, teamRes] = await Promise.all([
         client.getWhatsAppPersonalStatus(),
         client.getWhatsAppPersonalSession(),
+        client.getWhatsAppPersonalTeamStatus().catch(() => []),
       ]);
       setStatus(st);
       setSessionId(session.session_id);
+      if (Array.isArray(teamRes)) {
+        setTeamStatus(teamRes);
+      }
 
       if (isConnectedStatus(st)) {
         setQr(null);
@@ -125,6 +130,23 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
       setLoading(false);
     }
   }, [onError]);
+
+  async function handleDisconnectTargetUser(targetUserId: number, targetName: string) {
+    if (
+      !window.confirm(
+        `Disconnect mobile WhatsApp for ${targetName}? This will ONLY disconnect ${targetName}'s session and will NOT affect any other user's WhatsApp.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await client.disconnectWhatsAppPersonalUser(targetUserId);
+      setNotice(`Disconnected ${targetName}'s WhatsApp session successfully.`);
+      await refresh();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : `Failed to disconnect ${targetName}`);
+    }
+  }
 
   useEffect(() => {
     void refresh();
@@ -560,6 +582,110 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
               </ActionButton>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Team WhatsApp Multi-User Session Status Section */}
+      <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-8 space-y-6 shadow-2xl mt-8">
+        <div className="flex items-center justify-between gap-4 flex-wrap border-b border-slate-800 pb-4">
+          <div>
+            <h3 className="text-xl font-bold text-slate-100 flex items-center gap-3">
+              <IconWhatsApp className="w-6 h-6 text-emerald-400" />
+              Sales Team WhatsApp Sessions Overview
+            </h3>
+            <p className="text-sm text-slate-300 mt-1">
+              Every team member has their own independent WhatsApp session namespace. Disconnecting one team member does NOT affect other users.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="text-xs bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 px-3.5 py-2 rounded-xl font-bold transition-colors"
+          >
+            🔄 Refresh Team Status
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {teamStatus.map((t) => {
+            const isUserConnected = Boolean(t.connected);
+            const isSelf = Boolean(t.is_current_user);
+            const fullName = String(t.full_name || t.username || "Team User");
+            const roleName = String(t.role || "User").toUpperCase();
+            const sessionTag = String(t.session_id || "");
+            const userPhone = t.phone ? String(t.phone) : null;
+            const pic = t.profile_picture_url ? String(t.profile_picture_url) : null;
+            const targetId = Number(t.user_id);
+
+            return (
+              <div
+                key={targetId}
+                className={`rounded-2xl border p-5 flex flex-col justify-between space-y-4 shadow-xl transition-all ${
+                  isUserConnected
+                    ? "border-emerald-500/40 bg-emerald-500/10"
+                    : "border-slate-800 bg-slate-950/60"
+                }`}
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      {pic ? (
+                        <img
+                          src={pic}
+                          alt={fullName}
+                          className="w-10 h-10 rounded-full object-cover border-2 border-emerald-400 shrink-0"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 text-emerald-400 font-bold flex items-center justify-center text-base shrink-0">
+                          {fullName.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <div>
+                        <h4 className="text-base font-bold text-slate-100 leading-tight">
+                          {fullName}
+                        </h4>
+                        <span className="text-[11px] font-mono text-slate-400">
+                          {roleName} {isSelf ? "(You)" : ""}
+                        </span>
+                      </div>
+                    </div>
+                    <span
+                      className={`text-xs px-2.5 py-1 rounded-full font-bold shrink-0 ${
+                        isUserConnected
+                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                          : "bg-slate-800 text-slate-400 border border-slate-700"
+                      }`}
+                    >
+                      {isUserConnected ? "🟢 Active" : "🔴 Offline"}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1 text-xs pt-1">
+                    <div className="text-slate-300 font-mono">
+                      Session: <span className="text-emerald-400 font-semibold">{sessionTag}</span>
+                    </div>
+                    <div className="text-slate-200 font-mono font-semibold">
+                      Phone: {userPhone || (isUserConnected ? "Connected" : "Not linked")}
+                    </div>
+                  </div>
+                </div>
+
+                {isUserConnected ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleDisconnectTargetUser(targetId, fullName)}
+                    className="w-full text-xs py-2 px-3 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/30 font-semibold transition-colors text-center"
+                  >
+                    Disconnect {fullName}'s WhatsApp
+                  </button>
+                ) : (
+                  <div className="text-xs text-slate-500 text-center py-1 font-medium">
+                    No active WhatsApp session
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
