@@ -42,6 +42,9 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   const connected = isConnectedStatus(status);
   const statusLabel = String(status?.status ?? (connected ? "connected" : "disconnected"));
   const connectedPhone = status?.phone ? String(status.phone) : null;
+  const profilePictureUrl = (
+    (status?.profilePictureUrl || status?.profile_picture_url || status?.profilePic) as string
+  ) || null;
   const qrPending = statusLabel.toLowerCase() === "qr-pending";
   const qrImage = qrImageFromPayload(qr);
 
@@ -177,19 +180,33 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
             
             {connected ? (
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                    <IconCheck size="lg" />
-                  </div>
+                <div className="flex items-center gap-3.5">
+                  {profilePictureUrl ? (
+                    <div className="relative shrink-0">
+                      <img
+                        src={profilePictureUrl}
+                        alt={`${userName}'s WhatsApp profile`}
+                        className="w-14 h-14 rounded-full object-cover border-2 border-emerald-400 shadow-md ring-2 ring-emerald-500/20"
+                      />
+                      <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-slate-900 rounded-full" />
+                    </div>
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
+                      <IconCheck size="lg" />
+                    </div>
+                  )}
                   <div>
                     <h4 className="text-sm font-bold text-emerald-300">WhatsApp Mobile Connected</h4>
                     <p className="text-xs text-slate-300 font-mono mt-0.5">
                       {connectedPhone || "Linked via mobile WhatsApp"}
                     </p>
+                    <p className="text-[11px] text-emerald-400/80 font-medium mt-0.5">
+                      Account Owner: {userName}
+                    </p>
                   </div>
                 </div>
                 <p className="text-xs text-slate-400 border-t border-emerald-500/20 pt-2.5">
-                  Your mobile WhatsApp is active. You can send post-call follow-ups directly through your phone number.
+                  Your mobile WhatsApp is active. Post-call follow-ups and 2-way inbox messages sync directly with this account.
                 </p>
               </div>
             ) : (

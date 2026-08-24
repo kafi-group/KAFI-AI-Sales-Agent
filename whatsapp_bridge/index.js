@@ -121,10 +121,24 @@ async function initBaileysSession(sessionId, forceNew = false) {
     defaultQueryTimeoutMs: 60000,
   });
 
+async function fetchProfilePicture(sock) {
+  try {
+    const rawJid = sock.user?.id || "";
+    const cleanNum = rawJid.split("@")[0].split(":")[0];
+    if (!cleanNum) return null;
+    const userJid = `${cleanNum}@s.whatsapp.net`;
+    const ppUrl = await sock.profilePictureUrl(userJid, "image");
+    return ppUrl || null;
+  } catch (err) {
+    return null;
+  }
+}
+
   const sessionObj = {
     sock,
     connected: false,
     phone: null,
+    profilePictureUrl: null,
     qr: null,
     qrDataUrl: null,
     status: "disconnected",
@@ -157,6 +171,10 @@ async function initBaileysSession(sessionId, forceNew = false) {
       const rawNum = jid.split("@")[0].split(":")[0];
       sessionObj.phone = rawNum ? `+${rawNum}` : null;
       console.log(`[Session ${safeSessionId}] Connected as ${sessionObj.phone || jid}`);
+
+      fetchProfilePicture(sock).then((url) => {
+        sessionObj.profilePictureUrl = url;
+      });
     }
 
     if (connection === "close") {
@@ -267,11 +285,16 @@ app.get("/status", async (req, res) => {
     if (!sessionObj) {
       sessionObj = await initBaileysSession(sessionId, false);
     }
+    if (sessionObj.connected && !sessionObj.profilePictureUrl && sessionObj.sock) {
+      sessionObj.profilePictureUrl = await fetchProfilePicture(sessionObj.sock);
+    }
     return res.json({
       session: sessionId,
       connected: Boolean(sessionObj.connected),
       status: sessionObj.status,
       phone: sessionObj.phone,
+      profilePictureUrl: sessionObj.profilePictureUrl || null,
+      profile_picture_url: sessionObj.profilePictureUrl || null,
     });
   } catch (err) {
     return res.status(500).json({ error: err.message, session: sessionId });
