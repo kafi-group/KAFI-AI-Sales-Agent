@@ -124,22 +124,36 @@ async function initBaileysSession(sessionId, forceNew = false) {
 async function fetchProfilePicture(sock) {
   try {
     const rawJid = sock.user?.id || "";
+    if (!rawJid) return null;
     const cleanNum = rawJid.split("@")[0].split(":")[0];
-    if (!cleanNum) return null;
-    const userJid = `${cleanNum}@s.whatsapp.net`;
+    const userJid = cleanNum ? `${cleanNum}@s.whatsapp.net` : rawJid;
+    
+    // Try primary user JID (high res)
     try {
-      const ppUrl = await sock.profilePictureUrl(userJid, "image");
-      if (ppUrl) return ppUrl;
-    } catch (e) {
-      try {
-        const previewUrl = await sock.profilePictureUrl(userJid, "preview");
-        if (previewUrl) return previewUrl;
-      } catch (err2) {
-        return null;
-      }
-    }
+      const url = await sock.profilePictureUrl(userJid, "image");
+      if (url) return url;
+    } catch (e) {}
+
+    // Try raw sock.user.id (high res)
+    try {
+      const url = await sock.profilePictureUrl(rawJid, "image");
+      if (url) return url;
+    } catch (e) {}
+
+    // Fall back to preview thumbnail
+    try {
+      const previewUrl = await sock.profilePictureUrl(userJid, "preview");
+      if (previewUrl) return previewUrl;
+    } catch (e) {}
+
+    try {
+      const previewUrl = await sock.profilePictureUrl(rawJid, "preview");
+      if (previewUrl) return previewUrl;
+    } catch (e) {}
+
     return null;
   } catch (err) {
+    console.warn("[ProfilePicture] Error fetching profile picture:", err?.message);
     return null;
   }
 }

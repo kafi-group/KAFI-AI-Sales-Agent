@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { client } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ActionButton } from "../components/ui/ActionButton";
-import { IconCheck, IconRefresh, IconSend, IconWhatsApp } from "../components/icons/AppIcons";
+import { IconRefresh, IconSend, IconWhatsApp } from "../components/icons/AppIcons";
 
 interface WhatsAppMobilePageProps {
   onError: (message: string) => void;
@@ -198,8 +198,11 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                       <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-slate-900 rounded-full" />
                     </div>
                   ) : (
-                    <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
-                      <IconCheck size="lg" />
+                    <div className="relative shrink-0">
+                      <div className="w-14 h-14 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-lg flex items-center justify-center border-2 border-emerald-400/80 shadow-md ring-2 ring-emerald-500/20">
+                        {userName.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-slate-900 rounded-full" />
                     </div>
                   )}
                   <div>
