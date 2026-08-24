@@ -13,6 +13,10 @@ from db.models import (
     AppUser,
     AppUserRole,
     Buyer,
+    Channel,
+    Contact,
+    Interaction,
+    InteractionStatus,
     Quotation,
     QuotationLineItem,
     QuotationStatus,
@@ -280,3 +284,77 @@ def bridge_performance(db: Session) -> dict[str, Any]:
         "byRep": by_rep,
         "trackingSince": _iso_z(tracking),
     }
+
+
+def bridge_emails(db: Session, *, limit: int = 20) -> dict[str, Any]:
+    limit = max(1, min(int(limit), 100))
+    emails: list[dict[str, Any]] = []
+
+    # 1. DB interactions with channel == email
+    db_interactions = (
+        db.query(Interaction)
+        .filter(Interaction.channel == Channel.email)
+        .order_by(Interaction.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    if db_interactions:
+        for inter in db_interactions:
+            contact = db.get(Contact, inter.contact_id) if inter.contact_id else None
+            buyer = db.get(Buyer, contact.buyer_id) if contact and contact.buyer_id else None
+            sender_str = contact.email if contact and contact.email else (buyer.company_name if buyer else "Unknown")
+            if contact and contact.name:
+                sender_str = f"{contact.name} <{contact.email}>" if contact.email else contact.name
+
+            emails.append(
+                {
+                    "id": str(inter.id),
+                    "sender": sender_str,
+                    "subject": inter.subject or "Email Conversation",
+                    "receivedAt": _iso_z(inter.created_at),
+                    "snippet": (inter.content or "")[:200] or None,
+                    "leadName": buyer.company_name if buyer else (contact.name if contact else "Unknown"),
+                    "status": "unread" if inter.status == InteractionStatus.received else "read",
+                }
+            )
+
+    # 2. Supplement from live Inbox threads if needed
+    if len(emails) < limit:
+        try:
+            admin = _admin_viewer(db)
+            from modules import inbox as inbox_module
+
+            res = inbox_module.list_threads(admin, limit=limit - len(emails), offset=0)
+            threads = res.get("items") or []
+            existing_subjects = {e["subject"] for e in emails}
+            for t in threads:
+                subj = t.get("subject") or "No Subject"
+                if subj in existing_subjects:
+                    continue
+                sender_name = t.get("latest_from_name") or t.get("latest_from_email") or "Unknown"
+                sender_email = t.get("latest_from_email")
+                sender_formatted = f"{sender_name} <{sender_email}>" if sender_email else sender_name
+                snippet_text = t.get("snippet") or subj
+
+                lead_name = sender_name
+                if sender_email:
+                    b = db.query(Buyer).filter(Buyer.email.ilike(f"%{sender_email}%")).first()
+                    if b:
+                        lead_name = b.company_name
+
+                emails.append(
+                    {
+                        "id": str(t.get("thread_id") or t.get("id") or len(emails) + 1),
+                        "sender": sender_formatted,
+                        "subject": subj,
+                        "receivedAt": _iso_z(t.get("latest_date")),
+                        "snippet": str(snippet_text)[:200] if snippet_text else None,
+                        "leadName": lead_name,
+                        "status": "unread" if (t.get("unread_count") or 0) > 0 else "read",
+                    }
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
+    return {"emails": emails[:limit]}

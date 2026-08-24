@@ -57,6 +57,16 @@ def _mount_bridge_routes(router: APIRouter) -> None:
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(502, f"Could not load performance: {exc}") from exc
 
+    @router.get("/emails")
+    def agent_bridge_emails(
+        limit: int = Query(default=20, ge=1, le=100),
+        db: Session = Depends(get_db),
+    ) -> dict:
+        try:
+            return bridge_module.bridge_emails(db, limit=limit)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Could not list emails: {exc}") from exc
+
 
 router = APIRouter(
     prefix="/agent-bridge",
