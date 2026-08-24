@@ -154,9 +154,6 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
           <div className="flex items-center gap-2">
             <IconWhatsApp className="w-6 h-6 text-emerald-400" />
             <h1 className="text-xl font-bold text-slate-100">WhatsApp Mobile</h1>
-            <span className="bg-emerald-500/20 text-emerald-400 text-xs font-semibold px-2 py-0.5 rounded border border-emerald-500/30">
-              Baileys Bridge
-            </span>
           </div>
           <p className="text-sm text-slate-400 mt-1">
             Link your personal or company mobile WhatsApp number by scanning the QR code below. Each user has their own isolated WhatsApp session.
@@ -296,7 +293,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
           )}
 
           <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-800/60 flex items-center justify-between">
-            <span>Session: <code className="text-emerald-400 font-mono">{sessionId || "…"}</code> ({userName})</span>
+            <span>Account Session: <span className="text-emerald-400 font-medium">{userName}</span></span>
             <span>Isolated Multi-User Session</span>
           </div>
         </div>
