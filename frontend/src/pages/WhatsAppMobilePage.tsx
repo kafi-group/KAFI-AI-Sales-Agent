@@ -121,7 +121,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
     setNotice(null);
     try {
       await client.sendWhatsAppPersonal({ to_phone: toPhone.trim(), message: message.trim() });
-      setNotice("Test message sent successfully from your mobile WhatsApp account!");
+      setNotice("Test message sent successfully! It has been logged to your Sales Agent WhatsApp Inbox & Activity history.");
       setMessage("");
     } catch (e) {
       onError(e instanceof Error ? e.message : "Send failed");

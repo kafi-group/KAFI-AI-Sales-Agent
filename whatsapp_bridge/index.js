@@ -17,6 +17,13 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
 const BRIDGE_SECRET = (process.env.WHATSAPP_BRIDGE_SECRET || "").trim();
+const BACKEND_WEBHOOK_URL = (
+  process.env.BACKEND_WEBHOOK_URL ||
+  process.env.KAFI_BACKEND_URL ||
+  "http://localhost:8000"
+)
+  .trim()
+  .replace(/\/+$/, "");
 const SESSIONS_DIR = path.join(__dirname, "sessions");
 
 if (!fs.existsSync(SESSIONS_DIR)) {
@@ -28,6 +35,30 @@ const logger = pino({ level: "silent" });
 // In-memory active session tracking
 // Map<sessionId, { sock, connected, phone, qr, qrDataUrl, status }
 const activeSessions = new Map();
+
+async function forwardInboundToBackend(sessionId, payload) {
+  if (!BACKEND_WEBHOOK_URL) return;
+  const targetUrl = `${BACKEND_WEBHOOK_URL}/api/whatsapp-personal/inbound`;
+  try {
+    const headers = { "Content-Type": "application/json" };
+    if (BRIDGE_SECRET) {
+      headers["x-bridge-secret"] = BRIDGE_SECRET;
+    }
+    const res = await fetch(targetUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn(`[Session ${sessionId}] Webhook response not OK (${res.status}): ${errText}`);
+    } else {
+      console.log(`[Session ${sessionId}] Inbound message forwarded to backend successfully`);
+    }
+  } catch (err) {
+    console.error(`[Session ${sessionId}] Failed to forward inbound message to backend:`, err.message);
+  }
+}
 
 // Security middleware
 app.use((req, res, next) => {
@@ -156,10 +187,49 @@ async function initBaileysSession(sessionId, forceNew = false) {
     }
   });
 
+  // Listener for incoming WhatsApp messages
+  sock.ev.on("messages.upsert", async (m) => {
+    try {
+      if (m.type !== "notify") return;
+      for (const msg of m.messages) {
+        if (msg.key.fromMe) continue;
+        const remoteJid = msg.key.remoteJid || "";
+        if (!remoteJid || remoteJid.includes("@broadcast") || remoteJid.includes("@g.us")) {
+          continue;
+        }
+
+        const text =
+          msg.message?.conversation ||
+          msg.message?.extendedTextMessage?.text ||
+          msg.message?.imageMessage?.caption ||
+          msg.message?.videoMessage?.caption ||
+          "";
+
+        if (!text.trim()) continue;
+
+        const rawPhone = remoteJid.split("@")[0].split(":")[0];
+        const pushName = msg.pushName || "";
+
+        console.log(`[Session ${safeSessionId}] Incoming WhatsApp message from ${rawPhone}: "${text.trim().slice(0, 50)}"`);
+
+        await forwardInboundToBackend(safeSessionId, {
+          session_id: safeSessionId,
+          from_phone: rawPhone ? `+${rawPhone}` : remoteJid,
+          wa_id: rawPhone || remoteJid,
+          message: text.trim(),
+          provider_message_id: msg.key.id,
+          profile_name: pushName,
+        });
+      }
+    } catch (err) {
+      console.error(`[Session ${safeSessionId}] Error processing messages.upsert:`, err);
+    }
+  });
+
   return sessionObj;
 }
 
-// Helper to format recipient phone into JID
+// Helper to format recipient phone into JID & raw digits
 function formatJid(phone) {
   let cleaned = String(phone || "").replace(/\D/g, "");
   if (!cleaned) throw new Error("Invalid phone number");
@@ -168,10 +238,8 @@ function formatJid(phone) {
   } else if (cleaned.startsWith("0") && (cleaned.length === 10 || cleaned.length === 11)) {
     cleaned = "92" + cleaned.slice(1);
   }
-  if (!cleaned.endsWith("@s.whatsapp.net")) {
-    cleaned = `${cleaned}@s.whatsapp.net`;
-  }
-  return cleaned;
+  const jid = cleaned.endsWith("@s.whatsapp.net") ? cleaned : `${cleaned}@s.whatsapp.net`;
+  return { rawDigits: cleaned, jid };
 }
 
 // --- Endpoints ---
@@ -278,14 +346,16 @@ app.post("/send", async (req, res) => {
       });
     }
 
-    let jid = formatJid(toPhone);
+    const { rawDigits, jid: defaultJid } = formatJid(toPhone);
+    let jid = defaultJid;
+
     try {
-      const [onWa] = await sessionObj.sock.onWhatsApp(jid);
-      if (onWa && onWa.jid) {
+      const [onWa] = await sessionObj.sock.onWhatsApp(rawDigits);
+      if (onWa && onWa.exists && onWa.jid) {
         jid = onWa.jid;
       }
     } catch (e) {
-      console.warn(`[Session ${sessionId}] onWhatsApp lookup check fallback for ${jid}:`, e?.message);
+      console.warn(`[Session ${sessionId}] onWhatsApp lookup fallback for ${rawDigits}:`, e?.message);
     }
 
     const sent = await sessionObj.sock.sendMessage(jid, { text: message });
