@@ -608,7 +608,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {teamStatus.map((t) => {
-            const isUserConnected = Boolean(t.connected);
+            const isUserConnected = Boolean(t.connected) && String(t.status ?? "").toLowerCase() === "connected";
             const isSelf = Boolean(t.is_current_user);
             const fullName = String(t.full_name || t.username || "Team User");
             const roleName = String(t.role || "User").toUpperCase();
@@ -656,7 +656,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                           : "bg-slate-800 text-slate-400 border border-slate-700"
                       }`}
                     >
-                      {isUserConnected ? "🟢 Active" : "🔴 Offline"}
+                      {isUserConnected ? "🟢 Connected" : "🔴 Not Connected"}
                     </span>
                   </div>
 
@@ -665,7 +665,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                       Session: <span className="text-emerald-400 font-semibold">{sessionTag}</span>
                     </div>
                     <div className="text-slate-200 font-mono font-semibold">
-                      Phone: {userPhone || (isUserConnected ? "Connected" : "Not linked")}
+                      Phone: {userPhone ? userPhone : isUserConnected ? "Connected" : "Not linked (Scan QR)"}
                     </div>
                   </div>
                 </div>

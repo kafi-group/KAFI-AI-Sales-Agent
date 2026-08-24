@@ -81,18 +81,22 @@ def whatsapp_personal_team_status(
         try:
             st = bridge.bridge_status(u.id)
         except Exception:  # noqa: BLE001
-            st = {"connected": False, "status": "disconnected"}
+            st = {"connected": False, "status": "disconnected", "phone": None}
         
+        raw_st = str(st.get("status") or "").lower()
+        is_conn = bool(st.get("connected")) and raw_st in {"connected", "open", "ready"}
+        phone_val = (st.get("phone") or st.get("connectedPhone")) if is_conn else None
+
         team_status.append({
             "user_id": u.id,
             "username": u.username,
             "full_name": u.full_name or u.username,
             "role": u.role,
             "session_id": bridge.bridge_session_id(u.id),
-            "connected": bool(st.get("connected")),
-            "phone": st.get("phone") or st.get("connectedPhone"),
-            "profile_picture_url": st.get("profilePictureUrl") or st.get("profile_picture_url"),
-            "status": st.get("status", "disconnected"),
+            "connected": is_conn,
+            "phone": phone_val,
+            "profile_picture_url": st.get("profilePictureUrl") or st.get("profile_picture_url") if is_conn else None,
+            "status": "connected" if is_conn else (raw_st if raw_st else "disconnected"),
             "is_current_user": u.id == user.id,
         })
     return team_status

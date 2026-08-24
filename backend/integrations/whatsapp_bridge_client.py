@@ -47,16 +47,26 @@ def _extract_phone_number(data: dict[str, Any]) -> str | None:
 
 def _normalize_status(data: dict[str, Any]) -> dict[str, Any]:
     """Bridge uses status: connected | qr-pending | disconnected — normalize for UI."""
-    if "connected" not in data:
-        raw = str(data.get("status") or "").strip().lower()
-        if raw in {"qr-pending", "disconnected", "close", "closed", "logged_out"}:
-            data["connected"] = False
-        else:
-            data["connected"] = raw in {"connected", "open", "ready"}
-    phone = _extract_phone_number(data)
+    raw_status = str(data.get("status") or "").strip().lower()
+    raw_conn = data.get("connected")
+    
+    if raw_status in {"disconnected", "qr-pending", "close", "closed", "logged_out", ""}:
+        data["connected"] = False
+        data["status"] = raw_status if raw_status else "disconnected"
+    elif raw_conn is False:
+        data["connected"] = False
+        data["status"] = "disconnected"
+    else:
+        data["connected"] = bool(raw_conn) or raw_status in {"connected", "open", "ready"}
+
+    phone = _extract_phone_number(data) if data["connected"] else None
     if phone:
         data["phone"] = phone
         data["connectedPhone"] = phone
+    else:
+        data["phone"] = None
+        data["connectedPhone"] = None
+
     return data
 
 
