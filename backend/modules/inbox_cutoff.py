@@ -95,10 +95,7 @@ def has_active_cutoff(user_id: int | None = None) -> bool:
             user_id = get_active_mailbox_user_id()
         except Exception:  # noqa: BLE001
             user_id = None
-    return bool(
-        _parse_datetime(settings.inbox_since or settings.gmail_inbox_since or "")
-        or _read_file_cutoff(user_id)
-    )
+    return bool(_read_file_cutoff(user_id))
 
 
 def get_inbox_since(*, initialize: bool = False, user_id: int | None = None) -> datetime:
@@ -114,10 +111,6 @@ def get_inbox_since(*, initialize: bool = False, user_id: int | None = None) -> 
             user_id = get_active_mailbox_user_id()
         except Exception:  # noqa: BLE001
             user_id = None
-
-    env_value = _parse_datetime(settings.inbox_since or settings.gmail_inbox_since or "")
-    if env_value:
-        return env_value
 
     stored = _read_file_cutoff(user_id)
     if stored:

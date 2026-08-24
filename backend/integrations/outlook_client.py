@@ -701,7 +701,7 @@ class OutlookClient:
     ) -> list[dict[str, Any]]:
         from imap_tools import AND
 
-        from modules.inbox_cutoff import has_active_cutoff
+        from modules.inbox_cutoff import get_inbox_since, has_active_cutoff
 
         try:
             mailbox.folder.set(folder)

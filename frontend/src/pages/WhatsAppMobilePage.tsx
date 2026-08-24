@@ -39,12 +39,17 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const [imgFailed, setImgFailed] = useState(false);
   const connected = isConnectedStatus(status);
   const statusLabel = String(status?.status ?? (connected ? "connected" : "disconnected"));
   const connectedPhone = status?.phone ? String(status.phone) : null;
   const profilePictureUrl = (
     (status?.profilePictureUrl || status?.profile_picture_url || status?.profilePic) as string
   ) || null;
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [profilePictureUrl]);
   const qrPending = statusLabel.toLowerCase() === "qr-pending";
   const qrImage = qrImageFromPayload(qr);
 
@@ -181,11 +186,13 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
             {connected ? (
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 space-y-3">
                 <div className="flex items-center gap-3.5">
-                  {profilePictureUrl ? (
+                  {profilePictureUrl && !imgFailed ? (
                     <div className="relative shrink-0">
                       <img
                         src={profilePictureUrl}
                         alt={`${userName}'s WhatsApp profile`}
+                        referrerPolicy="no-referrer"
+                        onError={() => setImgFailed(true)}
                         className="w-14 h-14 rounded-full object-cover border-2 border-emerald-400 shadow-md ring-2 ring-emerald-500/20"
                       />
                       <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-slate-900 rounded-full" />

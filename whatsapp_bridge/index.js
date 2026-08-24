@@ -127,8 +127,18 @@ async function fetchProfilePicture(sock) {
     const cleanNum = rawJid.split("@")[0].split(":")[0];
     if (!cleanNum) return null;
     const userJid = `${cleanNum}@s.whatsapp.net`;
-    const ppUrl = await sock.profilePictureUrl(userJid, "image");
-    return ppUrl || null;
+    try {
+      const ppUrl = await sock.profilePictureUrl(userJid, "image");
+      if (ppUrl) return ppUrl;
+    } catch (e) {
+      try {
+        const previewUrl = await sock.profilePictureUrl(userJid, "preview");
+        if (previewUrl) return previewUrl;
+      } catch (err2) {
+        return null;
+      }
+    }
+    return null;
   } catch (err) {
     return null;
   }
