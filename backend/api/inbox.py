@@ -84,6 +84,13 @@ def clear_inbox_cutoff(user: AppUser = Depends(get_current_user_released)):
     return inbox_module.clear_cutoff(user)
 
 
+@router.post("/clear-all-cutoffs")
+def clear_all_inbox_cutoffs(user: AppUser = Depends(get_current_user_released)):
+    """Show all historic mailbox mail for ALL team users."""
+    _guard_configured(user)
+    return inbox_module.clear_all_cutoffs()
+
+
 @router.get("/threads", response_model=InboxThreadListResponse)
 def list_inbox_threads(
     limit: int = Query(default=50, ge=1, le=100),

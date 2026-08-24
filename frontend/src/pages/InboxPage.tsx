@@ -826,6 +826,18 @@ export function InboxPage({
     }
   }
 
+  async function showAllMailAllUsers() {
+    try {
+      await client.clearAllInboxCutoffs();
+      setNotice("Cleared email cutoffs for ALL team accounts. Showing all historic mailbox conversations.");
+      clearSelection();
+      setUnreadOnly(false);
+      await loadList();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to clear email cutoffs for all users");
+    }
+  }
+
   function formatSince(value: string | null | undefined): string {
     if (!value) return "";
     const date = new Date(value);
@@ -1039,6 +1051,15 @@ export function InboxPage({
                   title="Ask AI about unread mail"
                 >
                   {status.unread_count} unread — ask AI
+                </button>
+                {" · "}
+                <button
+                  type="button"
+                  onClick={() => void showAllMailAllUsers()}
+                  className="text-sky-400 hover:text-sky-300 underline decoration-dotted font-medium text-xs ml-1"
+                  title="Clear email cutoffs for all user accounts so everyone sees all past emails"
+                >
+                  Show All Past Emails (All Users)
                 </button>
               </>
             ) : null}

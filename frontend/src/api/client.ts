@@ -2470,6 +2470,11 @@ export const client = {
     request<{ showing_since: string }>("/inbox/reset-cutoff", { method: "POST" }),
   clearInboxCutoff: () =>
     request<{ showing_since: string | null }>("/inbox/clear-cutoff", { method: "POST" }),
+  clearAllInboxCutoffs: () =>
+    request<{ status: string; cleared_count: number; showing_since: string | null }>(
+      "/inbox/clear-all-cutoffs",
+      { method: "POST" },
+    ),
   getInboxUnreadCount: () => request<{ count: number }>("/inbox/unread-count"),
   listInboxThreads: (params: {
     limit?: number;

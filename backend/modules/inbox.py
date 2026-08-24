@@ -406,6 +406,13 @@ def clear_cutoff(user: AppUser) -> dict[str, str | None]:
     return {"showing_since": None}
 
 
+def clear_all_cutoffs() -> dict[str, Any]:
+    from modules.inbox_cutoff import clear_all_inbox_cutoffs
+
+    cleared = clear_all_inbox_cutoffs()
+    return {"status": "ok", "cleared_count": cleared, "showing_since": None}
+
+
 def _strip_thread_internals(thread: dict[str, Any]) -> dict[str, Any]:
     return {
         "thread_id": thread["thread_id"],

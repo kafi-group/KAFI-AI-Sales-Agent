@@ -39,11 +39,7 @@ def _cutoff_file(user_id: int | None) -> Path:
 def _read_file_cutoff(user_id: int | None = None) -> datetime | None:
     path = _cutoff_file(user_id)
     if not path.is_file():
-        # Fall back to legacy global cutoff only when no per-user file exists.
-        if user_id is not None and _LEGACY_CUTOFF_FILE.is_file():
-            path = _LEGACY_CUTOFF_FILE
-        else:
-            return None
+        return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return _parse_datetime(str(data.get("since", "")))
@@ -66,8 +62,29 @@ def clear_inbox_cutoff(user_id: int | None = None) -> None:
         path = _cutoff_file(user_id)
         if path.is_file():
             path.unlink()
+        if _LEGACY_CUTOFF_FILE.is_file():
+            _LEGACY_CUTOFF_FILE.unlink()
     except OSError:
         pass
+
+
+def clear_all_inbox_cutoffs() -> int:
+    """Clear inbox cutoffs for ALL users and legacy files so everyone sees all past emails."""
+    count = 0
+    if _LEGACY_CUTOFF_FILE.is_file():
+        try:
+            _LEGACY_CUTOFF_FILE.unlink()
+            count += 1
+        except OSError:
+            pass
+    if _CUTOFF_DIR.is_dir():
+        for file in _CUTOFF_DIR.glob("*.json"):
+            try:
+                file.unlink()
+                count += 1
+            except OSError:
+                pass
+    return count
 
 
 def has_active_cutoff(user_id: int | None = None) -> bool:
