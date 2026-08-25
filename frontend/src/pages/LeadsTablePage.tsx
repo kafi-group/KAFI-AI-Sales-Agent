@@ -979,6 +979,11 @@ export function LeadsTablePage({
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [intakeMethodFilter, setIntakeMethodFilter] = useState<"all" | "upload" | "discover">("all");
   const [movingToPool, setMovingToPool] = useState(false);
+  const [moveConfirmTarget, setMoveConfirmTarget] = useState<{
+    moduleKey: string;
+    moduleLabel: string;
+    count: number;
+  } | null>(null);
   const [populatingPool, setPopulatingPool] = useState(false);
   const [removingFromPool, setRemovingFromPool] = useState(false);
   const [classifyingPools, setClassifyingPools] = useState(false);
@@ -3177,7 +3182,28 @@ export function LeadsTablePage({
               disabled={selected.size === 0 || movingToModule}
               onChange={(e) => {
                 const val = e.target.value;
-                if (val) void handleMoveToModule(val);
+                if (val) {
+                  const labels: Record<string, string> = {
+                    khalid_focused_sales: "📌 Khalid Focused Sales",
+                    follow_up_clients: "⏰ Follow up clients",
+                    interested_clients: "💜 Interested Clients",
+                    not_interested_clients: "🚫 Not interested",
+                    not_received_call_clients: "📞 Did not receive call",
+                    hyperstore_targeted: "🏪 Hyperstore Target",
+                    targeted_distributor: "🚚 Targeted Distributors",
+                    targeted_client: "🎯 Targeted Client",
+                    incomplete_archives: "📂 Incomplete Data from Archives",
+                    old_clients: "🏛️ Old clients",
+                    master: "📋 Master Table (FMCG)",
+                  };
+                  const label = labels[val] || val.replace("_", " ");
+                  setMoveConfirmTarget({
+                    moduleKey: val,
+                    moduleLabel: label,
+                    count: selected.size,
+                  });
+                  e.target.value = "";
+                }
               }}
               className="bg-slate-900 text-slate-100 font-bold px-2.5 py-1 rounded-lg outline-none cursor-pointer border border-indigo-500/40 hover:border-indigo-300 disabled:opacity-50"
             >
@@ -5279,6 +5305,64 @@ export function LeadsTablePage({
                   Apply Filter
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {moveConfirmTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-indigo-500/40 bg-slate-900 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-500/20 text-indigo-400 text-xl font-bold">
+                📦
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-100">
+                  Confirm Move to Module
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Are you sure you want to transfer selected leads?
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 text-xs text-slate-300 space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Leads to move:</span>
+                <span className="font-extrabold text-indigo-300 bg-indigo-500/10 px-2.5 py-1 rounded-lg border border-indigo-500/20">
+                  {moveConfirmTarget.count} lead(s)
+                </span>
+              </div>
+              <div className="flex justify-between items-center pt-1">
+                <span className="text-slate-400">Destination module:</span>
+                <span className="font-extrabold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                  {moveConfirmTarget.moduleLabel}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={movingToModule}
+                onClick={() => setMoveConfirmTarget(null)}
+                className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-bold text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={movingToModule}
+                onClick={async () => {
+                  const target = moveConfirmTarget;
+                  setMoveConfirmTarget(null);
+                  await handleMoveToModule(target.moduleKey);
+                }}
+                className="rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-2 text-xs font-extrabold text-white shadow-lg transition-all disabled:opacity-50"
+              >
+                {movingToModule ? "Moving…" : "Confirm Move"}
+              </button>
             </div>
           </div>
         </div>

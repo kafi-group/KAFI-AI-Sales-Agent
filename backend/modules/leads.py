@@ -2814,6 +2814,7 @@ def move_leads_to_module(
         for lead_id in lead_ids:
             buyer = buyers_module.get_buyer(db, lead_id)
             if buyer:
+                buyer.source = "khalid_focused_sales"
                 buyer.assigned_to_user_id = khalid_id
                 buyer.assigned_to = khalid_name
                 buyer.assigned_at = datetime.utcnow()
