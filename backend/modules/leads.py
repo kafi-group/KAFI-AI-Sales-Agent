@@ -2786,6 +2786,7 @@ def move_leads_to_module(
 ) -> dict[str, object]:
     """Move a list of leads into any section/module (Khalid Focused, Call outcomes, Targeted Pools, Archives)."""
     from datetime import datetime
+    from sqlalchemy import or_, func as sa_func
     from auth.models import AppUser
     from modules.audit import log_action
 
