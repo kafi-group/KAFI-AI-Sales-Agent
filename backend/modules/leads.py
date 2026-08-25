@@ -1297,7 +1297,7 @@ def get_lead_table_column_values(
     address: str | None = None,
     remarks: str | None = None,
 ) -> dict[str, object]:
-    rows, _section_total, filtered_count = _filtered_lead_table_rows(
+    id_rows, _section_total, filtered_count = _filtered_lead_table_rows(
         db,
         score=score,
         country=country,
@@ -1331,18 +1331,82 @@ def get_lead_table_column_values(
         website=website,
         address=address,
         remarks=remarks,
-        page=None,
-        page_size=None,
+        ids_only=True,
     )
+
+    if filtered_count == 0 or not id_rows:
+        return {
+            "field": field,
+            "total_matching": 0,
+            "blank_count": 0,
+            "unique_values": [],
+        }
+
+    matching_buyer_ids = [int(r["id"]) for r in id_rows if isinstance(r, dict) and "id" in r]
 
     counts: dict[str, int] = {}
     blank_count = 0
-    for r in rows:
-        val = _extract_row_field_value(r, field)
-        if not val:
-            blank_count += 1
-        else:
-            counts[val] = counts.get(val, 0) + 1
+
+    buyer_col_map = {
+        "excel_file_grading": Buyer.company_grading,
+        "company_grading": Buyer.company_grading,
+        "business_type": Buyer.industry,
+        "industry": Buyer.industry,
+        "city": Buyer.city,
+        "website": Buyer.website_url,
+        "address": Buyer.address,
+        "remarks": Buyer.remarks,
+    }
+    contact_col_map = {
+        "designation": Contact.designation,
+        "contact_person": Contact.full_name,
+        "primary_mobile": Contact.phone,
+        "secondary_mobile": Contact.secondary_mobile,
+        "phone": Contact.primary_phone,
+        "secondary_phone": Contact.secondary_phone,
+        "email": Contact.email,
+        "secondary_email": Contact.secondary_email,
+    }
+
+    if field in buyer_col_map:
+        col = buyer_col_map[field]
+        grouped = (
+            db.query(col, sa_func.count(Buyer.id))
+            .filter(Buyer.id.in_(matching_buyer_ids))
+            .group_by(col)
+            .all()
+        )
+        for raw_val, cnt in grouped:
+            v = (raw_val or "").strip()
+            if not v or v in {"—", "-"}:
+                blank_count += cnt
+            else:
+                counts[v] = counts.get(v, 0) + cnt
+    elif field in contact_col_map:
+        ccol = contact_col_map[field]
+        grouped = (
+            db.query(ccol, sa_func.count(Contact.id))
+            .filter(Contact.buyer_id.in_(matching_buyer_ids))
+            .group_by(ccol)
+            .all()
+        )
+        has_val_buyers = set(
+            b_id
+            for (b_id,) in db.query(Contact.buyer_id)
+            .filter(
+                Contact.buyer_id.in_(matching_buyer_ids),
+                ccol.isnot(None),
+                ccol != "",
+                ccol != "—",
+                ccol != "-",
+            )
+            .all()
+        )
+        blank_count = len(matching_buyer_ids) - len(has_val_buyers)
+        for raw_val, cnt in grouped:
+            v = (raw_val or "").strip()
+            if v and v not in {"—", "-"}:
+                counts[v] = counts.get(v, 0) + cnt
 
     sorted_vals = sorted(counts.items(), key=lambda x: x[1], reverse=True)
     return {
@@ -1476,7 +1540,7 @@ def list_leads_table(
     remarks: str | None = None,
 ) -> dict[str, object]:
     page = max(1, page)
-    page_size = min(max(1, page_size), 100)
+    page_size = min(max(1, page_size), 50000)
 
     rows, section_total, filtered_count = _filtered_lead_table_rows(
         db,
