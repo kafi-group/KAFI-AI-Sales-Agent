@@ -14,15 +14,16 @@ _TRAINING_STORE: dict[str, Any] = {
     "last_trained_at": None,
     "total_calls_analyzed": 0,
     "learned_insights": (
-        "• Pitch Strategy: Lead with high quality Basmati 1121 and 5% Broken White Rice specs before quoting prices.\n"
-        "• Payment Terms: Standard payment terms are LC at sight or 30% TT advance deposit.\n"
-        "• Common Objections: When buyers request discounts for high volume (100+ MT), offer free SGS inspection certificates and CNF Karachi port quotes.\n"
-        "• Key Products: White Rice, Sesame Seeds 99% purity, Yellow Corn, Spices, and Edible Oils."
+        "• Call Opening: Start call by verifying identity ('Hello, am I speaking with [Name]?'). Upon confirmation, introduce yourself clearly as Sara/Rayan from Kafi Commodities.\n"
+        "• Pitch Strategy: Lead with high quality Basmati 1121, 5% Broken White Rice, 99% Purity Sesame Seeds, and Yellow Corn before quoting prices.\n"
+        "• Catalogue Delivery: NEVER ask the customer for their email address or phone number (we already have it on file!). Tell them: 'I will send our official product catalogue and CNF price list directly to your WhatsApp and email for you to go through.'\n"
+        "• Name Usage: Mention the customer's name once in the greeting. Do NOT repeat their name repeatedly in every spoken sentence."
     ),
     "custom_rules": (
-        "1. Always address the customer politely by name or company title.\n"
-        "2. Quoting prices in CNF (Cost & Freight) is preferred over FOB.\n"
-        "3. Always offer to email product specifications and proforma invoice."
+        "1. First ask: 'Hello, am I speaking with [Name]?'. After confirmation, introduce Sara/Rayan from Kafi Commodities.\n"
+        "2. Do NOT ask for the customer's email or phone number. We already have their info in our system.\n"
+        "3. Offer to send product catalogue and CNF price list to their WhatsApp and email.\n"
+        "4. Do NOT repeat the customer's name repeatedly during the call."
     ),
 }
 
