@@ -2861,7 +2861,7 @@ export function LeadsTablePage({
     displayedRows.length > 0 && displayedRows.every((row) => selected.has(row.id));
   const someOnPageSelected = displayedRows.some((row) => selected.has(row.id));
   const allMatchingAreSelected =
-    allMatchingSelected && selected.size > 0 && selected.size === filteredCount;
+    allMatchingSelected || (selected.size > 0 && selected.size >= filteredCount);
   const showSelectAllBanner =
     filteredCount > displayedRows.length &&
     allOnPageSelected &&

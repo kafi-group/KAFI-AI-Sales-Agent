@@ -1077,7 +1077,7 @@ def _filtered_lead_table_rows(
 
     if use_sql_sort:
         page = max(1, page)  # type: ignore[arg-type]
-        page_size = min(max(1, page_size), 100)  # type: ignore[arg-type]
+        page_size = min(max(1, page_size), 50000)  # type: ignore[arg-type]
         col = _SQL_SORT_COLS[sort_field]
         order_expr = col.desc() if reverse else col.asc()
         # filtered_count via count query (cheap — no row transfer)
@@ -1189,7 +1189,7 @@ def _filtered_lead_table_rows(
     page_ids = filtered_ids
     if page is not None and page_size is not None:
         page = max(1, page)
-        page_size = min(max(1, page_size), 100)
+        page_size = min(max(1, page_size), 50000)
         start = (page - 1) * page_size
         page_ids = filtered_ids[start : start + page_size]
 
