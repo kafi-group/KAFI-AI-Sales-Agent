@@ -251,20 +251,89 @@ function formatAddedAt(iso: string | null | undefined): string {
 }
 
 function getRowFieldValue(row: LeadTableRow, field: string): string {
-  if (field === "assigned_to_user_id") {
-    const assignedTo = (row as any).assigned_to;
-    if (assignedTo && assignedTo !== "unassigned") return String(assignedTo).trim();
-    if (row.assigned_to_user_id) return String(row.assigned_to_user_id).trim();
-    return "";
+  let val: any = null;
+  switch (field) {
+    case "id":
+      val = row.legacy_serial_no != null ? String(row.legacy_serial_no) : row.id;
+      break;
+    case "company_name":
+      val = row.company_name;
+      break;
+    case "business_type":
+      val = row.industry ?? (row as any).business_type;
+      break;
+    case "excel_file_grading":
+      val = row.company_grading ?? (row as any).excel_file_grading;
+      break;
+    case "designation":
+      val = row.contact_designation ?? (row as any).designation;
+      break;
+    case "contact_person":
+      val = row.contact_name ?? (row as any).contact_person;
+      break;
+    case "primary_mobile":
+      val = row.contact_phone ?? (row as any).primary_mobile;
+      break;
+    case "secondary_mobile":
+      val = row.contact_secondary_mobile ?? (row as any).secondary_mobile;
+      break;
+    case "phone":
+      val = row.contact_primary_phone ?? (row as any).phone;
+      break;
+    case "secondary_phone":
+      val = row.contact_secondary_phone ?? (row as any).secondary_phone;
+      break;
+    case "email":
+      val = row.contact_email ?? row.email;
+      break;
+    case "secondary_email":
+      val = row.contact_secondary_email ?? (row as any).secondary_email;
+      break;
+    case "country":
+      val = row.country;
+      break;
+    case "product":
+      val = row.product_interest ?? (row as any).product;
+      break;
+    case "website":
+      val = row.website_url ?? (row as any).website;
+      break;
+    case "city":
+      val = row.city;
+      break;
+    case "ai_grading":
+    case "latest_score":
+      val = row.latest_score ?? (row as any).ai_grading;
+      break;
+    case "address":
+      val = row.address;
+      break;
+    case "created_at":
+      if (!row.created_at) return "";
+      const d = new Date(row.created_at);
+      return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString();
+    case "calling_time":
+      val = row.calling_time;
+      break;
+    case "remarks":
+      val = row.remarks;
+      break;
+    case "assigned_to_user_id": {
+      const assignedTo = (row as any).assigned_to;
+      if (assignedTo && assignedTo !== "unassigned") return String(assignedTo).trim();
+      if (row.assigned_to_user_id) return String(row.assigned_to_user_id).trim();
+      return "";
+    }
+    case "market_role":
+      val = row.market_role;
+      break;
+    default:
+      val = (row as any)[field];
   }
-  if (field === "created_at") {
-    if (!row.created_at) return "";
-    const d = new Date(row.created_at);
-    return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString();
-  }
-  const val = (row as any)[field];
   if (val === null || val === undefined) return "";
-  return String(val).trim();
+  const str = String(val).trim();
+  if (str === "—" || str === "-") return "";
+  return str;
 }
 
 function tableViewStorageKey(userId: number | undefined, section: LeadsTableSection): string {
@@ -2625,6 +2694,26 @@ export function LeadsTablePage({
     return sortDir === "asc" ? " ↑" : " ↓";
   }
 
+  const getFilteredRowsExcept = useCallback(
+    (currentField: string) => {
+      const activeFields = Object.keys(selectedColValues).filter(
+        (field) => field !== currentField && selectedColValues[field] && selectedColValues[field].length > 0,
+      );
+
+      if (activeFields.length === 0) return rows;
+
+      return rows.filter((row) => {
+        return activeFields.every((field) => {
+          const allowedVals = selectedColValues[field];
+          const rawVal = getRowFieldValue(row, field);
+          const valLabel = rawVal ? rawVal : "(Blanks)";
+          return allowedVals.includes(valLabel) || (rawVal !== "" && allowedVals.includes(rawVal));
+        });
+      });
+    },
+    [rows, selectedColValues],
+  );
+
   const displayedRows = useMemo(() => {
     const activeFields = Object.keys(selectedColValues).filter(
       (field) => selectedColValues[field] && selectedColValues[field].length > 0,
@@ -4277,7 +4366,7 @@ export function LeadsTablePage({
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => {
+              {displayedRows.map((row) => {
                 const draft = drafts[row.id] ?? row;
                 const dirty = editMode && isRowDirty(row.id);
 
@@ -4811,118 +4900,121 @@ export function LeadsTablePage({
 
               {/* Multi-Select Value Options List */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-slate-300">
-                    Select options ({pendingColSelections.length} selected):
-                  </span>
-                  <div className="flex items-center gap-3 text-sm">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const allVals = Array.from(
-                          new Set(
-                            rows.map((r) => getRowFieldValue(r, colFilterModal.field) || "(Blanks)"),
-                          ),
-                        );
-                        setPendingColSelections(allVals);
-                      }}
-                      className="text-emerald-400 hover:underline font-semibold"
-                    >
-                      Select All
-                    </button>
-                    <span className="text-slate-600">|</span>
-                    <button
-                      type="button"
-                      onClick={() => setPendingColSelections([])}
-                      className="text-slate-400 hover:text-white font-semibold"
-                    >
-                      Clear All
-                    </button>
-                  </div>
-                </div>
+                {(() => {
+                  const modalRows = getFilteredRowsExcept(colFilterModal.field);
+                  const uniqueValuesMap = new Map<string, number>();
+                  let blankCount = 0;
 
-                {/* Scrollable Container with large text and vertical/horizontal scrolling */}
-                <div className="max-h-[380px] overflow-y-auto overflow-x-auto border-2 border-slate-800 bg-slate-950/80 rounded-2xl p-3 space-y-1.5 divide-y divide-slate-800/40">
-                  {(() => {
-                    const uniqueValuesMap = new Map<string, number>();
-                    let blankCount = 0;
-
-                    rows.forEach((r) => {
-                      const val = getRowFieldValue(r, colFilterModal.field);
-                      if (!val) {
-                        blankCount++;
-                      } else {
-                        uniqueValuesMap.set(val, (uniqueValuesMap.get(val) || 0) + 1);
-                      }
-                    });
-
-                    const sortedUniqueVals = Array.from(uniqueValuesMap.entries())
-                      .sort((a, b) => b[1] - a[1]);
-
-                    const allUniqueVals: [string, number][] = [
-                      ...(blankCount > 0 ? [["(Blanks)", blankCount] as [string, number]] : []),
-                      ...sortedUniqueVals,
-                    ];
-
-                    const filteredUniqueVals = allUniqueVals.filter(([val]) =>
-                      val.toLowerCase().includes(colModalSearch.trim().toLowerCase()),
-                    );
-
-                    if (filteredUniqueVals.length === 0) {
-                      return (
-                        <div className="py-8 text-center text-slate-500 text-sm font-medium">
-                          No matching values found for &quot;{colModalSearch}&quot;
-                        </div>
-                      );
+                  modalRows.forEach((r) => {
+                    const val = getRowFieldValue(r, colFilterModal.field);
+                    if (!val) {
+                      blankCount++;
+                    } else {
+                      uniqueValuesMap.set(val, (uniqueValuesMap.get(val) || 0) + 1);
                     }
+                  });
 
-                    return filteredUniqueVals.map(([val, count]) => {
-                      const checked = pendingColSelections.includes(val);
-                      const isBlank = val === "(Blanks)";
-                      return (
-                        <label
-                          key={val}
-                          className={`flex items-center justify-between gap-4 p-3 rounded-xl hover:bg-slate-900/90 cursor-pointer transition-colors group pt-2.5 ${
-                            isBlank ? "bg-amber-500/10 border border-amber-500/30" : ""
-                          }`}
-                        >
-                          <div className="flex items-center gap-3.5 min-w-0">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setPendingColSelections((prev) => [...prev, val]);
-                                } else {
-                                  setPendingColSelections((prev) =>
-                                    prev.filter((v) => v !== val),
-                                  );
-                                }
-                              }}
-                              className="w-5 h-5 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500 shrink-0"
-                            />
-                            <span
-                              className={`text-base font-semibold group-hover:text-white truncate ${
-                                isBlank ? "text-amber-300 font-bold" : "text-slate-200"
-                              }`}
-                            >
-                              {isBlank ? "📂 (Blanks / Empty Data)" : val}
-                            </span>
-                          </div>
-                          <span
-                            className={`text-xs font-mono font-bold px-2.5 py-1 rounded-full shrink-0 ${
-                              isBlank
-                                ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                                : "bg-slate-800/80 text-emerald-400"
-                            }`}
+                  const sortedUniqueVals = Array.from(uniqueValuesMap.entries())
+                    .sort((a, b) => b[1] - a[1]);
+
+                  const allUniqueVals: [string, number][] = [
+                    ...(blankCount > 0 ? [["(Blanks)", blankCount] as [string, number]] : []),
+                    ...sortedUniqueVals,
+                  ];
+
+                  const filteredUniqueVals = allUniqueVals.filter(([val]) =>
+                    val.toLowerCase().includes(colModalSearch.trim().toLowerCase()),
+                  );
+
+                  return (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-bold text-slate-300">
+                          Select options ({pendingColSelections.length} selected):
+                        </span>
+                        <div className="flex items-center gap-3 text-sm">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const allVals = Array.from(
+                                new Set(
+                                  modalRows.map((r) => getRowFieldValue(r, colFilterModal.field) || "(Blanks)"),
+                                ),
+                              );
+                              setPendingColSelections(allVals);
+                            }}
+                            className="text-emerald-400 hover:underline font-semibold"
                           >
-                            {count} rows
-                          </span>
-                        </label>
-                      );
-                    });
-                  })()}
-                </div>
+                            Select All
+                          </button>
+                          <span className="text-slate-600">|</span>
+                          <button
+                            type="button"
+                            onClick={() => setPendingColSelections([])}
+                            className="text-slate-400 hover:text-white font-semibold"
+                          >
+                            Clear All
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Scrollable Container with large text and vertical/horizontal scrolling */}
+                      <div className="max-h-[380px] overflow-y-auto overflow-x-auto border-2 border-slate-800 bg-slate-950/80 rounded-2xl p-3 space-y-1.5 divide-y divide-slate-800/40">
+                        {filteredUniqueVals.length === 0 ? (
+                          <div className="py-8 text-center text-slate-500 text-sm font-medium">
+                            No matching values found for &quot;{colModalSearch}&quot;
+                          </div>
+                        ) : (
+                          filteredUniqueVals.map(([val, count]) => {
+                            const checked = pendingColSelections.includes(val);
+                            const isBlank = val === "(Blanks)";
+                            return (
+                              <label
+                                key={val}
+                                className={`flex items-center justify-between gap-4 p-3 rounded-xl hover:bg-slate-900/90 cursor-pointer transition-colors group pt-2.5 ${
+                                  isBlank ? "bg-amber-500/10 border border-amber-500/30" : ""
+                                }`}
+                              >
+                                <div className="flex items-center gap-3.5 min-w-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setPendingColSelections((prev) => [...prev, val]);
+                                      } else {
+                                        setPendingColSelections((prev) =>
+                                          prev.filter((v) => v !== val),
+                                        );
+                                      }
+                                    }}
+                                    className="w-5 h-5 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500 shrink-0"
+                                  />
+                                  <span
+                                    className={`text-base font-semibold group-hover:text-white truncate ${
+                                      isBlank ? "text-amber-300 font-bold" : "text-slate-200"
+                                    }`}
+                                  >
+                                    {isBlank ? "📂 (Blanks / Empty Data)" : val}
+                                  </span>
+                                </div>
+                                <span
+                                  className={`text-xs font-mono font-bold px-2.5 py-1 rounded-full shrink-0 ${
+                                    isBlank
+                                      ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                                      : "bg-slate-800/80 text-emerald-400"
+                                  }`}
+                                >
+                                  {count} rows
+                                </span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
 
@@ -4943,7 +5035,8 @@ export function LeadsTablePage({
                   Reset Column Filter
                 </button>
                 {(() => {
-                  const blankCount = rows.filter(
+                  const modalRows = getFilteredRowsExcept(colFilterModal.field);
+                  const blankCount = modalRows.filter(
                     (r) => !getRowFieldValue(r, colFilterModal.field),
                   ).length;
                   if (blankCount === 0) return null;
