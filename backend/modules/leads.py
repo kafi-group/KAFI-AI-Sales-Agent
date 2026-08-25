@@ -616,21 +616,17 @@ def _apply_call_outcome_scope(
     include_placed_outcomes: bool,
     in_interested_clients: bool = False,
 ):
-    scoped_buyer_ids = {
-        row[0] for row in buyer_query.with_entities(Buyer.id).all()
-    }
-    if not scoped_buyer_ids:
-        return buyer_query.filter(Buyer.id == -1), set()
-
     if in_interested_clients:
-        buyer_query = buyer_query.filter(Buyer.interested_clients_list_at.isnot(None))
-        matched = {row[0] for row in buyer_query.with_entities(Buyer.id).all()}
-        if not matched:
-            return buyer_query.filter(Buyer.id == -1), set()
-        return buyer_query, matched
+        return buyer_query.filter(Buyer.interested_clients_list_at.isnot(None)), set()
 
     if call_outcome:
         from modules.calls import buyer_ids_with_latest_call_outcome
+
+        scoped_buyer_ids = {
+            row[0] for row in buyer_query.with_entities(Buyer.id).all()
+        }
+        if not scoped_buyer_ids:
+            return buyer_query.filter(Buyer.id == -1), set()
 
         matched_buyer_ids = buyer_ids_with_latest_call_outcome(
             db, call_outcome, buyer_ids=scoped_buyer_ids
@@ -641,6 +637,12 @@ def _apply_call_outcome_scope(
 
     if not include_placed_outcomes:
         from modules.calls import buyer_ids_with_placed_call_outcome
+
+        scoped_buyer_ids = {
+            row[0] for row in buyer_query.with_entities(Buyer.id).all()
+        }
+        if not scoped_buyer_ids:
+            return buyer_query.filter(Buyer.id == -1), set()
 
         placed_buyer_ids = buyer_ids_with_placed_call_outcome(
             db, buyer_ids=scoped_buyer_ids
@@ -658,7 +660,9 @@ def _apply_call_outcome_scope(
         if exclude_ids:
             buyer_query = buyer_query.filter(~Buyer.id.in_(exclude_ids))
             scoped_buyer_ids -= exclude_ids
-    return buyer_query, scoped_buyer_ids
+        return buyer_query, scoped_buyer_ids
+
+    return buyer_query, set()
 
 
 def _hydrate_lead_table_rows(
