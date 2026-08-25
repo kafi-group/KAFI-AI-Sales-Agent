@@ -149,6 +149,7 @@ def assign_tasks(
 @router.post("/tasks/self-test")
 def queue_self_test(
     payload: SelfTestRequest,
+    db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     _ = user
@@ -170,6 +171,25 @@ def queue_self_test(
             status_code=400,
             detail=f"Twilio Voice Error: {call_result.get('error')}",
         )
+
+    # Log interaction to DB for Call Center & Client History
+    try:
+        from db.models import Interaction, Channel, Direction, HandledBy, InteractionStatus
+        interaction = Interaction(
+            contact_id=None,
+            channel=Channel.phone,
+            direction=Direction.outbound,
+            subject=f"AI Voice Call ({agent_name}) to {contact_name}",
+            content=f"Interactive AI voice call to {payload.phone}. Twilio SID: {call_result.get('call_sid')}",
+            handled_by=HandledBy.agent,
+            status=InteractionStatus.sent,
+            approved_by="dashboard",
+        )
+        db.add(interaction)
+        db.commit()
+        db.refresh(interaction)
+    except Exception as exc:
+        print(f"Could not log AI interaction to DB: {exc}", flush=True)
 
     task = {
         "id": len(_TASKS) + 1,
