@@ -1851,6 +1851,15 @@ export const client = {
       unique_values: Array<{ value: string; count: number }>;
     }>(`/leads/table/column-values?${query}`);
   },
+  moveLeadsToModule: (leadIds: number[], targetModule: string) =>
+    request<{
+      updated_count: number;
+      target_module: string;
+      target_label: string;
+    }>("/leads/table/move-to-module", {
+      method: "POST",
+      body: JSON.stringify({ lead_ids: leadIds, target_module: targetModule }),
+    }),
   listLeadsTableIds: (params: Omit<LeadTableQuery, "page" | "page_size"> = {}) => {
     const search = new URLSearchParams();
     if (params.score) search.set("score", params.score);

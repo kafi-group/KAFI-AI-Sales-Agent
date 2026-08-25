@@ -131,12 +131,10 @@ def _table_assignment_filters(
             None,
             True,
         )
-    # Old clients: show every old_clients row (assigned + unassigned).
-    if (source or "").strip().lower() == "old_clients":
-        return None, False, False, None, False
-    # Incomplete archives: all rows in that pool.
-    if (source or "").strip().lower() == "incomplete_archives":
-        return None, False, False, None, False
+    # Old clients & Incomplete archives: show every row.
+    norm_source = (source or "").strip().lower()
+    if norm_source in {"old_clients", "incomplete_archives", "hyperstore_targeted", "targeted_distributor", "targeted_client"}:
+        return None, False, True, None, False
     # Other pool sections (New search lead): hide assigned leads.
     unassigned_only = not placed_section
     return None, unassigned_only, False, None, False
@@ -884,6 +882,38 @@ def set_target_pool_rows(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return LeadTableSetTargetPoolResponse(**result)
+
+
+class LeadTableMoveToModuleRequest(BaseModel):
+    lead_ids: list[int]
+    target_module: str
+
+
+class LeadTableMoveToModuleResponse(BaseModel):
+    updated_count: int
+    target_module: str
+    target_label: str
+
+
+@router.post("/table/move-to-module", response_model=LeadTableMoveToModuleResponse)
+def move_leads_to_target_module(
+    payload: LeadTableMoveToModuleRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """Move leads into any destination section/module."""
+    if not payload.lead_ids:
+        raise HTTPException(400, "Select at least one lead")
+    try:
+        result = leads_module.move_leads_to_module(
+            db,
+            lead_ids=payload.lead_ids,
+            target_module=payload.target_module,
+            by_user_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return LeadTableMoveToModuleResponse(**result)
 
 
 @router.post("/table/populate-target-pool", response_model=LeadTablePopulateTargetPoolResponse)

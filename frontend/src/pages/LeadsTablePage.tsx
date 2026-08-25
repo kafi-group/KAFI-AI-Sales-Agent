@@ -1421,14 +1421,18 @@ export function LeadsTablePage({
     setAllMatchingSelected(false);
   }, []);
 
+  const [sectionCounts, setSectionCounts] = useState<Record<string, number>>({});
+
   const loadSectionCounts = useCallback(async () => {
-    if (!onSectionCountsChange) return;
     try {
       const counts = await client.getLeadsTableSectionCounts(masterType);
-      onSectionCountsChange({
-        ...counts,
-        by_assignee: counts.by_assignee ?? {},
-      });
+      setSectionCounts(counts as any);
+      if (onSectionCountsChange) {
+        onSectionCountsChange({
+          ...counts,
+          by_assignee: counts.by_assignee ?? {},
+        });
+      }
     } catch {
       /* optional */
     }
@@ -2781,6 +2785,32 @@ export function LeadsTablePage({
     }
   }
 
+  const [movingToModule, setMovingToModule] = useState(false);
+
+  async function handleMoveToModule(targetModule: string) {
+    if (!targetModule || movingToModule) return;
+    const ids = [...selected];
+    if (ids.length === 0) return;
+
+    setMovingToModule(true);
+    try {
+      setSaveNotice(`Moving ${ids.length} lead(s) to target module…`);
+      const res = await client.moveLeadsToModule(ids, targetModule);
+      const isTargeted = isTargetedPoolSection(section);
+      setSaveNotice(
+        `Successfully moved ${res.updated_count} lead(s) to ${res.target_label}.` +
+          (isTargeted ? ` (They remain visible in ${sectionTitle(section, assigneeUsername, isAdmin, masterType)} as well.)` : ""),
+      );
+      clearSelection();
+      await loadTable();
+      await loadSectionCounts();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to move leads to target module");
+    } finally {
+      setMovingToModule(false);
+    }
+  }
+
   function clearFilters() {
     setScore("");
     setMarketRole("");
@@ -3139,6 +3169,53 @@ export function LeadsTablePage({
           >
             WhatsApp ({selected.size})
           </ActionButton>
+
+          <div className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-500/40 bg-indigo-950/70 px-3 py-1.5 text-xs font-bold text-indigo-200 shadow-sm">
+            <span className="text-indigo-300 font-extrabold shrink-0">📦 Move to module:</span>
+            <select
+              value=""
+              disabled={selected.size === 0 || movingToModule}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val) void handleMoveToModule(val);
+              }}
+              className="bg-slate-900 text-slate-100 font-bold px-2.5 py-1 rounded-lg outline-none cursor-pointer border border-indigo-500/40 hover:border-indigo-300 disabled:opacity-50"
+            >
+              <option value="" disabled>
+                {selected.size === 0
+                  ? "Select leads to move…"
+                  : movingToModule
+                    ? "Moving…"
+                    : `Move ${selected.size} selected lead(s) to…`}
+              </option>
+              <option value="khalid_focused_sales">📌 Khalid Focused Sales</option>
+              <option value="follow_up_clients">
+                ⏰ Follow up clients{sectionCounts.follow_up_clients != null ? ` (${sectionCounts.follow_up_clients})` : ""}
+              </option>
+              <option value="interested_clients">
+                💜 Interested Clients{sectionCounts.interested_clients != null ? ` (${sectionCounts.interested_clients})` : ""}
+              </option>
+              <option value="not_interested_clients">
+                🚫 Not interested{sectionCounts.not_interested_clients != null ? ` (${sectionCounts.not_interested_clients})` : ""}
+              </option>
+              <option value="not_received_call_clients">
+                📞 Did not receive call{sectionCounts.not_received_call_clients != null ? ` (${sectionCounts.not_received_call_clients})` : ""}
+              </option>
+              <option value="hyperstore_targeted">
+                🏪 Hyperstore Target{sectionCounts.hyperstore_targeted != null ? ` (${sectionCounts.hyperstore_targeted})` : ""}
+              </option>
+              <option value="targeted_distributor">
+                🚚 Targeted Distributors{sectionCounts.targeted_distributor != null ? ` (${sectionCounts.targeted_distributor})` : ""}
+              </option>
+              <option value="targeted_client">🎯 Targeted Client</option>
+              <option value="incomplete_archives">
+                📂 Incomplete Data from Archives{sectionCounts.incomplete_archives != null ? ` (${sectionCounts.incomplete_archives})` : ""}
+              </option>
+              <option value="old_clients">🏛️ Old clients</option>
+              <option value="master">📋 Master Table (FMCG)</option>
+            </select>
+          </div>
+
           {canMoveToInterestedClients && (
             <ActionButton
               icon={IconHeart}

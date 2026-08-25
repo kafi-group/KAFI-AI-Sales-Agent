@@ -2775,3 +2775,133 @@ def remove_from_target_pool(db: Session, *, lead_ids: list[int]) -> dict[str, ob
         )
 
     return {"updated_count": len(restored_ids), "updated_ids": restored_ids}
+
+
+def move_leads_to_module(
+    db: Session,
+    *,
+    lead_ids: list[int],
+    target_module: str,
+    by_user_id: int | None = None,
+) -> dict[str, object]:
+    """Move a list of leads into any section/module (Khalid Focused, Call outcomes, Targeted Pools, Archives)."""
+    from datetime import datetime
+    from auth.models import AppUser
+    from modules.audit import log_action
+
+    module = target_module.strip().lower()
+    updated_ids: list[int] = []
+    target_label = module.replace("_", " ").title()
+
+    if module == "khalid_focused_sales":
+        khalid_user = (
+            db.query(AppUser)
+            .filter(
+                or_(
+                    sa_func.lower(AppUser.username).like("%khalid%"),
+                    sa_func.lower(AppUser.full_name).like("%khalid%"),
+                )
+            )
+            .first()
+        )
+        khalid_id = khalid_user.id if khalid_user else 1
+        khalid_name = khalid_user.username if khalid_user else "Mr. Khalid"
+        for lead_id in lead_ids:
+            buyer = buyers_module.get_buyer(db, lead_id)
+            if buyer:
+                buyer.assigned_to_user_id = khalid_id
+                buyer.assigned_to = khalid_name
+                buyer.assigned_at = datetime.utcnow()
+                updated_ids.append(lead_id)
+        target_label = "Khalid Focused Sales"
+
+    elif module in {
+        "hyperstore_targeted",
+        "targeted_distributor",
+        "targeted_client",
+        "incomplete_archives",
+        "old_clients",
+    }:
+        for lead_id in lead_ids:
+            buyer = buyers_module.get_buyer(db, lead_id)
+            if buyer:
+                buyer.source = module
+                updated_ids.append(lead_id)
+        labels = {
+            "hyperstore_targeted": "Hyperstore Target",
+            "targeted_distributor": "Targeted Distributors",
+            "targeted_client": "Targeted Client",
+            "incomplete_archives": "Incomplete Data from Archives",
+            "old_clients": "Old clients",
+        }
+        target_label = labels.get(module, target_label)
+
+    elif module == "interested_clients":
+        from modules.calls import set_call_outcome
+
+        for lead_id in lead_ids:
+            buyer = buyers_module.get_buyer(db, lead_id)
+            if buyer:
+                buyer.interested_clients_list_at = datetime.utcnow()
+                set_call_outcome(db, buyer_id=lead_id, outcome="interested", by_user_id=by_user_id)
+                updated_ids.append(lead_id)
+        target_label = "Interested Clients"
+
+    elif module == "follow_up_clients":
+        from modules.calls import set_call_outcome
+
+        for lead_id in lead_ids:
+            buyer = buyers_module.get_buyer(db, lead_id)
+            if buyer:
+                set_call_outcome(db, buyer_id=lead_id, outcome="callback", by_user_id=by_user_id)
+                updated_ids.append(lead_id)
+        target_label = "Follow up clients"
+
+    elif module == "not_interested_clients":
+        from modules.calls import set_call_outcome
+
+        for lead_id in lead_ids:
+            buyer = buyers_module.get_buyer(db, lead_id)
+            if buyer:
+                buyer.interested_clients_list_at = None
+                set_call_outcome(db, buyer_id=lead_id, outcome="not_interested", by_user_id=by_user_id)
+                updated_ids.append(lead_id)
+        target_label = "Not interested"
+
+    elif module == "not_received_call_clients":
+        from modules.calls import set_call_outcome
+
+        for lead_id in lead_ids:
+            buyer = buyers_module.get_buyer(db, lead_id)
+            if buyer:
+                set_call_outcome(db, buyer_id=lead_id, outcome="no_response", by_user_id=by_user_id)
+                updated_ids.append(lead_id)
+        target_label = "Did not receive call"
+
+    elif module == "master":
+        for lead_id in lead_ids:
+            buyer = buyers_module.get_buyer(db, lead_id)
+            if buyer:
+                updated_ids.append(lead_id)
+        target_label = "Master Table (FMCG)"
+
+    if updated_ids:
+        invalidate_section_counts_cache()
+        db.commit()
+        log_action(
+            db,
+            entity_type="buyer",
+            entity_id=0,
+            action="move_leads_to_module",
+            details={
+                "target_module": module,
+                "target_label": target_label,
+                "lead_ids": updated_ids,
+            },
+        )
+
+    return {
+        "updated_count": len(updated_ids),
+        "target_module": module,
+        "target_label": target_label,
+    }
