@@ -766,6 +766,113 @@ def _hydrate_lead_table_rows(
     return rows
 
 
+def _is_blank_token(token: str | None) -> bool:
+    if not token:
+        return True
+    t = token.strip().lower()
+    return t in {"(blanks)", "(blank)", "__blank__", "blanks", "blank", ""}
+
+
+def _apply_column_field_filter(db: Session, buyer_query, field: str, values_str: str | None):
+    if not values_str:
+        return buyer_query
+    from sqlalchemy import or_
+
+    items = [v.strip() for v in values_str.split(",") if v.strip()]
+    if not items:
+        return buyer_query
+
+    has_blank = any(_is_blank_token(it) for it in items)
+    non_blank_items = [it.lower() for it in items if not _is_blank_token(it)]
+
+    if field in {"excel_file_grading", "company_grading"}:
+        conds = []
+        if has_blank:
+            conds.append(or_(Buyer.company_grading.is_(None), Buyer.company_grading == "", Buyer.company_grading == "—", Buyer.company_grading == "-"))
+        if non_blank_items:
+            conds.append(sa_func.lower(sa_func.coalesce(Buyer.company_grading, "")).in_(non_blank_items))
+        if conds:
+            buyer_query = buyer_query.filter(or_(*conds))
+
+    elif field in {"business_type", "industry"}:
+        conds = []
+        if has_blank:
+            conds.append(or_(Buyer.industry.is_(None), Buyer.industry == "", Buyer.industry == "—", Buyer.industry == "-"))
+        if non_blank_items:
+            conds.append(sa_func.lower(sa_func.coalesce(Buyer.industry, "")).in_(non_blank_items))
+        if conds:
+            buyer_query = buyer_query.filter(or_(*conds))
+
+    elif field == "city":
+        conds = []
+        if has_blank:
+            conds.append(or_(Buyer.city.is_(None), Buyer.city == "", Buyer.city == "—", Buyer.city == "-"))
+        if non_blank_items:
+            conds.append(sa_func.lower(sa_func.coalesce(Buyer.city, "")).in_(non_blank_items))
+        if conds:
+            buyer_query = buyer_query.filter(or_(*conds))
+
+    elif field == "website":
+        conds = []
+        if has_blank:
+            conds.append(or_(Buyer.website_url.is_(None), Buyer.website_url == "", Buyer.website_url == "—", Buyer.website_url == "-"))
+        if non_blank_items:
+            conds.append(sa_func.lower(sa_func.coalesce(Buyer.website_url, "")).in_(non_blank_items))
+        if conds:
+            buyer_query = buyer_query.filter(or_(*conds))
+
+    elif field == "address":
+        conds = []
+        if has_blank:
+            conds.append(or_(Buyer.address.is_(None), Buyer.address == "", Buyer.address == "—", Buyer.address == "-"))
+        if non_blank_items:
+            conds.append(sa_func.lower(sa_func.coalesce(Buyer.address, "")).in_(non_blank_items))
+        if conds:
+            buyer_query = buyer_query.filter(or_(*conds))
+
+    elif field == "remarks":
+        conds = []
+        if has_blank:
+            conds.append(or_(Buyer.remarks.is_(None), Buyer.remarks == "", Buyer.remarks == "—", Buyer.remarks == "-"))
+        if non_blank_items:
+            conds.append(sa_func.lower(sa_func.coalesce(Buyer.remarks, "")).in_(non_blank_items))
+        if conds:
+            buyer_query = buyer_query.filter(or_(*conds))
+
+    elif field in {"designation", "contact_person", "primary_mobile", "secondary_mobile", "phone", "secondary_phone", "email", "secondary_email"}:
+        col_map = {
+            "designation": Contact.designation,
+            "contact_person": Contact.full_name,
+            "primary_mobile": Contact.phone,
+            "secondary_mobile": Contact.secondary_mobile,
+            "phone": Contact.primary_phone,
+            "secondary_phone": Contact.secondary_phone,
+            "email": Contact.email,
+            "secondary_email": Contact.secondary_email,
+        }
+        contact_col = col_map[field]
+        conds = []
+        if has_blank:
+            conds.append(or_(contact_col.is_(None), contact_col == "", contact_col == "—", contact_col == "-"))
+        if non_blank_items:
+            conds.append(sa_func.lower(sa_func.coalesce(contact_col, "")).in_(non_blank_items))
+
+        if conds:
+            contact_subq = db.query(Contact.buyer_id).filter(or_(*conds)).distinct().subquery()
+            if has_blank:
+                no_contact_subq = db.query(Contact.buyer_id).distinct().subquery()
+                buyer_query = buyer_query.filter(
+                    or_(
+                        ~Buyer.id.in_(db.query(no_contact_subq.c.buyer_id)),
+                        Buyer.id.in_(db.query(contact_subq.c.buyer_id)),
+                    )
+                )
+            else:
+                buyer_query = buyer_query.filter(Buyer.id.in_(db.query(contact_subq.c.buyer_id)))
+
+    return buyer_query
+
+
 def _filtered_lead_table_rows(
     db: Session,
     *,
@@ -795,6 +902,17 @@ def _filtered_lead_table_rows(
     page_size: int | None = None,
     ids_only: bool = False,
     master_type: str | None = None,
+    designation: str | None = None,
+    contact_person: str | None = None,
+    primary_mobile: str | None = None,
+    secondary_mobile: str | None = None,
+    phone: str | None = None,
+    secondary_phone: str | None = None,
+    email: str | None = None,
+    secondary_email: str | None = None,
+    website: str | None = None,
+    address: str | None = None,
+    remarks: str | None = None,
 ) -> tuple[list[dict[str, object]], int, int]:
     """Filter leads for the table.
 
@@ -827,27 +945,21 @@ def _filtered_lead_table_rows(
     if section_total == 0:
         return [], 0, 0
 
-    # Push cheap column filters to SQL so we never hydrate the whole section.
-    if industry:
-        ind_list = [i.strip().lower() for i in industry.split(",") if i.strip()]
-        if ind_list:
-            buyer_query = buyer_query.filter(
-                sa_func.lower(sa_func.coalesce(Buyer.industry, "")).in_(ind_list)
-            )
-    if company_grading:
-        cg_list = [g.strip().lower() for g in company_grading.split(",") if g.strip()]
-        if cg_list:
-            buyer_query = buyer_query.filter(
-                sa_func.lower(sa_func.coalesce(Buyer.company_grading, "")).in_(cg_list)
-            )
-    if product_interest:
-        buyer_query = _apply_product_category_filter(buyer_query, product_interest)
-    if city:
-        city_list = [c.strip().lower() for c in city.split(",") if c.strip()]
-        if city_list:
-            buyer_query = buyer_query.filter(
-                sa_func.lower(sa_func.coalesce(Buyer.city, "")).in_(city_list)
-            )
+    # Push column filters to SQL
+    buyer_query = _apply_column_field_filter(db, buyer_query, "company_grading", company_grading)
+    buyer_query = _apply_column_field_filter(db, buyer_query, "industry", industry)
+    buyer_query = _apply_column_field_filter(db, buyer_query, "city", city)
+    buyer_query = _apply_column_field_filter(db, buyer_query, "designation", designation)
+    buyer_query = _apply_column_field_filter(db, buyer_query, "contact_person", contact_person)
+    buyer_query = _apply_column_field_filter(db, buyer_query, "primary_mobile", primary_mobile)
+    buyer_query = _apply_column_field_filter(db, buyer_query, "secondary_mobile", secondary_mobile)
+    buyer_query = _apply_column_field_filter(db, buyer_query, "phone", phone)
+    buyer_query = _apply_column_field_filter(db, buyer_query, "secondary_phone", secondary_phone)
+    buyer_query = _apply_column_field_filter(db, buyer_query, "email", email)
+    buyer_query = _apply_column_field_filter(db, buyer_query, "secondary_email", secondary_email)
+    buyer_query = _apply_column_field_filter(db, buyer_query, "website", website)
+    buyer_query = _apply_column_field_filter(db, buyer_query, "address", address)
+    buyer_query = _apply_column_field_filter(db, buyer_query, "remarks", remarks)
     if market_role:
         try:
             role_value = MarketRole(market_role)
@@ -1090,6 +1202,157 @@ def _filtered_lead_table_rows(
     return _hydrate_lead_table_rows(db, ordered_buyers), section_total, filtered_count
 
 
+def _extract_row_field_value(r: dict | object, field: str) -> str:
+    get = (lambda k: r.get(k)) if isinstance(r, dict) else (lambda k: getattr(r, k, None))
+    val = None
+    if field == "id":
+        val = get("legacy_serial_no") or get("id")
+    elif field == "company_name":
+        val = get("company_name")
+    elif field in {"business_type", "industry"}:
+        val = get("industry") or get("business_type")
+    elif field in {"excel_file_grading", "company_grading"}:
+        val = get("company_grading") or get("excel_file_grading")
+    elif field == "designation":
+        val = get("contact_designation") or get("designation")
+    elif field == "contact_person":
+        val = get("contact_name") or get("contact_person")
+    elif field == "primary_mobile":
+        val = get("contact_phone") or get("primary_mobile")
+    elif field == "secondary_mobile":
+        val = get("contact_secondary_mobile") or get("secondary_mobile")
+    elif field == "phone":
+        val = get("contact_primary_phone") or get("phone")
+    elif field == "secondary_phone":
+        val = get("contact_secondary_phone") or get("secondary_phone")
+    elif field == "email":
+        val = get("contact_email") or get("email")
+    elif field == "secondary_email":
+        val = get("contact_secondary_email") or get("secondary_email")
+    elif field == "country":
+        val = get("country")
+    elif field == "product":
+        val = get("product_interest") or get("product")
+    elif field == "website":
+        val = get("website_url") or get("website")
+    elif field == "city":
+        val = get("city")
+    elif field in {"ai_grading", "latest_score"}:
+        val = get("latest_score") or get("ai_grading")
+    elif field == "address":
+        val = get("address")
+    elif field == "calling_time":
+        val = get("calling_time")
+    elif field == "remarks":
+        val = get("remarks")
+    elif field == "assigned_to_user_id":
+        val = get("assigned_to")
+    elif field == "market_role":
+        val = get("market_role")
+    else:
+        val = get(field)
+
+    if val is None:
+        return ""
+    s = str(val).strip()
+    if s in {"—", "-"}:
+        return ""
+    return s
+
+
+def get_lead_table_column_values(
+    db: Session,
+    *,
+    field: str,
+    score: str | None = None,
+    country: str | None = None,
+    industry: str | None = None,
+    company_grading: str | None = None,
+    product_interest: str | None = None,
+    city: str | None = None,
+    call_recommended: str | None = None,
+    source: str | None = None,
+    exclude_source: str | None = None,
+    call_outcome: str | None = None,
+    in_interested_clients: bool = False,
+    market_role: str | None = None,
+    q: str | None = None,
+    assigned_to_user_id: int | None = None,
+    unassigned_only: bool = False,
+    pool_for_user_id: int | None = None,
+    include_placed_outcomes: bool = False,
+    admin_sent_only: bool = False,
+    intake_method: str | None = None,
+    new_search_lead_only: bool = False,
+    master_type: str | None = None,
+    designation: str | None = None,
+    contact_person: str | None = None,
+    primary_mobile: str | None = None,
+    secondary_mobile: str | None = None,
+    phone: str | None = None,
+    secondary_phone: str | None = None,
+    email: str | None = None,
+    secondary_email: str | None = None,
+    website: str | None = None,
+    address: str | None = None,
+    remarks: str | None = None,
+) -> dict[str, object]:
+    rows, _section_total, filtered_count = _filtered_lead_table_rows(
+        db,
+        score=score,
+        country=country,
+        industry=industry,
+        company_grading=company_grading,
+        product_interest=product_interest,
+        city=city,
+        call_recommended=call_recommended,
+        source=source,
+        exclude_source=exclude_source,
+        call_outcome=call_outcome,
+        in_interested_clients=in_interested_clients,
+        market_role=market_role,
+        q=q,
+        assigned_to_user_id=assigned_to_user_id,
+        unassigned_only=unassigned_only,
+        pool_for_user_id=pool_for_user_id,
+        include_placed_outcomes=include_placed_outcomes,
+        admin_sent_only=admin_sent_only,
+        intake_method=intake_method,
+        new_search_lead_only=new_search_lead_only,
+        master_type=master_type,
+        designation=designation,
+        contact_person=contact_person,
+        primary_mobile=primary_mobile,
+        secondary_mobile=secondary_mobile,
+        phone=phone,
+        secondary_phone=secondary_phone,
+        email=email,
+        secondary_email=secondary_email,
+        website=website,
+        address=address,
+        remarks=remarks,
+        page=None,
+        page_size=None,
+    )
+
+    counts: dict[str, int] = {}
+    blank_count = 0
+    for r in rows:
+        val = _extract_row_field_value(r, field)
+        if not val:
+            blank_count += 1
+        else:
+            counts[val] = counts.get(val, 0) + 1
+
+    sorted_vals = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+    return {
+        "field": field,
+        "total_matching": filtered_count,
+        "blank_count": blank_count,
+        "unique_values": [{"value": k, "count": v} for k, v in sorted_vals],
+    }
+
+
 def list_leads_table_ids(
     db: Session,
     *,
@@ -1116,6 +1379,17 @@ def list_leads_table_ids(
     intake_method: str | None = None,
     new_search_lead_only: bool = False,
     master_type: str | None = None,
+    designation: str | None = None,
+    contact_person: str | None = None,
+    primary_mobile: str | None = None,
+    secondary_mobile: str | None = None,
+    phone: str | None = None,
+    secondary_phone: str | None = None,
+    email: str | None = None,
+    secondary_email: str | None = None,
+    website: str | None = None,
+    address: str | None = None,
+    remarks: str | None = None,
 ) -> dict[str, object]:
     rows, _section_total, filtered_count = _filtered_lead_table_rows(
         db,
@@ -1143,6 +1417,17 @@ def list_leads_table_ids(
         new_search_lead_only=new_search_lead_only,
         ids_only=True,
         master_type=master_type,
+        designation=designation,
+        contact_person=contact_person,
+        primary_mobile=primary_mobile,
+        secondary_mobile=secondary_mobile,
+        phone=phone,
+        secondary_phone=secondary_phone,
+        email=email,
+        secondary_email=secondary_email,
+        website=website,
+        address=address,
+        remarks=remarks,
     )
     return {
         "filtered_count": filtered_count,
@@ -1178,6 +1463,17 @@ def list_leads_table(
     intake_method: str | None = None,
     new_search_lead_only: bool = False,
     master_type: str | None = None,
+    designation: str | None = None,
+    contact_person: str | None = None,
+    primary_mobile: str | None = None,
+    secondary_mobile: str | None = None,
+    phone: str | None = None,
+    secondary_phone: str | None = None,
+    email: str | None = None,
+    secondary_email: str | None = None,
+    website: str | None = None,
+    address: str | None = None,
+    remarks: str | None = None,
 ) -> dict[str, object]:
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
@@ -1209,6 +1505,17 @@ def list_leads_table(
         page=page,
         page_size=page_size,
         master_type=master_type,
+        designation=designation,
+        contact_person=contact_person,
+        primary_mobile=primary_mobile,
+        secondary_mobile=secondary_mobile,
+        phone=phone,
+        secondary_phone=secondary_phone,
+        email=email,
+        secondary_email=secondary_email,
+        website=website,
+        address=address,
+        remarks=remarks,
     )
 
     total_pages = max(1, (filtered_count + page_size - 1) // page_size) if filtered_count else 1

@@ -1796,8 +1796,60 @@ export const client = {
     if (params.intake_method) search.set("intake_method", params.intake_method);
     if (params.new_search_lead_only) search.set("new_search_lead_only", "true");
     if (params.master_type) search.set("master_type", params.master_type);
+    if (params.score) search.set("score", params.score);
+    if (params.country) search.set("country", params.country);
+    if (params.industry) search.set("industry", params.industry);
+    if (params.company_grading) search.set("company_grading", params.company_grading);
+    if (params.product_interest) search.set("product_interest", params.product_interest);
+    if (params.city) search.set("city", params.city);
+    if (params.call_recommended) search.set("call_recommended", params.call_recommended);
+    if (params.source) search.set("source", params.source);
+    if (params.exclude_source) search.set("exclude_source", params.exclude_source);
+    if (params.call_outcome) search.set("call_outcome", params.call_outcome);
+    if (params.in_interested_clients) search.set("in_interested_clients", "true");
+    if (params.market_role) search.set("market_role", params.market_role);
+    if (params.q) search.set("q", params.q);
+    if (params.sort_by) search.set("sort_by", params.sort_by);
+    if (params.sort_dir) search.set("sort_dir", params.sort_dir);
+    if (params.page) search.set("page", String(params.page));
+    if (params.page_size) search.set("page_size", String(params.page_size));
+    if (params.assigned_to_user_id != null) {
+      search.set("assigned_to_user_id", String(params.assigned_to_user_id));
+    }
+    if (params.my_assigned) search.set("my_assigned", "true");
+    if (params.master) search.set("master", "true");
+    if (params.intake_method) search.set("intake_method", params.intake_method);
+    if (params.new_search_lead_only) search.set("new_search_lead_only", "true");
+    if (params.master_type) search.set("master_type", params.master_type);
+
+    // Pass additional column filters dynamically (designation, contact_person, email, etc.)
+    Object.entries(params).forEach(([k, v]) => {
+      if (v != null && v !== "" && v !== false && !search.has(k)) {
+        search.set(k, String(v));
+      }
+    });
+
     const query = search.toString();
     return request<LeadTableResponse>(`/leads/table${query ? `?${query}` : ""}`);
+  },
+  getLeadTableColumnValues: (
+    field: string,
+    params: Record<string, any> = {},
+  ) => {
+    const search = new URLSearchParams();
+    search.set("field", field);
+    Object.entries(params).forEach(([k, v]) => {
+      if (v != null && v !== "" && v !== false) {
+        search.set(k, String(v));
+      }
+    });
+    const query = search.toString();
+    return request<{
+      field: string;
+      total_matching: number;
+      blank_count: number;
+      unique_values: Array<{ value: string; count: number }>;
+    }>(`/leads/table/column-values?${query}`);
   },
   listLeadsTableIds: (params: Omit<LeadTableQuery, "page" | "page_size"> = {}) => {
     const search = new URLSearchParams();

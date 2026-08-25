@@ -1184,10 +1184,18 @@ export function LeadsTablePage({
   const [colModalSearch, setColModalSearch] = useState("");
   const [selectedColValues, setSelectedColValues] = useState<Record<string, string[]>>({});
   const [pendingColSelections, setPendingColSelections] = useState<string[]>([]);
+  const [colModalColumnData, setColModalColumnData] = useState<{
+    field: string;
+    total_matching: number;
+    blank_count: number;
+    unique_values: Array<{ value: string; count: number }>;
+  } | null>(null);
+  const [colModalLoading, setColModalLoading] = useState(false);
 
   function openColFilter(field: SortField, label: string) {
     setColFilterModal({ field, label });
     setColModalSearch("");
+    setColModalColumnData(null);
     setPendingColSelections(selectedColValues[field] || []);
   }
 
@@ -1334,21 +1342,31 @@ export function LeadsTablePage({
   }, [section]);
 
   const tableQueryParams = useMemo(
-    () => ({
-      score: useClientsFilters ? undefined : score || undefined,
-      market_role: useClientsFilters ? undefined : marketRole || undefined,
-      country: country || undefined,
-      industry: useClientsFilters ? industry || undefined : undefined,
-      company_grading: useClientsFilters ? companyGrading || undefined : undefined,
-      product_interest: useClientsFilters ? productInterest || undefined : undefined,
-      city: useClientsFilters ? city || undefined : undefined,
-      call_recommended: useClientsFilters ? callRecommended || undefined : undefined,
-      q: debouncedSearch.trim() || undefined,
-      sort_by: sortBy,
-      sort_dir: sortDir,
-      master_type: masterType,
-      ...sectionTableParams(section, intakeMethodFilter),
-    }),
+    () => {
+      const colFiltersParams: Record<string, string> = {};
+      Object.entries(selectedColValues).forEach(([f, vals]) => {
+        if (vals && vals.length > 0) {
+          colFiltersParams[f] = vals.join(",");
+        }
+      });
+
+      return {
+        score: useClientsFilters ? undefined : score || undefined,
+        market_role: useClientsFilters ? undefined : marketRole || undefined,
+        country: country || undefined,
+        industry: useClientsFilters ? industry || undefined : undefined,
+        company_grading: useClientsFilters ? companyGrading || undefined : undefined,
+        product_interest: useClientsFilters ? productInterest || undefined : undefined,
+        city: useClientsFilters ? city || undefined : undefined,
+        call_recommended: useClientsFilters ? callRecommended || undefined : undefined,
+        q: debouncedSearch.trim() || undefined,
+        sort_by: sortBy,
+        sort_dir: sortDir,
+        master_type: masterType,
+        ...sectionTableParams(section, intakeMethodFilter),
+        ...colFiltersParams,
+      };
+    },
     [
       callRecommended,
       city,
@@ -1365,8 +1383,38 @@ export function LeadsTablePage({
       sortDir,
       intakeMethodFilter,
       masterType,
+      selectedColValues,
     ],
   );
+
+  useEffect(() => {
+    if (!colFilterModal) {
+      setColModalColumnData(null);
+      setColModalLoading(false);
+      return;
+    }
+    let active = true;
+    setColModalLoading(true);
+
+    const paramsExceptField: Record<string, any> = { ...tableQueryParams };
+    delete paramsExceptField[colFilterModal.field];
+
+    client
+      .getLeadTableColumnValues(colFilterModal.field, paramsExceptField)
+      .then((res) => {
+        if (active) setColModalColumnData(res);
+      })
+      .catch((err) => {
+        console.warn("Failed to load overall column values", err);
+      })
+      .finally(() => {
+        if (active) setColModalLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [colFilterModal?.field, JSON.stringify(tableQueryParams)]);
 
   const clearSelection = useCallback(() => {
     setSelected(new Set());
@@ -2673,6 +2721,66 @@ export function LeadsTablePage({
     setSortDir(field === "company_name" || field === "country" ? "asc" : "desc");
   }
 
+  const [exporting, setExporting] = useState(false);
+
+  async function handleExportData() {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      if (allMatchingSelected || (selected.size > 0 && selected.size > rows.length)) {
+        setSaveNotice(`Preparing full export for all matching leads…`);
+        const result = await client.listLeadsTable({
+          ...tableQueryParams,
+          page: 1,
+          page_size: 10000,
+        });
+        const exportRows = allMatchingSelected
+          ? result.rows
+          : result.rows.filter((r) => selected.has(r.id));
+        exportLeadsTableCsv(exportRows, `${section}-full-backup.xls`);
+        setSaveNotice(`Exported ${exportRows.length} lead(s) to Excel.`);
+      } else if (selected.size > 0) {
+        const selectedRows = rows.filter((r) => selected.has(r.id));
+        if (selectedRows.length === selected.size) {
+          exportLeadsTableCsv(selectedRows, `${section}-selected.xls`);
+          setSaveNotice(`Exported ${selectedRows.length} selected lead(s) to Excel.`);
+        } else {
+          setSaveNotice(`Preparing export for ${selected.size} selected lead(s)…`);
+          const result = await client.listLeadsTable({
+            ...tableQueryParams,
+            page: 1,
+            page_size: 10000,
+          });
+          const filtered = result.rows.filter((r) => selected.has(r.id));
+          exportLeadsTableCsv(filtered, `${section}-selected.xls`);
+          setSaveNotice(`Exported ${filtered.length} selected lead(s) to Excel.`);
+        }
+      } else {
+        const exportAll = window.confirm(
+          `Export all ${filteredCount} matching lead(s) in section to Excel?\n\n` +
+            `• Click OK to download a full backup of all ${filteredCount} lead(s).\n` +
+            `• Click Cancel to download only the currently visible page (${rows.length} rows).`,
+        );
+        if (exportAll) {
+          setSaveNotice(`Preparing full export of ${filteredCount} lead(s)…`);
+          const result = await client.listLeadsTable({
+            ...tableQueryParams,
+            page: 1,
+            page_size: 10000,
+          });
+          exportLeadsTableCsv(result.rows, `${section}-full-${filteredCount}-leads.xls`);
+          setSaveNotice(`Exported all ${result.rows.length} lead(s) to Excel.`);
+        } else {
+          exportLeadsTableCsv(rows, `${section}-visible-page.xls`);
+        }
+      }
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to export data");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   function clearFilters() {
     setScore("");
     setMarketRole("");
@@ -3253,11 +3361,11 @@ export function LeadsTablePage({
           )}
           <ActionButton
             icon={IconDownload}
-            onClick={() => exportLeadsTableCsv(rows)}
-            disabled={rows.length === 0}
-            title="Export Excel"
+            onClick={() => void handleExportData()}
+            disabled={rows.length === 0 || exporting}
+            title="Export Excel (supports full dataset backup)"
           >
-            Export
+            {exporting ? "Exporting…" : "Export"}
           </ActionButton>
           <ActionButton
             icon={editMode ? IconCheck : IconEdit}
@@ -4901,26 +5009,35 @@ export function LeadsTablePage({
               {/* Multi-Select Value Options List */}
               <div className="space-y-3">
                 {(() => {
-                  const modalRows = getFilteredRowsExcept(colFilterModal.field);
-                  const uniqueValuesMap = new Map<string, number>();
+                  let allUniqueVals: [string, number][] = [];
                   let blankCount = 0;
+                  let totalMatching = filteredCount;
 
-                  modalRows.forEach((r) => {
-                    const val = getRowFieldValue(r, colFilterModal.field);
-                    if (!val) {
-                      blankCount++;
-                    } else {
-                      uniqueValuesMap.set(val, (uniqueValuesMap.get(val) || 0) + 1);
-                    }
-                  });
-
-                  const sortedUniqueVals = Array.from(uniqueValuesMap.entries())
-                    .sort((a, b) => b[1] - a[1]);
-
-                  const allUniqueVals: [string, number][] = [
-                    ...(blankCount > 0 ? [["(Blanks)", blankCount] as [string, number]] : []),
-                    ...sortedUniqueVals,
-                  ];
+                  if (colModalColumnData) {
+                    blankCount = colModalColumnData.blank_count;
+                    totalMatching = colModalColumnData.total_matching;
+                    allUniqueVals = [
+                      ...(blankCount > 0 ? [["(Blanks)", blankCount] as [string, number]] : []),
+                      ...colModalColumnData.unique_values.map((v) => [v.value, v.count] as [string, number]),
+                    ];
+                  } else {
+                    const modalRows = getFilteredRowsExcept(colFilterModal.field);
+                    const uniqueValuesMap = new Map<string, number>();
+                    modalRows.forEach((r) => {
+                      const val = getRowFieldValue(r, colFilterModal.field);
+                      if (!val) {
+                        blankCount++;
+                      } else {
+                        uniqueValuesMap.set(val, (uniqueValuesMap.get(val) || 0) + 1);
+                      }
+                    });
+                    const sortedUniqueVals = Array.from(uniqueValuesMap.entries())
+                      .sort((a, b) => b[1] - a[1]);
+                    allUniqueVals = [
+                      ...(blankCount > 0 ? [["(Blanks)", blankCount] as [string, number]] : []),
+                      ...sortedUniqueVals,
+                    ];
+                  }
 
                   const filteredUniqueVals = allUniqueVals.filter(([val]) =>
                     val.toLowerCase().includes(colModalSearch.trim().toLowerCase()),
@@ -4930,17 +5047,19 @@ export function LeadsTablePage({
                     <>
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-bold text-slate-300">
-                          Select options ({pendingColSelections.length} selected):
+                          Select options ({pendingColSelections.length} selected)
+                          {colModalColumnData ? ` out of ${totalMatching} total rows` : ""}:
                         </span>
                         <div className="flex items-center gap-3 text-sm">
+                          {colModalLoading && (
+                            <span className="text-xs text-amber-400 animate-pulse font-mono">
+                              Calculating overall counts…
+                            </span>
+                          )}
                           <button
                             type="button"
                             onClick={() => {
-                              const allVals = Array.from(
-                                new Set(
-                                  modalRows.map((r) => getRowFieldValue(r, colFilterModal.field) || "(Blanks)"),
-                                ),
-                              );
+                              const allVals = allUniqueVals.map(([v]) => v);
                               setPendingColSelections(allVals);
                             }}
                             className="text-emerald-400 hover:underline font-semibold"
@@ -4962,7 +5081,9 @@ export function LeadsTablePage({
                       <div className="max-h-[380px] overflow-y-auto overflow-x-auto border-2 border-slate-800 bg-slate-950/80 rounded-2xl p-3 space-y-1.5 divide-y divide-slate-800/40">
                         {filteredUniqueVals.length === 0 ? (
                           <div className="py-8 text-center text-slate-500 text-sm font-medium">
-                            No matching values found for &quot;{colModalSearch}&quot;
+                            {colModalLoading
+                              ? "Calculating options across section..."
+                              : `No matching values found for "${colModalSearch}"`}
                           </div>
                         ) : (
                           filteredUniqueVals.map(([val, count]) => {
@@ -5035,10 +5156,11 @@ export function LeadsTablePage({
                   Reset Column Filter
                 </button>
                 {(() => {
-                  const modalRows = getFilteredRowsExcept(colFilterModal.field);
-                  const blankCount = modalRows.filter(
-                    (r) => !getRowFieldValue(r, colFilterModal.field),
-                  ).length;
+                  const blankCount = colModalColumnData
+                    ? colModalColumnData.blank_count
+                    : getFilteredRowsExcept(colFilterModal.field).filter(
+                        (r) => !getRowFieldValue(r, colFilterModal.field),
+                      ).length;
                   if (blankCount === 0) return null;
                   return (
                     <button

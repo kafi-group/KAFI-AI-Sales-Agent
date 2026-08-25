@@ -5,6 +5,8 @@ import { buildE164, formatDialCode, getDialCode, parsePhoneForDialpad } from "..
 import { useTwilioVoiceOptional } from "../hooks/useTwilioVoice";
 import { subscribeFloatingDialpadNumber } from "../utils/dialpadEvents";
 import { DialerContactInput } from "./DialerContactInput";
+import { PhoneFixModal } from "./PhoneFixModal";
+import { detectLeadingZeroAfterCountryCode, type PhoneZeroCheckResult } from "../utils/phoneUtils";
 
 const DIAL_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"] as const;
 
@@ -146,8 +148,13 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
     setCountryOpen(false);
   }
 
-  async function handleCall() {
-    if (!voice || !formattedNumber) return;
+  const [phoneFixCheck, setPhoneFixCheck] = useState<{
+    check: PhoneZeroCheckResult;
+    pendingTarget?: string;
+  } | null>(null);
+
+  async function startCallWithNumber(num: string) {
+    if (!voice) return;
     if (!voice.ready) {
       try {
         await voice.retryInit();
@@ -158,7 +165,7 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
     }
     setCalling(true);
     try {
-      await voice.placeManualCall(formattedNumber, {
+      await voice.placeManualCall(num, {
         contactName: contactName.trim() || undefined,
         country: selectedCountry?.name,
       });
@@ -167,6 +174,16 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
     } finally {
       setCalling(false);
     }
+  }
+
+  async function handleCall() {
+    if (!voice || !formattedNumber) return;
+    const zeroErr = detectLeadingZeroAfterCountryCode(formattedNumber);
+    if (zeroErr) {
+      setPhoneFixCheck({ check: zeroErr, pendingTarget: formattedNumber });
+      return;
+    }
+    await startCallWithNumber(formattedNumber);
   }
 
   function onDragStart(e: React.PointerEvent) {
@@ -429,6 +446,32 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
             )}
           </div>
         </div>
+      )}
+
+      {phoneFixCheck && (
+        <PhoneFixModal
+          checkResult={phoneFixCheck.check}
+          contactName={contactName}
+          onFixAutoAndCall={(corrected) => {
+            setPhoneFixCheck(null);
+            const parsed = parsePhoneForDialpad(corrected);
+            if (parsed) {
+              setCountryCode(parsed.countryCode);
+              setDigits(parsed.digits);
+            }
+            void startCallWithNumber(corrected);
+          }}
+          onFixManualAndCall={(edited) => {
+            setPhoneFixCheck(null);
+            const parsed = parsePhoneForDialpad(edited);
+            if (parsed) {
+              setCountryCode(parsed.countryCode);
+              setDigits(parsed.digits);
+            }
+            void startCallWithNumber(edited);
+          }}
+          onCancel={() => setPhoneFixCheck(null)}
+        />
       )}
     </div>,
     document.body,
