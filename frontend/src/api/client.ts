@@ -117,6 +117,13 @@ function messageForHttpError(status: number, text: string, statusText: string): 
   return sanitizeUserFacingError(parsed);
 }
 
+export interface VoiceEngineSettings {
+  vapi_enabled: boolean;
+  vapi_key_configured: boolean;
+  elevenlabs_key_masked: string | null;
+  has_elevenlabs_key: boolean;
+}
+
 /**
  * Timeouts must stay above Railway pool waits + Vercel→Railway hop.
  * A 12s abort used to fire while Postgres pool_timeout (15s) was still waiting,
@@ -2914,6 +2921,17 @@ export const client = {
 
   getCallConfig: () => request<CallConfig>("/calls/config"),
   getTwilioBalance: () => request<TwilioBalance>("/calls/twilio-balance"),
+  getVoiceEngineSettings: () => request<VoiceEngineSettings>("/calls/voice-engine-settings"),
+  toggleVapiEngine: (pin: string, enabled: boolean) =>
+    request<{ ok: boolean; vapi_enabled: boolean; message: string }>("/calls/toggle-vapi-engine", {
+      method: "POST",
+      body: JSON.stringify({ pin, enabled }),
+    }),
+  updateElevenLabsKey: (pin: string, apiKey: string) =>
+    request<{ ok: boolean; has_key: boolean; message: string }>("/calls/update-elevenlabs-key", {
+      method: "POST",
+      body: JSON.stringify({ pin, api_key: apiKey }),
+    }),
   listInterestedFollowUps: () =>
     request<InterestedFollowUp[]>("/leads/interested-follow-ups"),
   acknowledgeInterestedFollowUp: (buyerId: number) =>

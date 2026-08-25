@@ -297,8 +297,8 @@ class VoiceClient:
         if not normalized:
             return {"ok": False, "error": f"Invalid destination phone number: '{to_phone}'. Must be in E.164 format (e.g. +923142867152)."}
 
-        # Try Vapi Voice Engine first for sub-second conversational AI calling
-        vapi_key = settings.vapi_api_key
+        # Try Vapi Voice Engine first for sub-second conversational AI calling (if enabled)
+        vapi_key = settings.vapi_api_key if getattr(settings, "vapi_enabled", True) else None
         vapi_phone_id = settings.vapi_phone_number_id
 
         if vapi_key:
@@ -308,6 +308,18 @@ class VoiceClient:
                 agent_name = "Sara" if persona == "female" else "Rayan"
                 c_name = contact_name or "there"
                 first_msg = text_message or f"Hello {c_name}, this is {agent_name} calling from Kafi Commodities. How are you doing today?"
+
+                voice_config = {
+                    "provider": "playht",
+                    "voiceId": "jennifer" if persona == "female" else "will",
+                }
+                eleven_key = getattr(settings, "elevenlabs_api_key", None)
+                if eleven_key and eleven_key.strip():
+                    voice_config = {
+                        "provider": "11labs",
+                        "voiceId": "21m00Tcm4TlvDq8ikWAM" if persona == "female" else "ErXwobaYiN019PkySvjV",
+                        "apiKey": eleven_key.strip(),
+                    }
 
                 payload = {
                     "customer": {"number": normalized, "name": c_name},
@@ -329,10 +341,7 @@ class VoiceClient:
                                 }
                             ],
                         },
-                        "voice": {
-                            "provider": "playht",
-                            "voiceId": "jennifer" if persona == "female" else "will",
-                        },
+                        "voice": voice_config,
                     },
                 }
 

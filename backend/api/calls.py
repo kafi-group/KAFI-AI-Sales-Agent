@@ -1,5 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db, require_admin
@@ -159,6 +160,59 @@ def get_twilio_public_status():
         "twilio_validate_webhooks": cfg.get("twilio_validate_webhooks"),
         "setup_message": cfg.get("setup_message"),
         "missing_env": cfg.get("missing_env"),
+    }
+
+
+class VoiceEngineSettingsResponse(BaseModel):
+    vapi_enabled: bool
+    vapi_key_configured: bool
+    elevenlabs_key_masked: str | None = None
+    has_elevenlabs_key: bool
+
+
+class ToggleVapiEngineRequest(BaseModel):
+    pin: str
+    enabled: bool
+
+
+class UpdateElevenLabsKeyRequest(BaseModel):
+    pin: str
+    api_key: str | None = None
+
+
+@router.get("/calls/voice-engine-settings", response_model=VoiceEngineSettingsResponse)
+def get_voice_engine_settings():
+    eleven_key = getattr(settings, "elevenlabs_api_key", None) or ""
+    masked = f"••••{eleven_key[-4:]}" if len(eleven_key) >= 4 else ("••••" if eleven_key else None)
+    return VoiceEngineSettingsResponse(
+        vapi_enabled=getattr(settings, "vapi_enabled", True),
+        vapi_key_configured=bool(getattr(settings, "vapi_api_key", None)),
+        elevenlabs_key_masked=masked,
+        has_elevenlabs_key=bool(eleven_key.strip()),
+    )
+
+
+@router.post("/calls/toggle-vapi-engine")
+def toggle_vapi_engine(payload: ToggleVapiEngineRequest):
+    if payload.pin != "786786":
+        raise HTTPException(status_code=400, detail="Invalid PIN code. Authorization failed.")
+    settings.vapi_enabled = payload.enabled
+    return {
+        "ok": True,
+        "vapi_enabled": settings.vapi_enabled,
+        "message": f"Vapi Voice Engine is now {'ON' if payload.enabled else 'OFF'}.",
+    }
+
+
+@router.post("/calls/update-elevenlabs-key")
+def update_elevenlabs_key(payload: UpdateElevenLabsKeyRequest):
+    if payload.pin != "786786":
+        raise HTTPException(status_code=400, detail="Invalid PIN code. Authorization failed.")
+    settings.elevenlabs_api_key = (payload.api_key or "").strip() or None
+    return {
+        "ok": True,
+        "has_key": bool(settings.elevenlabs_api_key),
+        "message": "ElevenLabs API Key updated successfully.",
     }
 
 
