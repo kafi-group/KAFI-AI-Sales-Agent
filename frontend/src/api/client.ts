@@ -2568,7 +2568,7 @@ export const client = {
     const query = search.toString();
     return request<InboxThreadListResponse>(`/inbox/threads${query ? `?${query}` : ""}`);
   },
-  getHelpfulGuidance: (params: { months?: number; user_id?: number } = {}) => {
+  getHelpfulGuidance: (params: { months?: number; user_id?: number | string } = {}) => {
     const search = new URLSearchParams();
     if (params.months) search.set("months", String(params.months));
     if (params.user_id != null) search.set("user_id", String(params.user_id));

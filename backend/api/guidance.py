@@ -14,7 +14,7 @@ router = APIRouter(prefix="/guidance", tags=["guidance"])
 @router.get("/helpful")
 def get_helpful_guidance(
     months: int = Query(3, ge=1, le=12),
-    user_id: int | None = None,
+    user_id: str | None = None,
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):

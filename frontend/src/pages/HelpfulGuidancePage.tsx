@@ -38,7 +38,7 @@ export function HelpfulGuidancePage({ onError }: HelpfulGuidancePageProps) {
     try {
       const result = await client.getHelpfulGuidance({
         months: 3,
-        user_id: userFilter ? Number(userFilter) : undefined,
+        user_id: userFilter || undefined,
       });
       setData(result as unknown as HelpfulGuidanceResponse);
     } catch (e) {
@@ -83,6 +83,9 @@ export function HelpfulGuidancePage({ onError }: HelpfulGuidancePageProps) {
           onChange={setUserFilter}
           options={[
             { value: "", label: "Team rollup" },
+            { value: "agent_all", label: "🤖 All AI Sales Agents" },
+            { value: "agent_sara", label: "🤖 Sara (AI Sales Agent)" },
+            { value: "agent_rayan", label: "🤖 Rayan (AI Sales Agent)" },
             ...assignees.map((u) => ({ value: String(u.id), label: u.username })),
           ]}
           allowEmpty
