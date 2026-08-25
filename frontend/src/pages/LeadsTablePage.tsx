@@ -250,6 +250,23 @@ function formatAddedAt(iso: string | null | undefined): string {
   });
 }
 
+function getRowFieldValue(row: LeadTableRow, field: string): string {
+  if (field === "assigned_to_user_id") {
+    const assignedTo = (row as any).assigned_to;
+    if (assignedTo && assignedTo !== "unassigned") return String(assignedTo).trim();
+    if (row.assigned_to_user_id) return String(row.assigned_to_user_id).trim();
+    return "";
+  }
+  if (field === "created_at") {
+    if (!row.created_at) return "";
+    const d = new Date(row.created_at);
+    return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString();
+  }
+  const val = (row as any)[field];
+  if (val === null || val === undefined) return "";
+  return String(val).trim();
+}
+
 function tableViewStorageKey(userId: number | undefined, section: LeadsTableSection): string {
   return `${TABLE_VIEW_STORAGE_PREFIX}:${userId ?? "anonymous"}:${section}`;
 }
@@ -2036,7 +2053,7 @@ export function LeadsTablePage({
   }
 
   function toggleSelectAllOnPage() {
-    const pageIds = rows.map((row) => row.id);
+    const pageIds = displayedRows.map((row) => row.id);
     const allSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
     setAllMatchingSelected(false);
     setSelected((prev) => {
@@ -2600,12 +2617,30 @@ export function LeadsTablePage({
     setDebouncedSearch("");
     setSortBy("created_at");
     setSortDir("desc");
+    setSelectedColValues({});
   }
 
   function sortIndicator(field: SortField): string {
     if (sortBy !== field) return "";
     return sortDir === "asc" ? " ↑" : " ↓";
   }
+
+  const displayedRows = useMemo(() => {
+    const activeFields = Object.keys(selectedColValues).filter(
+      (field) => selectedColValues[field] && selectedColValues[field].length > 0,
+    );
+
+    if (activeFields.length === 0) return rows;
+
+    return rows.filter((row) => {
+      return activeFields.every((field) => {
+        const allowedVals = selectedColValues[field];
+        const rawVal = getRowFieldValue(row, field);
+        const valLabel = rawVal ? rawVal : "(Blanks)";
+        return allowedVals.includes(valLabel) || (rawVal !== "" && allowedVals.includes(rawVal));
+      });
+    });
+  }, [rows, selectedColValues]);
 
   const hasActiveFilters = useClientsFilters
     ? Boolean(
@@ -2615,16 +2650,23 @@ export function LeadsTablePage({
           productInterest ||
           city ||
           callRecommended ||
-          search.trim(),
+          search.trim() ||
+          Object.values(selectedColValues).some((v) => v && v.length > 0),
       )
-    : Boolean(score || marketRole || country || search.trim());
+    : Boolean(
+        score ||
+          marketRole ||
+          country ||
+          search.trim() ||
+          Object.values(selectedColValues).some((v) => v && v.length > 0),
+      );
   const allOnPageSelected =
-    rows.length > 0 && rows.every((row) => selected.has(row.id));
-  const someOnPageSelected = rows.some((row) => selected.has(row.id));
+    displayedRows.length > 0 && displayedRows.every((row) => selected.has(row.id));
+  const someOnPageSelected = displayedRows.some((row) => selected.has(row.id));
   const allMatchingAreSelected =
     allMatchingSelected && selected.size > 0 && selected.size === filteredCount;
   const showSelectAllBanner =
-    filteredCount > rows.length &&
+    filteredCount > displayedRows.length &&
     allOnPageSelected &&
     !allMatchingAreSelected &&
     !selectingAll;
@@ -3666,7 +3708,7 @@ export function LeadsTablePage({
           {columnsUi.css ? <style>{columnsUi.css}</style> : null}
           {isTargetedPool ? (
             <TargetedPoolLeadsTable
-              rows={rows}
+              rows={displayedRows}
               drafts={drafts}
               selected={selected}
               editMode={editMode}
@@ -3746,7 +3788,7 @@ export function LeadsTablePage({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => {
+                {displayedRows.map((row) => {
                   const draft = drafts[row.id] ?? row;
                   const dirty = editMode && isRowDirty(row.id);
                   const cell = (
@@ -4779,9 +4821,7 @@ export function LeadsTablePage({
                       onClick={() => {
                         const allVals = Array.from(
                           new Set(
-                            rows
-                              .map((r) => String((r as any)[colFilterModal.field] || "").trim())
-                              .filter(Boolean),
+                            rows.map((r) => getRowFieldValue(r, colFilterModal.field) || "(Blanks)"),
                           ),
                         );
                         setPendingColSelections(allVals);
@@ -4805,9 +4845,13 @@ export function LeadsTablePage({
                 <div className="max-h-[380px] overflow-y-auto overflow-x-auto border-2 border-slate-800 bg-slate-950/80 rounded-2xl p-3 space-y-1.5 divide-y divide-slate-800/40">
                   {(() => {
                     const uniqueValuesMap = new Map<string, number>();
+                    let blankCount = 0;
+
                     rows.forEach((r) => {
-                      const val = String((r as any)[colFilterModal.field] || "").trim();
-                      if (val) {
+                      const val = getRowFieldValue(r, colFilterModal.field);
+                      if (!val) {
+                        blankCount++;
+                      } else {
                         uniqueValuesMap.set(val, (uniqueValuesMap.get(val) || 0) + 1);
                       }
                     });
@@ -4815,7 +4859,12 @@ export function LeadsTablePage({
                     const sortedUniqueVals = Array.from(uniqueValuesMap.entries())
                       .sort((a, b) => b[1] - a[1]);
 
-                    const filteredUniqueVals = sortedUniqueVals.filter(([val]) =>
+                    const allUniqueVals: [string, number][] = [
+                      ...(blankCount > 0 ? [["(Blanks)", blankCount] as [string, number]] : []),
+                      ...sortedUniqueVals,
+                    ];
+
+                    const filteredUniqueVals = allUniqueVals.filter(([val]) =>
                       val.toLowerCase().includes(colModalSearch.trim().toLowerCase()),
                     );
 
@@ -4829,10 +4878,13 @@ export function LeadsTablePage({
 
                     return filteredUniqueVals.map(([val, count]) => {
                       const checked = pendingColSelections.includes(val);
+                      const isBlank = val === "(Blanks)";
                       return (
                         <label
                           key={val}
-                          className="flex items-center justify-between gap-4 p-3 rounded-xl hover:bg-slate-900/90 cursor-pointer transition-colors group pt-2.5"
+                          className={`flex items-center justify-between gap-4 p-3 rounded-xl hover:bg-slate-900/90 cursor-pointer transition-colors group pt-2.5 ${
+                            isBlank ? "bg-amber-500/10 border border-amber-500/30" : ""
+                          }`}
                         >
                           <div className="flex items-center gap-3.5 min-w-0">
                             <input
@@ -4849,11 +4901,21 @@ export function LeadsTablePage({
                               }}
                               className="w-5 h-5 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500 shrink-0"
                             />
-                            <span className="text-base text-slate-200 font-semibold group-hover:text-white truncate">
-                              {val}
+                            <span
+                              className={`text-base font-semibold group-hover:text-white truncate ${
+                                isBlank ? "text-amber-300 font-bold" : "text-slate-200"
+                              }`}
+                            >
+                              {isBlank ? "📂 (Blanks / Empty Data)" : val}
                             </span>
                           </div>
-                          <span className="text-xs font-mono font-bold bg-slate-800/80 text-emerald-400 px-2.5 py-1 rounded-full shrink-0">
+                          <span
+                            className={`text-xs font-mono font-bold px-2.5 py-1 rounded-full shrink-0 ${
+                              isBlank
+                                ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                                : "bg-slate-800/80 text-emerald-400"
+                            }`}
+                          >
                             {count} rows
                           </span>
                         </label>
@@ -4866,20 +4928,43 @@ export function LeadsTablePage({
 
             {/* Modal Footer */}
             <div className="bg-slate-950 border-t border-slate-800 p-6 flex items-center justify-between shrink-0 gap-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedColValues((prev) => ({
-                    ...prev,
-                    [colFilterModal.field]: [],
-                  }));
-                  setColFilterModal(null);
-                }}
-                className="px-5 py-3 rounded-2xl border border-slate-700 text-slate-300 hover:bg-slate-900 hover:text-white font-bold text-sm transition-colors"
-              >
-                Reset Column Filter
-              </button>
-              
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedColValues((prev) => ({
+                      ...prev,
+                      [colFilterModal.field]: [],
+                    }));
+                    setColFilterModal(null);
+                  }}
+                  className="px-5 py-3 rounded-2xl border border-slate-700 text-slate-300 hover:bg-slate-900 hover:text-white font-bold text-sm transition-colors"
+                >
+                  Reset Column Filter
+                </button>
+                {(() => {
+                  const blankCount = rows.filter(
+                    (r) => !getRowFieldValue(r, colFilterModal.field),
+                  ).length;
+                  if (blankCount === 0) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingColSelections(["(Blanks)"]);
+                      }}
+                      className="px-5 py-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 font-extrabold text-sm transition-colors flex items-center gap-2"
+                      title="Select only rows with blank/empty data for this column"
+                    >
+                      <span>Show Blanks Only</span>
+                      <span className="bg-amber-500/20 px-2 py-0.5 rounded-full text-xs font-mono">
+                        {blankCount}
+                      </span>
+                    </button>
+                  );
+                })()}
+              </div>
+
               <div className="flex items-center gap-3">
                 <button
                   type="button"
