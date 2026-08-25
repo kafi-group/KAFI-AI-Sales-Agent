@@ -158,7 +158,12 @@ def queue_self_test(
     contact_name = payload.contact_name or "Mr. Khalid"
     msg = f"Hello {contact_name}, this is {agent_name} calling from Kafi Commodities. Thank you for connecting with us."
 
-    call_result = voice_client.place_outbound_ai_call(payload.phone, text_message=msg)
+    call_result = voice_client.place_outbound_ai_call(
+        payload.phone,
+        text_message=msg,
+        persona=payload.persona,
+        contact_name=contact_name,
+    )
 
     if not call_result.get("ok"):
         raise HTTPException(

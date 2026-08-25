@@ -269,8 +269,30 @@ class VoiceClient:
         return {"missing": missing, "browser_ready": self.browser_ready}
 
 
-    def place_outbound_ai_call(self, to_phone: str, text_message: str | None = None) -> dict[str, Any]:
-        """Initiate an outbound PSTN call via Twilio REST API."""
+    def ai_gather_twiml(self, message: str, action_url: str, voice: str = "Polly.Joanna-Neural") -> str:
+        """Build TwiML with <Gather input='speech'> for interactive voice conversation."""
+        import html
+        text = html.escape((message or "").strip()[:500])
+        action_xml = html.escape(action_url, quote=True)
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Response>'
+            f'<Gather input="speech" action="{action_xml}" method="POST" speechTimeout="auto" timeout="6">'
+            f'<Say voice="{voice}">{text}</Say>'
+            '</Gather>'
+            f'<Say voice="{voice}">I did not catch a response. Thank you for your time with Kafi Commodities and have a great day!</Say>'
+            '<Hangup/>'
+            '</Response>'
+        )
+
+    def place_outbound_ai_call(
+        self,
+        to_phone: str,
+        text_message: str | None = None,
+        persona: str = "female",
+        contact_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Initiate an outbound PSTN call via Twilio REST API with interactive AI voice gather."""
         if not self.is_configured:
             return {"ok": False, "error": "Twilio is not configured on the server. Please set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER."}
         
@@ -280,20 +302,31 @@ class VoiceClient:
         
         try:
             from twilio.rest import Client
+            import urllib.parse
 
             client = Client(
                 settings.twilio_account_sid.strip(),
                 settings.twilio_auth_token.strip(),
             )
 
-            msg = text_message or "Hello, this is Sara calling on behalf of Mr. Khalid from Kafi Commodities. Thank you for connecting."
-            twiml_content = self.say_twiml(msg)
+            q_persona = urllib.parse.quote(persona or "female")
+            q_name = urllib.parse.quote(contact_name or "there")
 
-            call = client.calls.create(
-                to=normalized,
-                from_=settings.twilio_phone_number.strip(),
-                twiml=twiml_content,
-            )
+            if settings.twilio_webhook_base_url:
+                webhook_url = self.webhook_url(f"/api/webhooks/twilio/ai-agent/intro?persona={q_persona}&name={q_name}")
+                call = client.calls.create(
+                    to=normalized,
+                    from_=settings.twilio_phone_number.strip(),
+                    url=webhook_url,
+                )
+            else:
+                msg = text_message or f"Hello {contact_name or 'there'}, this is {persona} from Kafi Commodities. Thank you for connecting."
+                twiml_content = self.say_twiml(msg)
+                call = client.calls.create(
+                    to=normalized,
+                    from_=settings.twilio_phone_number.strip(),
+                    twiml=twiml_content,
+                )
             return {"ok": True, "call_sid": call.sid, "status": call.status}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}

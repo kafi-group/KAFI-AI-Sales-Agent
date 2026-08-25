@@ -667,3 +667,87 @@ async def twilio_call_recording(
     if media and media.get("local_path") and media.get("transcript_status") == "pending":
         background_tasks.add_task(_transcribe_in_background, iid)
     return {"ok": True}
+
+
+@webhooks_router.post("/ai-agent/intro")
+async def twilio_ai_agent_intro(request: Request):
+    """Initial spoken greeting when AI agent calls buyer, prompting for speech response."""
+    persona = request.query_params.get("persona", "female")
+    name = request.query_params.get("name", "there")
+    agent_name = "Sara" if persona == "female" else "Rayan"
+    voice = "Polly.Joanna-Neural" if persona == "female" else "Polly.Matthew-Neural"
+
+    greeting = f"Hello {name}, this is {agent_name} calling from Kafi Commodities. How are you doing today?"
+    
+    respond_url = ""
+    if settings.twilio_webhook_base_url:
+        import urllib.parse
+        q_persona = urllib.parse.quote(persona)
+        respond_url = voice_client.webhook_url(f"/api/webhooks/twilio/ai-agent/respond?persona={q_persona}")
+    else:
+        respond_url = f"/api/webhooks/twilio/ai-agent/respond?persona={persona}"
+
+    xml = voice_client.ai_gather_twiml(greeting, respond_url, voice=voice)
+    return _twiml_response(xml)
+
+
+@webhooks_router.post("/ai-agent/respond")
+async def twilio_ai_agent_respond(request: Request):
+    """Processes buyer's spoken input via Gemini AI and responds interactively."""
+    persona = request.query_params.get("persona", "female")
+    agent_name = "Sara" if persona == "female" else "Rayan"
+    voice = "Polly.Joanna-Neural" if persona == "female" else "Polly.Matthew-Neural"
+
+    params = await request.form()
+    speech_result = (params.get("SpeechResult") or "").strip()
+
+    if not speech_result:
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Response>'
+            f'<Say voice="{voice}">I did not catch that. Thank you for speaking with Kafi Commodities and have a wonderful day!</Say>'
+            '<Hangup/>'
+            '</Response>'
+        )
+        return _twiml_response(xml)
+
+    # Check if buyer wants to conclude call
+    lower_speech = speech_result.lower()
+    if any(k in lower_speech for k in ["bye", "goodbye", "not interested", "stop calling", "hang up", "no thank you", "no thanks"]):
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Response>'
+            f'<Say voice="{voice}">Thank you for your time. Have a wonderful day!</Say>'
+            '<Hangup/>'
+            '</Response>'
+        )
+        return _twiml_response(xml)
+
+    # Generate dynamic conversational response via Gemini AI
+    try:
+        from modules.llm_client import llm_client
+        prompt = (
+            f"You are {agent_name}, a friendly and sharp B2B AI Sales Executive for Kafi Commodities. "
+            "Kafi Commodities exports white rice, sesame seeds, corn, spices, and edible oils globally. "
+            f"You are on a live phone call with a client. The client just said: \"{speech_result}\". "
+            "Respond naturally in 1 to 2 clear, spoken sentences to answer their question, mention our commodities if relevant, and keep the conversation going smoothly. "
+            "Do NOT use markdown, emojis, bullet points, or special characters."
+        )
+        ai_reply = llm_client.generate_content(prompt)
+        ai_reply = (ai_reply or "").strip().replace("*", "").replace("#", "")
+        if not ai_reply:
+            ai_reply = "We offer premium quality white rice, sesame seeds, and agricultural commodities. Are you currently importing any of these items?"
+    except Exception as exc:
+        print(f"AI response generation error: {exc}", flush=True)
+        ai_reply = "We specialize in premium white rice, sesame seeds, and edible oils with competitive FOB rates. Are you currently sourcing these for your market?"
+
+    respond_url = ""
+    if settings.twilio_webhook_base_url:
+        import urllib.parse
+        q_persona = urllib.parse.quote(persona)
+        respond_url = voice_client.webhook_url(f"/api/webhooks/twilio/ai-agent/respond?persona={q_persona}")
+    else:
+        respond_url = f"/api/webhooks/twilio/ai-agent/respond?persona={persona}"
+
+    xml = voice_client.ai_gather_twiml(ai_reply, respond_url, voice=voice)
+    return _twiml_response(xml)
