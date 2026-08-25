@@ -281,17 +281,22 @@ def get_call_history_item(db: Session, *, interaction_id: int) -> dict | None:
 def call_interaction_to_dict(db: Session, interaction: Interaction) -> dict:
     from modules.call_media import get_call_media, public_call_media
 
-    contact = db.get(Contact, interaction.contact_id)
+    contact = db.get(Contact, interaction.contact_id) if interaction.contact_id else None
     buyer = db.get(Buyer, contact.buyer_id) if contact else None
     parsed = parse_call_fields(interaction.content)
     media = public_call_media(get_call_media(interaction), interaction_id=interaction.id)
+
+    company = (buyer.company_name if buyer else None) or parsed.get("company_name") or interaction.subject or "Direct AI Call"
+    contact_nm = (contact.full_name if contact else None) or parsed.get("contact_name")
+    contact_ph = (contact.phone if contact else None) or parsed.get("lead_phone")
+
     return {
         "id": interaction.id,
         "contact_id": interaction.contact_id,
         "buyer_id": buyer.id if buyer else None,
-        "company_name": buyer.company_name if buyer else None,
-        "contact_name": contact.full_name if contact else None,
-        "contact_phone": contact.phone if contact else None,
+        "company_name": company,
+        "contact_name": contact_nm,
+        "contact_phone": contact_ph,
         "channel": interaction.channel.value,
         "direction": interaction.direction.value,
         "subject": interaction.subject,
@@ -316,15 +321,19 @@ def list_call_history(
     """List phone call interactions, optionally paginated and limited to a recent window."""
     query = (
         db.query(Interaction)
-        .join(Contact, Interaction.contact_id == Contact.id)
+        .outerjoin(Contact, Interaction.contact_id == Contact.id)
         .filter(Interaction.channel == Channel.phone)
     )
     if buyer_id is not None:
         query = query.filter(Contact.buyer_id == buyer_id)
 
     if assigned_to_user_id is not None:
-        query = query.join(Buyer, Contact.buyer_id == Buyer.id).filter(
-            Buyer.assigned_to_user_id == assigned_to_user_id
+        from sqlalchemy import or_
+        query = query.outerjoin(Buyer, Contact.buyer_id == Buyer.id).filter(
+            or_(
+                Buyer.assigned_to_user_id == assigned_to_user_id,
+                Interaction.contact_id.is_(None),
+            )
         )
 
     if since_days is not None and since_days > 0:
