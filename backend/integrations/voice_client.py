@@ -309,16 +309,17 @@ class VoiceClient:
                 c_name = contact_name or "there"
                 first_msg = text_message or f"Hello {c_name}, this is {agent_name} calling from Kafi Commodities. How are you doing today?"
 
-                voice_config = {
-                    "provider": "playht",
-                    "voiceId": "jennifer" if persona == "female" else "will",
-                }
                 eleven_key = getattr(settings, "elevenlabs_api_key", None)
-                eleven_on = getattr(settings, "elevenlabs_enabled", True)
+                eleven_on = getattr(settings, "elevenlabs_enabled", False)
                 if eleven_on and eleven_key and eleven_key.strip():
                     voice_config = {
                         "provider": "11labs",
                         "voiceId": "21m00Tcm4TlvDq8ikWAM" if persona == "female" else "ErXwobaYiN019PkySvjV",
+                    }
+                else:
+                    voice_config = {
+                        "provider": "azure",
+                        "voiceId": "en-US-JennyNeural" if persona == "female" else "en-US-GuyNeural",
                     }
 
                 try:

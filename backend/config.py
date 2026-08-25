@@ -160,7 +160,7 @@ class Settings(BaseSettings):
     vapi_api_key: str | None = "7bc20bf2-f724-47d0-8b6b-ffb8c8b99905"
     vapi_phone_number_id: str | None = "b64519d0-0296-4f0b-8a71-c49aa88f8e8f"
     vapi_enabled: bool = True
-    elevenlabs_enabled: bool = True
+    elevenlabs_enabled: bool = False
     elevenlabs_api_key: str | None = "sk_880257fad111679821f7d3bbbf1a562b4d2c2fbe22cd14af"
 
     # Twilio Voice — browser calling from dashboard (integrations/voice_client.py)
