@@ -33,6 +33,8 @@ export function HelpfulGuidancePage({ onError }: HelpfulGuidancePageProps) {
   const [assignees, setAssignees] = useState<AppUser[]>([]);
   const [userFilter, setUserFilter] = useState("");
 
+  const [viewCategory, setViewCategory] = useState<"users" | "agents">("users");
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -66,6 +68,37 @@ export function HelpfulGuidancePage({ onError }: HelpfulGuidancePageProps) {
 
   const totals = data.kpi_totals;
 
+  const defaultHumanUsers = [
+    { value: "", label: "Team rollup (All Human Reps)" },
+    { value: "khalid", label: "Khalid (Admin/Rep)" },
+    { value: "sadia", label: "Sadia (Sales Rep)" },
+    { value: "asim", label: "Asim (Sales Rep)" },
+    { value: "usman", label: "Usman (Sales Rep)" },
+  ];
+
+  const humanUserOptions =
+    assignees.length > 0
+      ? [
+          { value: "", label: "Team rollup (All Human Reps)" },
+          ...assignees.map((u) => ({ value: String(u.id), label: u.username })),
+        ]
+      : defaultHumanUsers;
+
+  const aiAgentOptions = [
+    { value: "agent_all", label: "🤖 All AI Sales Agents (Sara & Rayan)" },
+    { value: "agent_sara", label: "🤖 Sara (AI Sales Agent)" },
+    { value: "agent_rayan", label: "🤖 Rayan (AI Sales Agent)" },
+  ];
+
+  function handleCategoryChange(category: "users" | "agents") {
+    setViewCategory(category);
+    if (category === "users") {
+      setUserFilter("");
+    } else {
+      setUserFilter("agent_all");
+    }
+  }
+
   return (
     <section className="space-y-6 max-w-4xl">
       <div>
@@ -77,20 +110,46 @@ export function HelpfulGuidancePage({ onError }: HelpfulGuidancePageProps) {
       </div>
 
       {isAdmin && (
-        <SearchableSelect
-          label="User"
-          value={userFilter}
-          onChange={setUserFilter}
-          options={[
-            { value: "", label: "Team rollup" },
-            { value: "agent_all", label: "🤖 All AI Sales Agents" },
-            { value: "agent_sara", label: "🤖 Sara (AI Sales Agent)" },
-            { value: "agent_rayan", label: "🤖 Rayan (AI Sales Agent)" },
-            ...assignees.map((u) => ({ value: String(u.id), label: u.username })),
-          ]}
-          allowEmpty
-          emptyLabel="Team rollup"
-        />
+        <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Select Performance View:
+            </span>
+            <div className="flex items-center rounded-lg bg-slate-950 p-1 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => handleCategoryChange("users")}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
+                  viewCategory === "users"
+                    ? "bg-sky-600 text-white shadow-md"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <span>👥 Human Sales Reps</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleCategoryChange("agents")}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
+                  viewCategory === "agents"
+                    ? "bg-emerald-600 text-white shadow-md"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <span>🤖 AI Sales Agents</span>
+              </button>
+            </div>
+          </div>
+
+          <SearchableSelect
+            label={viewCategory === "users" ? "Select Human Sales Rep" : "Select AI Sales Agent"}
+            value={userFilter}
+            onChange={setUserFilter}
+            options={viewCategory === "users" ? humanUserOptions : aiAgentOptions}
+            allowEmpty={false}
+          />
+        </div>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
