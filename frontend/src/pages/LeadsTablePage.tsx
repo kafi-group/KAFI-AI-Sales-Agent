@@ -284,7 +284,7 @@ function getRowFieldValue(row: LeadTableRow, field: string): string {
       val = row.contact_secondary_phone ?? (row as any).secondary_phone;
       break;
     case "email":
-      val = row.contact_email ?? row.email;
+      val = row.contact_email ?? (row as any).email;
       break;
     case "secondary_email":
       val = row.contact_secondary_email ?? (row as any).secondary_email;
@@ -313,7 +313,7 @@ function getRowFieldValue(row: LeadTableRow, field: string): string {
       const d = new Date(row.created_at);
       return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString();
     case "calling_time":
-      val = row.calling_time;
+      val = (row as any).calling_time;
       break;
     case "remarks":
       val = row.remarks;
