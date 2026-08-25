@@ -594,7 +594,7 @@ export function AppSidebar({
                               />
                               <span className="truncate">{child.label}</span>
                             </span>
-                            {child.count > 0 ? (
+                            {child.count != null ? (
                               <span
                                 className={`shrink-0 text-xs tabular-nums px-1.5 py-0.5 rounded min-w-[1.25rem] text-center ${
                                   childActive
