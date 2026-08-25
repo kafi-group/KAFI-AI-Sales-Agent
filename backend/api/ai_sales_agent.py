@@ -275,3 +275,25 @@ def pause_runner(
             r["status"] = "paused"
             return r
     raise HTTPException(404, "Runner persona not found")
+
+
+class UpdateRulesRequest(BaseModel):
+    rules: str
+
+
+@router.get("/training")
+def get_ai_training_info(db: Session = Depends(get_db)):
+    from modules.ai_agent_training import get_training_knowledge
+    return get_training_knowledge(db)
+
+
+@router.post("/train-from-history")
+def train_ai_from_history(db: Session = Depends(get_db)):
+    from modules.ai_agent_training import train_agent_from_history
+    return train_agent_from_history(db)
+
+
+@router.post("/update-rules")
+def update_ai_sales_rules(payload: UpdateRulesRequest):
+    from modules.ai_agent_training import update_custom_rules
+    return update_custom_rules(payload.rules)

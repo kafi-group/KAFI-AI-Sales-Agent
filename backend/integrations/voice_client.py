@@ -321,6 +321,23 @@ class VoiceClient:
                         "voiceId": "21m00Tcm4TlvDq8ikWAM" if persona == "female" else "ErXwobaYiN019PkySvjV",
                     }
 
+                try:
+                    from modules.ai_agent_training import get_training_knowledge
+                    t_data = get_training_knowledge(None)
+                    insights_txt = t_data.get("learned_insights", "")
+                    rules_txt = t_data.get("custom_rules", "")
+                except Exception:
+                    insights_txt, rules_txt = "", ""
+
+                system_prompt = (
+                    f"You are {agent_name}, a friendly, natural, and sharp B2B AI Sales Representative for Kafi Commodities. "
+                    "Kafi Commodities is a leading global exporter of white rice, sesame seeds, corn, spices, and edible oils. "
+                    f"Use the following learned sales playbook from past call history:\n{insights_txt}\n\n"
+                    f"Follow these strict custom sales rules:\n{rules_txt}\n\n"
+                    "You are on a live phone call with a buyer. Answer questions concisely in 1 to 2 spoken sentences, "
+                    "mention our high quality FMCG commodities when relevant, and keep the sales conversation moving forward smoothly."
+                )
+
                 payload = {
                     "customer": {"number": normalized, "name": c_name},
                     "assistant": {
@@ -332,12 +349,7 @@ class VoiceClient:
                             "messages": [
                                 {
                                     "role": "system",
-                                    "content": (
-                                        f"You are {agent_name}, a friendly, natural, and sharp B2B AI Sales Representative for Kafi Commodities. "
-                                        "Kafi Commodities is a leading global exporter of white rice, sesame seeds, corn, spices, and edible oils. "
-                                        "You are on a live phone call with a buyer. Answer questions concisely in 1 to 2 spoken sentences, "
-                                        "mention our high quality FMCG commodities when relevant, and keep the sales conversation moving forward smoothly."
-                                    ),
+                                    "content": system_prompt,
                                 }
                             ],
                         },

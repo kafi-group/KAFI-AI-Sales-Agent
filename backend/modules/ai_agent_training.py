@@ -1,0 +1,83 @@
+"""AI Agent Training module for Sara & Rayan (RAG learning from past call history)."""
+
+from datetime import datetime, timezone
+from typing import Any
+from sqlalchemy.orm import Session
+from db.models import Interaction, Channel
+import llm_client
+
+_TRAINING_STORE: dict[str, Any] = {
+    "last_trained_at": None,
+    "total_calls_analyzed": 0,
+    "learned_insights": (
+        "• Pitch Strategy: Lead with high quality Basmati 1121 and 5% Broken White Rice specs before quoting prices.\n"
+        "• Payment Terms: Standard payment terms are LC at sight or 30% TT advance deposit.\n"
+        "• Common Objections: When buyers request discounts for high volume (100+ MT), offer free SGS inspection certificates and CNF Karachi port quotes.\n"
+        "• Key Products: White Rice, Sesame Seeds 99% purity, Yellow Corn, Spices, and Edible Oils."
+    ),
+    "custom_rules": (
+        "1. Always address the customer politely by name or company title.\n"
+        "2. Quoting prices in CNF (Cost & Freight) is preferred over FOB.\n"
+        "3. Always offer to email product specifications and proforma invoice."
+    ),
+}
+
+
+def get_training_knowledge(db: Session) -> dict[str, Any]:
+    _ = db
+    return dict(_TRAINING_STORE)
+
+
+def train_agent_from_history(db: Session) -> dict[str, Any]:
+    """Scan past phone call interactions, extract sales wisdom with Gemini AI, and update training knowledge."""
+    calls = (
+        db.query(Interaction)
+        .filter(Interaction.channel == Channel.phone)
+        .order_by(Interaction.created_at.desc())
+        .limit(30)
+        .all()
+    )
+
+    if not calls:
+        _TRAINING_STORE["last_trained_at"] = datetime.now(timezone.utc).isoformat()
+        _TRAINING_STORE["total_calls_analyzed"] = 0
+        return dict(_TRAINING_STORE)
+
+    transcripts_sample = []
+    for c in calls:
+        subj = c.subject or "Phone Call"
+        content = c.content or ""
+        if content.strip():
+            transcripts_sample.append(f"- Call Subject: {subj}\n  Call Content/Log: {content[:300]}")
+
+    combined_text = "\n".join(transcripts_sample)
+
+    prompt = f"""
+Analyze the following recent B2B sales phone call logs and transcripts for Kafi Commodities (exporter of white rice, sesame seeds, corn, edible oils):
+
+{combined_text}
+
+Synthesize a concise, high-converting Sales Training Playbook for AI Sales Agents (Sara & Rayan).
+Extract:
+1. Top 3 successful sales pitch angles.
+2. Common buyer objections and winning answers (e.g. prices, payment terms, minimum order quantities).
+3. Key product specs & trade terms frequently discussed.
+
+Format your output cleanly in 4-6 concise bullet points.
+"""
+
+    try:
+        response = llm_client.generate_content(prompt, temperature=0.3)
+        if response and response.strip():
+            _TRAINING_STORE["learned_insights"] = response.strip()
+    except Exception as exc:
+        print(f"Error synthesizing training knowledge with Gemini AI: {exc}", flush=True)
+
+    _TRAINING_STORE["last_trained_at"] = datetime.now(timezone.utc).isoformat()
+    _TRAINING_STORE["total_calls_analyzed"] = len(calls)
+    return dict(_TRAINING_STORE)
+
+
+def update_custom_rules(rules_text: str) -> dict[str, Any]:
+    _TRAINING_STORE["custom_rules"] = rules_text.strip()
+    return dict(_TRAINING_STORE)

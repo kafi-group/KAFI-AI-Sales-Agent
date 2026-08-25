@@ -125,6 +125,13 @@ export interface VoiceEngineSettings {
   has_elevenlabs_key: boolean;
 }
 
+export interface AiTrainingData {
+  last_trained_at: string | null;
+  total_calls_analyzed: number;
+  learned_insights: string;
+  custom_rules: string;
+}
+
 /**
  * Timeouts must stay above Railway pool waits + Vercel→Railway hop.
  * A 12s abort used to fire while Postgres pool_timeout (15s) was still waiting,
@@ -2942,6 +2949,13 @@ export const client = {
     request<{ ok: boolean; has_key: boolean; message: string }>("/calls/update-elevenlabs-key", {
       method: "POST",
       body: JSON.stringify({ pin, api_key: apiKey }),
+    }),
+  getAiTrainingInfo: () => request<AiTrainingData>("/ai-sales-agent/training"),
+  trainAiFromHistory: () => request<AiTrainingData>("/ai-sales-agent/train-from-history", { method: "POST" }),
+  updateAiSalesRules: (rules: string) =>
+    request<AiTrainingData>("/ai-sales-agent/update-rules", {
+      method: "POST",
+      body: JSON.stringify({ rules }),
     }),
   listInterestedFollowUps: () =>
     request<InterestedFollowUp[]>("/leads/interested-follow-ups"),

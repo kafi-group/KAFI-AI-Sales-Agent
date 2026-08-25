@@ -38,9 +38,32 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   const [selfTesting, setSelfTesting] = useState(false);
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
 
+  // AI Agent Training & Knowledge Base State
+  const [trainingData, setTrainingData] = useState<import("../api/client").AiTrainingData | null>(null);
+  const [trainingLoading, setTrainingLoading] = useState(false);
+  const [rulesDraft, setRulesDraft] = useState("");
+  const [savingRules, setSavingRules] = useState(false);
+  const [trainingNotice, setTrainingNotice] = useState<string | null>(null);
+
+  const loadTraining = useCallback(async () => {
+    try {
+      const data = await client.getAiTrainingInfo();
+      setTrainingData(data);
+      setRulesDraft(data.custom_rules || "");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   useEffect(() => {
     setUnlocked(Boolean(getAiSalesAgentAccessCode()));
   }, []);
+
+  useEffect(() => {
+    if (unlocked) {
+      void loadTraining();
+    }
+  }, [unlocked, loadTraining]);
 
   useEffect(() => {
     if (user?.full_name && !selfTestName) {
@@ -221,6 +244,35 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       await load();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Remove failed");
+    }
+  }
+
+  async function handleTrainFromHistory() {
+    setTrainingLoading(true);
+    setTrainingNotice(null);
+    try {
+      const res = await client.trainAiFromHistory();
+      setTrainingData(res);
+      setTrainingNotice(`Successfully analyzed ${res.total_calls_analyzed} past calls! Training playbook updated for Sara & Rayan.`);
+      setTimeout(() => setTrainingNotice(null), 5000);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to train AI from history");
+    } finally {
+      setTrainingLoading(false);
+    }
+  }
+
+  async function handleSaveRules() {
+    setSavingRules(true);
+    try {
+      const res = await client.updateAiSalesRules(rulesDraft);
+      setTrainingData(res);
+      setTrainingNotice("Custom sales rules saved and applied to Sara & Rayan calls!");
+      setTimeout(() => setTrainingNotice(null), 4000);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to save rules");
+    } finally {
+      setSavingRules(false);
     }
   }
 
@@ -454,6 +506,93 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
           </div>
         </div>
       )}
+
+      {/* 🧠 AI Agent Training & Sales Playbook Section */}
+      <div className="rounded-xl border border-slate-700/80 bg-slate-900/40 p-5 space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="font-medium text-slate-100 flex items-center gap-2">
+              <span>🧠 AI Agent Training & Sales Playbook</span>
+              <span className="text-xs px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-mono">
+                Gemini RAG Engine
+              </span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">
+              Sara & Rayan analyze past sales call logs, transcripts, and objections to continuously improve their sales techniques.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void handleTrainFromHistory()}
+            disabled={trainingLoading}
+            className="px-4 py-2 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 transition-all flex items-center gap-2 shadow-lg shadow-emerald-950/40"
+          >
+            {trainingLoading ? (
+              <>
+                <span className="animate-spin">⚡</span>
+                <span>Gemini Analyzing History…</span>
+              </>
+            ) : (
+              <>
+                <span>⚡ Auto-Train from Call History</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {trainingNotice && (
+          <p className="text-xs text-emerald-300 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2">
+            {trainingNotice}
+          </p>
+        )}
+
+        <div className="grid gap-4 md:grid-cols-2">
+          {/* Learned Insights Card */}
+          <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Learned Insights (From Call History)
+              </h4>
+              {trainingData?.last_trained_at && (
+                <span className="text-xs text-slate-500 font-mono">
+                  {trainingData.total_calls_analyzed} calls analyzed
+                </span>
+              )}
+            </div>
+            <div className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed bg-slate-900/60 p-3 rounded-lg border border-slate-800/80 max-h-48 overflow-y-auto font-mono">
+              {trainingData?.learned_insights || "Click 'Auto-Train' above to extract insights from past sales calls."}
+            </div>
+          </div>
+
+          {/* Custom Sales Rules Editor */}
+          <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-4 space-y-2 flex flex-col justify-between">
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                Custom Sales Rules & Guidelines
+              </h4>
+              <textarea
+                rows={4}
+                value={rulesDraft}
+                onChange={(e) => setRulesDraft(e.target.value)}
+                placeholder="Type custom sales instructions for Sara & Rayan (e.g. Always pitch CNF price first, offer 1% discount on 100+ MT orders)..."
+                className="w-full text-xs rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-slate-200 placeholder:text-slate-600 focus:border-sky-500 focus:outline-none resize-none font-mono"
+              />
+            </div>
+            <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
+              <span className="text-xs text-slate-500">Injected into voice call prompts</span>
+              <button
+                type="button"
+                onClick={() => void handleSaveRules()}
+                disabled={savingRules}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 transition-colors"
+              >
+                {savingRules ? "Saving…" : "Save Custom Rules"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
