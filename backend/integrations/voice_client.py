@@ -292,13 +292,76 @@ class VoiceClient:
         persona: str = "female",
         contact_name: str | None = None,
     ) -> dict[str, Any]:
-        """Initiate an outbound PSTN call via Twilio REST API with interactive AI voice gather."""
-        if not self.is_configured:
-            return {"ok": False, "error": "Twilio is not configured on the server. Please set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER."}
-        
+        """Initiate an outbound PSTN call via Vapi AI Voice Engine (or Twilio fallback)."""
         normalized = normalize_e164(to_phone)
         if not normalized:
             return {"ok": False, "error": f"Invalid destination phone number: '{to_phone}'. Must be in E.164 format (e.g. +923142867152)."}
+
+        # Try Vapi Voice Engine first for sub-second conversational AI calling
+        vapi_key = settings.vapi_api_key
+        vapi_phone_id = settings.vapi_phone_number_id
+
+        if vapi_key:
+            try:
+                import json
+                import urllib.request
+                agent_name = "Sara" if persona == "female" else "Rayan"
+                c_name = contact_name or "there"
+                first_msg = text_message or f"Hello {c_name}, this is {agent_name} calling from Kafi Commodities. How are you doing today?"
+
+                payload = {
+                    "customer": {"number": normalized, "name": c_name},
+                    "assistant": {
+                        "name": agent_name,
+                        "firstMessage": first_msg,
+                        "model": {
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "messages": [
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        f"You are {agent_name}, a friendly, natural, and sharp B2B AI Sales Representative for Kafi Commodities. "
+                                        "Kafi Commodities is a leading global exporter of white rice, sesame seeds, corn, spices, and edible oils. "
+                                        "You are on a live phone call with a buyer. Answer questions concisely in 1 to 2 spoken sentences, "
+                                        "mention our high quality FMCG commodities when relevant, and keep the sales conversation moving forward smoothly."
+                                    ),
+                                }
+                            ],
+                        },
+                        "voice": {
+                            "provider": "playht",
+                            "voiceId": "jennifer" if persona == "female" else "will",
+                        },
+                    },
+                }
+
+                if vapi_phone_id:
+                    payload["phoneNumberId"] = vapi_phone_id
+
+                data = json.dumps(payload).encode("utf-8")
+                req = urllib.request.Request(
+                    "https://api.vapi.ai/call",
+                    data=data,
+                    headers={
+                        "Authorization": f"Bearer {vapi_key}",
+                        "Content-Type": "application/json",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=12) as res:
+                    resp_data = json.loads(res.read().decode("utf-8"))
+                    return {
+                        "ok": True,
+                        "call_sid": resp_data.get("id"),
+                        "status": resp_data.get("status", "queued"),
+                        "engine": "vapi",
+                    }
+            except Exception as exc:
+                print(f"Vapi call failed, falling back to Twilio TwiML: {exc}", flush=True)
+
+        if not self.is_configured:
+            return {"ok": False, "error": "Neither Vapi nor Twilio is configured on the server."}
         
         try:
             from twilio.rest import Client
@@ -327,7 +390,7 @@ class VoiceClient:
                     from_=settings.twilio_phone_number.strip(),
                     twiml=twiml_content,
                 )
-            return {"ok": True, "call_sid": call.sid, "status": call.status}
+            return {"ok": True, "call_sid": call.sid, "status": call.status, "engine": "twilio"}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

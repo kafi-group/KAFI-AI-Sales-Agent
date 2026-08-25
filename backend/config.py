@@ -156,6 +156,10 @@ class Settings(BaseSettings):
     # Default: serpapi,duckduckgo,google_cse,wikidata (+ CompanyLens after a domain is found)
     web_search_combined_providers: str | None = None
 
+    # Vapi AI Voice Integration (Sub-Second Ultra-Fast Conversational Voice Engine)
+    vapi_api_key: str | None = "7bc20bf2-f724-47d0-8b6b-ffb8c8b99905"
+    vapi_phone_number_id: str | None = "b64519d0-0296-4f0b-8a71-c49aa88f8e8f"
+
     # Twilio Voice — browser calling from dashboard (integrations/voice_client.py)
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
