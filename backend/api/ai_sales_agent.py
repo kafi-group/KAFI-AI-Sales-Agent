@@ -172,11 +172,22 @@ def queue_self_test(
             detail=f"Twilio Voice Error: {call_result.get('error')}",
         )
 
+    # Match contact by phone if present so the call links to this lead's profile
+    contact_id = None
+    if payload.phone:
+        try:
+            from modules.calls import _find_contact_by_phone
+            matched_contact = _find_contact_by_phone(db, payload.phone)
+            if matched_contact:
+                contact_id = matched_contact.id
+        except Exception:
+            pass
+
     # Log interaction to DB for Call Center & Client History
     try:
         from db.models import Interaction, Channel, Direction, HandledBy, InteractionStatus
         interaction = Interaction(
-            contact_id=None,
+            contact_id=contact_id,
             channel=Channel.phone,
             direction=Direction.outbound,
             subject=f"AI Voice Call ({agent_name}) to {contact_name}",
