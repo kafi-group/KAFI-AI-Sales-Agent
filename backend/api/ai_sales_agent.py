@@ -282,18 +282,21 @@ class UpdateRulesRequest(BaseModel):
 
 
 @router.get("/training")
-def get_ai_training_info(db: Session = Depends(get_db)):
+def get_ai_training_info(db: Session = Depends(get_db), user: AppUser = Depends(get_current_user)):
+    _ = user
     from modules.ai_agent_training import get_training_knowledge
     return get_training_knowledge(db)
 
 
 @router.post("/train-from-history")
-def train_ai_from_history(db: Session = Depends(get_db)):
+def train_ai_from_history(db: Session = Depends(get_db), user: AppUser = Depends(get_current_user)):
+    _ = user
     from modules.ai_agent_training import train_agent_from_history
     return train_agent_from_history(db)
 
 
 @router.post("/update-rules")
-def update_ai_sales_rules(payload: UpdateRulesRequest):
+def update_ai_sales_rules(payload: UpdateRulesRequest, user: AppUser = Depends(get_current_user)):
+    _ = user
     from modules.ai_agent_training import update_custom_rules
     return update_custom_rules(payload.rules)

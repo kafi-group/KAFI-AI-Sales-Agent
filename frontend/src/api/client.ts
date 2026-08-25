@@ -2950,13 +2950,6 @@ export const client = {
       method: "POST",
       body: JSON.stringify({ pin, api_key: apiKey }),
     }),
-  getAiTrainingInfo: () => request<AiTrainingData>("/ai-sales-agent/training"),
-  trainAiFromHistory: () => request<AiTrainingData>("/ai-sales-agent/train-from-history", { method: "POST" }),
-  updateAiSalesRules: (rules: string) =>
-    request<AiTrainingData>("/ai-sales-agent/update-rules", {
-      method: "POST",
-      body: JSON.stringify({ rules }),
-    }),
   listInterestedFollowUps: () =>
     request<InterestedFollowUp[]>("/leads/interested-follow-ups"),
   acknowledgeInterestedFollowUp: (buyerId: number) =>
@@ -3365,6 +3358,21 @@ export const client = {
       { headers: aiSalesAgentHeaders() },
     );
   },
+  getAiTrainingInfo: () =>
+    request<AiTrainingData>("/ai-sales-agent/training", {
+      headers: aiSalesAgentHeaders(),
+    }),
+  trainAiFromHistory: () =>
+    request<AiTrainingData>("/ai-sales-agent/train-from-history", {
+      method: "POST",
+      headers: aiSalesAgentHeaders(),
+    }),
+  updateAiSalesRules: (rules: string) =>
+    request<AiTrainingData>("/ai-sales-agent/update-rules", {
+      method: "POST",
+      headers: aiSalesAgentHeaders(),
+      body: JSON.stringify({ rules }),
+    }),
 };
 
 export interface AiSalesAgentRunner {
