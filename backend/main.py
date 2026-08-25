@@ -92,6 +92,18 @@ def _run_bulk_email_schedule_job():
         db.close()
 
 
+def _keepalive_ping():
+    """Self-ping HTTP endpoint every 2 minutes to keep Railway container warm 24/7."""
+    import urllib.request
+    try:
+        url = "https://kafi-sales-agent.up.railway.app/api/leads/product-types"
+        req = urllib.request.Request(url, headers={"User-Agent": "Kafi-KeepAlive/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp.read()
+    except Exception:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import os
@@ -205,6 +217,14 @@ async def lifespan(app: FastAPI):
             "interval",
             minutes=2,
             id="bulk_email_schedule",
+            max_instances=1,
+            coalesce=True,
+        )
+        apscheduler.add_job(
+            _keepalive_ping,
+            "interval",
+            minutes=2,
+            id="keepalive_ping",
             max_instances=1,
             coalesce=True,
         )

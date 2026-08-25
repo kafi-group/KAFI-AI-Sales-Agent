@@ -177,6 +177,14 @@ function DashboardApp() {
     null,
   );
   const [error, setErrorState] = useState<string | null>(null);
+  useEffect(() => {
+    // Keepalive ping every 2 minutes to keep Railway container warm 24/7
+    const interval = setInterval(() => {
+      client.listProductTypes().catch(() => {});
+    }, 120000);
+    return () => clearInterval(interval);
+  }, []);
+
   const setError = useCallback((message: string | null) => {
     setErrorState(message == null ? null : sanitizeUserFacingError(message));
   }, []);
