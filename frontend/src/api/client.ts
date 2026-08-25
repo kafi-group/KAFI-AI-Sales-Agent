@@ -120,6 +120,7 @@ function messageForHttpError(status: number, text: string, statusText: string): 
 export interface VoiceEngineSettings {
   vapi_enabled: boolean;
   vapi_key_configured: boolean;
+  elevenlabs_enabled: boolean;
   elevenlabs_key_masked: string | null;
   has_elevenlabs_key: boolean;
 }
@@ -2922,8 +2923,18 @@ export const client = {
   getCallConfig: () => request<CallConfig>("/calls/config"),
   getTwilioBalance: () => request<TwilioBalance>("/calls/twilio-balance"),
   getVoiceEngineSettings: () => request<VoiceEngineSettings>("/calls/voice-engine-settings"),
+  unlockVoiceSettings: (pin: string) =>
+    request<VoiceEngineSettings>("/calls/unlock-voice-settings", {
+      method: "POST",
+      body: JSON.stringify({ pin }),
+    }),
   toggleVapiEngine: (pin: string, enabled: boolean) =>
     request<{ ok: boolean; vapi_enabled: boolean; message: string }>("/calls/toggle-vapi-engine", {
+      method: "POST",
+      body: JSON.stringify({ pin, enabled }),
+    }),
+  toggleElevenLabsEngine: (pin: string, enabled: boolean) =>
+    request<{ ok: boolean; elevenlabs_enabled: boolean; message: string }>("/calls/toggle-elevenlabs-engine", {
       method: "POST",
       body: JSON.stringify({ pin, enabled }),
     }),

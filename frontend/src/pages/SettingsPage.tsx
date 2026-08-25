@@ -31,46 +31,45 @@ export function SettingsPage({ onError }: SettingsPageProps) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // PIN Secret Protection State
+  // Lock / Unlock State
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [activePin, setActivePin] = useState("");
+
+  // PIN Secret Verification Modal State
   const [pinModalOpen, setPinModalOpen] = useState(false);
-  const [pinAction, setPinAction] = useState<"toggle_vapi" | "save_elevenlabs" | null>(null);
+  const [pinAction, setPinAction] = useState<"unlock" | "toggle_vapi" | "toggle_elevenlabs" | "save_elevenlabs" | null>(null);
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
   const [savingAction, setSavingAction] = useState(false);
 
-  // Drafts
+  // Pending Drafts
   const [pendingVapiState, setPendingVapiState] = useState<boolean>(true);
+  const [pendingElevenLabsState, setPendingElevenLabsState] = useState<boolean>(true);
   const [elevenLabsDraft, setElevenLabsDraft] = useState("");
 
   const loadData = useCallback(async () => {
     try {
-      const [twData, voiceData] = await Promise.all([
-        client.getTwilioBalance(),
-        client.getVoiceEngineSettings(),
-      ]);
+      const twData = await client.getTwilioBalance();
       setTwilio(twData);
-      setVoiceSettings(voiceData);
+      if (isUnlocked && activePin) {
+        const voiceData = await client.unlockVoiceSettings(activePin);
+        setVoiceSettings(voiceData);
+      }
     } catch (err) {
       onError(err instanceof Error ? err.message : "Failed to load settings");
     }
-  }, [onError]);
+  }, [onError, isUnlocked, activePin]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
-        const [twData, voiceData] = await Promise.all([
-          client.getTwilioBalance(),
-          client.getVoiceEngineSettings(),
-        ]);
-        if (!cancelled) {
-          setTwilio(twData);
-          setVoiceSettings(voiceData);
-        }
+        const twData = await client.getTwilioBalance();
+        if (!cancelled) setTwilio(twData);
       } catch (err) {
         if (!cancelled) {
-          onError(err instanceof Error ? err.message : "Failed to load settings");
+          onError(err instanceof Error ? err.message : "Failed to load Twilio balance");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -90,17 +89,32 @@ export function SettingsPage({ onError }: SettingsPageProps) {
     }
   }
 
+  function promptUnlock() {
+    setPinAction("unlock");
+    setPinInput("");
+    setPinError(null);
+    setPinModalOpen(true);
+  }
+
   function promptVapiToggle(newState: boolean) {
     setPendingVapiState(newState);
     setPinAction("toggle_vapi");
-    setPinInput("");
+    setPinInput(activePin);
+    setPinError(null);
+    setPinModalOpen(true);
+  }
+
+  function promptElevenLabsToggle(newState: boolean) {
+    setPendingElevenLabsState(newState);
+    setPinAction("toggle_elevenlabs");
+    setPinInput(activePin);
     setPinError(null);
     setPinModalOpen(true);
   }
 
   function promptElevenLabsSave() {
     setPinAction("save_elevenlabs");
-    setPinInput("");
+    setPinInput(activePin);
     setPinError(null);
     setPinModalOpen(true);
   }
@@ -108,7 +122,7 @@ export function SettingsPage({ onError }: SettingsPageProps) {
   async function handlePinSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!pinInput.trim()) {
-      setPinError("Please enter the secret code.");
+      setPinError("Please enter secret code.");
       return;
     }
 
@@ -116,9 +130,21 @@ export function SettingsPage({ onError }: SettingsPageProps) {
     setPinError(null);
 
     try {
-      if (pinAction === "toggle_vapi") {
+      if (pinAction === "unlock") {
+        const data = await client.unlockVoiceSettings(pinInput.trim());
+        setVoiceSettings(data);
+        setActivePin(pinInput.trim());
+        setIsUnlocked(true);
+        setPinModalOpen(false);
+      } else if (pinAction === "toggle_vapi") {
         const res = await client.toggleVapiEngine(pinInput.trim(), pendingVapiState);
         setVoiceSettings((prev) => (prev ? { ...prev, vapi_enabled: res.vapi_enabled } : prev));
+        setActivePin(pinInput.trim());
+        setPinModalOpen(false);
+      } else if (pinAction === "toggle_elevenlabs") {
+        const res = await client.toggleElevenLabsEngine(pinInput.trim(), pendingElevenLabsState);
+        setVoiceSettings((prev) => (prev ? { ...prev, elevenlabs_enabled: res.elevenlabs_enabled } : prev));
+        setActivePin(pinInput.trim());
         setPinModalOpen(false);
       } else if (pinAction === "save_elevenlabs") {
         const res = await client.updateElevenLabsKey(pinInput.trim(), elevenLabsDraft.trim());
@@ -133,11 +159,12 @@ export function SettingsPage({ onError }: SettingsPageProps) {
               }
             : prev
         );
+        setActivePin(pinInput.trim());
         setElevenLabsDraft("");
         setPinModalOpen(false);
       }
     } catch (err) {
-      setPinError(err instanceof Error ? err.message : "Invalid secret code");
+      setPinError(err instanceof Error ? err.message : "Invalid secret code. Authorization failed.");
     } finally {
       setSavingAction(false);
     }
@@ -237,99 +264,166 @@ export function SettingsPage({ onError }: SettingsPageProps) {
         )}
       </section>
 
-      {/* AI Voice Engine Controls (Secret PIN Protected) */}
+      {/* AI Voice Engine Controls (Secret PIN Protected Container) */}
       <section className="rounded-xl border border-slate-700/80 bg-slate-900/60 p-5 sm:p-6 space-y-6">
-        <div>
-          <h3 className="text-base font-medium text-slate-100">AI Voice Engine Configuration</h3>
-          <p className="mt-1 text-sm text-slate-400">
-            Control sub-second Vapi voice agent routing and high-realism ElevenLabs API keys. Protected by secret PIN code.
-          </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-medium text-slate-100 flex items-center gap-2">
+              <span>AI Voice Engine Configuration</span>
+              {isUnlocked ? (
+                <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
+                  Unlocked
+                </span>
+              ) : (
+                <span className="text-xs px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300">
+                  Protected
+                </span>
+              )}
+            </h3>
+            <p className="mt-1 text-sm text-slate-400">
+              Control sub-second Vapi voice agent routing and high-realism ElevenLabs API keys.
+            </p>
+          </div>
+
+          {isUnlocked && (
+            <button
+              type="button"
+              onClick={() => {
+                setIsUnlocked(false);
+                setActivePin("");
+              }}
+              className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
+            >
+              🔒 Lock Configuration
+            </button>
+          )}
         </div>
 
-        <div className="grid gap-6 md:grid-cols-2">
-          {/* Vapi Toggle Card */}
-          <div className="rounded-lg border border-slate-700/70 bg-slate-950/50 p-5 flex flex-col justify-between space-y-4">
-            <div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-semibold text-slate-200">Vapi AI Voice Engine</span>
-                <span
-                  className={`text-xs px-2.5 py-1 rounded-full border font-medium ${
-                    voiceSettings?.vapi_enabled
-                      ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-                      : "bg-slate-800 text-slate-400 border-slate-700"
-                  }`}
-                >
-                  {voiceSettings?.vapi_enabled ? "ON (Vapi Active)" : "OFF (Standard TwiML)"}
-                </span>
-              </div>
-              <p className="mt-2 text-xs text-slate-400 leading-relaxed">
-                When <strong>ON</strong>, AI sales agent calls use Vapi's sub-second voice engine. When <strong>OFF</strong>, calls fall back to standard Twilio TwiML gathering without Vapi.
+        {!isUnlocked ? (
+          /* Locked Security Banner */
+          <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-6 text-center space-y-4">
+            <div className="mx-auto w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 text-xl font-bold shadow-inner">
+              🔒
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-sm font-semibold text-slate-200">Voice Engine Configuration Hidden</h4>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                Enter your secret security code to reveal Vapi routing controls, ElevenLabs voice toggles, and API keys.
               </p>
             </div>
-
-            <div className="pt-2 flex items-center justify-between border-t border-slate-800/80">
-              <span className="text-xs text-slate-500">Toggle requires code</span>
+            <div>
               <button
                 type="button"
-                onClick={() => promptVapiToggle(!voiceSettings?.vapi_enabled)}
-                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                  voiceSettings?.vapi_enabled ? "bg-emerald-600" : "bg-slate-700"
-                }`}
+                onClick={promptUnlock}
+                className="px-5 py-2.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow-lg shadow-sky-900/30 transition-all hover:scale-105 active:scale-95"
               >
-                <span
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                    voiceSettings?.vapi_enabled ? "translate-x-5" : "translate-x-0"
-                  }`}
-                />
+                🔓 Unlock Configuration
               </button>
             </div>
           </div>
+        ) : (
+          /* Unlocked Controls */
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Vapi Toggle Card */}
+            <div className="rounded-lg border border-slate-700/70 bg-slate-950/50 p-5 flex flex-col justify-between space-y-4">
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-slate-200">Vapi AI Voice Engine</span>
+                  <span
+                    className={`text-xs px-2.5 py-1 rounded-full border font-medium ${
+                      voiceSettings?.vapi_enabled
+                        ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                        : "bg-slate-800 text-slate-400 border-slate-700"
+                    }`}
+                  >
+                    {voiceSettings?.vapi_enabled ? "ON (Vapi Active)" : "OFF (Standard TwiML)"}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-slate-400 leading-relaxed">
+                  When <strong>ON</strong>, AI sales agent calls use Vapi's sub-second engine. When <strong>OFF</strong>, calls fall back to standard Twilio TwiML gathering without Vapi.
+                </p>
+              </div>
 
-          {/* ElevenLabs Key Card */}
-          <div className="rounded-lg border border-slate-700/70 bg-slate-950/50 p-5 flex flex-col justify-between space-y-4">
-            <div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-semibold text-slate-200">ElevenLabs Voice API</span>
-                <span
-                  className={`text-xs px-2.5 py-1 rounded-full border font-medium ${
-                    voiceSettings?.has_elevenlabs_key
-                      ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-                      : "bg-slate-800 text-slate-400 border-slate-700"
+              <div className="pt-2 flex items-center justify-between border-t border-slate-800/80">
+                <span className="text-xs text-slate-500">Require code to change</span>
+                <button
+                  type="button"
+                  onClick={() => promptVapiToggle(!voiceSettings?.vapi_enabled)}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    voiceSettings?.vapi_enabled ? "bg-emerald-600" : "bg-slate-700"
                   }`}
                 >
-                  {voiceSettings?.has_elevenlabs_key
-                    ? `Connected (${voiceSettings.elevenlabs_key_masked || "Active"})`
-                    : "Not Configured"}
-                </span>
-              </div>
-              <p className="mt-2 text-xs text-slate-400 leading-relaxed">
-                Connect your ElevenLabs API Key to give Sara and Rayan ultra-realistic, natural human voice synthesis.
-              </p>
-
-              <div className="mt-3 space-y-2">
-                <input
-                  type="password"
-                  placeholder={voiceSettings?.elevenlabs_key_masked ? "Update ElevenLabs Key..." : "Enter ElevenLabs API Key..."}
-                  value={elevenLabsDraft}
-                  onChange={(e) => setElevenLabsDraft(e.target.value)}
-                  className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
-                />
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      voiceSettings?.vapi_enabled ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
               </div>
             </div>
 
-            <div className="pt-2 flex items-center justify-between border-t border-slate-800/80">
-              <span className="text-xs text-slate-500">Requires secret code</span>
-              <button
-                type="button"
-                onClick={promptElevenLabsSave}
-                disabled={!elevenLabsDraft.trim()}
-                className="px-3 py-1.5 rounded-lg bg-sky-600 text-white text-xs font-medium hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                Save ElevenLabs Key
-              </button>
+            {/* ElevenLabs Toggle & Key Card */}
+            <div className="rounded-lg border border-slate-700/70 bg-slate-950/50 p-5 flex flex-col justify-between space-y-4">
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-slate-200">ElevenLabs Voice API</span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-xs px-2.5 py-1 rounded-full border font-medium ${
+                        voiceSettings?.elevenlabs_enabled
+                          ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                          : "bg-slate-800 text-slate-400 border-slate-700"
+                      }`}
+                    >
+                      {voiceSettings?.elevenlabs_enabled ? "ON (11Labs Active)" : "OFF (Standard Voice)"}
+                    </span>
+                  </div>
+                </div>
+                <p className="mt-2 text-xs text-slate-400 leading-relaxed">
+                  When <strong>ON</strong>, Sara & Rayan speak using ElevenLabs ultra-realistic human voices. When <strong>OFF</strong>, standard natural synthetic voices are used.
+                </p>
+
+                <div className="mt-3 space-y-2">
+                  <input
+                    type="password"
+                    placeholder={voiceSettings?.elevenlabs_key_masked ? `Current Key: ${voiceSettings.elevenlabs_key_masked}` : "Enter ElevenLabs API Key..."}
+                    value={elevenLabsDraft}
+                    onChange={(e) => setElevenLabsDraft(e.target.value)}
+                    className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-between border-t border-slate-800/80 gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500">Toggle Engine:</span>
+                  <button
+                    type="button"
+                    onClick={() => promptElevenLabsToggle(!voiceSettings?.elevenlabs_enabled)}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      voiceSettings?.elevenlabs_enabled ? "bg-emerald-600" : "bg-slate-700"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        voiceSettings?.elevenlabs_enabled ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={promptElevenLabsSave}
+                  disabled={!elevenLabsDraft.trim()}
+                  className="px-3 py-1.5 rounded-lg bg-sky-600 text-white text-xs font-medium hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Save Key
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </section>
 
       {/* Secret PIN Modal Dialog */}
@@ -337,13 +431,17 @@ export function SettingsPage({ onError }: SettingsPageProps) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-2xl space-y-5">
             <div className="space-y-1">
-              <h3 className="text-base font-semibold text-slate-100">
-                🔒 Security Verification
+              <h3 className="text-base font-semibold text-slate-100 flex items-center gap-2">
+                <span>🔒 Enter Security Code</span>
               </h3>
               <p className="text-xs text-slate-400">
-                {pinAction === "toggle_vapi"
+                {pinAction === "unlock"
+                  ? "Enter the 6-digit secret code to reveal Voice Engine Configuration."
+                  : pinAction === "toggle_vapi"
                   ? `Enter secret code to turn Vapi AI Engine ${pendingVapiState ? "ON" : "OFF"}.`
-                  : "Enter secret code to update ElevenLabs API Key settings."}
+                  : pinAction === "toggle_elevenlabs"
+                  ? `Enter secret code to turn ElevenLabs Voice API ${pendingElevenLabsState ? "ON" : "OFF"}.`
+                  : "Enter secret code to update ElevenLabs API Key."}
               </p>
             </div>
 

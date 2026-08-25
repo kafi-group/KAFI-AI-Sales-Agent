@@ -314,7 +314,8 @@ class VoiceClient:
                     "voiceId": "jennifer" if persona == "female" else "will",
                 }
                 eleven_key = getattr(settings, "elevenlabs_api_key", None)
-                if eleven_key and eleven_key.strip():
+                eleven_on = getattr(settings, "elevenlabs_enabled", True)
+                if eleven_on and eleven_key and eleven_key.strip():
                     voice_config = {
                         "provider": "11labs",
                         "voiceId": "21m00Tcm4TlvDq8ikWAM" if persona == "female" else "ErXwobaYiN019PkySvjV",

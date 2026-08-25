@@ -166,11 +166,16 @@ def get_twilio_public_status():
 class VoiceEngineSettingsResponse(BaseModel):
     vapi_enabled: bool
     vapi_key_configured: bool
+    elevenlabs_enabled: bool
     elevenlabs_key_masked: str | None = None
     has_elevenlabs_key: bool
 
 
-class ToggleVapiEngineRequest(BaseModel):
+class UnlockVoiceSettingsRequest(BaseModel):
+    pin: str
+
+
+class ToggleVoiceEngineRequest(BaseModel):
     pin: str
     enabled: bool
 
@@ -180,6 +185,13 @@ class UpdateElevenLabsKeyRequest(BaseModel):
     api_key: str | None = None
 
 
+@router.post("/calls/unlock-voice-settings", response_model=VoiceEngineSettingsResponse)
+def unlock_voice_settings(payload: UnlockVoiceSettingsRequest):
+    if payload.pin != "786786":
+        raise HTTPException(status_code=400, detail="Invalid PIN code. Authorization failed.")
+    return get_voice_engine_settings()
+
+
 @router.get("/calls/voice-engine-settings", response_model=VoiceEngineSettingsResponse)
 def get_voice_engine_settings():
     eleven_key = getattr(settings, "elevenlabs_api_key", None) or ""
@@ -187,13 +199,14 @@ def get_voice_engine_settings():
     return VoiceEngineSettingsResponse(
         vapi_enabled=getattr(settings, "vapi_enabled", True),
         vapi_key_configured=bool(getattr(settings, "vapi_api_key", None)),
+        elevenlabs_enabled=getattr(settings, "elevenlabs_enabled", True),
         elevenlabs_key_masked=masked,
         has_elevenlabs_key=bool(eleven_key.strip()),
     )
 
 
 @router.post("/calls/toggle-vapi-engine")
-def toggle_vapi_engine(payload: ToggleVapiEngineRequest):
+def toggle_vapi_engine(payload: ToggleVoiceEngineRequest):
     if payload.pin != "786786":
         raise HTTPException(status_code=400, detail="Invalid PIN code. Authorization failed.")
     settings.vapi_enabled = payload.enabled
@@ -201,6 +214,18 @@ def toggle_vapi_engine(payload: ToggleVapiEngineRequest):
         "ok": True,
         "vapi_enabled": settings.vapi_enabled,
         "message": f"Vapi Voice Engine is now {'ON' if payload.enabled else 'OFF'}.",
+    }
+
+
+@router.post("/calls/toggle-elevenlabs-engine")
+def toggle_elevenlabs_engine(payload: ToggleVoiceEngineRequest):
+    if payload.pin != "786786":
+        raise HTTPException(status_code=400, detail="Invalid PIN code. Authorization failed.")
+    settings.elevenlabs_enabled = payload.enabled
+    return {
+        "ok": True,
+        "elevenlabs_enabled": settings.elevenlabs_enabled,
+        "message": f"ElevenLabs Voice API is now {'ON' if payload.enabled else 'OFF'}.",
     }
 
 
