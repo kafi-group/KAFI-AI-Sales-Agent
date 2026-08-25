@@ -269,4 +269,34 @@ class VoiceClient:
         return {"missing": missing, "browser_ready": self.browser_ready}
 
 
+    def place_outbound_ai_call(self, to_phone: str, text_message: str | None = None) -> dict[str, Any]:
+        """Initiate an outbound PSTN call via Twilio REST API."""
+        if not self.is_configured:
+            return {"ok": False, "error": "Twilio is not configured on the server. Please set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER."}
+        
+        normalized = normalize_e164(to_phone)
+        if not normalized:
+            return {"ok": False, "error": f"Invalid destination phone number: '{to_phone}'. Must be in E.164 format (e.g. +923142867152)."}
+        
+        try:
+            from twilio.rest import Client
+
+            client = Client(
+                settings.twilio_account_sid.strip(),
+                settings.twilio_auth_token.strip(),
+            )
+
+            msg = text_message or "Hello, this is Sara calling on behalf of Mr. Khalid from Kafi Commodities. Thank you for connecting."
+            twiml_content = self.say_twiml(msg)
+
+            call = client.calls.create(
+                to=normalized,
+                from_=settings.twilio_phone_number.strip(),
+                twiml=twiml_content,
+            )
+            return {"ok": True, "call_sid": call.sid, "status": call.status}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+
 voice_client = VoiceClient()

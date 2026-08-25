@@ -152,13 +152,27 @@ def queue_self_test(
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     _ = user
+    from integrations.voice_client import voice_client
+
+    agent_name = "Sara" if payload.persona == "female" else "Rayan"
+    contact_name = payload.contact_name or "Mr. Khalid"
+    msg = f"Hello {contact_name}, this is {agent_name} calling from Kafi Commodities. Thank you for connecting with us."
+
+    call_result = voice_client.place_outbound_ai_call(payload.phone, text_message=msg)
+
+    if not call_result.get("ok"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Twilio Voice Error: {call_result.get('error')}",
+        )
+
     task = {
         "id": len(_TASKS) + 1,
         "persona": payload.persona,
         "buyer_id": 0,
         "contact_id": None,
         "company_name": "Direct AI Call",
-        "contact_name": payload.contact_name or "Self Test Contact",
+        "contact_name": contact_name,
         "contact_phone": payload.phone,
         "status": "in_progress",
         "ready": True,
@@ -166,7 +180,7 @@ def queue_self_test(
         "created_at": "2026-08-24T13:00:00Z",
         "started_at": "2026-08-24T13:00:00Z",
         "outcome": "Calling",
-        "remarks": f"Calling {payload.phone} live...",
+        "remarks": f"Calling {payload.phone} live (SID: {call_result.get('call_sid')})...",
     }
     _TASKS.insert(0, task)
     for r in _RUNNERS:
@@ -174,7 +188,7 @@ def queue_self_test(
             r["status"] = "running"
             r["current_task_id"] = task["id"]
             r["current_task"] = task
-    return {"task": task}
+    return {"task": task, "call_result": call_result}
 
 
 @router.delete("/tasks/{task_id}")
