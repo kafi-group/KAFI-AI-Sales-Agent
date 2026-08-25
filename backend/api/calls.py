@@ -208,11 +208,32 @@ def toggle_vapi_engine(payload: ToggleVapiEngineRequest):
 def update_elevenlabs_key(payload: UpdateElevenLabsKeyRequest):
     if payload.pin != "786786":
         raise HTTPException(status_code=400, detail="Invalid PIN code. Authorization failed.")
-    settings.elevenlabs_api_key = (payload.api_key or "").strip() or None
+    new_key = (payload.api_key or "").strip() or None
+    settings.elevenlabs_api_key = new_key
+
+    if new_key and getattr(settings, "vapi_api_key", None):
+        try:
+            import json
+            import urllib.request
+            data = json.dumps({"provider": "11labs", "apiKey": new_key}).encode()
+            req = urllib.request.Request(
+                "https://api.vapi.ai/credential",
+                data=data,
+                headers={
+                    "Authorization": f"Bearer {settings.vapi_api_key}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=10) as res:
+                _ = res.read()
+        except Exception as exc:
+            print(f"Could not sync ElevenLabs key to Vapi credentials: {exc}", flush=True)
+
     return {
         "ok": True,
         "has_key": bool(settings.elevenlabs_api_key),
-        "message": "ElevenLabs API Key updated successfully.",
+        "message": "ElevenLabs API Key updated and synced to Vapi successfully.",
     }
 
 

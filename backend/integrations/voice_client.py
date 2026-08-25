@@ -318,7 +318,6 @@ class VoiceClient:
                     voice_config = {
                         "provider": "11labs",
                         "voiceId": "21m00Tcm4TlvDq8ikWAM" if persona == "female" else "ErXwobaYiN019PkySvjV",
-                        "apiKey": eleven_key.strip(),
                     }
 
                 payload = {
