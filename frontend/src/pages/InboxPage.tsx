@@ -84,6 +84,26 @@ const TRIAGE_FILTERS: Array<{ key: string; label: string; chipClass: string }> =
     label: "Tracking",
     chipClass: "border-sky-700/60 text-sky-200 bg-sky-950/40",
   },
+  {
+    key: "newsletter",
+    label: "Newsletter",
+    chipClass: "border-purple-700/60 text-purple-200 bg-purple-950/40",
+  },
+  {
+    key: "invites_exhibitions",
+    label: "Invites & Exhibitions",
+    chipClass: "border-indigo-700/60 text-indigo-200 bg-indigo-950/40",
+  },
+  {
+    key: "advertising",
+    label: "Advertising",
+    chipClass: "border-pink-700/60 text-pink-200 bg-pink-950/40",
+  },
+  {
+    key: "tax_notice_challan",
+    label: "Tax, Notice & Challan",
+    chipClass: "border-rose-700/60 text-rose-200 bg-rose-950/40",
+  },
 ];
 
 function triageBadgeClass(category: string | null | undefined): string {
@@ -96,6 +116,14 @@ function triageBadgeClass(category: string | null | undefined): string {
       return "border-emerald-700/50 text-emerald-200 bg-emerald-950/50";
     case "tracking":
       return "border-sky-700/50 text-sky-200 bg-sky-950/50";
+    case "newsletter":
+      return "border-purple-700/50 text-purple-200 bg-purple-950/50";
+    case "invites_exhibitions":
+      return "border-indigo-700/50 text-indigo-200 bg-indigo-950/50";
+    case "advertising":
+      return "border-pink-700/50 text-pink-200 bg-pink-950/50";
+    case "tax_notice_challan":
+      return "border-rose-700/50 text-rose-200 bg-rose-950/50";
     case "info":
       return "border-slate-600 text-slate-400 bg-slate-900/60";
     default:

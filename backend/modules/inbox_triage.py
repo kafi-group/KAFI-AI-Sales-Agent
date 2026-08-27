@@ -10,6 +10,10 @@ EMAIL_TRIAGE_CATEGORIES = (
     "opportunity",
     "info",
     "tracking",
+    "newsletter",
+    "invites_exhibitions",
+    "advertising",
+    "tax_notice_challan",
 )
 
 _CATEGORY_LABELS = {
@@ -18,6 +22,10 @@ _CATEGORY_LABELS = {
     "opportunity": "Opportunity",
     "info": "Info",
     "tracking": "Tracking / Cargo / Documents",
+    "newsletter": "Newsletter",
+    "invites_exhibitions": "Invites & Exhibitions",
+    "advertising": "Advertising",
+    "tax_notice_challan": "Tax, Notice & Challan",
 }
 
 
@@ -35,6 +43,85 @@ def classify_email_triage(
     """Return one of EMAIL_TRIAGE_CATEGORIES."""
     text = f"{subject or ''}\n{body or ''}".lower()
     subj = (subject or "").lower()
+
+    tax_terms = (
+        "tax",
+        "notice",
+        "challan",
+        "fbr",
+        "srb",
+        "pra",
+        "kpra",
+        "income tax",
+        "sales tax",
+        "withholding",
+        "assessment",
+        "audit",
+        "penalty",
+        "statutory",
+        "government notice",
+        "bank challan",
+        "cpr",
+        "tax return",
+        "e-filing",
+    )
+    if any(term in text for term in tax_terms):
+        return "tax_notice_challan"
+
+    invites_terms = (
+        "invitation",
+        "invite",
+        "exhibition",
+        "exhibitions",
+        "expo",
+        "summit",
+        "conference",
+        "trade show",
+        "webinar",
+        "event",
+        "booth",
+        "wspc",
+        "fair",
+        "forum",
+        "meeting invitation",
+    )
+    if any(term in text for term in invites_terms) or (
+        from_email and any(k in from_email.lower() for k in ("expo", "event", "invitation"))
+    ):
+        return "invites_exhibitions"
+
+    advertising_terms = (
+        "advertising",
+        "advertisement",
+        "sponsored",
+        "promo",
+        "promotion",
+        "promotional",
+        "discount",
+        "special offer",
+        "media kit",
+        "banner ad",
+        "banner advertising",
+    )
+    if any(term in text for term in advertising_terms):
+        return "advertising"
+
+    newsletter_terms = (
+        "newsletter",
+        "digest",
+        "bulletin",
+        "weekly update",
+        "monthly update",
+        "subscription",
+        "latest news",
+        "industry news",
+        "market update",
+        "issue #",
+    )
+    if any(term in text for term in newsletter_terms) or (
+        from_email and "newsletter" in from_email.lower()
+    ):
+        return "newsletter"
 
     tracking_terms = (
         "tracking",
@@ -75,13 +162,9 @@ def classify_email_triage(
         return "opportunity"
 
     info_terms = (
-        "newsletter",
         "unsubscribe",
         "no-reply",
         "noreply",
-        "marketing",
-        "webinar",
-        "digest",
     )
     if any(term in text for term in info_terms) or (
         from_email and "noreply" in from_email.lower()
