@@ -554,20 +554,29 @@ export function AiModePage({
 
   async function openQuery(row: AiModeQueryRow) {
     setSelectedQuery(row);
-    setQueryMessage(null);
+    const fallbackMsg = {
+      uid: String(row.uid || ""),
+      folder: row.folder || "INBOX",
+      subject: row.subject || "(no subject)",
+      from_email: row.from_email || "",
+      from_name: row.from_name || row.from_email || "Customer",
+      body: row.preview || "(email body snippet from query log)",
+      preview: row.preview || "",
+      date: row.received_at || "",
+    };
+    setQueryMessage(fallbackMsg);
     setReplyBody(isAdmin ? buildReplyDraft(row) : "");
     setQueryMessageLoading(true);
     try {
       const data = await client.getAiModeQueryMessage(row.id);
-      setQueryMessage(data.message || null);
-      // Inquiries always prefer an AI draft (template only if AI is unavailable).
+      if (data && data.message && (data.message.body || data.message.preview)) {
+        setQueryMessage(data.message);
+      }
       if (isAdmin) {
         await generateQueryReply(row.id, row);
       }
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to open query email");
-      setSelectedQuery(null);
-      setReplyBody("");
+      console.warn("Could not fetch full IMAP message body, using preview snippet:", e);
     } finally {
       setQueryMessageLoading(false);
     }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   client,
   type PersonalizedFollowupDraft,
@@ -104,6 +104,11 @@ export function PersonalizedEmailsPage({
 
   const selected = rows.find((r) => r.id === selectedId) ?? null;
 
+  const onCountChangeRef = useRef(onCountChange);
+  useEffect(() => {
+    onCountChangeRef.current = onCountChange;
+  }, [onCountChange]);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -111,18 +116,18 @@ export function PersonalizedEmailsPage({
       const data: PersonalizedFollowupListResponse = await client.listPersonalizedFollowups(
         status ? { status } : {},
       );
-      setRows(data.rows);
-      onCountChange?.(data.pending_count);
+      setRows(data.rows || []);
+      onCountChangeRef.current?.(data.pending_count || 0);
       setSelectedId((prev) => {
-        if (prev && data.rows.some((r) => r.id === prev)) return prev;
-        return data.rows[0]?.id ?? null;
+        if (prev && (data.rows || []).some((r) => r.id === prev)) return prev;
+        return (data.rows || [])[0]?.id ?? null;
       });
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to load personalized emails");
     } finally {
       setLoading(false);
     }
-  }, [filter, onCountChange, onError]);
+  }, [filter, onError]);
 
   useEffect(() => {
     void refresh();
