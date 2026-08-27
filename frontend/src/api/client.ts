@@ -132,6 +132,43 @@ export interface AiTrainingData {
   custom_rules: string;
 }
 
+export interface EnrichmentColumnAnalysis {
+  field_key: string;
+  field_label: string;
+  db_populated_count: number;
+  db_missing_count: number;
+  file_populated_count: number;
+  new_fill_count: number;
+  protected_count: number;
+}
+
+export interface SampleFillPreview {
+  company_name: string;
+  field_name: string;
+  new_value: string;
+}
+
+export interface EnrichmentComparisonReport {
+  user_name: string;
+  table_source: string;
+  filename: string;
+  db_total_contacts: number;
+  uploaded_file_contacts: number;
+  matched_contacts_count: number;
+  unmatched_contacts_count: number;
+  total_potential_new_fills: number;
+  column_analysis: EnrichmentColumnAnalysis[];
+  sample_fills: SampleFillPreview[];
+}
+
+export interface SafeMergeResult {
+  status: string;
+  contacts_updated: number;
+  total_fields_filled: number;
+  protected_fields_count: number;
+  message: string;
+}
+
 /**
  * Timeouts must stay above Railway pool waits + Vercel→Railway hop.
  * A 12s abort used to fire while Postgres pool_timeout (15s) was still waiting,
@@ -2847,6 +2884,42 @@ export const client = {
       );
     }
     return res.json() as Promise<EmailAttachment>;
+  },
+
+  compareEnrichmentFile: async (file: File, userId?: number, tableSource = "master_table") => {
+    const form = new FormData();
+    form.append("file", file);
+    const params = new URLSearchParams({ table_source: tableSource });
+    if (userId) params.set("user_id", String(userId));
+    const res = await fetch(`${API_BASE}/leads/enrichment/compare?${params.toString()}`, {
+      method: "POST",
+      body: form,
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err as { detail?: string }).detail || "Analysis failed");
+    }
+    return res.json() as Promise<EnrichmentComparisonReport>;
+  },
+
+  safeMergeEnrichmentFile: async (file: File, userId?: number, tableSource = "master_table") => {
+    const form = new FormData();
+    form.append("file", file);
+    const params = new URLSearchParams({ table_source: tableSource });
+    if (userId) params.set("user_id", String(userId));
+    const res = await fetch(`${API_BASE}/leads/enrichment/safe-merge?${params.toString()}`, {
+      method: "POST",
+      body: form,
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err as { detail?: string }).detail || "Merge failed");
+    }
+    return res.json() as Promise<SafeMergeResult>;
   },
 
   updateDraftAttachments: (interactionId: number, attachments: EmailAttachment[]) =>

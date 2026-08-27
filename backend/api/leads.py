@@ -1502,3 +1502,47 @@ def onboard_lead(
         "next_actions": result["next_actions"],
         "enrichment": result.get("enrichment"),
     }
+
+
+@router.post("/enrichment/compare")
+async def compare_enrichment_file_endpoint(
+    file: UploadFile = File(...),
+    user_id: int | None = Query(default=None),
+    table_source: str = Query(default="master_table"),
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    from modules import enrichment_comparison as comparison_module
+    content = await file.read()
+    try:
+        return comparison_module.generate_enrichment_comparison_report(
+            db,
+            file_content=content,
+            filename=file.filename or "enrichment.xlsx",
+            user_id=user_id,
+            table_source=table_source,
+        )
+    except Exception as exc:
+        raise HTTPException(400, f"Could not analyze file: {exc}") from exc
+
+
+@router.post("/enrichment/safe-merge")
+async def safe_merge_enrichment_file_endpoint(
+    file: UploadFile = File(...),
+    user_id: int | None = Query(default=None),
+    table_source: str = Query(default="master_table"),
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    from modules import enrichment_comparison as comparison_module
+    content = await file.read()
+    try:
+        return comparison_module.execute_safe_fill_merge(
+            db,
+            file_content=content,
+            filename=file.filename or "enrichment.xlsx",
+            user_id=user_id,
+            table_source=table_source,
+        )
+    except Exception as exc:
+        raise HTTPException(400, f"Could not execute safe merge: {exc}") from exc
