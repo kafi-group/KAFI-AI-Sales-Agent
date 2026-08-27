@@ -29,6 +29,7 @@ class SelfTestRequest(BaseModel):
     persona: str
     phone: str
     contact_name: str | None = None
+    language: str | None = "en"
 
 
 class RunnerControlRequest(BaseModel):
@@ -161,9 +162,9 @@ def queue_self_test(
 
     call_result = voice_client.place_outbound_ai_call(
         payload.phone,
-        text_message=msg,
         persona=payload.persona,
         contact_name=contact_name,
+        language=payload.language or "en",
     )
 
     if not call_result.get("ok"):

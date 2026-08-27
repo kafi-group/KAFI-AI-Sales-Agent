@@ -53,6 +53,59 @@ def mask_phone(phone: str | None) -> str | None:
     return f"{normalized[:4]}****{normalized[-4:]}"
 
 
+LANGUAGE_CONFIGS: dict[str, dict[str, str]] = {
+    "en": {
+        "name": "English",
+        "voice_female": "en-US-JennyNeural",
+        "voice_male": "en-US-GuyNeural",
+        "greeting": "Hello, am I speaking with {c_name}?",
+        "instruction": "Conduct this conversation fluently and naturally in English.",
+    },
+    "ur": {
+        "name": "Urdu",
+        "voice_female": "ur-PK-UzmaNeural",
+        "voice_male": "ur-PK-AsadNeural",
+        "greeting": "سلام! کیا میری بات {c_name} سے ہو رہی ہے؟",
+        "instruction": "Conduct this entire conversation fluently, politely, and naturally in Urdu (اردو).",
+    },
+    "fr": {
+        "name": "French",
+        "voice_female": "fr-FR-DeniseNeural",
+        "voice_male": "fr-FR-HenriNeural",
+        "greeting": "Bonjour, est-ce que je parle à {c_name} ?",
+        "instruction": "Conduct this entire conversation fluently and naturally in French (Français).",
+    },
+    "ar": {
+        "name": "Arabic",
+        "voice_female": "ar-SA-ZariyahNeural",
+        "voice_male": "ar-SA-HamedNeural",
+        "greeting": "مرحباً، هل أتحدث مع {c_name}؟",
+        "instruction": "Conduct this entire conversation fluently and naturally in formal B2B Arabic (العربية).",
+    },
+    "de": {
+        "name": "German",
+        "voice_female": "de-DE-KatjaNeural",
+        "voice_male": "de-DE-ConradNeural",
+        "greeting": "Hallo, spreche ich mit {c_name}?",
+        "instruction": "Conduct this entire conversation fluently and naturally in German (Deutsch).",
+    },
+    "ru": {
+        "name": "Russian",
+        "voice_female": "ru-RU-SvetlanaNeural",
+        "voice_male": "ru-RU-DmitryNeural",
+        "greeting": "Здравствуйте, я говорю с {c_name}?",
+        "instruction": "Conduct this entire conversation fluently and naturally in Russian (Русский).",
+    },
+    "zh": {
+        "name": "Chinese",
+        "voice_female": "zh-CN-XiaoxiaoNeural",
+        "voice_male": "zh-CN-YunxiNeural",
+        "greeting": "您好，请问是 {c_name} 先生/女士吗？",
+        "instruction": "Conduct this entire conversation fluently and naturally in Mandarin Chinese (中文).",
+    },
+}
+
+
 class VoiceClient:
     @property
     def is_configured(self) -> bool:
@@ -291,6 +344,7 @@ class VoiceClient:
         text_message: str | None = None,
         persona: str = "female",
         contact_name: str | None = None,
+        language: str | None = "en",
     ) -> dict[str, Any]:
         """Initiate an outbound PSTN call via Vapi AI Voice Engine (or Twilio fallback)."""
         normalized = normalize_e164(to_phone)
@@ -301,13 +355,16 @@ class VoiceClient:
         vapi_key = settings.vapi_api_key if getattr(settings, "vapi_enabled", True) else None
         vapi_phone_id = settings.vapi_phone_number_id
 
+        lang_code = (language or "en").strip().lower()
+        lang_cfg = LANGUAGE_CONFIGS.get(lang_code, LANGUAGE_CONFIGS["en"])
+
         if vapi_key:
             try:
                 import json
                 import urllib.request
                 agent_name = "Sara" if persona == "female" else "Rayan"
                 c_name = contact_name or "there"
-                first_msg = text_message or f"Hello, am I speaking with {c_name}?"
+                first_msg = text_message or lang_cfg["greeting"].format(c_name=c_name)
 
                 eleven_key = getattr(settings, "elevenlabs_api_key", None)
                 eleven_on = getattr(settings, "elevenlabs_enabled", False)
@@ -319,7 +376,7 @@ class VoiceClient:
                 else:
                     voice_config = {
                         "provider": "azure",
-                        "voiceId": "en-US-JennyNeural" if persona == "female" else "en-US-GuyNeural",
+                        "voiceId": lang_cfg["voice_female"] if persona == "female" else lang_cfg["voice_male"],
                     }
 
                 try:
@@ -333,8 +390,9 @@ class VoiceClient:
                 system_prompt = (
                     f"You are {agent_name}, a friendly, natural, and sharp B2B AI Sales Representative for Kafi Commodities. "
                     "Kafi Commodities is a leading global exporter of White Rice (Basmati 1121 & 5% Broken), Sesame Seeds (99% Purity), Yellow Corn, Spices, and Edible Oils.\n\n"
+                    f"LANGUAGE INSTRUCTION:\n{lang_cfg['instruction']}\n\n"
                     "STRICT CONVERSATIONAL PROTOCOL & RULES:\n"
-                    f"1. OPENING GREETING: You start the call by asking 'Hello, am I speaking with {c_name}?'. Once the customer confirms, say: 'Great! This is {agent_name} from Kafi Commodities. We deal in high quality White Rice, Sesame Seeds, Corn, and Spices. I wanted to see if you would be interested in getting our latest price list and product info?'\n"
+                    f"1. OPENING GREETING: You start the call by asking '{first_msg}'. Once the customer confirms, introduce {agent_name} from Kafi Commodities and offer our product catalogue and price list.\n"
                     "2. DO NOT REPEAT THE CUSTOMER'S NAME: You already asked for their name in the greeting. NEVER repeat their name in every sentence during the call.\n"
                     "3. DO NOT ASK FOR EMAIL OR PHONE NUMBER: We ALREADY have the customer's email and phone number in our system. NEVER ask the buyer to give you their email or phone number.\n"
                     "4. CATALOGUE & PRICE LIST DELIVERY: Tell the buyer: 'I am going to send our full product catalogue and CNF price list directly to your WhatsApp and email so you can go through it. Please take a look when you get a chance!'\n"

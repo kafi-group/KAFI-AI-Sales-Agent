@@ -35,6 +35,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   const [selfTestPhone, setSelfTestPhone] = useState("");
   const [selfTestName, setSelfTestName] = useState("");
   const [selfTestPersona, setSelfTestPersona] = useState<"male" | "female">("female");
+  const [selfTestLanguage, setSelfTestLanguage] = useState<string>("en");
   const [selfTesting, setSelfTesting] = useState(false);
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
 
@@ -146,6 +147,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         persona: selfTestPersona,
         phone,
         contact_name: selfTestName.trim() || undefined,
+        language: selfTestLanguage,
       });
       setFilterPersona(selfTestPersona);
       setQueueNotice(
@@ -176,6 +178,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         persona: selfTestPersona,
         phone,
         contact_name: selfTestName.trim() || undefined,
+        language: selfTestLanguage,
       });
       await client.startAiSalesAgentRunner(selfTestPersona);
       const agentName = selfTestPersona === "female" ? "Sara" : "Rayan";
@@ -417,6 +420,22 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
               >
                 <option value="female">Sara (female)</option>
                 <option value="male">Rayan (male)</option>
+              </select>
+            </label>
+            <label className="text-sm text-slate-400">
+              Speaking Language
+              <select
+                value={selfTestLanguage}
+                onChange={(e) => setSelfTestLanguage(e.target.value)}
+                className="mt-1 block w-full min-w-[160px] rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100 font-medium"
+              >
+                <option value="en">🇺🇸 English (Default)</option>
+                <option value="ur">🇵🇰 Urdu (اردو)</option>
+                <option value="fr">🇫🇷 French (Français)</option>
+                <option value="ar">🇸🇦 Arabic (العربية)</option>
+                <option value="de">🇩🇪 German (Deutsch)</option>
+                <option value="ru">🇷🇺 Russian (Русский)</option>
+                <option value="zh">🇨🇳 Chinese (中文)</option>
               </select>
             </label>
             <label className="text-sm text-slate-400 flex-1 min-w-[160px]">

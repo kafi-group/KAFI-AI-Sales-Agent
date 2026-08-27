@@ -3397,6 +3397,7 @@ export const client = {
     persona: string;
     phone: string;
     contact_name?: string;
+    language?: string;
   }) =>
     request<{ task: AiSalesAgentTask }>("/ai-sales-agent/tasks/self-test", {
       method: "POST",
