@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   client,
   type AppUser,
@@ -130,6 +130,77 @@ export function ManualKpiSection({
     }
   }
 
+  const summaryMetrics = useMemo(() => {
+    let waChat = 0;
+    let waCalls = 0;
+    let phoneCalls = 0;
+    let callsAttended = 0;
+    let callsConvertWa = 0;
+    let inquiries = 0;
+    let buyersFollowups = 0;
+    const countriesSet = new Set<string>();
+
+    for (const r of rows) {
+      const cType = (r.contact_type || "").toLowerCase();
+      const fType = (r.follow_up_type || "").toLowerCase();
+      const rem = (r.remarks || "").toLowerCase();
+      const ctry = (r.country || "").trim();
+
+      if (ctry) countriesSet.add(ctry);
+
+      if (cType.includes("whatsapp") || fType.includes("whatsapp") || cType.includes("wa")) {
+        waChat++;
+      }
+      if (cType.includes("wa call") || cType.includes("whatsapp call")) {
+        waCalls++;
+      }
+      if (cType.includes("call") || cType.includes("phone")) {
+        phoneCalls++;
+      }
+      if (
+        (cType.includes("call") || cType.includes("phone")) &&
+        !rem.includes("hangup") &&
+        !rem.includes("no answer")
+      ) {
+        callsAttended++;
+      }
+      if (fType.includes("whatsapp") || rem.includes("whatsapp") || rem.includes("wa")) {
+        callsConvertWa++;
+      }
+      if (
+        rem.includes("price") ||
+        rem.includes("catalogue") ||
+        rem.includes("quote") ||
+        rem.includes("inquiry") ||
+        rem.includes("interested")
+      ) {
+        inquiries++;
+      }
+      if (fType && fType !== "no") {
+        buyersFollowups++;
+      }
+    }
+
+    const countriesList = Array.from(countriesSet).join(", ") || "None";
+    const waStatus = waChat > 0 || waCalls > 0 ? "Done" : "Pending";
+    const bulkEmail = rows.some((r) => (r.follow_up_type || "").toLowerCase().includes("email"))
+      ? "Done"
+      : "Pending";
+
+    return {
+      waChat,
+      waCalls,
+      phoneCalls: phoneCalls || rows.length,
+      callsAttended,
+      callsConvertWa,
+      inquiries,
+      buyersFollowups,
+      countriesList,
+      waStatus,
+      bulkEmail,
+    };
+  }, [rows]);
+
   const inputClass =
     "w-full min-w-0 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-100";
 
@@ -137,11 +208,10 @@ export function ManualKpiSection({
     <section className="space-y-4 rounded-xl border border-violet-800/40 bg-violet-950/10 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h3 className="text-base font-medium text-slate-100">Manual KPI</h3>
+          <h3 className="text-base font-medium text-slate-100">Manual KPI (Usman & Asim Log)</h3>
           <p className="mt-1 text-sm text-slate-400">
-            Off-system activity (phone, WhatsApp, email outside Sales Agent) — same columns as the
-            Daily KPI Report spreadsheet. Starts empty; each user logs their own rows.
-            {isAdmin ? " You see everyone’s entries." : ""}
+            Off-system activity log matching the Daily KPI Report spreadsheet. Starts empty; each user logs their own rows.
+            {isAdmin ? " You see entries for Usman, Asim, and all team reps." : ""}
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -167,10 +237,10 @@ export function ManualKpiSection({
                 onChange={(e) => setUserFilter(e.target.value)}
                 className="mt-1 block min-w-[10rem] rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-sm text-slate-100"
               >
-                <option value="">All users</option>
+                <option value="">All users (Usman & Asim)</option>
                 {assignees.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.full_name}
+                    {u.full_name || u.username}
                   </option>
                 ))}
               </select>
@@ -191,6 +261,62 @@ export function ManualKpiSection({
           >
             {adding ? "Adding…" : "Add row"}
           </button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-emerald-700/50 bg-emerald-950/30 p-3">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <span className="text-xs font-bold uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+            Daily KPI Summary Bar (Excel Spreadsheet Metrics)
+          </span>
+          <span className="text-xs text-emerald-400/80 font-mono">{rangeLabel}</span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-11 gap-2 text-center text-xs">
+          <div className="rounded border border-emerald-800/60 bg-emerald-900/40 p-2">
+            <p className="text-[10px] text-emerald-300 uppercase font-semibold">Date</p>
+            <p className="font-mono text-emerald-100 mt-1 truncate">{anchorDate}</p>
+          </div>
+          <div className="rounded border border-emerald-800/60 bg-emerald-900/40 p-2">
+            <p className="text-[10px] text-emerald-300 uppercase font-semibold">WA Chat</p>
+            <p className="text-lg font-bold text-emerald-100 mt-0.5 tabular-nums">{summaryMetrics.waChat}</p>
+          </div>
+          <div className="rounded border border-emerald-800/60 bg-emerald-900/40 p-2">
+            <p className="text-[10px] text-emerald-300 uppercase font-semibold">WA Calls</p>
+            <p className="text-lg font-bold text-emerald-100 mt-0.5 tabular-nums">{summaryMetrics.waCalls}</p>
+          </div>
+          <div className="rounded border border-emerald-800/60 bg-emerald-900/40 p-2">
+            <p className="text-[10px] text-emerald-300 uppercase font-semibold">Phone Calls</p>
+            <p className="text-lg font-bold text-emerald-100 mt-0.5 tabular-nums">{summaryMetrics.phoneCalls}</p>
+          </div>
+          <div className="rounded border border-emerald-800/60 bg-emerald-900/40 p-2">
+            <p className="text-[10px] text-emerald-300 uppercase font-semibold">Calls Attended</p>
+            <p className="text-lg font-bold text-emerald-100 mt-0.5 tabular-nums">{summaryMetrics.callsAttended}</p>
+          </div>
+          <div className="rounded border border-emerald-800/60 bg-emerald-900/40 p-2">
+            <p className="text-[10px] text-emerald-300 uppercase font-semibold">Calls Convert WA</p>
+            <p className="text-lg font-bold text-emerald-100 mt-0.5 tabular-nums">{summaryMetrics.callsConvertWa}</p>
+          </div>
+          <div className="rounded border border-emerald-800/60 bg-emerald-900/40 p-2">
+            <p className="text-[10px] text-emerald-300 uppercase font-semibold">Inquiries</p>
+            <p className="text-lg font-bold text-emerald-100 mt-0.5 tabular-nums">{summaryMetrics.inquiries}</p>
+          </div>
+          <div className="rounded border border-emerald-800/60 bg-emerald-900/40 p-2">
+            <p className="text-[10px] text-emerald-300 uppercase font-semibold">Buyers Follow Ups</p>
+            <p className="text-lg font-bold text-emerald-100 mt-0.5 tabular-nums">{summaryMetrics.buyersFollowups}</p>
+          </div>
+          <div className="rounded border border-emerald-800/60 bg-emerald-900/40 p-2 lg:col-span-2">
+            <p className="text-[10px] text-emerald-300 uppercase font-semibold">Mails & Countries</p>
+            <p className="text-xs font-medium text-emerald-200 mt-1 truncate" title={summaryMetrics.countriesList}>
+              {summaryMetrics.countriesList}
+            </p>
+          </div>
+          <div className="rounded border border-emerald-800/60 bg-emerald-900/40 p-2">
+            <p className="text-[10px] text-emerald-300 uppercase font-semibold">WA / Bulk Email</p>
+            <p className="text-xs font-semibold text-emerald-300 mt-1">
+              {summaryMetrics.waStatus} / {summaryMetrics.bulkEmail}
+            </p>
+          </div>
         </div>
       </div>
 
