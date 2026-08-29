@@ -616,31 +616,26 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
           ) : (
             filteredTemplates.map((template) => (
               <div key={template.id} className="space-y-2">
-                <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-medium text-slate-100">{template.name}</p>
+                <div className="rounded-lg border border-slate-800 bg-slate-950 p-3.5 flex items-center justify-between gap-3 max-w-full">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      <p className="font-semibold text-slate-100 text-sm break-words whitespace-normal min-w-0">{template.name}</p>
                       <StatusBadge status={template.status} />
                       {template.category && (
-                        <span className="px-2 py-0.5 rounded text-xs border border-slate-700 bg-slate-800 text-slate-400">
+                        <span className="px-2 py-0.5 rounded text-xs border border-slate-700 bg-slate-800 text-slate-300">
                           {template.category}
                         </span>
                       )}
-                      <span className="text-xs text-slate-500">{template.language}</span>
+                      <span className="text-xs text-slate-400 font-mono">{template.language}</span>
+                      {template.variable_count > 0 && (
+                        <span className="text-xs text-slate-500">
+                          · {template.variable_count} variable{template.variable_count === 1 ? "" : "s"}
+                        </span>
+                      )}
                     </div>
-                    {template.body_text && (
-                      <p className="text-xs text-slate-500 mt-1.5 whitespace-pre-wrap line-clamp-3">
-                        {template.body_text}
-                      </p>
-                    )}
                     {template.rejection_reason && (
-                      <p className="text-xs text-red-300/90 mt-2">
+                      <p className="text-xs text-red-300/90 mt-1.5 break-words">
                         Rejection reason: {template.rejection_reason}
-                      </p>
-                    )}
-                    {template.variable_count > 0 && (
-                      <p className="text-xs text-slate-600 mt-1">
-                        {template.variable_count} variable{template.variable_count === 1 ? "" : "s"}
                       </p>
                     )}
                   </div>

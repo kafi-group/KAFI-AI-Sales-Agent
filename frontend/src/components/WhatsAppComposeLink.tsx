@@ -11,14 +11,12 @@ import {
   IconExternal,
   IconEye,
   IconSend,
-  IconSparkles,
   IconTemplate,
   IconWhatsApp,
   IconX,
 } from "./icons/AppIcons";
 import { ProseTextarea } from "./ProseTextField";
 import { WhatsAppTemplatePreviewModal } from "./WhatsAppTemplatePreviewModal";
-import { renderWhatsAppTemplatePreview } from "../utils/whatsappTemplateVariables";
 
 type ComposeTab = "personal" | "template";
 
@@ -308,7 +306,7 @@ export function LeadWhatsAppComposeModal({
           </div>
         </div>
 
-        <div className="p-5 overflow-y-auto flex-1 space-y-4">
+        <div className="p-5 overflow-y-auto overflow-x-hidden flex-1 space-y-4 max-w-full">
           {tab === "personal" ? (
             <>
               {resolvingContact ? (
@@ -350,8 +348,8 @@ export function LeadWhatsAppComposeModal({
           ) : (
             <>
               <p className="text-xs text-slate-500">
-                Select an approved Meta template to send to this lead. Sync templates in{" "}
-                <strong className="text-slate-400">WhatsApp templates</strong> in the sidebar.
+                Select an approved Meta template to send to this lead. Click{" "}
+                <strong className="text-cyan-300">View</strong> on any template to read the full message content.
               </p>
 
               {loadingTemplates ? (
@@ -367,36 +365,37 @@ export function LeadWhatsAppComposeModal({
                     type="search"
                     value={templateSearch}
                     onChange={(e) => setTemplateSearch(e.target.value)}
-                    placeholder="Search templates by name, category, body…"
+                    placeholder="Search templates by name…"
                     className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
                   />
-                  <ul className="space-y-2">
+                  <ul className="space-y-2 max-w-full">
                     {filteredTemplates.map((template) => {
                       const selected = String(template.id) === templateId;
                       return (
-                        <li key={template.id} className="flex items-center gap-2">
+                        <li key={template.id} className="flex items-center gap-2 max-w-full">
                           <button
                             type="button"
                             onClick={() => setTemplateId(String(template.id))}
-                            className={`flex-1 rounded-lg border p-3 text-left transition ${
+                            className={`flex-1 min-w-0 rounded-lg border px-3.5 py-2.5 text-left transition ${
                               selected
-                                ? "border-emerald-500/50 bg-emerald-500/10"
+                                ? "border-emerald-500/60 bg-emerald-500/10 ring-1 ring-emerald-500/30"
                                 : "border-slate-800 bg-slate-950 hover:border-slate-700"
                             }`}
                           >
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="font-medium text-slate-100">{template.name}</p>
-                              <span className="text-xs text-slate-500">({template.category})</span>
+                            <div className="flex items-center justify-between gap-2 flex-wrap min-w-0">
+                              <span className="font-semibold text-slate-100 text-sm break-words whitespace-normal min-w-0 flex-1">
+                                {template.name}
+                              </span>
+                              <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-medium shrink-0">
+                                {template.category || "TEMPLATE"}
+                              </span>
                             </div>
-                            {template.body_text && (
-                              <p className="text-sm text-slate-400 truncate mt-0.5">{template.body_text}</p>
-                            )}
                           </button>
                           <button
                             type="button"
                             onClick={() => setViewingTemplate(template)}
-                            className="px-3 py-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 text-xs font-semibold shrink-0 flex items-center gap-1 self-stretch"
-                            title="View full template"
+                            className="px-3.5 py-2.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 text-xs font-semibold shrink-0 flex items-center gap-1 transition self-stretch"
+                            title="Open full template content in a new window"
                           >
                             <IconEye size="xs" />
                             View
@@ -409,30 +408,6 @@ export function LeadWhatsAppComposeModal({
                     <p className="text-sm text-slate-500">No templates match your search.</p>
                   )}
                 </>
-              )}
-
-              {selectedTemplate && (
-                <div className="rounded-xl border border-slate-700/80 bg-slate-950/90 p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <IconSparkles size="xs" className="text-emerald-400" />
-                      Message Preview (What will be sent)
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setViewingTemplate(selectedTemplate)}
-                      className="text-xs text-cyan-300 hover:text-cyan-200 flex items-center gap-1 font-medium"
-                    >
-                      <IconEye size="xs" />
-                      Full View
-                    </button>
-                  </div>
-                  <div className="rounded-xl bg-[#005c4b] border border-[#005c4b]/80 p-3.5 text-slate-100 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap font-sans shadow">
-                    {renderWhatsAppTemplatePreview(selectedTemplate.body_text, variables) || (
-                      <span className="italic text-emerald-200/60">No template content</span>
-                    )}
-                  </div>
-                </div>
               )}
 
               {selectedTemplate && variables.length > 0 && (
