@@ -169,6 +169,37 @@ export interface SafeMergeResult {
   message: string;
 }
 
+export interface MissingRowDetail {
+  id: number;
+  legacy_serial_no: number;
+  company_name: string;
+  assigned_to: string;
+  company_grading: string;
+  country: string;
+  city: string;
+  missing_column_key: string;
+  missing_column_label: string;
+  website_url: string;
+  contact_person: string;
+  primary_phone: string;
+  primary_email: string;
+}
+
+export interface MissingDataReport {
+  section: string;
+  section_label: string;
+  column_key: string;
+  column_label: string;
+  user_id: number | null;
+  user_name: string;
+  total_contacts: number;
+  missing_count: number;
+  populated_count: number;
+  missing_percentage: number;
+  available_columns: { key: string; label: string }[];
+  missing_rows: MissingRowDetail[];
+}
+
 /**
  * Timeouts must stay above Railway pool waits + Vercel→Railway hop.
  * A 12s abort used to fire while Postgres pool_timeout (15s) was still waiting,
@@ -2920,6 +2951,20 @@ export const client = {
       throw new Error((err as { detail?: string }).detail || "Merge failed");
     }
     return res.json() as Promise<SafeMergeResult>;
+  },
+
+  getMissingDataReport: async (section = "master", columnKey = "contact_name", userId?: number) => {
+    const params = new URLSearchParams({ section, column_key: columnKey });
+    if (userId) params.set("user_id", String(userId));
+    const res = await fetch(`${API_BASE}/leads/missing-data-report?${params.toString()}`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err as { detail?: string }).detail || "Could not fetch missing data report");
+    }
+    return res.json() as Promise<MissingDataReport>;
   },
 
   updateDraftAttachments: (interactionId: number, attachments: EmailAttachment[]) =>

@@ -1546,3 +1546,25 @@ async def safe_merge_enrichment_file_endpoint(
         )
     except Exception as exc:
         raise HTTPException(400, f"Could not execute safe merge: {exc}") from exc
+
+
+@router.get("/missing-data-report")
+def get_missing_data_report_endpoint(
+    section: str = Query(default="master"),
+    column_key: str = Query(default="contact_name"),
+    user_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    from modules import enrichment_comparison as comparison_module
+    try:
+        return comparison_module.generate_missing_data_report(
+            db,
+            section=section,
+            column_key=column_key,
+            user_id=user_id,
+            viewer=user,
+        )
+    except Exception as exc:
+        raise HTTPException(400, f"Could not generate missing data report: {exc}") from exc
+

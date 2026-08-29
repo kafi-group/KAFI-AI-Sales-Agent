@@ -5,6 +5,7 @@ import {
   type EnrichmentComparisonReport,
   type SafeMergeResult,
   type SynthesisJobStatus,
+  type MissingDataReport,
 } from "../api/client";
 
 const ACCEPT = ".csv,.xlsx,.xls,.xlsm,.tsv,.zip,.rar";
@@ -14,6 +15,32 @@ const MAX_POLL_FAILURES = 8;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function downloadMissingRowsCsv(report: MissingDataReport) {
+  if (!report || !report.missing_rows || report.missing_rows.length === 0) return;
+  const headers = ["Row Ref ID", "Company Name", "Assigned To", "Grading", "Country", "City", "Missing Field", "Website", "Contact Person", "Phone", "Email"];
+  const rows = report.missing_rows.map((r) => [
+    r.legacy_serial_no || r.id,
+    `"${(r.company_name || "").replace(/"/g, '""')}"`,
+    `"${(r.assigned_to || "").replace(/"/g, '""')}"`,
+    `"${(r.company_grading || "").replace(/"/g, '""')}"`,
+    `"${(r.country || "").replace(/"/g, '""')}"`,
+    `"${(r.city || "").replace(/"/g, '""')}"`,
+    `"${(r.missing_column_label || "").replace(/"/g, '""')}"`,
+    `"${(r.website_url || "").replace(/"/g, '""')}"`,
+    `"${(r.contact_person || "").replace(/"/g, '""')}"`,
+    `"${(r.primary_phone || "").replace(/"/g, '""')}"`,
+    `"${(r.primary_email || "").replace(/"/g, '""')}"`,
+  ]);
+  const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+  const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Missing_${report.column_key}_${report.section}_${(report.user_name || "all").replace(/\s+/g, "_")}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function fileKey(file: File): string {
@@ -96,7 +123,26 @@ interface DataSynthesisPageProps {
 }
 
 export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
-  const [mode, setMode] = useState<"clean" | "enrichment">("enrichment");
+  const [mode, setMode] = useState<"clean" | "enrichment" | "missing_report">("enrichment");
+
+  // State for Missing Data Report
+  const [missingSection, setMissingSection] = useState("master");
+  const [missingColumnKey, setMissingColumnKey] = useState("contact_name");
+  const [missingUserId, setMissingUserId] = useState("");
+  const [missingReportData, setMissingReportData] = useState<MissingDataReport | null>(null);
+  const [loadingMissingReport, setLoadingMissingReport] = useState(false);
+
+  const fetchMissingReport = async (sec = missingSection, col = missingColumnKey, uId = missingUserId) => {
+    setLoadingMissingReport(true);
+    try {
+      const res = await client.getMissingDataReport(sec, col, uId ? Number(uId) : undefined);
+      setMissingReportData(res);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Could not fetch missing data report");
+    } finally {
+      setLoadingMissingReport(false);
+    }
+  };
 
   // State for Smart Data Clean & Merge
   const [sourceFiles, setSourceFiles] = useState<File[]>([]);
@@ -255,7 +301,7 @@ export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
         </div>
 
         {/* Mode Selector */}
-        <div className="flex items-center rounded-lg bg-slate-950 p-1 border border-slate-800">
+        <div className="flex items-center rounded-lg bg-slate-950 p-1 border border-slate-800 gap-1">
           <button
             type="button"
             onClick={() => setMode("enrichment")}
@@ -279,10 +325,258 @@ export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
           >
             <span>🧩 Clean Raw Files</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setMode("missing_report");
+              void fetchMissingReport();
+            }}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
+              mode === "missing_report"
+                ? "bg-amber-600 text-white shadow-md font-semibold"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <span>📊 Missing Data Report</span>
+          </button>
         </div>
       </div>
 
-      {mode === "clean" ? (
+      {mode === "missing_report" ? (
+        <div className="space-y-6">
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 space-y-5">
+            <div className="border-b border-slate-800 pb-3">
+              <h3 className="text-base font-semibold text-slate-100 flex items-center gap-2">
+                <span>📊</span>
+                Column-Wise Missing Data Inspector
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Select a search source section, user rep scope, and single column to calculate exact missing row counts and inspect row references.
+              </p>
+            </div>
+
+            {/* Step 1 & Scope Selectors */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Step 1: Search Source */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase tracking-wider flex items-center gap-1">
+                  <span className="w-4 h-4 rounded-full bg-amber-500/20 text-amber-400 text-[10px] flex items-center justify-center font-bold">1</span>
+                  Select Search Source Section:
+                </label>
+                <select
+                  value={missingSection}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setMissingSection(val);
+                    void fetchMissingReport(val, missingColumnKey, missingUserId);
+                  }}
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                >
+                  <option value="master">Master Table (FMCG)</option>
+                  <option value="old_clients">Old Clients</option>
+                  <option value="new_search_lead">New Search Lead</option>
+                  <option value="khalid_focused">Khalid Focused Sales</option>
+                  <option value="all">All Combined Sections</option>
+                </select>
+              </div>
+
+              {/* Rep Scope Selector */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase tracking-wider flex items-center gap-1">
+                  <span className="w-4 h-4 rounded-full bg-cyan-500/20 text-cyan-400 text-[10px] flex items-center justify-center font-bold">👤</span>
+                  Assigned User / Rep Scope:
+                </label>
+                <select
+                  value={missingUserId}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setMissingUserId(val);
+                    void fetchMissingReport(missingSection, missingColumnKey, val);
+                  }}
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                >
+                  <option value="">All Users (Entire Table Scope)</option>
+                  {assignees.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.full_name || u.username} ({u.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Step 2: Single Column Selector */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-2 uppercase tracking-wider flex items-center gap-1">
+                <span className="w-4 h-4 rounded-full bg-amber-500/20 text-amber-400 text-[10px] flex items-center justify-center font-bold">2</span>
+                Select Column to Check Missing Data (Only 1 Column Selected at a Time):
+              </label>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                {(missingReportData?.available_columns || [
+                  { key: "contact_name", label: "Contact Person / Name" },
+                  { key: "designation", label: "Designation / Title" },
+                  { key: "phone", label: "Primary Phone Number" },
+                  { key: "secondary_phone", label: "Secondary Phone / Mobile" },
+                  { key: "email", label: "Primary Email Address" },
+                  { key: "secondary_email", label: "Secondary Email Address" },
+                  { key: "website_url", label: "Website URL" },
+                  { key: "country", label: "Country" },
+                  { key: "city", label: "City" },
+                  { key: "address", label: "Address" },
+                  { key: "company_grading", label: "Company Grading" },
+                  { key: "product_interest", label: "Product / Remarks" },
+                ]).map((col) => {
+                  const isSelected = missingColumnKey === col.key;
+                  return (
+                    <button
+                      key={col.key}
+                      type="button"
+                      onClick={() => {
+                        setMissingColumnKey(col.key);
+                        void fetchMissingReport(missingSection, col.key, missingUserId);
+                      }}
+                      className={`px-3 py-2 text-xs font-medium rounded-lg border text-left transition-all flex items-center justify-between gap-1.5 ${
+                        isSelected
+                          ? "bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm font-semibold ring-1 ring-amber-500"
+                          : "bg-slate-950/70 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                      }`}
+                    >
+                      <span className="truncate">{col.label}</span>
+                      {isSelected && <span className="text-amber-400 font-bold text-xs">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Report Metrics Dashboard */}
+          {loadingMissingReport ? (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-8 text-center text-slate-400">
+              <div className="inline-block animate-spin text-2xl mb-2">⏳</div>
+              <p className="text-sm font-medium">Analyzing database contacts for missing {missingColumnKey}...</p>
+            </div>
+          ) : missingReportData ? (
+            <div className="space-y-6">
+              {/* KPI Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+                  <p className="text-xs font-medium text-slate-400">Total Contacts Analyzed</p>
+                  <p className="text-2xl font-bold text-slate-100 mt-1 tabular-nums">
+                    {missingReportData.total_contacts.toLocaleString()}
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-1">{missingReportData.section_label}</p>
+                </div>
+
+                <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 p-4">
+                  <p className="text-xs font-medium text-amber-400">Missing {missingReportData.column_label}</p>
+                  <p className="text-2xl font-bold text-amber-300 mt-1 tabular-nums">
+                    {missingReportData.missing_count.toLocaleString()}
+                  </p>
+                  <p className="text-[11px] text-amber-400/80 mt-1 font-semibold">
+                    {missingReportData.missing_percentage}% Missing Rate
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-4">
+                  <p className="text-xs font-medium text-emerald-400">Populated / Filled</p>
+                  <p className="text-2xl font-bold text-emerald-300 mt-1 tabular-nums">
+                    {missingReportData.populated_count.toLocaleString()}
+                  </p>
+                  <p className="text-[11px] text-emerald-400/80 mt-1">
+                    {(100 - missingReportData.missing_percentage).toFixed(2)}% Complete
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+                  <p className="text-xs font-medium text-slate-400">Target Rep Scope</p>
+                  <p className="text-sm font-semibold text-cyan-300 mt-1 truncate">
+                    {missingReportData.user_name}
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-1 truncate">{missingReportData.column_label}</p>
+                </div>
+              </div>
+
+              {/* Missing Rows Table Header & Export */}
+              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                  <div>
+                    <h4 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                      <span>📋</span>
+                      Details of Rows Missing <span className="text-amber-400">{missingReportData.column_label}</span>
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Showing exact row references ({missingReportData.missing_count} rows) in {missingReportData.section_label} ({missingReportData.user_name}).
+                    </p>
+                  </div>
+
+                  {missingReportData.missing_count > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => downloadMissingRowsCsv(missingReportData)}
+                      className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-md transition-all flex items-center gap-1.5"
+                    >
+                      <span>📥</span>
+                      <span>Export {missingReportData.missing_count} Missing Rows (CSV/Excel)</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Missing Rows Grid */}
+                {missingReportData.missing_rows.length === 0 ? (
+                  <div className="py-8 text-center space-y-2">
+                    <span className="text-3xl">🎉</span>
+                    <p className="text-sm font-semibold text-emerald-400">
+                      Zero missing rows! 100% of contacts in this section have populated {missingReportData.column_label}.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto max-h-96 overflow-y-auto rounded-lg border border-slate-800">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-950 text-slate-300 sticky top-0 border-b border-slate-800 font-semibold">
+                        <tr>
+                          <th className="px-3 py-2.5 w-16">Row ID</th>
+                          <th className="px-3 py-2.5">Company Name</th>
+                          <th className="px-3 py-2.5">Assigned To</th>
+                          <th className="px-3 py-2.5">Grading</th>
+                          <th className="px-3 py-2.5">Country / City</th>
+                          <th className="px-3 py-2.5">Missing Column</th>
+                          <th className="px-3 py-2.5">Website</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60 bg-slate-900/40 text-slate-300">
+                        {missingReportData.missing_rows.map((r) => (
+                          <tr key={r.id} className="hover:bg-slate-800/40 transition-colors">
+                            <td className="px-3 py-2 font-mono text-slate-400">{r.legacy_serial_no || r.id}</td>
+                            <td className="px-3 py-2 font-medium text-slate-100">{r.company_name}</td>
+                            <td className="px-3 py-2 text-cyan-400">{r.assigned_to}</td>
+                            <td className="px-3 py-2">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[11px]">
+                                {r.company_grading}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-slate-400">
+                              {r.country} {r.city !== "-" ? `(${r.city})` : ""}
+                            </td>
+                            <td className="px-3 py-2">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                <span>⚠️</span> MISSING {r.missing_column_label}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-slate-400 truncate max-w-[150px]">{r.website_url}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : mode === "clean" ? (
         <div className="space-y-6 max-w-xl">
           <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-4 space-y-3">
             <p className="text-sm font-medium text-slate-200">

@@ -9,9 +9,9 @@ from __future__ import annotations
 import io
 from typing import Any
 import pandas as pd
-from sqlalchemy.orm import Session
-from db.models import Buyer, AppUser
-from modules.buyers import _normalize_name, _dedupe_domain
+from sqlalchemy.orm import Session, joinedload
+from db.models import Buyer, Contact, AppUser
+from modules.buyers import normalize_buyer_key as _normalize_name, buyer_website_domain as _dedupe_domain
 
 COMPARE_COLUMNS = [
     ("company_name", "Company Name"),
@@ -80,24 +80,30 @@ def _parse_uploaded_file(file_content: bytes, filename: str) -> list[dict[str, A
             or norm.get("email_address")
             or norm.get("email_1")
             or norm.get("primary_email")
+            or norm.get("primary_email_no.")
             or ""
         )
         email2 = (
             norm.get("secondary_email")
             or norm.get("email_2")
             or norm.get("alternate_email")
+            or norm.get("secondary_email_no.")
             or ""
         )
         phone1 = (
             norm.get("phone")
             or norm.get("phone_number")
             or norm.get("mobile")
+            or norm.get("primary_mobile_no.")
+            or norm.get("primary_phone_no.")
             or norm.get("contact_1")
             or ""
         )
         phone2 = (
             norm.get("secondary_phone")
             or norm.get("secondary_mobile")
+            or norm.get("secondary_mobile_no.")
+            or norm.get("secondary_phone_no.")
             or norm.get("contact_2")
             or norm.get("phone_2")
             or ""
@@ -112,9 +118,9 @@ def _parse_uploaded_file(file_content: bytes, filename: str) -> list[dict[str, A
         country = norm.get("country") or norm.get("location") or ""
         city = norm.get("city") or ""
         address = norm.get("address") or norm.get("street") or ""
-        linkedin = norm.get("linkedin_url") or norm.get("linkedin") or ""
-        facebook = norm.get("facebook_url") or norm.get("facebook") or ""
-        instagram = norm.get("instagram_url") or norm.get("instagram") or ""
+        linkedin = norm.get("linkedin_url") or norm.get("linkedin") or norm.get("linkedin_company_url") or ""
+        facebook = norm.get("facebook_url") or norm.get("facebook") or norm.get("facebook_company_url") or ""
+        instagram = norm.get("instagram_url") or norm.get("instagram") or norm.get("instagram_company_url") or ""
         remarks = norm.get("remarks") or norm.get("notes") or norm.get("comment") or ""
 
         row_dict = {
@@ -139,6 +145,51 @@ def _parse_uploaded_file(file_content: bytes, filename: str) -> list[dict[str, A
     return normalized_rows
 
 
+def _get_db_field_val(buyer: Buyer, field_key: str) -> str:
+    """Safely extract field value from Buyer or primary Contact."""
+    if field_key == "company_name":
+        return buyer.company_name or ""
+    elif field_key == "website_url":
+        return buyer.website_url or ""
+    elif field_key == "country":
+        return buyer.country or ""
+    elif field_key == "city":
+        return buyer.city or ""
+    elif field_key == "address":
+        return buyer.address or ""
+    elif field_key == "remarks":
+        return buyer.remarks or ""
+    elif field_key == "facebook_url":
+        return buyer.facebook_company_url or ""
+    elif field_key == "instagram_url":
+        return buyer.instagram_company_url or ""
+    elif field_key == "linkedin_url":
+        val = buyer.linkedin_company_url or ""
+        if not val and buyer.contacts:
+            val = buyer.contacts[0].linkedin_profile_url or ""
+        return val
+
+    # Contact-level fields
+    primary_contact = buyer.contacts[0] if buyer.contacts else None
+    if not primary_contact:
+        return ""
+
+    if field_key == "contact_name":
+        return primary_contact.full_name or ""
+    elif field_key == "designation":
+        return primary_contact.designation or ""
+    elif field_key == "email":
+        return primary_contact.email or ""
+    elif field_key == "secondary_email":
+        return primary_contact.secondary_email or ""
+    elif field_key == "phone":
+        return primary_contact.phone or primary_contact.primary_phone or ""
+    elif field_key == "secondary_phone":
+        return primary_contact.secondary_phone or primary_contact.secondary_mobile or ""
+
+    return ""
+
+
 def generate_enrichment_comparison_report(
     db: Session,
     *,
@@ -150,10 +201,10 @@ def generate_enrichment_comparison_report(
     """Read-only analysis comparing uploaded enriched file against Sales Agent contacts."""
     uploaded_rows = _parse_uploaded_file(file_content, filename)
 
-    query = db.query(Buyer)
+    query = db.query(Buyer).options(joinedload(Buyer.contacts))
     if table_source == "old_clients":
         query = query.filter(Buyer.source == "old_clients")
-    else:
+    elif table_source == "master_table":
         query = query.filter(Buyer.source != "old_clients")
 
     if user_id is not None:
@@ -178,16 +229,16 @@ def generate_enrichment_comparison_report(
             dom = _dedupe_domain(buyer.website_url)
             if dom:
                 by_domain[dom] = buyer
-        if buyer.email:
-            by_email[buyer.email.strip().lower()] = buyer
-        if buyer.phone:
-            by_phone[buyer.phone.strip()] = buyer
 
         for c in buyer.contacts or []:
             if c.email:
                 by_email[c.email.strip().lower()] = buyer
+            if c.secondary_email:
+                by_email[c.secondary_email.strip().lower()] = buyer
             if c.phone:
                 by_phone[c.phone.strip()] = buyer
+            if c.primary_phone:
+                by_phone[c.primary_phone.strip()] = buyer
 
     matched_pairs: list[tuple[dict[str, Any], Buyer]] = []
     unmatched_rows: list[dict[str, Any]] = []
@@ -225,10 +276,7 @@ def generate_enrichment_comparison_report(
         protected_existing = 0
 
         for file_row, buyer in matched_pairs:
-            db_val = getattr(buyer, field_key, None)
-            if not db_val and buyer.contacts:
-                db_val = getattr(buyer.contacts[0], field_key, None)
-
+            db_val = _get_db_field_val(buyer, field_key)
             db_has_val = bool(db_val and str(db_val).strip())
             file_val = file_row.get(field_key)
             file_has_val = bool(file_val and str(file_val).strip())
@@ -297,10 +345,10 @@ def execute_safe_fill_merge(
     """Perform a Safe Merge: Populates missing/blank fields only, 100% preserving existing DB values."""
     uploaded_rows = _parse_uploaded_file(file_content, filename)
 
-    query = db.query(Buyer)
+    query = db.query(Buyer).options(joinedload(Buyer.contacts))
     if table_source == "old_clients":
         query = query.filter(Buyer.source == "old_clients")
-    else:
+    elif table_source == "master_table":
         query = query.filter(Buyer.source != "old_clients")
 
     if user_id is not None:
@@ -320,41 +368,40 @@ def execute_safe_fill_merge(
             dom = _dedupe_domain(buyer.website_url)
             if dom:
                 by_domain[dom] = buyer
-        if buyer.email:
-            by_email[buyer.email.strip().lower()] = buyer
-        if buyer.phone:
-            by_phone[buyer.phone.strip()] = buyer
         for c in buyer.contacts or []:
             if c.email:
                 by_email[c.email.strip().lower()] = buyer
+            if c.secondary_email:
+                by_email[c.secondary_email.strip().lower()] = buyer
             if c.phone:
                 by_phone[c.phone.strip()] = buyer
+            if c.primary_phone:
+                by_phone[c.primary_phone.strip()] = buyer
 
     contacts_updated = 0
     total_fields_filled = 0
     protected_fields_count = 0
 
-    buyer_fields = [
-        "country",
-        "industry",
-        "city",
-        "address",
-        "website_url",
-        "remarks",
-        "company_grading",
-        "product_interest",
-    ]
-    contact_fields = [
-        "contact_name",
-        "designation",
-        "email",
-        "secondary_email",
-        "phone",
-        "secondary_phone",
-        "linkedin_url",
-        "facebook_url",
-        "instagram_url",
-    ]
+    buyer_field_map = {
+        "country": "country",
+        "city": "city",
+        "address": "address",
+        "website_url": "website_url",
+        "remarks": "remarks",
+        "facebook_url": "facebook_company_url",
+        "instagram_url": "instagram_company_url",
+        "linkedin_url": "linkedin_company_url",
+    }
+
+    contact_field_map = {
+        "contact_name": "full_name",
+        "designation": "designation",
+        "email": "email",
+        "secondary_email": "secondary_email",
+        "phone": "phone",
+        "secondary_phone": "secondary_phone",
+        "linkedin_url": "linkedin_profile_url",
+    }
 
     for row in uploaded_rows:
         comp_name = row.get("company_name") or ""
@@ -376,14 +423,14 @@ def execute_safe_fill_merge(
             continue
 
         buyer_modified = False
-        primary_contact = buyer.contacts[0] if buyer.contacts else None
 
-        for f in buyer_fields:
-            current_val = getattr(buyer, f, None)
-            new_val = row.get(f)
+        # 1. Update Buyer model fields
+        for file_key, db_attr in buyer_field_map.items():
+            current_val = getattr(buyer, db_attr, None)
+            new_val = row.get(file_key)
             if not current_val or not str(current_val).strip():
                 if new_val and str(new_val).strip():
-                    setattr(buyer, f, str(new_val).strip())
+                    setattr(buyer, db_attr, str(new_val).strip())
                     buyer_modified = True
                     total_fields_filled += 1
             else:
@@ -394,23 +441,31 @@ def execute_safe_fill_merge(
                 ):
                     protected_fields_count += 1
 
-        if primary_contact:
-            for f in contact_fields:
-                current_val = getattr(primary_contact, f, None)
-                new_val = row.get(f)
-                if not current_val or not str(current_val).strip():
-                    if new_val and str(new_val).strip():
-                        setattr(primary_contact, f, str(new_val).strip())
-                        buyer_modified = True
-                        total_fields_filled += 1
-                else:
-                    if (
-                        new_val
-                        and str(new_val).strip()
-                        and str(current_val).strip().lower()
-                        != str(new_val).strip().lower()
-                    ):
-                        protected_fields_count += 1
+        # 2. Update Primary Contact fields
+        if not buyer.contacts:
+            # Create a primary contact if missing
+            primary_contact = Contact(buyer_id=buyer.id, full_name=row.get("contact_name") or buyer.company_name)
+            db.add(primary_contact)
+            buyer.contacts.append(primary_contact)
+            buyer_modified = True
+        else:
+            primary_contact = buyer.contacts[0]
+
+        for file_key, db_attr in contact_field_map.items():
+            current_val = getattr(primary_contact, db_attr, None)
+            new_val = row.get(file_key)
+            if not current_val or not str(current_val).strip():
+                if new_val and str(new_val).strip():
+                    setattr(primary_contact, db_attr, str(new_val).strip())
+                    buyer_modified = True
+                    total_fields_filled += 1
+            else:
+                if (
+                    new_val
+                    and str(new_val).strip()
+                    and str(current_val).strip().lower() != str(new_val).strip().lower()
+                ):
+                    protected_fields_count += 1
 
         if buyer_modified:
             contacts_updated += 1
@@ -424,3 +479,118 @@ def execute_safe_fill_merge(
         "protected_fields_count": protected_fields_count,
         "message": f"Successfully enriched {contacts_updated} contacts with {total_fields_filled} new missing fields filled! {protected_fields_count} existing fields were 100% protected.",
     }
+
+
+AVAILABLE_REPORT_COLUMNS = [
+    ("contact_name", "Contact Person / Name"),
+    ("designation", "Designation / Title"),
+    ("phone", "Primary Phone Number"),
+    ("secondary_phone", "Secondary Phone / Mobile"),
+    ("email", "Primary Email Address"),
+    ("secondary_email", "Secondary Email Address"),
+    ("website_url", "Website URL"),
+    ("country", "Country"),
+    ("city", "City"),
+    ("address", "Address"),
+    ("company_grading", "Company Grading"),
+    ("product_interest", "Product / Remarks"),
+]
+
+
+def generate_missing_data_report(
+    db: Session,
+    *,
+    section: str = "master",
+    column_key: str = "contact_name",
+    user_id: int | None = None,
+    viewer: AppUser,
+) -> dict[str, Any]:
+    """Generates column-wise missing data report for specified section, column, and user scope."""
+    # Scope resolution
+    is_admin = getattr(viewer, "role", "") == "admin" or str(getattr(viewer, "role", "")).endswith("admin")
+    if not is_admin:
+        target_user_id = viewer.id
+        user_name = viewer.full_name or viewer.username
+    else:
+        target_user_id = user_id
+        if target_user_id:
+            u_obj = db.query(AppUser).filter(AppUser.id == target_user_id).first()
+            user_name = u_obj.full_name or u_obj.username if u_obj else f"User #{target_user_id}"
+        else:
+            user_name = "All Assigned Users"
+
+    # Query setup with joinedload
+    query = db.query(Buyer).options(joinedload(Buyer.contacts))
+
+    # Section filtering
+    sec_clean = (section or "master").strip().lower()
+    if sec_clean == "old_clients":
+        query = query.filter(Buyer.source == "old_clients")
+        section_label = "Old Clients"
+    elif sec_clean in ("new_search_lead", "discover"):
+        query = query.filter(Buyer.intake_method == "discover")
+        section_label = "New Search Lead"
+    elif sec_clean in ("khalid_focused", "focused"):
+        query = query.filter(Buyer.interested_clients_list_at.isnot(None))
+        section_label = "Khalid Focused Sales"
+    elif sec_clean == "master":
+        query = query.filter(Buyer.source != "old_clients")
+        section_label = "Master Table (FMCG)"
+    else:
+        section_label = "All Sections Combined"
+
+    # User scoping
+    if target_user_id is not None:
+        query = query.filter(Buyer.assigned_to_user_id == target_user_id)
+
+    db_buyers = query.all()
+    total_contacts = len(db_buyers)
+
+    column_label_dict = dict(AVAILABLE_REPORT_COLUMNS)
+    col_label = column_label_dict.get(column_key, column_key.replace("_", " ").title())
+
+    missing_rows = []
+    populated_count = 0
+
+    for buyer in db_buyers:
+        val = _get_db_field_val(buyer, column_key)
+        has_val = bool(val and str(val).strip() and str(val).strip().lower() not in ("select...", "nan", "none", "null", "-"))
+
+        if has_val:
+            populated_count += 1
+        else:
+            contact = buyer.contacts[0] if buyer.contacts else None
+            missing_rows.append({
+                "id": buyer.id,
+                "legacy_serial_no": buyer.legacy_serial_no or buyer.id,
+                "company_name": buyer.company_name or "Unnamed Company",
+                "assigned_to": buyer.assigned_to or (buyer.assigned_to_user_id and f"User #{buyer.assigned_to_user_id}") or "unassigned",
+                "company_grading": buyer.company_grading or "-",
+                "country": buyer.country or "-",
+                "city": buyer.city or "-",
+                "missing_column_key": column_key,
+                "missing_column_label": col_label,
+                "website_url": buyer.website_url or "-",
+                "contact_person": contact.full_name if contact else "-",
+                "primary_phone": (contact.phone or contact.primary_phone) if contact else "-",
+                "primary_email": contact.email if contact else "-",
+            })
+
+    missing_count = len(missing_rows)
+    missing_pct = round((missing_count / total_contacts * 100), 2) if total_contacts > 0 else 0.0
+
+    return {
+        "section": sec_clean,
+        "section_label": section_label,
+        "column_key": column_key,
+        "column_label": col_label,
+        "user_id": target_user_id,
+        "user_name": user_name,
+        "total_contacts": total_contacts,
+        "missing_count": missing_count,
+        "populated_count": populated_count,
+        "missing_percentage": missing_pct,
+        "available_columns": [{"key": k, "label": v} for k, v in AVAILABLE_REPORT_COLUMNS],
+        "missing_rows": missing_rows,
+    }
+
