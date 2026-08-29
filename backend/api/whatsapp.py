@@ -404,11 +404,20 @@ def whatsapp_buyer_preview(
 
 @router.get("/conversations", response_model=WhatsAppConversationListResponse)
 def list_whatsapp_conversations(
-    page: int = 1,
-    page_size: int = 20,
+    page: int | str = 1,
+    page_size: int | str = 20,
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
+    try:
+        page_val = int(page) if page is not None else 1
+    except (ValueError, TypeError):
+        page_val = 1
+    try:
+        page_size_val = int(page_size) if page_size is not None else 20
+    except (ValueError, TypeError):
+        page_size_val = 20
+
     def _is_admin(u: AppUser) -> bool:
         role = u.role.value if isinstance(u.role, AppUserRole) else str(u.role)
         return role == AppUserRole.admin.value
@@ -417,24 +426,28 @@ def list_whatsapp_conversations(
     rows, total = comms.list_whatsapp_conversations(
         db,
         assigned_to_user_id=assigned_id,
-        page=page,
-        page_size=page_size,
+        page=page_val,
+        page_size=page_size_val,
     )
-    page = max(1, page)
-    page_size = min(max(1, page_size), 100)
-    total_pages = max(1, (total + page_size - 1) // page_size)
+    page_val = max(1, page_val)
+    page_size_val = min(max(1, page_size_val), 100)
+    total_pages = max(1, (total + page_size_val - 1) // page_size_val)
     return WhatsAppConversationListResponse(
         total=total,
-        page=page,
-        page_size=page_size,
+        page=page_val,
+        page_size=page_size_val,
         total_pages=total_pages,
         rows=[WhatsAppConversationRead(**row) for row in rows],
     )
 
 
 @router.get("/conversations/{contact_id}/messages", response_model=list[InteractionRead])
-def list_whatsapp_conversation_messages(contact_id: int, db: Session = Depends(get_db)):
-    rows = comms.list_whatsapp_messages(db, contact_id=contact_id)
+def list_whatsapp_conversation_messages(contact_id: str, db: Session = Depends(get_db)):
+    try:
+        cid = int(contact_id)
+    except (ValueError, TypeError):
+        return []
+    rows = comms.list_whatsapp_messages(db, contact_id=cid)
     return [_interaction_read(db, row) for row in rows]
 
 
