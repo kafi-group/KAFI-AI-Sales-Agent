@@ -65,43 +65,92 @@ interface InboxPageProps {
 
 const PAGE_SIZE = 50;
 
-const TRIAGE_FILTERS: Array<{ key: string; label: string; chipClass: string }> = [
-  { key: "", label: "All", chipClass: "border-slate-600 text-slate-300" },
-  { key: "urgent", label: "Urgent", chipClass: "border-red-700/60 text-red-200 bg-red-950/40" },
+const TRIAGE_FILTERS: Array<{
+  key: string;
+  label: string;
+  emoji: string;
+  activeClass: string;
+  inactiveClass: string;
+  chipClass: string;
+}> = [
+  {
+    key: "",
+    label: "All",
+    emoji: "🌐",
+    activeClass: "border-cyan-400 text-white bg-cyan-600 ring-2 ring-cyan-400 shadow-md shadow-cyan-900/50 font-bold",
+    inactiveClass: "border-slate-700 text-slate-200 bg-slate-800/80 hover:bg-slate-700 hover:border-slate-500",
+    chipClass: "border-slate-600 text-slate-300",
+  },
+  {
+    key: "urgent",
+    label: "Urgent",
+    emoji: "🚨",
+    activeClass: "border-red-400 text-white bg-red-600 ring-2 ring-red-400 shadow-md shadow-red-950/60 font-bold",
+    inactiveClass: "border-red-800/70 text-red-300 bg-red-950/40 hover:bg-red-900/60 hover:border-red-600",
+    chipClass: "border-red-700/60 text-red-200 bg-red-950/40",
+  },
   {
     key: "action_required",
     label: "Action",
+    emoji: "⚡",
+    activeClass: "border-amber-400 text-amber-950 bg-amber-400 ring-2 ring-amber-300 shadow-md shadow-amber-950/60 font-bold",
+    inactiveClass: "border-amber-800/70 text-amber-300 bg-amber-950/40 hover:bg-amber-900/60 hover:border-amber-600",
     chipClass: "border-amber-700/60 text-amber-200 bg-amber-950/40",
   },
   {
     key: "opportunity",
     label: "Opportunity",
+    emoji: "💰",
+    activeClass: "border-emerald-400 text-emerald-950 bg-emerald-400 ring-2 ring-emerald-300 shadow-md shadow-emerald-950/60 font-bold",
+    inactiveClass: "border-emerald-800/70 text-emerald-300 bg-emerald-950/40 hover:bg-emerald-900/60 hover:border-emerald-600",
     chipClass: "border-emerald-700/60 text-emerald-200 bg-emerald-950/40",
   },
-  { key: "info", label: "Info", chipClass: "border-slate-600 text-slate-400 bg-slate-900/60" },
+  {
+    key: "info",
+    label: "Info",
+    emoji: "ℹ️",
+    activeClass: "border-teal-400 text-teal-950 bg-teal-400 ring-2 ring-teal-300 shadow-md shadow-teal-950/60 font-bold",
+    inactiveClass: "border-teal-800/70 text-teal-300 bg-teal-950/40 hover:bg-teal-900/60 hover:border-teal-600",
+    chipClass: "border-slate-600 text-slate-400 bg-slate-900/60",
+  },
   {
     key: "tracking",
     label: "Tracking",
+    emoji: "📦",
+    activeClass: "border-sky-400 text-white bg-sky-600 ring-2 ring-sky-300 shadow-md shadow-sky-950/60 font-bold",
+    inactiveClass: "border-sky-800/70 text-sky-300 bg-sky-950/40 hover:bg-sky-900/60 hover:border-sky-600",
     chipClass: "border-sky-700/60 text-sky-200 bg-sky-950/40",
   },
   {
     key: "newsletter",
     label: "Newsletter",
+    emoji: "📰",
+    activeClass: "border-purple-400 text-white bg-purple-600 ring-2 ring-purple-300 shadow-md shadow-purple-950/60 font-bold",
+    inactiveClass: "border-purple-800/70 text-purple-300 bg-purple-950/40 hover:bg-purple-900/60 hover:border-purple-600",
     chipClass: "border-purple-700/60 text-purple-200 bg-purple-950/40",
   },
   {
     key: "invites_exhibitions",
     label: "Invites & Exhibitions",
+    emoji: "🎟️",
+    activeClass: "border-indigo-400 text-white bg-indigo-600 ring-2 ring-indigo-300 shadow-md shadow-indigo-950/60 font-bold",
+    inactiveClass: "border-indigo-800/70 text-indigo-300 bg-indigo-950/40 hover:bg-indigo-900/60 hover:border-indigo-600",
     chipClass: "border-indigo-700/60 text-indigo-200 bg-indigo-950/40",
   },
   {
     key: "advertising",
     label: "Advertising",
+    emoji: "📣",
+    activeClass: "border-pink-400 text-white bg-pink-600 ring-2 ring-pink-300 shadow-md shadow-pink-950/60 font-bold",
+    inactiveClass: "border-pink-800/70 text-pink-300 bg-pink-950/40 hover:bg-pink-900/60 hover:border-pink-600",
     chipClass: "border-pink-700/60 text-pink-200 bg-pink-950/40",
   },
   {
     key: "tax_notice_challan",
     label: "Tax, Notice & Challan",
+    emoji: "⚖️",
+    activeClass: "border-rose-400 text-white bg-rose-600 ring-2 ring-rose-300 shadow-md shadow-rose-950/60 font-bold",
+    inactiveClass: "border-rose-800/70 text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 hover:border-rose-600",
     chipClass: "border-rose-700/60 text-rose-200 bg-rose-950/40",
   },
 ];
@@ -1250,8 +1299,11 @@ export function InboxPage({
             ) : null}
           </div>
           {section === "inbox" && !searchActive ? (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] text-slate-500 mr-1">Triage</span>
+            <div className="flex flex-wrap items-center gap-2 py-1">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mr-1 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse" />
+                Triage:
+              </span>
               {TRIAGE_FILTERS.map((f) => {
                 const active = triageFilter === f.key;
                 return (
@@ -1263,13 +1315,12 @@ export function InboxPage({
                       setThreadPage(1);
                       clearSelection();
                     }}
-                    className={`px-2 py-0.5 rounded-full border text-[11px] transition ${
-                      active
-                        ? `${f.chipClass} ring-1 ring-emerald-500/40`
-                        : "border-slate-800 text-slate-500 hover:border-slate-600 hover:text-slate-300"
+                    className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border text-sm font-semibold transition-all duration-150 transform hover:scale-[1.03] active:scale-[0.98] cursor-pointer ${
+                      active ? f.activeClass : f.inactiveClass
                     }`}
                   >
-                    {f.label}
+                    <span className="text-base">{f.emoji}</span>
+                    <span>{f.label}</span>
                   </button>
                 );
               })}
