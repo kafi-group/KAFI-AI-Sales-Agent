@@ -1515,7 +1515,11 @@ async def compare_enrichment_file_endpoint(
 ):
     from modules import enrichment_comparison as comparison_module
     content = await file.read()
-    parsed_user_id = int(user_id) if user_id and user_id.strip().isdigit() else None
+    parsed_user_id = None
+    if user_id is not None:
+        u_str = str(user_id).strip().lower()
+        if u_str and u_str not in ("none", "null", "undefined", "nan", "") and u_str.isdigit():
+            parsed_user_id = int(u_str)
     try:
         return comparison_module.generate_enrichment_comparison_report(
             db,
@@ -1540,7 +1544,11 @@ async def safe_merge_enrichment_file_endpoint(
 ):
     from modules import enrichment_comparison as comparison_module
     content = await file.read()
-    parsed_user_id = int(user_id) if user_id and user_id.strip().isdigit() else None
+    parsed_user_id = None
+    if user_id is not None:
+        u_str = str(user_id).strip().lower()
+        if u_str and u_str not in ("none", "null", "undefined", "nan", "") and u_str.isdigit():
+            parsed_user_id = int(u_str)
     try:
         return comparison_module.execute_safe_fill_merge(
             db,
@@ -1564,7 +1572,11 @@ def get_missing_data_report_endpoint(
     user: AppUser = Depends(get_current_user),
 ):
     from modules import enrichment_comparison as comparison_module
-    parsed_user_id = int(user_id) if user_id and user_id.strip().isdigit() else None
+    parsed_user_id = None
+    if user_id is not None:
+        u_str = str(user_id).strip().lower()
+        if u_str and u_str not in ("none", "null", "undefined", "nan", "") and u_str.isdigit():
+            parsed_user_id = int(u_str)
     try:
         return comparison_module.generate_missing_data_report(
             db,
