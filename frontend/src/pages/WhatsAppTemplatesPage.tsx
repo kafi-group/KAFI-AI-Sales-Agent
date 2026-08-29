@@ -7,7 +7,8 @@ import {
   type WhatsAppTemplateNotification,
 } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { IconSearch } from "../components/icons/AppIcons";
+import { IconEye, IconSearch } from "../components/icons/AppIcons";
+import { WhatsAppTemplatePreviewModal } from "../components/WhatsAppTemplatePreviewModal";
 import { capitalizeFirstLetter } from "../utils/spelling";
 
 interface WhatsAppTemplatesPageProps {
@@ -86,6 +87,7 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
   const [editingTemplateId, setEditingTemplateId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<WhatsAppTemplateCreateForm | null>(null);
   const [resubmitting, setResubmitting] = useState(false);
+  const [viewingTemplate, setViewingTemplate] = useState<WhatsAppTemplate | null>(null);
 
   const refreshNotifications = useCallback(async () => {
     try {
@@ -642,12 +644,21 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
                       </p>
                     )}
                   </div>
-                  <div className="flex flex-col gap-1 shrink-0">
+                  <div className="flex flex-col gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setViewingTemplate(template)}
+                      className="text-xs px-2.5 py-1.5 rounded-md border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 font-medium flex items-center justify-center gap-1 transition"
+                      title="View template details"
+                    >
+                      <IconEye size="xs" />
+                      View
+                    </button>
                     {canResubmitStatus(template.status) ? (
                       <button
                         type="button"
                         onClick={() => startEditTemplate(template)}
-                        className="text-xs px-2.5 py-1.5 rounded-md border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20"
+                        className="text-xs px-2.5 py-1.5 rounded-md border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 font-medium"
                       >
                         Edit & resubmit
                       </button>
@@ -655,12 +666,12 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
                       <button
                         type="button"
                         onClick={() => startDuplicateFromTemplate(template)}
-                        className="text-xs px-2.5 py-1.5 rounded-md border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20"
+                        className="text-xs px-2.5 py-1.5 rounded-md border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 font-medium"
                       >
                         Duplicate & edit
                       </button>
                     ) : template.status === "pending" ? (
-                      <span className="text-xs text-slate-500 px-1">Awaiting Meta</span>
+                      <span className="text-xs text-slate-500 px-1 text-center">Awaiting Meta</span>
                     ) : null}
                   </div>
                 </div>
@@ -744,6 +755,18 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
           )}
         </div>
       </div>
+
+      <WhatsAppTemplatePreviewModal
+        template={viewingTemplate}
+        onClose={() => setViewingTemplate(null)}
+        onDuplicateTemplate={(tmpl) => {
+          if (canResubmitStatus(tmpl.status)) {
+            startEditTemplate(tmpl);
+          } else {
+            startDuplicateFromTemplate(tmpl);
+          }
+        }}
+      />
     </section>
   );
 }

@@ -748,3 +748,23 @@ export function IndexIcon({
       return <IconList {...props} />;
   }
 }
+
+export function IconEye({ size, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </Svg>
+  );
+}
+
+export function IconCopy({ size, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </Svg>
+  );
+}
+
+

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { WhatsAppTemplate } from "../api/client";
 import {
   mergeWhatsAppTemplateVariables,
@@ -6,7 +6,8 @@ import {
   suggestWhatsAppTemplateVariables,
   type WhatsAppLeadContext,
 } from "../utils/whatsappTemplateVariables";
-import { IconSearch } from "./icons/AppIcons";
+import { IconEye, IconSearch } from "./icons/AppIcons";
+import { WhatsAppTemplatePreviewModal } from "./WhatsAppTemplatePreviewModal";
 
 export interface WhatsAppTemplatePickerProps {
   templates: WhatsAppTemplate[];
@@ -37,6 +38,7 @@ export function WhatsAppTemplatePicker({
   compact = false,
   emptyMessage,
 }: WhatsAppTemplatePickerProps) {
+  const [viewingTemplate, setViewingTemplate] = useState<WhatsAppTemplate | null>(null);
   const selectedTemplate = templates.find((t) => String(t.id) === templateId);
 
   const filteredTemplates = useMemo(() => {
@@ -111,11 +113,11 @@ export function WhatsAppTemplatePicker({
         {filteredTemplates.map((template) => {
           const selected = String(template.id) === templateId;
           return (
-            <li key={template.id}>
+            <li key={template.id} className="flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => onTemplateIdChange(String(template.id))}
-                className={`w-full rounded-md border p-2.5 text-left transition ${
+                className={`flex-1 rounded-md border p-2.5 text-left transition ${
                   selected
                     ? "border-emerald-500/50 bg-emerald-500/10"
                     : "border-transparent bg-transparent hover:border-slate-700 hover:bg-slate-900"
@@ -131,12 +133,21 @@ export function WhatsAppTemplatePicker({
                 {template.body_text ? (
                   <p
                     className={`text-xs text-slate-400 mt-0.5 whitespace-pre-wrap ${
-                      selected ? "" : "line-clamp-3"
+                      selected ? "" : "line-clamp-2"
                     }`}
                   >
                     {template.body_text}
                   </p>
                 ) : null}
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewingTemplate(template)}
+                className="px-2.5 py-1.5 rounded-md border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 text-xs font-medium shrink-0 flex items-center gap-1"
+                title="View full template"
+              >
+                <IconEye size="xs" />
+                View
               </button>
             </li>
           );
@@ -147,12 +158,29 @@ export function WhatsAppTemplatePicker({
       ) : null}
       {selectedTemplate ? (
         <div className="rounded-lg border border-slate-700 bg-slate-950/80 p-3 space-y-2">
-          <p className="text-xs font-medium text-emerald-300/90">Message preview (what will send)</p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium text-emerald-300/90">Message preview (what will send)</p>
+            <button
+              type="button"
+              onClick={() => setViewingTemplate(selectedTemplate)}
+              className="text-xs text-cyan-300 hover:text-cyan-200 flex items-center gap-1 font-medium"
+            >
+              <IconEye size="xs" />
+              Full View
+            </button>
+          </div>
           <pre className="text-sm text-slate-200 whitespace-pre-wrap font-sans leading-relaxed max-h-56 overflow-y-auto">
             {previewText || selectedTemplate.body_text || selectedTemplate.name}
           </pre>
         </div>
       ) : null}
+
+      <WhatsAppTemplatePreviewModal
+        template={viewingTemplate}
+        onClose={() => setViewingTemplate(null)}
+        leadContext={leadContext}
+        onSelectTemplate={(tmpl) => onTemplateIdChange(String(tmpl.id))}
+      />
       {selectedTemplate && selectedTemplate.variable_count > 0 ? (
         <div className="space-y-1.5 pt-1">
           <p className="text-xs text-slate-400">

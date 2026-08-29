@@ -9,12 +9,16 @@ import {
 import { ActionButton } from "./ui/ActionButton";
 import {
   IconExternal,
+  IconEye,
   IconSend,
+  IconSparkles,
   IconTemplate,
   IconWhatsApp,
   IconX,
 } from "./icons/AppIcons";
 import { ProseTextarea } from "./ProseTextField";
+import { WhatsAppTemplatePreviewModal } from "./WhatsAppTemplatePreviewModal";
+import { renderWhatsAppTemplatePreview } from "../utils/whatsappTemplateVariables";
 
 type ComposeTab = "personal" | "template";
 
@@ -94,6 +98,7 @@ export function LeadWhatsAppComposeModal({
   const [templateSearch, setTemplateSearch] = useState("");
   const [variables, setVariables] = useState<string[]>([]);
   const [requireOptIn, setRequireOptIn] = useState(false);
+  const [viewingTemplate, setViewingTemplate] = useState<WhatsAppTemplate | null>(null);
 
   const refreshTemplates = useCallback(async () => {
     setLoadingTemplates(true);
@@ -367,34 +372,67 @@ export function LeadWhatsAppComposeModal({
                   />
                   <ul className="space-y-2">
                     {filteredTemplates.map((template) => {
-                    const selected = String(template.id) === templateId;
-                    return (
-                      <li key={template.id}>
-                        <button
-                          type="button"
-                          onClick={() => setTemplateId(String(template.id))}
-                          className={`w-full rounded-lg border p-3 text-left transition ${
-                            selected
-                              ? "border-emerald-500/50 bg-emerald-500/10"
-                              : "border-slate-800 bg-slate-950 hover:border-slate-700"
-                          }`}
-                        >
-                          <p className="font-medium text-slate-100">
-                            {template.name}{" "}
-                            <span className="text-xs text-slate-500">({template.category})</span>
-                          </p>
-                          {template.body_text && (
-                            <p className="text-sm text-slate-400 truncate">{template.body_text}</p>
-                          )}
-                        </button>
-                      </li>
-                    );
-                  })}
+                      const selected = String(template.id) === templateId;
+                      return (
+                        <li key={template.id} className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setTemplateId(String(template.id))}
+                            className={`flex-1 rounded-lg border p-3 text-left transition ${
+                              selected
+                                ? "border-emerald-500/50 bg-emerald-500/10"
+                                : "border-slate-800 bg-slate-950 hover:border-slate-700"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="font-medium text-slate-100">{template.name}</p>
+                              <span className="text-xs text-slate-500">({template.category})</span>
+                            </div>
+                            {template.body_text && (
+                              <p className="text-sm text-slate-400 truncate mt-0.5">{template.body_text}</p>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setViewingTemplate(template)}
+                            className="px-3 py-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 text-xs font-semibold shrink-0 flex items-center gap-1 self-stretch"
+                            title="View full template"
+                          >
+                            <IconEye size="xs" />
+                            View
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                   {filteredTemplates.length === 0 && (
                     <p className="text-sm text-slate-500">No templates match your search.</p>
                   )}
                 </>
+              )}
+
+              {selectedTemplate && (
+                <div className="rounded-xl border border-slate-700/80 bg-slate-950/90 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <IconSparkles size="xs" className="text-emerald-400" />
+                      Message Preview (What will be sent)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setViewingTemplate(selectedTemplate)}
+                      className="text-xs text-cyan-300 hover:text-cyan-200 flex items-center gap-1 font-medium"
+                    >
+                      <IconEye size="xs" />
+                      Full View
+                    </button>
+                  </div>
+                  <div className="rounded-xl bg-[#005c4b] border border-[#005c4b]/80 p-3.5 text-slate-100 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap font-sans shadow">
+                    {renderWhatsAppTemplatePreview(selectedTemplate.body_text, variables) || (
+                      <span className="italic text-emerald-200/60">No template content</span>
+                    )}
+                  </div>
+                </div>
               )}
 
               {selectedTemplate && variables.length > 0 && (
@@ -486,6 +524,17 @@ export function LeadWhatsAppComposeModal({
           )}
         </div>
       </div>
+
+      <WhatsAppTemplatePreviewModal
+        template={viewingTemplate}
+        onClose={() => setViewingTemplate(null)}
+        leadContext={{
+          company_name: row.company_name,
+          contact_name: row.contact_name,
+          country: row.country,
+        }}
+        onSelectTemplate={(tmpl) => setTemplateId(String(tmpl.id))}
+      />
     </div>,
     document.body,
   );
