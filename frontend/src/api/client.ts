@@ -263,6 +263,7 @@ function timeoutForPath(path: string): number {
     path.startsWith("/data-synthesis") ||
     path.startsWith("/inbox") ||
     path.startsWith("/email") ||
+    path.startsWith("/whatsapp") ||
     path.startsWith("/calls")
   ) {
     return HEAVY_FETCH_TIMEOUT_MS;

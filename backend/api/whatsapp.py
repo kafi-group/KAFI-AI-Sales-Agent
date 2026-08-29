@@ -114,6 +114,41 @@ def whatsapp_test_send(
         )
     else:
         result = whatsapp_client.send_text(phone=to, message=payload.message)
+    # If recipient phone matches an existing contact, record an Interaction row
+    contact = (
+        db.query(Contact)
+        .filter(
+            (Contact.phone == to) | (Contact.wa_id == to) | (Contact.primary_phone == to)
+        )
+        .first()
+    )
+    if contact:
+        from db.models import Channel, Direction, HandledBy, Interaction, InteractionStatus
+        sent_status = (
+            InteractionStatus.sent
+            if result.get("status") == "sent"
+            else InteractionStatus.failed
+        )
+        ix = Interaction(
+            buyer_id=contact.buyer_id,
+            contact_id=contact.id,
+            channel=Channel.whatsapp,
+            direction=Direction.outbound,
+            status=sent_status,
+            template_name=payload.template_name,
+            content=f"[WhatsApp Template: {payload.template_name}]" if payload.template_name else (payload.message or ""),
+            handled_by=HandledBy.human,
+            provider_message_id=result.get("provider_message_id"),
+            meta_data={
+                "to": to,
+                "template_name": payload.template_name,
+                "template_language": payload.template_language or "en_US",
+                "status": result.get("status"),
+                "actor": user.username,
+            },
+        )
+        db.add(ix)
+        db.commit()
 
     log_action(
         db,
@@ -126,6 +161,7 @@ def whatsapp_test_send(
             "status": result.get("status"),
             "template_name": payload.template_name,
             "provider_message_id": result.get("provider_message_id"),
+            "contact_id": contact.id if contact else None,
         },
     )
     return WhatsAppTestSendResponse(

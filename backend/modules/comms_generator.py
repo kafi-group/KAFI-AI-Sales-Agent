@@ -482,7 +482,10 @@ class CommsGenerator:
                 Interaction.contact_id.label("contact_id"),
                 sa_func.max(Interaction.created_at).label("last_at"),
             )
-            .filter(Interaction.channel == Channel.whatsapp)
+            .filter(
+                Interaction.channel == Channel.whatsapp,
+                Interaction.contact_id.isnot(None),
+            )
         )
         if assigned_to_user_id is not None:
             latest_q = (
@@ -500,25 +503,52 @@ class CommsGenerator:
             .all()
         )
 
+        contact_ids = [r.contact_id for r in rows if r.contact_id is not None]
+        if not contact_ids:
+            return [], total
+
+        # Batch load contacts with buyers
+        contacts = (
+            db.query(Contact)
+            .filter(Contact.id.in_(contact_ids))
+            .all()
+        )
+        contacts_by_id = {c.id: c for c in contacts}
+        buyer_ids = [c.buyer_id for c in contacts if c.buyer_id]
+        buyers_by_id = {}
+        if buyer_ids:
+            buyers = db.query(Buyer).filter(Buyer.id.in_(buyer_ids)).all()
+            buyers_by_id = {b.id: b for b in buyers}
+
+        # Batch load the most recent interaction for each contact
+        recent_interactions = (
+            db.query(Interaction)
+            .filter(
+                Interaction.channel == Channel.whatsapp,
+                Interaction.contact_id.in_(contact_ids),
+            )
+            .order_by(Interaction.created_at.desc())
+            .all()
+        )
+        latest_interaction_by_contact: dict[int, Interaction] = {}
+        for ix in recent_interactions:
+            if ix.contact_id and ix.contact_id not in latest_interaction_by_contact:
+                latest_interaction_by_contact[ix.contact_id] = ix
+
         conversations: list[dict] = []
+        now_utc = datetime.now(timezone.utc)
         for row in rows:
-            contact = db.get(Contact, row.contact_id)
+            if not row.contact_id:
+                continue
+            contact = contacts_by_id.get(row.contact_id)
             if not contact:
                 continue
-            buyer = db.get(Buyer, contact.buyer_id)
-            last_message = (
-                db.query(Interaction)
-                .filter(
-                    Interaction.contact_id == contact.id,
-                    Interaction.channel == Channel.whatsapp,
-                )
-                .order_by(Interaction.created_at.desc())
-                .first()
-            )
+            buyer = buyers_by_id.get(contact.buyer_id)
+            last_message = latest_interaction_by_contact.get(contact.id)
             expires = contact.whatsapp_window_expires_at
             if expires is not None and expires.tzinfo is None:
                 expires = expires.replace(tzinfo=timezone.utc)
-            within_window = bool(expires and expires > datetime.now(timezone.utc))
+            within_window = bool(expires and expires > now_utc)
             conversations.append(
                 {
                     "contact_id": contact.id,
@@ -531,7 +561,11 @@ class CommsGenerator:
                     "window_expires_at": contact.whatsapp_window_expires_at,
                     "last_message": last_message.content if last_message else None,
                     "last_message_at": last_message.created_at if last_message else None,
-                    "last_direction": last_message.direction.value if last_message else None,
+                    "last_direction": (
+                        last_message.direction.value
+                        if (last_message and hasattr(last_message.direction, "value"))
+                        else (str(last_message.direction) if last_message else None)
+                    ),
                 }
             )
         return conversations, total
