@@ -100,11 +100,29 @@ function looksLikeInternalServerError(message: string): boolean {
 }
 
 /** Rewrite server-fault copy for UI — never surface "Internal Server Error". */
-export function sanitizeUserFacingError(message: string): string {
-  const trimmed = (message || "").trim();
-  if (!trimmed) return HARD_RESTART_MESSAGE;
+export function sanitizeUserFacingError(message: unknown): string {
+  let str = "";
+  if (typeof message === "string") {
+    str = message;
+  } else if (message && typeof message === "object") {
+    if ("message" in message && typeof (message as { message?: unknown }).message === "string") {
+      str = (message as { message: string }).message;
+    } else if ("detail" in message) {
+      const detail = (message as { detail?: unknown }).detail;
+      if (typeof detail === "string") str = detail;
+      else if (Array.isArray(detail)) {
+        str = detail.map((d) => (typeof d === "object" && d && "msg" in d ? String((d as { msg: unknown }).msg) : String(d))).join("; ");
+      } else str = JSON.stringify(detail);
+    } else {
+      str = JSON.stringify(message);
+    }
+  } else {
+    str = String(message || "");
+  }
+
+  const trimmed = (str || "").trim();
+  if (!trimmed || trimmed === "[object Object]") return HARD_RESTART_MESSAGE;
   if (looksLikeInternalServerError(trimmed)) return HARD_RESTART_MESSAGE;
-  // Bare upstream labels from retries / proxies
   if (/^upstream\s*500\b/i.test(trimmed) || /^error\s*500\b/i.test(trimmed)) {
     return HARD_RESTART_MESSAGE;
   }
@@ -2921,7 +2939,7 @@ export const client = {
     const form = new FormData();
     form.append("file", file);
     const params = new URLSearchParams({ table_source: tableSource, master_type: masterType });
-    if (userId) params.set("user_id", String(userId));
+    if (userId && !isNaN(userId) && userId > 0) params.set("user_id", String(userId));
     const res = await fetch(`${API_BASE}/leads/enrichment/compare?${params.toString()}`, {
       method: "POST",
       body: form,
@@ -2929,8 +2947,8 @@ export const client = {
       credentials: "include",
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error((err as { detail?: string }).detail || "Analysis failed");
+      const text = await res.text().catch(() => "");
+      throw new Error(messageForHttpError(res.status, text, res.statusText));
     }
     return res.json() as Promise<EnrichmentComparisonReport>;
   },
@@ -2939,7 +2957,7 @@ export const client = {
     const form = new FormData();
     form.append("file", file);
     const params = new URLSearchParams({ table_source: tableSource, master_type: masterType });
-    if (userId) params.set("user_id", String(userId));
+    if (userId && !isNaN(userId) && userId > 0) params.set("user_id", String(userId));
     const res = await fetch(`${API_BASE}/leads/enrichment/safe-merge?${params.toString()}`, {
       method: "POST",
       body: form,
@@ -2947,22 +2965,22 @@ export const client = {
       credentials: "include",
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error((err as { detail?: string }).detail || "Merge failed");
+      const text = await res.text().catch(() => "");
+      throw new Error(messageForHttpError(res.status, text, res.statusText));
     }
     return res.json() as Promise<SafeMergeResult>;
   },
 
   getMissingDataReport: async (section = "master", columnKey = "contact_name", userId?: number, masterType = "fmcg") => {
     const params = new URLSearchParams({ section, column_key: columnKey, master_type: masterType });
-    if (userId) params.set("user_id", String(userId));
+    if (userId && !isNaN(userId) && userId > 0) params.set("user_id", String(userId));
     const res = await fetch(`${API_BASE}/leads/missing-data-report?${params.toString()}`, {
       headers: authHeaders(),
       credentials: "include",
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error((err as { detail?: string }).detail || "Could not fetch missing data report");
+      const text = await res.text().catch(() => "");
+      throw new Error(messageForHttpError(res.status, text, res.statusText));
     }
     return res.json() as Promise<MissingDataReport>;
   },
