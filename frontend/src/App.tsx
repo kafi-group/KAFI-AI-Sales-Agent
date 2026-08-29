@@ -1273,7 +1273,7 @@ function DashboardApp() {
               />
             )}
             {tab === "data-synthesis" && isAdmin && (
-              <DataSynthesisPage onError={setError} />
+              <DataSynthesisPage onError={setError} masterType={masterType} />
             )}
             {tab === "table" && selectedLeadId !== null && (
               <BuyerProfile

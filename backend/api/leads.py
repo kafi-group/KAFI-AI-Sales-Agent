@@ -1509,6 +1509,7 @@ async def compare_enrichment_file_endpoint(
     file: UploadFile = File(...),
     user_id: int | None = Query(default=None),
     table_source: str = Query(default="master_table"),
+    master_type: str = Query(default="fmcg"),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -1521,6 +1522,7 @@ async def compare_enrichment_file_endpoint(
             filename=file.filename or "enrichment.xlsx",
             user_id=user_id,
             table_source=table_source,
+            master_type=master_type,
         )
     except Exception as exc:
         raise HTTPException(400, f"Could not analyze file: {exc}") from exc
@@ -1531,6 +1533,7 @@ async def safe_merge_enrichment_file_endpoint(
     file: UploadFile = File(...),
     user_id: int | None = Query(default=None),
     table_source: str = Query(default="master_table"),
+    master_type: str = Query(default="fmcg"),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -1543,6 +1546,7 @@ async def safe_merge_enrichment_file_endpoint(
             filename=file.filename or "enrichment.xlsx",
             user_id=user_id,
             table_source=table_source,
+            master_type=master_type,
         )
     except Exception as exc:
         raise HTTPException(400, f"Could not execute safe merge: {exc}") from exc
@@ -1553,6 +1557,7 @@ def get_missing_data_report_endpoint(
     section: str = Query(default="master"),
     column_key: str = Query(default="contact_name"),
     user_id: int | None = Query(default=None),
+    master_type: str = Query(default="fmcg"),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -1563,6 +1568,7 @@ def get_missing_data_report_endpoint(
             section=section,
             column_key=column_key,
             user_id=user_id,
+            master_type=master_type,
             viewer=user,
         )
     except Exception as exc:

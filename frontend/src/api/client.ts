@@ -2917,10 +2917,10 @@ export const client = {
     return res.json() as Promise<EmailAttachment>;
   },
 
-  compareEnrichmentFile: async (file: File, userId?: number, tableSource = "master_table") => {
+  compareEnrichmentFile: async (file: File, userId?: number, tableSource = "master_table", masterType = "fmcg") => {
     const form = new FormData();
     form.append("file", file);
-    const params = new URLSearchParams({ table_source: tableSource });
+    const params = new URLSearchParams({ table_source: tableSource, master_type: masterType });
     if (userId) params.set("user_id", String(userId));
     const res = await fetch(`${API_BASE}/leads/enrichment/compare?${params.toString()}`, {
       method: "POST",
@@ -2935,10 +2935,10 @@ export const client = {
     return res.json() as Promise<EnrichmentComparisonReport>;
   },
 
-  safeMergeEnrichmentFile: async (file: File, userId?: number, tableSource = "master_table") => {
+  safeMergeEnrichmentFile: async (file: File, userId?: number, tableSource = "master_table", masterType = "fmcg") => {
     const form = new FormData();
     form.append("file", file);
-    const params = new URLSearchParams({ table_source: tableSource });
+    const params = new URLSearchParams({ table_source: tableSource, master_type: masterType });
     if (userId) params.set("user_id", String(userId));
     const res = await fetch(`${API_BASE}/leads/enrichment/safe-merge?${params.toString()}`, {
       method: "POST",
@@ -2953,8 +2953,8 @@ export const client = {
     return res.json() as Promise<SafeMergeResult>;
   },
 
-  getMissingDataReport: async (section = "master", columnKey = "contact_name", userId?: number) => {
-    const params = new URLSearchParams({ section, column_key: columnKey });
+  getMissingDataReport: async (section = "master", columnKey = "contact_name", userId?: number, masterType = "fmcg") => {
+    const params = new URLSearchParams({ section, column_key: columnKey, master_type: masterType });
     if (userId) params.set("user_id", String(userId));
     const res = await fetch(`${API_BASE}/leads/missing-data-report?${params.toString()}`, {
       headers: authHeaders(),

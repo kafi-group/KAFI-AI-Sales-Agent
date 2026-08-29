@@ -197,6 +197,7 @@ def generate_enrichment_comparison_report(
     filename: str,
     user_id: int | None = None,
     table_source: str = "master_table",
+    master_type: str = "fmcg",
 ) -> dict[str, Any]:
     """Read-only analysis comparing uploaded enriched file against Sales Agent contacts."""
     uploaded_rows = _parse_uploaded_file(file_content, filename)
@@ -206,6 +207,8 @@ def generate_enrichment_comparison_report(
         query = query.filter(Buyer.source == "old_clients")
     elif table_source == "master_table":
         query = query.filter(Buyer.source != "old_clients")
+        if master_type:
+            query = query.filter(Buyer.master_type == master_type)
 
     if user_id is not None:
         query = query.filter(Buyer.assigned_to_user_id == user_id)
@@ -341,6 +344,7 @@ def execute_safe_fill_merge(
     filename: str,
     user_id: int | None = None,
     table_source: str = "master_table",
+    master_type: str = "fmcg",
 ) -> dict[str, Any]:
     """Perform a Safe Merge: Populates missing/blank fields only, 100% preserving existing DB values."""
     uploaded_rows = _parse_uploaded_file(file_content, filename)
@@ -350,6 +354,8 @@ def execute_safe_fill_merge(
         query = query.filter(Buyer.source == "old_clients")
     elif table_source == "master_table":
         query = query.filter(Buyer.source != "old_clients")
+        if master_type:
+            query = query.filter(Buyer.master_type == master_type)
 
     if user_id is not None:
         query = query.filter(Buyer.assigned_to_user_id == user_id)
@@ -503,6 +509,7 @@ def generate_missing_data_report(
     section: str = "master",
     column_key: str = "contact_name",
     user_id: int | None = None,
+    master_type: str = "fmcg",
     viewer: AppUser,
 ) -> dict[str, Any]:
     """Generates column-wise missing data report for specified section, column, and user scope."""
@@ -535,7 +542,14 @@ def generate_missing_data_report(
         section_label = "Khalid Focused Sales"
     elif sec_clean == "master":
         query = query.filter(Buyer.source != "old_clients")
-        section_label = "Master Table (FMCG)"
+        if master_type:
+            query = query.filter(Buyer.master_type == master_type)
+        if master_type == "minerals_ores":
+            section_label = "Master Table (Minerals & Ores)"
+        elif master_type == "other_items":
+            section_label = "Master Table (Other Items)"
+        else:
+            section_label = "Master Table (FMCG)"
     else:
         section_label = "All Sections Combined"
 

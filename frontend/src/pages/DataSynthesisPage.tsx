@@ -120,10 +120,17 @@ function ProgressPanel({ status }: { status: SynthesisJobStatus }) {
 
 interface DataSynthesisPageProps {
   onError: (message: string) => void;
+  masterType?: string;
 }
 
-export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
+export function DataSynthesisPage({ onError, masterType = "fmcg" }: DataSynthesisPageProps) {
   const [mode, setMode] = useState<"clean" | "enrichment" | "missing_report">("enrichment");
+
+  const masterLabel = useMemo(() => {
+    if (masterType === "minerals_ores") return "Master Table (Minerals & Ores)";
+    if (masterType === "other_items") return "Master Table (Other Items)";
+    return "Master Table (FMCG)";
+  }, [masterType]);
 
   // State for Missing Data Report
   const [missingSection, setMissingSection] = useState("master");
@@ -135,7 +142,7 @@ export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
   const fetchMissingReport = async (sec = missingSection, col = missingColumnKey, uId = missingUserId) => {
     setLoadingMissingReport(true);
     try {
-      const res = await client.getMissingDataReport(sec, col, uId ? Number(uId) : undefined);
+      const res = await client.getMissingDataReport(sec, col, uId ? Number(uId) : undefined, masterType);
       setMissingReportData(res);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Could not fetch missing data report");
@@ -373,7 +380,7 @@ export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
                   }}
                   className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
                 >
-                  <option value="master">Master Table (FMCG)</option>
+                  <option value="master">{masterLabel}</option>
                   <option value="old_clients">Old Clients</option>
                   <option value="new_search_lead">New Search Lead</option>
                   <option value="khalid_focused">Khalid Focused Sales</option>
@@ -706,7 +713,7 @@ export function DataSynthesisPage({ onError }: DataSynthesisPageProps) {
                   onChange={(e) => setTableSource(e.target.value)}
                   className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 font-medium"
                 >
-                  <option value="master_table">Master Table (FMCG)</option>
+                  <option value="master_table">{masterLabel}</option>
                   <option value="old_clients">Old Clients</option>
                 </select>
               </div>
