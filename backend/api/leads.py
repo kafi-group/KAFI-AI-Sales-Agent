@@ -1507,7 +1507,7 @@ def onboard_lead(
 @router.post("/enrichment/compare")
 async def compare_enrichment_file_endpoint(
     file: UploadFile = File(...),
-    user_id: int | None = Query(default=None),
+    user_id: str | None = Query(default=None),
     table_source: str = Query(default="master_table"),
     master_type: str = Query(default="fmcg"),
     db: Session = Depends(get_db),
@@ -1515,12 +1515,13 @@ async def compare_enrichment_file_endpoint(
 ):
     from modules import enrichment_comparison as comparison_module
     content = await file.read()
+    parsed_user_id = int(user_id) if user_id and user_id.strip().isdigit() else None
     try:
         return comparison_module.generate_enrichment_comparison_report(
             db,
             file_content=content,
             filename=file.filename or "enrichment.xlsx",
-            user_id=user_id,
+            user_id=parsed_user_id,
             table_source=table_source,
             master_type=master_type,
         )
@@ -1531,7 +1532,7 @@ async def compare_enrichment_file_endpoint(
 @router.post("/enrichment/safe-merge")
 async def safe_merge_enrichment_file_endpoint(
     file: UploadFile = File(...),
-    user_id: int | None = Query(default=None),
+    user_id: str | None = Query(default=None),
     table_source: str = Query(default="master_table"),
     master_type: str = Query(default="fmcg"),
     db: Session = Depends(get_db),
@@ -1539,12 +1540,13 @@ async def safe_merge_enrichment_file_endpoint(
 ):
     from modules import enrichment_comparison as comparison_module
     content = await file.read()
+    parsed_user_id = int(user_id) if user_id and user_id.strip().isdigit() else None
     try:
         return comparison_module.execute_safe_fill_merge(
             db,
             file_content=content,
             filename=file.filename or "enrichment.xlsx",
-            user_id=user_id,
+            user_id=parsed_user_id,
             table_source=table_source,
             master_type=master_type,
         )
@@ -1556,18 +1558,19 @@ async def safe_merge_enrichment_file_endpoint(
 def get_missing_data_report_endpoint(
     section: str = Query(default="master"),
     column_key: str = Query(default="contact_name"),
-    user_id: int | None = Query(default=None),
+    user_id: str | None = Query(default=None),
     master_type: str = Query(default="fmcg"),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
     from modules import enrichment_comparison as comparison_module
+    parsed_user_id = int(user_id) if user_id and user_id.strip().isdigit() else None
     try:
         return comparison_module.generate_missing_data_report(
             db,
             section=section,
             column_key=column_key,
-            user_id=user_id,
+            user_id=parsed_user_id,
             master_type=master_type,
             viewer=user,
         )

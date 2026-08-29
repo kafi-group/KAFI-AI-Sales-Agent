@@ -142,7 +142,8 @@ export function DataSynthesisPage({ onError, masterType = "fmcg" }: DataSynthesi
   const fetchMissingReport = async (sec = missingSection, col = missingColumnKey, uId = missingUserId) => {
     setLoadingMissingReport(true);
     try {
-      const res = await client.getMissingDataReport(sec, col, uId ? Number(uId) : undefined, masterType);
+      const parsedUserId = uId && !isNaN(Number(uId)) && Number(uId) > 0 ? Number(uId) : undefined;
+      const res = await client.getMissingDataReport(sec, col, parsedUserId, masterType);
       setMissingReportData(res);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Could not fetch missing data report");
