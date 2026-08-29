@@ -144,7 +144,7 @@ def whatsapp_personal_send(
                 content=body.message,
                 status=InteractionStatus.sent,
                 handled_by=HandledBy.human,
-                provider_message_id=res.get("messageId") if isinstance(res, dict) else None,
+                provider_message_id=f"baileys_{res.get('messageId')}" if isinstance(res, dict) and res.get("messageId") else "baileys_mobile",
             )
             db.add(outbound)
             db.commit()

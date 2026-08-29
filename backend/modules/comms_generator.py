@@ -475,17 +475,29 @@ class CommsGenerator:
         page = max(1, page)
         page_size = min(max(1, page_size), 100)
 
-        from sqlalchemy import func as sa_func
+        from sqlalchemy import func as sa_func, or_
+
+        meta_condition = (
+            (Interaction.channel == Channel.whatsapp)
+            & (Interaction.contact_id.isnot(None))
+            & (
+                (Interaction.template_name.isnot(None))
+                | (Interaction.provider_message_id.like("wamid.%"))
+                | (Interaction.provider_message_id.like("meta_%"))
+                | (Interaction.wa_status.isnot(None))
+            )
+            & (
+                (Interaction.provider_message_id.is_(None))
+                | (~Interaction.provider_message_id.like("baileys%"))
+            )
+        )
 
         latest_q = (
             db.query(
                 Interaction.contact_id.label("contact_id"),
                 sa_func.max(Interaction.created_at).label("last_at"),
             )
-            .filter(
-                Interaction.channel == Channel.whatsapp,
-                Interaction.contact_id.isnot(None),
-            )
+            .filter(meta_condition)
         )
         if assigned_to_user_id is not None:
             latest_q = (
@@ -520,12 +532,12 @@ class CommsGenerator:
             buyers = db.query(Buyer).filter(Buyer.id.in_(buyer_ids)).all()
             buyers_by_id = {b.id: b for b in buyers}
 
-        # Batch load the most recent interaction for each contact
+        # Batch load the most recent Meta interaction for each contact
         recent_interactions = (
             db.query(Interaction)
             .filter(
-                Interaction.channel == Channel.whatsapp,
                 Interaction.contact_id.in_(contact_ids),
+                meta_condition,
             )
             .order_by(Interaction.created_at.desc())
             .all()
@@ -577,12 +589,25 @@ class CommsGenerator:
         contact_id: int,
         limit: int = 200,
     ) -> list[Interaction]:
+        from sqlalchemy import or_
+
+        meta_condition = (
+            (Interaction.channel == Channel.whatsapp)
+            & (Interaction.contact_id == contact_id)
+            & (
+                (Interaction.template_name.isnot(None))
+                | (Interaction.provider_message_id.like("wamid.%"))
+                | (Interaction.provider_message_id.like("meta_%"))
+                | (Interaction.wa_status.isnot(None))
+            )
+            & (
+                (Interaction.provider_message_id.is_(None))
+                | (~Interaction.provider_message_id.like("baileys%"))
+            )
+        )
         return (
             db.query(Interaction)
-            .filter(
-                Interaction.contact_id == contact_id,
-                Interaction.channel == Channel.whatsapp,
-            )
+            .filter(meta_condition)
             .order_by(Interaction.created_at.asc())
             .limit(limit)
             .all()
