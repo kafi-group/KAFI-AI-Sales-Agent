@@ -38,7 +38,22 @@ def _parse_uploaded_file(file_content: bytes, filename: str) -> list[dict[str, A
     if fname.endswith(".csv"):
         df = pd.read_csv(io.BytesIO(file_content), dtype=str).fillna("")
     elif fname.endswith((".xlsx", ".xls", ".xlsm")):
-        df = pd.read_excel(io.BytesIO(file_content), dtype=str).fillna("")
+        xl = pd.ExcelFile(io.BytesIO(file_content))
+        df = None
+        max_rows = -1
+        for s in xl.sheet_names:
+            try:
+                sample_df = pd.read_excel(xl, sheet_name=s, nrows=5)
+                cols_lower = [str(c).lower() for c in sample_df.columns]
+                if any("company" in c or "buyer" in c or "contact" in c for c in cols_lower):
+                    full_s_df = pd.read_excel(xl, sheet_name=s, dtype=str).fillna("")
+                    if len(full_s_df) > max_rows:
+                        max_rows = len(full_s_df)
+                        df = full_s_df
+            except Exception:
+                pass
+        if df is None:
+            df = pd.read_excel(io.BytesIO(file_content), dtype=str).fillna("")
     else:
         raise ValueError("Unsupported file format. Please upload an Excel (.xlsx) or CSV file.")
 
