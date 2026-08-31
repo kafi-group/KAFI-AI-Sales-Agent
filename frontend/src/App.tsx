@@ -48,6 +48,8 @@ import { DataSynthesisPage } from "./pages/DataSynthesisPage";
 import { LeadsTablePage } from "./pages/LeadsTablePage";
 import { ClientHistoryPage } from "./pages/ClientHistoryPage";
 import { HelpfulGuidancePage } from "./pages/HelpfulGuidancePage";
+import { HorekaPage } from "./pages/HorekaPage";
+import { CataloguePage } from "./pages/CataloguePage";
 import { ChatbotPage } from "./pages/ChatbotPage";
 import { KpiPage } from "./pages/KpiPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -147,6 +149,8 @@ function DashboardApp() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpenPreference);
   const [mailDraftCount, setMailDraftCount] = useState(0);
+  const [horekaCategory, setHorekaCategory] = useState<string>("All");
+  const [catalogueId, setCatalogueId] = useState<string>("all_products");
   const [mailLabels, setMailLabels] = useState<
     Array<{ id: number; name: string; color: string; count: number }>
   >([]);
@@ -1071,6 +1075,33 @@ function DashboardApp() {
       count: 0,
       external: QUOTATION_AGENT_URL,
     },
+    {
+      id: "horeka" as const,
+      label: "Horeka",
+      count: 177,
+      children: [
+        { id: "horeka-all", label: "Price List Manager", count: 177 },
+        { id: "horeka-spices", label: "Spices & Masala", count: 32 },
+        { id: "horeka-salt", label: "Himalayan Salt", count: 29 },
+        { id: "horeka-pickles", label: "Pickles & Chutneys", count: 13 },
+        { id: "horeka-pastes", label: "Pastes & Sauces", count: 25 },
+        { id: "horeka-rice", label: "Rice & Staples", count: 6 },
+        { id: "horeka-desserts", label: "Desserts & Bakery", count: 20 },
+        { id: "horeka-wellness", label: "Beverages & Wellness", count: 20 },
+      ],
+    },
+    {
+      id: "catalogue" as const,
+      label: "Catalogue",
+      count: 4,
+      children: [
+        { id: "catalogue-all", label: "All Catalogues", count: 4 },
+        { id: "catalogue-all_products", label: "Kafi All Product Catalogue", count: 0 },
+        { id: "catalogue-salt_catalogue", label: "Kafi Salt Catalogue", count: 0 },
+        { id: "catalogue-edible_salt", label: "Edible Salt Catalogue", count: 0 },
+        { id: "catalogue-non_edible_salt", label: "Non-Edible Pink Salt", count: 0 },
+      ],
+    },
     { id: "chatbot", label: "Brand assistant", count: 0 },
     {
       id: "sales-assistant",
@@ -1151,6 +1182,16 @@ function DashboardApp() {
           onSelectMailSection={handleSelectMailSection}
           onDeleteMailLabel={(labelId) => void handleDeleteMailLabel(labelId)}
           onSelectWhatsAppSection={handleSelectWhatsAppSection}
+          horekaCategory={horekaCategory}
+          onSelectHorekaCategory={(cat) => {
+            setHorekaCategory(cat);
+            setTab("horeka");
+          }}
+          catalogueId={catalogueId}
+          onSelectCatalogueItem={(cid) => {
+            setCatalogueId(cid);
+            setTab("catalogue");
+          }}
           onOpenMailer={() => void openMailerApp()}
           onOpenSalesAssistant={() => {
             window.dispatchEvent(new CustomEvent(OPEN_SALES_ASSISTANT_EVENT));
@@ -1376,6 +1417,18 @@ function DashboardApp() {
             )}
             {tab === "helpful-guidance" && (
               <HelpfulGuidancePage onError={setError} />
+            )}
+            {tab === "horeka" && (
+              <HorekaPage
+                initialCategory={horekaCategory}
+                onError={setError}
+              />
+            )}
+            {tab === "catalogue" && (
+              <CataloguePage
+                initialCatalogueId={catalogueId === "all" ? null : catalogueId}
+                onError={setError}
+              />
             )}
             {tab === "chatbot" && <ChatbotPage onError={setError} />}
             {tab === "ai-mode" && (

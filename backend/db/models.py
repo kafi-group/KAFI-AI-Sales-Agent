@@ -927,3 +927,32 @@ class BulkEmailSchedule(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class HorekaLineItem(Base):
+    """Horeka / B2B line item with packaging, price tiers, and MOQ."""
+
+    __tablename__ = "horeka_line_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sno: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    category: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    sub_category: Mapped[Optional[str]] = mapped_column(String(100))
+    brand: Mapped[str] = mapped_column(String(100), default="ESSENCE")
+    item_code: Mapped[Optional[str]] = mapped_column(String(50), index=True)
+    product_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    packaging: Mapped[str] = mapped_column(String(255), default="")
+    unit: Mapped[str] = mapped_column(String(50), default="USD/carton")
+    standard_price: Mapped[float] = mapped_column(Float, default=0.0)
+    bulk_tier1_price: Mapped[Optional[float]] = mapped_column(Float)
+    bulk_tier2_price: Mapped[Optional[float]] = mapped_column(Float)
+    moq: Mapped[Optional[str]] = mapped_column(String(100), default="10 Master Cartons")
+    stock_status: Mapped[str] = mapped_column(String(50), default="In Stock")
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+

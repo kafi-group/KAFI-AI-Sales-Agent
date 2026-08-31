@@ -3,15 +3,16 @@ import { createPortal } from "react-dom";
 import { client, type EmailAttachment, type EmailTemplate, type MailComposeDraft } from "../api/client";
 import { EmailBodyEditor, emailBodyHasContent } from "./EmailBodyEditor";
 import { AttachedFilesList } from "./AttachedFilesList";
+import { AttachCatalogueModal } from "./AttachCatalogueModal";
 import { ProseInput } from "./ProseTextField";
-import { IconPaperclip } from "./icons/AppIcons";
+import { IconBookOpen, IconPaperclip } from "./icons/AppIcons";
 
 interface ComposeMailModalProps {
   fromEmail: string;
   onClose: () => void;
   onSent: (message: string) => void;
   onError: (message: string) => void;
-  initialDraft?: MailComposeDraft | null;
+  initialDraft?: (Partial<MailComposeDraft> & { attachments?: EmailAttachment[] }) | null;
   onDraftSaved?: () => void;
   onDraftDiscarded?: () => void;
 }
@@ -34,8 +35,9 @@ export function ComposeMailModal({
   const [cc, setCc] = useState(initialDraft?.cc_addrs || "");
   const [subject, setSubject] = useState(initialDraft?.subject || "");
   const [body, setBody] = useState(initialDraft?.body || "");
-  const [attachments, setAttachments] = useState<EmailAttachment[]>([]);
+  const [attachments, setAttachments] = useState<EmailAttachment[]>(initialDraft?.attachments || []);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [showAttachCatalogue, setShowAttachCatalogue] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [sending, setSending] = useState(false);
   const [showCc, setShowCc] = useState(Boolean(initialDraft?.cc_addrs?.trim()));
@@ -363,6 +365,15 @@ export function ComposeMailModal({
               <IconPaperclip size="sm" className="text-emerald-400" />
               <span>{uploadingAttachment ? "Attaching…" : "Attach Document"}</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setShowAttachCatalogue(true)}
+              disabled={sending || uploadingAttachment}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-xs font-medium text-slate-200 transition cursor-pointer disabled:opacity-50"
+            >
+              <IconBookOpen size="sm" className="text-emerald-400" />
+              <span>Attach Catalogue</span>
+            </button>
             {attachments.length > 0 && (
               <span className="text-xs text-emerald-400 font-medium">
                 {attachments.length} attached
@@ -450,6 +461,13 @@ export function ComposeMailModal({
             </div>
           </div>
         </div>
+      )}
+      {showAttachCatalogue && (
+        <AttachCatalogueModal
+          onClose={() => setShowAttachCatalogue(false)}
+          onAttach={(newAtts) => setAttachments((prev) => [...prev, ...newAtts])}
+          onError={onError}
+        />
       )}
     </div>,
     document.body,

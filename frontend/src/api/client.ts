@@ -3604,7 +3604,94 @@ export const client = {
       headers: aiSalesAgentHeaders(),
       body: JSON.stringify({ rules }),
     }),
+
+  // ── Catalogues ─────────────────────────────────────────────────────────────
+  listCatalogues: () => request<CatalogueItem[]>("/catalogues"),
+  attachCatalogues: (catalogue_ids: string[]) =>
+    request<EmailAttachment[]>("/catalogues/attach", {
+      method: "POST",
+      body: JSON.stringify({ catalogue_ids }),
+    }),
+
+  // ── Horeka B2B Price List ──────────────────────────────────────────────────
+  listHorekaItems: (
+    params: {
+      category?: string;
+      search?: string;
+      stock_status?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) => {
+    const query = new URLSearchParams();
+    if (params.category) query.set("category", params.category);
+    if (params.search) query.set("search", params.search);
+    if (params.stock_status) query.set("stock_status", params.stock_status);
+    if (params.limit) query.set("limit", String(params.limit));
+    if (params.offset) query.set("offset", String(params.offset));
+    const qs = query.toString();
+    return request<HorekaListResponse>(`/horeka/items${qs ? `?${qs}` : ""}`);
+  },
+  updateHorekaItem: (itemId: number, data: Partial<HorekaLineItemData>) =>
+    request<{ id: number; product_name: string; standard_price: number }>(
+      `/horeka/items/${itemId}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(data),
+      },
+    ),
+  createHorekaItem: (data: Partial<HorekaLineItemData>) =>
+    request<HorekaLineItemData>("/horeka/items", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  deleteHorekaItem: (itemId: number) =>
+    request<{ ok: boolean }>(`/horeka/items/${itemId}`, {
+      method: "DELETE",
+    }),
+  attachHorekaPriceList: (format = "excel") =>
+    request<EmailAttachment>(`/horeka/attach?file_format=${format}`, {
+      method: "POST",
+    }),
 };
+
+export interface CatalogueItem {
+  id: string;
+  title: string;
+  category: string;
+  description: string;
+  filename: string;
+  badge: string;
+  color: string;
+  size: number;
+  exists: boolean;
+  download_url: string;
+}
+
+export interface HorekaLineItemData {
+  id: number;
+  sno: number;
+  category: string;
+  sub_category?: string | null;
+  brand: string;
+  item_code?: string | null;
+  product_name: string;
+  packaging: string;
+  unit: string;
+  standard_price: number;
+  bulk_tier1_price?: number | null;
+  bulk_tier2_price?: number | null;
+  moq?: string | null;
+  stock_status: string;
+  notes?: string | null;
+  updated_at?: string | null;
+}
+
+export interface HorekaListResponse {
+  total: number;
+  categories: string[];
+  items: HorekaLineItemData[];
+}
 
 export interface AiSalesAgentRunner {
   persona: string;

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { client, type EmailAttachment } from "../api/client";
-import { IconPaperclip } from "./icons/AppIcons";
+import { IconBookOpen, IconPaperclip } from "./icons/AppIcons";
+import { AttachCatalogueModal } from "./AttachCatalogueModal";
 
 interface EmailAttachmentsFieldProps {
   attachments: EmailAttachment[];
@@ -26,6 +27,7 @@ export function EmailAttachmentsField({
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAttachCatalogue, setShowAttachCatalogue] = useState(false);
 
   async function handleFiles(fileList: FileList | null) {
     if (!fileList?.length || disabled) return;
@@ -65,15 +67,26 @@ export function EmailAttachmentsField({
             </span>
           )}
         </div>
-        <button
-          type="button"
-          disabled={disabled || uploading || attachments.length >= 8}
-          onClick={() => inputRef.current?.click()}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-medium text-slate-200 disabled:opacity-50 transition cursor-pointer"
-        >
-          <IconPaperclip size="xs" className="text-emerald-400" />
-          <span>{uploading ? "Attaching…" : "+ Add files"}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={disabled || uploading || attachments.length >= 8}
+            onClick={() => inputRef.current?.click()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-medium text-slate-200 disabled:opacity-50 transition cursor-pointer"
+          >
+            <IconPaperclip size="xs" className="text-emerald-400" />
+            <span>{uploading ? "Attaching…" : "+ Add files"}</span>
+          </button>
+          <button
+            type="button"
+            disabled={disabled || uploading || attachments.length >= 8}
+            onClick={() => setShowAttachCatalogue(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-medium text-slate-200 disabled:opacity-50 transition cursor-pointer"
+          >
+            <IconBookOpen size="xs" className="text-emerald-400" />
+            <span>+ Attach Catalogue</span>
+          </button>
+        </div>
       </div>
       <input
         ref={inputRef}
@@ -123,6 +136,13 @@ export function EmailAttachmentsField({
             ))}
           </div>
         </div>
+      )}
+      {showAttachCatalogue && (
+        <AttachCatalogueModal
+          onClose={() => setShowAttachCatalogue(false)}
+          onAttach={(newAtts) => onChange([...attachments, ...newAtts])}
+          onError={(msg) => setError(msg)}
+        />
       )}
     </div>
   );

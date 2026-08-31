@@ -31,7 +31,8 @@ frontend/node_modules/
 frontend/dist/
 whatsapp_bridge/node_modules/
 whatsapp_bridge/sessions/
-backend/static/
+backend/static/*
+!backend/static/catalogues/
 
 # OS
 .DS_Store

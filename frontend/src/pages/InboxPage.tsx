@@ -22,6 +22,7 @@ import {
 import { CreateLabelModal } from "../components/CreateLabelModal";
 import { ComposeMailModal } from "../components/ComposeMailModal";
 import { AttachedFilesList } from "../components/AttachedFilesList";
+import { AttachCatalogueModal } from "../components/AttachCatalogueModal";
 import {
   EmailBodyEditor,
   emailBodyHasContent,
@@ -30,6 +31,7 @@ import { capitalizeFirstLetter } from "../utils/spelling";
 import { ActionButton, IconButton } from "../components/ui/ActionButton";
 import {
   IconArchive,
+  IconBookOpen,
   IconChevronRight,
   IconInbox,
   IconPaperclip,
@@ -366,6 +368,7 @@ export function InboxPage({
   const [replySubjectLine, setReplySubjectLine] = useState("");
   const [replyAttachments, setReplyAttachments] = useState<EmailAttachment[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [showAttachCatalogue, setShowAttachCatalogue] = useState(false);
   const replyFileInputRef = useRef<HTMLInputElement | null>(null);
   const [showReplyForm, setShowReplyForm] = useState(false);
   const [sending, setSending] = useState(false);
@@ -2077,6 +2080,16 @@ export function InboxPage({
                         >
                           {uploadingAttachment ? "Attaching…" : "Attach Document"}
                         </ActionButton>
+                        <ActionButton
+                          icon={IconBookOpen}
+                          size="md"
+                          variant="secondary"
+                          onClick={() => setShowAttachCatalogue(true)}
+                          disabled={sending || uploadingAttachment}
+                          title="Attach Official Catalogue / Price List"
+                        >
+                          Attach Catalogue
+                        </ActionButton>
                         {replyAttachments.length > 0 && (
                           <span className="text-xs text-emerald-400 font-medium">
                             {replyAttachments.length} attached
@@ -2460,6 +2473,16 @@ export function InboxPage({
                       >
                         {uploadingAttachment ? "Attaching…" : "Attach Document"}
                       </ActionButton>
+                      <ActionButton
+                        icon={IconBookOpen}
+                        size="md"
+                        variant="secondary"
+                        onClick={() => setShowAttachCatalogue(true)}
+                        disabled={sending || uploadingAttachment}
+                        title="Attach Official Catalogue / Price List"
+                      >
+                        Attach Catalogue
+                      </ActionButton>
                       {replyAttachments.length > 0 && (
                         <span className="text-xs text-emerald-400 font-medium">
                           {replyAttachments.length} attached
@@ -2521,6 +2544,14 @@ export function InboxPage({
         className="hidden"
         accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp,.gif"
       />
+
+      {showAttachCatalogue && (
+        <AttachCatalogueModal
+          onClose={() => setShowAttachCatalogue(false)}
+          onAttach={(newAtts) => setReplyAttachments((prev) => [...prev, ...newAtts])}
+          onError={onError}
+        />
+      )}
 
       {showCompose && (
         <ComposeMailModal

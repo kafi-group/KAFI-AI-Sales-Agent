@@ -109,6 +109,15 @@ def _ensure_buyer_social_columns() -> None:
     print("Applied missing buyer social URL columns.")
 
 
+def _ensure_horeka_table() -> None:
+    """Ensure horeka_line_items table exists."""
+    from db.models import Base
+    inspector = inspect(engine)
+    if "horeka_line_items" not in inspector.get_table_names():
+        Base.metadata.tables["horeka_line_items"].create(engine, checkfirst=True)
+        print("Created horeka_line_items table.", flush=True)
+
+
 def run_migrations() -> None:
     alembic_cfg = _alembic_config()
     script = ScriptDirectory.from_config(alembic_cfg)
@@ -122,3 +131,4 @@ def run_migrations() -> None:
     _stamp_head_if_interested_columns_already_applied(alembic_cfg, script)
     command.upgrade(alembic_cfg, "head")
     _ensure_buyer_social_columns()
+    _ensure_horeka_table()

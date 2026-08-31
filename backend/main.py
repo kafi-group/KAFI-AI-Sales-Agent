@@ -11,6 +11,7 @@ from api import (
     ai_sales_agent,
     auth,
     calls,
+    catalogues,
     chatbot,
     compliance,
     data_synthesis,
@@ -18,6 +19,7 @@ from api import (
     email_attachments,
     email_templates,
     guidance,
+    horeka,
     inbox,
     interactions,
     kpi,
@@ -363,6 +365,8 @@ app.include_router(whatsapp.router, prefix="/api")
 app.include_router(whatsapp_personal.router, prefix="/api")
 app.include_router(whatsapp.webhooks_router, prefix="/api")
 app.include_router(ai_mode.router, prefix="/api")
+app.include_router(catalogues.router, prefix="/api")
+app.include_router(horeka.router, prefix="/api")
 
 
 OLD_CLIENTS_IMPORT_PARSER = "old_clients_v2"

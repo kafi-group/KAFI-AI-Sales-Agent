@@ -11,7 +11,7 @@ from fastapi import UploadFile
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
 STORAGE_DIR = _BACKEND_DIR / "storage" / "email_attachments"
 
-MAX_FILE_BYTES = 10 * 1024 * 1024
+MAX_FILE_BYTES = 100 * 1024 * 1024
 MAX_FILES_PER_EMAIL = 8
 
 ALLOWED_CONTENT_TYPES = {
@@ -96,6 +96,42 @@ async def save_upload(file: UploadFile) -> dict:
     return {
         "id": att_id,
         "filename": filename,
+        "content_type": content_type,
+        "size": len(data),
+        "storage_path": f"email_attachments/{storage_name}",
+    }
+
+
+def register_attachment_from_path(
+    source_path: Path, filename: str | None = None, content_type: str = "application/pdf"
+) -> dict:
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    clean_name = _sanitize_filename(filename or source_path.name)
+    att_id = str(uuid.uuid4())
+    storage_name = f"{att_id}_{clean_name}"
+    abs_path = STORAGE_DIR / storage_name
+    abs_path.write_bytes(source_path.read_bytes())
+    return {
+        "id": att_id,
+        "filename": clean_name,
+        "content_type": content_type,
+        "size": source_path.stat().st_size,
+        "storage_path": f"email_attachments/{storage_name}",
+    }
+
+
+def register_attachment_from_bytes(
+    data: bytes, filename: str, content_type: str = "application/pdf"
+) -> dict:
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    clean_name = _sanitize_filename(filename)
+    att_id = str(uuid.uuid4())
+    storage_name = f"{att_id}_{clean_name}"
+    abs_path = STORAGE_DIR / storage_name
+    abs_path.write_bytes(data)
+    return {
+        "id": att_id,
+        "filename": clean_name,
         "content_type": content_type,
         "size": len(data),
         "storage_path": f"email_attachments/{storage_name}",
