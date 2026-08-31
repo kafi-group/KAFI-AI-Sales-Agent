@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   client,
+  type EmailAttachment,
   type InboxAnalyzeResponse,
   type InboxMessageDetail,
   type InboxMessageListResponse,
@@ -30,6 +31,7 @@ import {
   IconArchive,
   IconChevronRight,
   IconInbox,
+  IconPaperclip,
   IconPlus,
   IconRefresh,
   IconReply,
@@ -361,6 +363,9 @@ export function InboxPage({
   const [replyCc, setReplyCc] = useState("");
   const [replyBcc, setReplyBcc] = useState("");
   const [replySubjectLine, setReplySubjectLine] = useState("");
+  const [replyAttachments, setReplyAttachments] = useState<EmailAttachment[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const replyFileInputRef = useRef<HTMLInputElement | null>(null);
   const [showReplyForm, setShowReplyForm] = useState(false);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -864,6 +869,30 @@ export function InboxPage({
     return hasReplyAllTargets(source, mailbox);
   }, [isThreadView, replyTarget, messageDetail, status?.email, status?.emails]);
 
+  async function handleReplyFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploadingAttachment(true);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const uploaded = await client.uploadEmailAttachment(file);
+        setReplyAttachments((prev) => [...prev, uploaded]);
+      }
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Failed to upload attachment");
+    } finally {
+      setUploadingAttachment(false);
+      if (replyFileInputRef.current) {
+        replyFileInputRef.current.value = "";
+      }
+    }
+  }
+
+  function handleRemoveReplyAttachment(id: string) {
+    setReplyAttachments((prev) => prev.filter((a) => a.id !== id));
+  }
+
   async function sendReply() {
     if (!emailBodyHasContent(replyBody)) return;
     setSending(true);
@@ -876,10 +905,12 @@ export function InboxPage({
           subject: replySubjectLine.trim() || undefined,
           cc: replyCc.trim() || undefined,
           bcc: replyBcc.trim() || undefined,
+          attachments: replyAttachments.length > 0 ? replyAttachments : undefined,
         });
         const extras = [
           replyCc.trim() ? `Cc: ${replyCc.trim()}` : "",
           replyBcc.trim() ? `Bcc: ${replyBcc.trim()}` : "",
+          replyAttachments.length > 0 ? `${replyAttachments.length} attachment(s)` : "",
         ]
           .filter(Boolean)
           .join("; ");
@@ -888,6 +919,7 @@ export function InboxPage({
         );
         setReplyBody("");
         setReplyBcc("");
+        setReplyAttachments([]);
         setShowReplyForm(false);
         await openThread(selectedThreadId);
       } else if (messageDetail) {
@@ -898,10 +930,12 @@ export function InboxPage({
           cc: replyCc.trim() || undefined,
           bcc: replyBcc.trim() || undefined,
           folder: messageDetail.folder || "INBOX",
+          attachments: replyAttachments.length > 0 ? replyAttachments : undefined,
         });
         const extras = [
           replyCc.trim() ? `Cc: ${replyCc.trim()}` : "",
           replyBcc.trim() ? `Bcc: ${replyBcc.trim()}` : "",
+          replyAttachments.length > 0 ? `${replyAttachments.length} attachment(s)` : "",
         ]
           .filter(Boolean)
           .join("; ");
@@ -910,6 +944,7 @@ export function InboxPage({
         );
         setReplyBody("");
         setReplyBcc("");
+        setReplyAttachments([]);
         setShowReplyForm(false);
         await openMessage(messageDetail);
       }
@@ -2020,32 +2055,89 @@ export function InboxPage({
                       placeholder="Write your reply…"
                       rows={7}
                     />
-                    <div className="flex justify-end gap-2">
-                      <ActionButton
-                        icon={IconX}
-                        size="md"
-                        onClick={() => {
-                          setShowReplyForm(false);
-                          setReplyBody("");
-                          setReplyBcc("");
-                          setNotice(null);
-                        }}
-                        title="Cancel"
-                      >
-                        Cancel
-                      </ActionButton>
-                      <ActionButton
-                        icon={IconSend}
-                        variant="primary"
-                        size="md"
-                        onClick={() => void sendReply()}
-                        disabled={
-                          sending || !emailBodyHasContent(replyBody) || !replyTo.trim()
-                        }
-                        title="Send reply"
-                      >
-                        {sending ? "Sending…" : "Send reply"}
-                      </ActionButton>
+                    {replyAttachments.length > 0 && (
+                      <div className="flex flex-wrap gap-2 pt-1 pb-1">
+                        {replyAttachments.map((att) => (
+                          <div
+                            key={att.id}
+                            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-200"
+                          >
+                            <IconPaperclip size="xs" className="text-emerald-400" />
+                            <span className="font-medium max-w-[200px] truncate">
+                              {att.filename}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              ({(att.size / 1024).toFixed(0)} KB)
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveReplyAttachment(att.id)}
+                              className="text-slate-400 hover:text-rose-400 transition ml-1 cursor-pointer"
+                              title="Remove attachment"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <input
+                      type="file"
+                      ref={replyFileInputRef}
+                      onChange={handleReplyFileUpload}
+                      multiple
+                      className="hidden"
+                      accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp,.gif"
+                    />
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <div className="flex items-center gap-2">
+                        <ActionButton
+                          icon={IconPaperclip}
+                          size="md"
+                          variant="secondary"
+                          onClick={() => replyFileInputRef.current?.click()}
+                          disabled={sending || uploadingAttachment}
+                          title="Attach Document / Files"
+                        >
+                          {uploadingAttachment ? "Attaching…" : "Attach Document"}
+                        </ActionButton>
+                        {replyAttachments.length > 0 && (
+                          <span className="text-xs text-emerald-400 font-medium">
+                            {replyAttachments.length} attached
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <ActionButton
+                          icon={IconX}
+                          size="md"
+                          onClick={() => {
+                            setShowReplyForm(false);
+                            setReplyBody("");
+                            setReplyBcc("");
+                            setReplyAttachments([]);
+                            setNotice(null);
+                          }}
+                          title="Cancel"
+                        >
+                          Cancel
+                        </ActionButton>
+                        <ActionButton
+                          icon={IconSend}
+                          variant="primary"
+                          size="md"
+                          onClick={() => void sendReply()}
+                          disabled={
+                            sending ||
+                            !emailBodyHasContent(replyBody) ||
+                            !replyTo.trim() ||
+                            uploadingAttachment
+                          }
+                          title="Send reply"
+                        >
+                          {sending ? "Sending…" : "Send reply"}
+                        </ActionButton>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -2367,32 +2459,81 @@ export function InboxPage({
                     placeholder="Write your reply…"
                     rows={7}
                   />
-                  <div className="flex justify-end gap-2">
-                    <ActionButton
-                      icon={IconX}
-                      size="md"
-                      onClick={() => {
-                        setShowReplyForm(false);
-                        setReplyBody("");
-                        setReplyBcc("");
-                        setNotice(null);
-                      }}
-                      title="Cancel"
-                    >
-                      Cancel
-                    </ActionButton>
-                    <ActionButton
-                      icon={IconSend}
-                      variant="primary"
-                      size="md"
-                      onClick={() => void sendReply()}
-                      disabled={
-                        sending || !emailBodyHasContent(replyBody) || !replyTo.trim()
-                      }
-                      title="Send reply"
-                    >
-                      {sending ? "Sending…" : "Send reply"}
-                    </ActionButton>
+                  {replyAttachments.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-1 pb-1">
+                      {replyAttachments.map((att) => (
+                        <div
+                          key={att.id}
+                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-200"
+                        >
+                          <IconPaperclip size="xs" className="text-emerald-400" />
+                          <span className="font-medium max-w-[200px] truncate">
+                            {att.filename}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            ({(att.size / 1024).toFixed(0)} KB)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveReplyAttachment(att.id)}
+                            className="text-slate-400 hover:text-rose-400 transition ml-1 cursor-pointer"
+                            title="Remove attachment"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <div className="flex items-center gap-2">
+                      <ActionButton
+                        icon={IconPaperclip}
+                        size="md"
+                        variant="secondary"
+                        onClick={() => replyFileInputRef.current?.click()}
+                        disabled={sending || uploadingAttachment}
+                        title="Attach Document / Files"
+                      >
+                        {uploadingAttachment ? "Attaching…" : "Attach Document"}
+                      </ActionButton>
+                      {replyAttachments.length > 0 && (
+                        <span className="text-xs text-emerald-400 font-medium">
+                          {replyAttachments.length} attached
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <ActionButton
+                        icon={IconX}
+                        size="md"
+                        onClick={() => {
+                          setShowReplyForm(false);
+                          setReplyBody("");
+                          setReplyBcc("");
+                          setReplyAttachments([]);
+                          setNotice(null);
+                        }}
+                        title="Cancel"
+                      >
+                        Cancel
+                      </ActionButton>
+                      <ActionButton
+                        icon={IconSend}
+                        variant="primary"
+                        size="md"
+                        onClick={() => void sendReply()}
+                        disabled={
+                          sending ||
+                          !emailBodyHasContent(replyBody) ||
+                          !replyTo.trim() ||
+                          uploadingAttachment
+                        }
+                        title="Send reply"
+                      >
+                        {sending ? "Sending…" : "Send reply"}
+                      </ActionButton>
+                    </div>
                   </div>
                 </div>
               )}

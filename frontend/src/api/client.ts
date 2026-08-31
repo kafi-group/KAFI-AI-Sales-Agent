@@ -2690,6 +2690,8 @@ export const client = {
     subject?: string;
     body: string;
     cc?: string;
+    bcc?: string;
+    attachments?: Array<{ id: string; filename: string; content_type: string; size: number }>;
   }) =>
     request<InboxComposeResponse>("/inbox/compose", {
       method: "POST",
@@ -2732,7 +2734,14 @@ export const client = {
     request<InboxThreadDetail>(`/inbox/threads/${encodeURIComponent(threadId)}`),
   replyInboxThread: (
     threadId: string,
-    payload: { body: string; to?: string; subject?: string; cc?: string; bcc?: string },
+    payload: {
+      body: string;
+      to?: string;
+      subject?: string;
+      cc?: string;
+      bcc?: string;
+      attachments?: Array<{ id: string; filename: string; content_type: string; size: number }>;
+    },
   ) =>
     request<InboxReplyResponse>(`/inbox/threads/${encodeURIComponent(threadId)}/reply`, {
       method: "POST",
@@ -2837,6 +2846,7 @@ export const client = {
       cc?: string;
       bcc?: string;
       folder?: string;
+      attachments?: Array<{ id: string; filename: string; content_type: string; size: number }>;
     },
   ) =>
     request<InboxReplyResponse>(`/inbox/messages/${encodeURIComponent(uid)}/reply`, {

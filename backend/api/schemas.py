@@ -1341,6 +1341,7 @@ class InboxReplyRequest(BaseModel):
     cc: Optional[str] = None
     bcc: Optional[str] = None
     folder: Optional[str] = "INBOX"
+    attachments: Optional[list[dict[str, Any]]] = None
 
 
 class InboxReplyResponse(BaseModel):
@@ -1355,6 +1356,8 @@ class InboxComposeRequest(BaseModel):
     subject: str = Field(default="", description="Email subject")
     body: str = Field(min_length=1, description="Plain-text email body")
     cc: Optional[str] = None
+    bcc: Optional[str] = None
+    attachments: Optional[list[dict[str, Any]]] = None
 
 
 class InboxComposeResponse(BaseModel):

@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { client, type EmailTemplate, type MailComposeDraft } from "../api/client";
+import { client, type EmailAttachment, type EmailTemplate, type MailComposeDraft } from "../api/client";
 import { EmailBodyEditor, emailBodyHasContent } from "./EmailBodyEditor";
 import { ProseInput } from "./ProseTextField";
+import { IconPaperclip } from "./icons/AppIcons";
 
 interface ComposeMailModalProps {
   fromEmail: string;
@@ -32,6 +33,9 @@ export function ComposeMailModal({
   const [cc, setCc] = useState(initialDraft?.cc_addrs || "");
   const [subject, setSubject] = useState(initialDraft?.subject || "");
   const [body, setBody] = useState(initialDraft?.body || "");
+  const [attachments, setAttachments] = useState<EmailAttachment[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [sending, setSending] = useState(false);
   const [showCc, setShowCc] = useState(Boolean(initialDraft?.cc_addrs?.trim()));
   const [draftId, setDraftId] = useState<number | null>(initialDraft?.id ?? null);
@@ -45,6 +49,30 @@ export function ComposeMailModal({
   const closingRef = useRef(false);
   const stateRef = useRef({ to, cc, subject, body, draftId });
   stateRef.current = { to, cc, subject, body, draftId };
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploadingAttachment(true);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const uploaded = await client.uploadEmailAttachment(file);
+        setAttachments((prev) => [...prev, uploaded]);
+      }
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Failed to upload attachment");
+    } finally {
+      setUploadingAttachment(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  }
+
+  function handleRemoveAttachment(id: string) {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }
 
   async function saveDraftNow(force = false): Promise<number | null> {
     const snap = stateRef.current;
@@ -168,6 +196,7 @@ export function ComposeMailModal({
         subject: subject.trim(),
         body: body.trimEnd(),
         cc: cc.trim() || undefined,
+        attachments: attachments.length > 0 ? attachments : undefined,
       });
       sentRef.current = true;
       if (draftId != null) {
@@ -302,10 +331,57 @@ export function ComposeMailModal({
               placeholder="Write your email…"
             />
           </div>
+
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 pt-1 pb-1">
+              {attachments.map((att) => (
+                <div
+                  key={att.id}
+                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-200"
+                >
+                  <IconPaperclip size="xs" className="text-emerald-400" />
+                  <span className="font-medium max-w-[200px] truncate">{att.filename}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    ({(att.size / 1024).toFixed(0)} KB)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveAttachment(att.id)}
+                    className="text-slate-400 hover:text-rose-400 transition ml-1 cursor-pointer"
+                    title="Remove attachment"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-slate-800 bg-slate-950/40">
-          <div>
+          <div className="flex items-center gap-2">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              multiple
+              className="hidden"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp,.gif"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={sending || uploadingAttachment}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-xs font-medium text-slate-200 transition cursor-pointer disabled:opacity-50"
+            >
+              <IconPaperclip size="sm" className="text-emerald-400" />
+              <span>{uploadingAttachment ? "Attaching…" : "Attach Document"}</span>
+            </button>
+            {attachments.length > 0 && (
+              <span className="text-xs text-emerald-400 font-medium">
+                {attachments.length} attached
+              </span>
+            )}
             {(draftId != null ||
               hasDraftContent(to, cc, subject, body) ||
               Boolean(initialDraft)) && (
@@ -313,7 +389,7 @@ export function ComposeMailModal({
                 type="button"
                 onClick={() => void discardDraft()}
                 disabled={sending || discarding}
-                className="px-3 py-2 rounded-lg border border-red-800/50 text-sm text-red-300 hover:bg-red-950/40 disabled:opacity-50"
+                className="px-3 py-2 rounded-lg border border-red-800/50 text-sm text-red-300 hover:bg-red-950/40 disabled:opacity-50 ml-2"
               >
                 {discarding ? "Discarding…" : "Discard"}
               </button>
@@ -331,7 +407,7 @@ export function ComposeMailModal({
             <button
               type="button"
               onClick={() => void handleSend()}
-              disabled={sending || discarding || !to.trim() || !emailBodyHasContent(body)}
+              disabled={sending || discarding || !to.trim() || !emailBodyHasContent(body) || uploadingAttachment}
               className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium text-white disabled:opacity-50"
             >
               {sending ? "Sending…" : "Send"}

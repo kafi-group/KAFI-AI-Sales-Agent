@@ -155,6 +155,8 @@ def compose_inbox_mail(
             subject=payload.subject,
             body=payload.body,
             cc=payload.cc,
+            bcc=payload.bcc,
+            attachments=payload.attachments,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Could not send email: {exc}") from exc
@@ -209,6 +211,7 @@ def reply_inbox_thread(
             subject=payload.subject,
             cc=payload.cc,
             bcc=payload.bcc,
+            attachments=payload.attachments,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Could not send reply: {exc}") from exc
@@ -470,6 +473,7 @@ def reply_inbox_message(
             subject=payload.subject,
             cc=payload.cc,
             bcc=payload.bcc,
+            attachments=payload.attachments,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Could not send reply: {exc}") from exc

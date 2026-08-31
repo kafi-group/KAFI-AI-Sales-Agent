@@ -783,6 +783,7 @@ def reply(
     cc: str | None = None,
     bcc: str | None = None,
     include_quote: bool = True,
+    attachments: list[dict] | None = None,
 ) -> dict[str, Any]:
     account = resolve_user_mailbox(user)
     if not account:
@@ -826,6 +827,7 @@ def reply(
             body=tracked_body,
             cc=cc,
             bcc=bcc,
+            attachments=attachments,
             interaction_id=track_interaction_id,
             send_mode="individual",
         )
@@ -862,6 +864,7 @@ def reply_to_thread(
     subject: str | None = None,
     cc: str | None = None,
     bcc: str | None = None,
+    attachments: list[dict] | None = None,
 ) -> dict[str, Any]:
     thread = get_thread(user, thread_id, mark_seen=False)
     if not thread or not thread.get("messages"):
@@ -886,6 +889,7 @@ def reply_to_thread(
         cc=cc,
         bcc=bcc,
         include_quote=True,
+        attachments=attachments,
     )
 
 
@@ -896,6 +900,8 @@ def compose(
     subject: str,
     body: str,
     cc: str | None = None,
+    bcc: str | None = None,
+    attachments: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Send a new outbound email from the logged-in user's mailbox (SMTP/OAuth)."""
     account = resolve_user_mailbox(user)
@@ -925,6 +931,8 @@ def compose(
             subject=subject_clean,
             body=tracked_body,
             cc=(cc or "").strip() or None,
+            bcc=(bcc or "").strip() or None,
+            attachments=attachments,
             interaction_id=track_interaction_id,
             send_mode="individual",
         )
