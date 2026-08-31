@@ -916,6 +916,17 @@ export interface EmailTemplate {
   updated_at: string;
 }
 
+export interface AvailablePhoneOption {
+  phone: string;
+  raw?: string;
+  label: string;
+  contact_name?: string | null;
+  is_dialed: boolean;
+  type: "mobile" | "landline" | "unknown";
+  is_landline: boolean;
+  wa_supported: boolean;
+}
+
 export interface PersonalizedFollowupDraft {
   id: number;
   interaction_id: number;
@@ -926,6 +937,8 @@ export interface PersonalizedFollowupDraft {
   contact_name: string | null;
   contact_email: string | null;
   contact_phone: string | null;
+  available_phones?: AvailablePhoneOption[];
+  selected_phone?: string | null;
   created_by_user_id: number | null;
   call_outcome: string;
   call_context?: string | null;
@@ -955,6 +968,7 @@ export interface PersonalizedFollowupListResponse {
 
 export interface PersonalizedFollowupSendPayload {
   channels?: string;
+  target_phone?: string;
   template_name?: string;
   template_language?: string;
   template_variables?: string[];

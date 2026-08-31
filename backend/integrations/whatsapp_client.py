@@ -286,6 +286,8 @@ def _friendly_whatsapp_api_error(
     error_obj = (body or {}).get("error") or {}
     code = error_obj.get("code")
 
+    if code in {131026, 131051} or "not a valid whatsapp user" in lower or "not on whatsapp" in lower or "undeliverable" in lower or "not registered" in lower:
+        return f"Recipient number is not registered on WhatsApp. ({text})"
     if status_code == 401 or code == 190 or "expired" in lower or "session has expired" in lower:
         return (
             "Your WHATSAPP_ACCESS_TOKEN has expired. In Meta Business Settings → System users, "

@@ -49,6 +49,8 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
   const [waTemplateSearch, setWaTemplateSearch] = useState("");
   const [waTemplateVariables, setWaTemplateVariables] = useState<string[]>([]);
   const [needsWaTemplate, setNeedsWaTemplate] = useState(false);
+  const [selectedPhone, setSelectedPhone] = useState("");
+  const [customPhone, setCustomPhone] = useState("");
 
   useEffect(() => {
     if (!pendingFollowUp) return;
@@ -58,6 +60,8 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     setSubject("");
     setEmailBody("");
     setAttachments([]);
+    setSelectedPhone("");
+    setCustomPhone("");
     setDraftNotice(null);
     setStep("remarks");
     setWaTemplateId("");
@@ -110,6 +114,13 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     setSubject(draft.subject || "");
     setEmailBody(draft.email_body || draft.whatsapp_body || "");
     setAttachments([]);
+    if (draft.selected_phone) {
+      setSelectedPhone(draft.selected_phone);
+    } else if (draft.available_phones && draft.available_phones.length > 0) {
+      setSelectedPhone(draft.available_phones[0].phone);
+    } else if (draft.contact_phone) {
+      setSelectedPhone(draft.contact_phone);
+    }
   }, [draft?.id]);
 
   if (!pendingFollowUp || bulkOwnsFollowUp) return null;
@@ -189,6 +200,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
       if (!saved) return;
       const result = await client.sendPersonalizedFollowup(draft.id, {
         channels,
+        target_phone: selectedPhone.trim() || undefined,
         attachments: channels === "email" || channels === "all" ? attachments : undefined,
         ...(useWaTemplate
           ? {
@@ -238,37 +250,22 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
   }
 
   const whatsappPreview = deriveWhatsAppFromEmail(emailBody);
+  const availablePhones = draft?.available_phones || [];
+  const selectedPhoneObj = availablePhones.find((p) => p.phone === selectedPhone);
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60">
-      <div
-        className="w-full sm:max-w-2xl max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-xl border border-slate-700 bg-slate-900 shadow-2xl p-5 space-y-4"
-        role="dialog"
-        aria-labelledby="post-call-title"
-      >
-        <div>
-          <h3 id="post-call-title" className="text-lg font-medium text-slate-100">
-            {step === "confirm" ? "Review & send confirmation" : "Call finished"}
-          </h3>
-          <p className="text-sm text-slate-400 mt-1">
-            {step === "confirm" ? (
-              <>
-                Edit the message, attach files for email, then send to{" "}
-                <span className="text-slate-200">{pendingFollowUp.label}</span>.
-              </>
-            ) : (
-              <>
-                Add remarks and label the outcome for{" "}
-                <span className="text-slate-200">{pendingFollowUp.label}</span>.
-                {callOutcomeSectionHint(outcome) ? (
-                  <span className="block mt-1 text-emerald-300/90">
-                    {callOutcomeSectionHint(outcome)}
-                  </span>
-                ) : null}
-              </>
-            )}
-          </p>
-        </div>
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="post-call-title"
+    >
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-6 shadow-2xl space-y-4">
+        <h3 id="post-call-title" className="text-lg font-medium text-slate-100">
+          {step === "remarks"
+            ? "Call remarks & outcome"
+            : `Follow-up draft — ${draft?.company_name || "Lead"}`}
+        </h3>
 
         {step === "remarks" ? (
           <>
@@ -287,12 +284,19 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
               onOutcomeChange={setOutcome}
               onSave={() => void saveRemarks()}
               saving={saving}
-              saveLabel="Save & prepare confirmation"
+              saveLabel="Save & generate draft"
               compact
             />
+            {outcome ? (
+              <p className="text-xs text-slate-400">
+                Next list:{" "}
+                <span className="text-slate-200">{callOutcomeSectionHint(outcome)}</span>
+              </p>
+            ) : null}
             <ActionButton
               icon={IconX}
               variant="ghost"
+              size="sm"
               onClick={dismiss}
               title="Skip for now"
               className="text-slate-400"
@@ -310,16 +314,6 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                   <p className="text-xs text-slate-400">
                     Draft tone:{" "}
                     <span className="text-slate-200">{draft.call_context_label}</span>
-                  </p>
-                ) : null}
-                {draft.call_context &&
-                ["voicemail_or_no_answer", "brief_or_unclear"].includes(draft.call_context) &&
-                /\b(as per our (call|conversation|discussion)|following our call|thank you for speaking with us today)\b/i.test(
-                  emailBody,
-                ) ? (
-                  <p className="text-xs text-amber-200/95 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-                    This draft assumes a live conversation, but the call was voicemail or could
-                    not connect. Edit the text before sending.
                   </p>
                 ) : null}
                 <label className="block">
@@ -346,6 +340,94 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                   label="Email attachments"
                   hint="Optional — PDF, images, Excel, etc. Included when you send email."
                 />
+
+                {/* Target WhatsApp Recipient & Number Selector */}
+                <div className="rounded-xl border border-slate-700/80 bg-slate-950/60 p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                      <IconWhatsApp size="sm" className="text-emerald-400" />
+                      Target WhatsApp Recipient
+                    </span>
+                    {selectedPhoneObj && (
+                      <span
+                        className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
+                          selectedPhoneObj.is_landline
+                            ? "bg-amber-950/70 text-amber-300 border border-amber-800/60"
+                            : "bg-emerald-950/70 text-emerald-300 border border-emerald-800/60"
+                        }`}
+                      >
+                        {selectedPhoneObj.is_landline ? "⚠️ Landline (No WhatsApp)" : "🟢 WhatsApp Mobile"}
+                      </span>
+                    )}
+                  </div>
+
+                  {availablePhones.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {availablePhones.map((p) => {
+                        const isSelected = selectedPhone === p.phone;
+                        return (
+                          <label
+                            key={p.phone}
+                            onClick={() => {
+                              setSelectedPhone(p.phone);
+                              setCustomPhone("");
+                            }}
+                            className={`flex items-start gap-2.5 p-2.5 rounded-lg border text-xs cursor-pointer transition ${
+                              isSelected
+                                ? "border-emerald-500 bg-emerald-950/30 text-slate-100 shadow-sm"
+                                : "border-slate-800 bg-slate-900/60 text-slate-300 hover:border-slate-700"
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="target_phone"
+                              checked={isSelected}
+                              onChange={() => {
+                                setSelectedPhone(p.phone);
+                                setCustomPhone("");
+                              }}
+                              className="mt-0.5 text-emerald-500 focus:ring-0"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 font-medium">
+                                <span className="truncate">{p.label}</span>
+                                {p.is_dialed && (
+                                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-sky-900/60 text-sky-300 border border-sky-700/50">
+                                    Dialed
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-slate-400 font-mono text-[11px] mt-0.5 truncate">{p.phone}</p>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+
+                  {selectedPhoneObj?.is_landline && (
+                    <p className="text-xs text-amber-300/90 rounded-lg bg-amber-950/40 border border-amber-800/50 px-2.5 py-1.5">
+                      ⚠️ <strong>Landline selected:</strong> WhatsApp cannot deliver messages to landlines. Please select a mobile number above or enter one below.
+                    </p>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-1 border-t border-slate-800/80">
+                    <span className="text-[11px] text-slate-400 shrink-0">Other number:</span>
+                    <input
+                      type="text"
+                      placeholder="e.g. +971501234567"
+                      value={customPhone}
+                      onChange={(e) => {
+                        setCustomPhone(e.target.value);
+                        if (e.target.value.trim()) {
+                          setSelectedPhone(e.target.value.trim());
+                        }
+                      }}
+                      className="flex-1 rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
                 <label className="block">
                   <span className="text-xs text-slate-400">WhatsApp preview (auto-synced from email)</span>
                   <textarea

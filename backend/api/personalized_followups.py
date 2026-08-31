@@ -28,6 +28,10 @@ class PersonalizedFollowupSend(BaseModel):
         default="both",
         description="email | whatsapp | both",
     )
+    target_phone: Optional[str] = Field(
+        default=None,
+        description="Specific recipient phone number for WhatsApp (Meta / Mobile). Defaults to dialed or primary contact phone.",
+    )
     template_name: Optional[str] = None
     template_language: str = "en_US"
     template_variables: list[str] = Field(default_factory=list)
@@ -60,19 +64,33 @@ def list_personalized_followups(
 def get_personalized_followup_by_interaction(
     interaction_id: int,
     db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    row = pf_module.get_draft_for_interaction(db, interaction_id=interaction_id)
+    if not row:
+        raise HTTPException(404, "Personalized draft not found for this call")
+    return row
+
+
+@router.post("/{draft_id}/generate")
+def trigger_generation(
+    draft_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
     _user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    draft = pf_module.get_draft_for_interaction(db, interaction_id=interaction_id)
+    draft = db.get(PersonalizedFollowupDraft, draft_id)
     if not draft:
-        raise HTTPException(404, "No call confirmation draft for this interaction")
-    return draft
+        raise HTTPException(404, "Personalized draft not found")
+    background_tasks.add_task(_generate_in_background, draft_id)
+    return {"status": "generating", "draft_id": draft_id}
 
 
 @router.get("/{draft_id}")
 def get_personalized_followup(
     draft_id: int,
     db: Session = Depends(get_db),
-    _user: AppUser = Depends(get_current_user),
+    user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     draft = db.get(PersonalizedFollowupDraft, draft_id)
     if not draft:
@@ -103,19 +121,13 @@ def update_personalized_followup(
 @router.post("/{draft_id}/regenerate")
 def regenerate_personalized_followup(
     draft_id: int,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    draft = db.get(PersonalizedFollowupDraft, draft_id)
-    if not draft:
-        raise HTTPException(404, "Personalized draft not found")
-    if draft.status == "sent":
-        raise HTTPException(400, "Already sent")
-    draft.status = "generating"
-    db.commit()
-    background_tasks.add_task(_generate_in_background, draft_id)
-    db.refresh(draft)
+    try:
+        draft = pf_module.generate_draft_content(db, draft_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     return pf_module.draft_to_dict(db, draft)
 
 
@@ -133,6 +145,7 @@ def send_personalized_followup(
             draft_id,
             user=user,
             channels=body.channels,
+            target_phone=body.target_phone,
             template_name=body.template_name,
             template_language=body.template_language,
             template_variables=body.template_variables,

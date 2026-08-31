@@ -355,6 +355,125 @@ Source:
 {shared_rules}"""
 
 
+def _classify_phone_type(phone: str, label_hint: str = "") -> tuple[str, bool, bool]:
+    """Classify phone number type and WhatsApp capability.
+
+    Returns: (type: "mobile"|"landline"|"unknown", is_landline: bool, wa_supported: bool)
+    """
+    clean = "".join(ch for ch in phone if ch.isdigit())
+    # UAE (+971)
+    if clean.startswith("971"):
+        # Landlines: +971 2 (Abu Dhabi), +971 3 (Al Ain), +971 4 (Dubai), +971 6 (Sharjah/Ajman), +971 7 (RAK), +971 9 (Fujairah)
+        if any(clean.startswith(p) for p in ("9712", "9713", "9714", "9716", "9717", "9719")):
+            return "landline", True, False
+        # Mobiles: +971 50, 52, 54, 55, 56, 58
+        if any(clean.startswith(p) for p in ("97150", "97152", "97154", "97155", "97156", "97158")):
+            return "mobile", False, True
+    # Saudi (+966)
+    if clean.startswith("966"):
+        if clean.startswith("9665"):
+            return "mobile", False, True
+        if any(clean.startswith(p) for p in ("96611", "96612", "96613", "96614", "96616", "96617")):
+            return "landline", True, False
+    # Pakistan (+92)
+    if clean.startswith("92"):
+        if clean.startswith("923"):
+            return "mobile", False, True
+        if any(clean.startswith(p) for p in ("9221", "9242", "9251", "9291", "9261", "9281")):
+            return "landline", True, False
+    # UK (+44)
+    if clean.startswith("44"):
+        if clean.startswith("447"):
+            return "mobile", False, True
+        if any(clean.startswith(p) for p in ("441", "442")):
+            return "landline", True, False
+    # US/Canada (+1)
+    if clean.startswith("1") and len(clean) == 11:
+        return "mobile", False, True
+
+    hint = (label_hint or "").lower()
+    if "mobile" in hint or "cell" in hint or "whatsapp" in hint:
+        return "mobile", False, True
+    if "landline" in hint or "office" in hint or "fax" in hint or "tel" in hint:
+        return "landline", True, False
+
+    return "unknown", False, True
+
+
+def get_available_phones_for_draft(db: Session, draft: PersonalizedFollowupDraft) -> list[dict[str, Any]]:
+    """Gather, deduplicate, and classify all available phone numbers for this lead/contact."""
+    from integrations.voice_client import normalize_e164
+    from modules.calls import parse_call_fields
+
+    interaction = db.get(Interaction, draft.interaction_id) if draft.interaction_id else None
+    dialed_raw = parse_call_fields(interaction.content).get("lead_phone") if interaction else None
+    dialed_e164 = normalize_e164(dialed_raw) if dialed_raw else None
+
+    contact = db.get(Contact, draft.contact_id) if draft.contact_id else None
+    buyer = db.get(Buyer, draft.buyer_id) if draft.buyer_id else None
+
+    raw_list: list[dict[str, Any]] = []
+
+    if contact:
+        if contact.phone:
+            raw_list.append({"phone": contact.phone, "label": "Primary Mobile", "contact_name": contact.full_name})
+        if contact.secondary_mobile:
+            raw_list.append({"phone": contact.secondary_mobile, "label": "Secondary Mobile", "contact_name": contact.full_name})
+        if contact.primary_phone:
+            raw_list.append({"phone": contact.primary_phone, "label": "Office Phone", "contact_name": contact.full_name})
+        if contact.secondary_phone:
+            raw_list.append({"phone": contact.secondary_phone, "label": "Secondary Landline", "contact_name": contact.full_name})
+        if contact.wa_id and contact.wa_id != contact.phone:
+            raw_list.append({"phone": contact.wa_id, "label": "WhatsApp Number", "contact_name": contact.full_name})
+
+    if buyer and buyer.contacts:
+        for c in buyer.contacts:
+            if contact and c.id == contact.id:
+                continue
+            if c.phone:
+                raw_list.append({"phone": c.phone, "label": f"{c.full_name} (Mobile)", "contact_name": c.full_name})
+            if c.secondary_mobile:
+                raw_list.append({"phone": c.secondary_mobile, "label": f"{c.full_name} (Secondary)", "contact_name": c.full_name})
+            if c.primary_phone:
+                raw_list.append({"phone": c.primary_phone, "label": f"{c.full_name} (Office)", "contact_name": c.full_name})
+
+    if dialed_raw:
+        raw_list.insert(0, {
+            "phone": dialed_raw,
+            "label": "Dialed Number",
+            "contact_name": contact.full_name if contact else None,
+        })
+
+    seen_e164: set[str] = set()
+    result: list[dict[str, Any]] = []
+    for item in raw_list:
+        raw_p = (item.get("phone") or "").strip()
+        if not raw_p:
+            continue
+        e164 = normalize_e164(raw_p) or raw_p
+        if e164 in seen_e164:
+            continue
+        seen_e164.add(e164)
+
+        is_dialed = bool((dialed_e164 and e164 == dialed_e164) or (dialed_raw and raw_p == dialed_raw))
+        ptype, is_landline, wa_supported = _classify_phone_type(e164, item.get("label", ""))
+
+        result.append({
+            "phone": e164,
+            "raw": raw_p,
+            "label": item.get("label", "Phone"),
+            "contact_name": item.get("contact_name"),
+            "is_dialed": is_dialed,
+            "type": ptype,
+            "is_landline": is_landline,
+            "wa_supported": wa_supported,
+        })
+
+    # Sort so dialed or mobile numbers appear first, followed by landlines
+    result.sort(key=lambda x: (not x["is_dialed"], x["is_landline"]))
+    return result
+
+
 def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, Any]:
     buyer = db.get(Buyer, draft.buyer_id)
     contact = db.get(Contact, draft.contact_id) if draft.contact_id else None
@@ -366,6 +485,15 @@ def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, An
         notes=notes,
         transcript=transcript,
     )
+    available_phones = get_available_phones_for_draft(db, draft)
+    selected_phone = None
+    if available_phones:
+        # Default to first non-landline dialed, or first mobile, or first phone
+        mobile_dialed = next((p["phone"] for p in available_phones if p["is_dialed"] and not p["is_landline"]), None)
+        dialed = next((p["phone"] for p in available_phones if p["is_dialed"]), None)
+        first_mobile = next((p["phone"] for p in available_phones if not p["is_landline"]), None)
+        selected_phone = mobile_dialed or dialed or first_mobile or available_phones[0]["phone"]
+
     return {
         "id": draft.id,
         "interaction_id": draft.interaction_id,
@@ -376,6 +504,8 @@ def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, An
         "contact_name": contact.full_name if contact else None,
         "contact_email": contact.email if contact else None,
         "contact_phone": (contact.phone or contact.wa_id) if contact else None,
+        "available_phones": available_phones,
+        "selected_phone": selected_phone,
         "created_by_user_id": draft.created_by_user_id,
         "call_outcome": draft.call_outcome,
         "call_context": call_context,
@@ -676,6 +806,7 @@ def send_draft(
     *,
     user: AppUser,
     channels: str | list[str] | None = None,
+    target_phone: str | None = None,
     template_name: str | None = None,
     template_language: str = "en_US",
     template_variables: list[str] | None = None,
@@ -772,6 +903,19 @@ def send_draft(
     db.commit()
 
     from modules.comms_generator import get_comms
+    from integrations.voice_client import normalize_e164
+
+    contact = db.get(Contact, draft.contact_id) if draft.contact_id else None
+    recipient_wa_phone = None
+    if target_phone and target_phone.strip():
+        recipient_wa_phone = normalize_e164(target_phone.strip()) or target_phone.strip()
+    elif contact and (contact.phone or contact.wa_id):
+        recipient_wa_phone = normalize_e164(contact.phone or contact.wa_id) or (contact.phone or contact.wa_id)
+    elif interaction:
+        from modules.calls import parse_call_fields
+        dialed_p = parse_call_fields(interaction.content).get("lead_phone")
+        if dialed_p:
+            recipient_wa_phone = normalize_e164(dialed_p) or dialed_p
 
     comms = get_comms()
     email_status = draft.email_send_status
@@ -816,10 +960,11 @@ def send_draft(
     if send_whatsapp:
         try:
             from modules import whatsapp_templates as templates_module
+            from integrations.whatsapp_client import whatsapp_client
 
-            contact = db.get(Contact, draft.contact_id) if draft.contact_id else None
-            if not contact or not (contact.phone or contact.wa_id):
-                raise ValueError("Contact has no phone number for WhatsApp")
+            if not recipient_wa_phone:
+                raise ValueError("Recipient has no phone number for WhatsApp")
+
             resolved_variables = list(template_variables or [])
             if (template_name or "").strip():
                 from db.models import WhatsAppTemplate
@@ -833,7 +978,7 @@ def send_draft(
                     suggested = templates_module.suggest_template_variables(
                         template_row.body_text,
                         template_row.variable_count,
-                        contact_name=draft.contact_name or contact.full_name,
+                        contact_name=draft.contact_name or (contact.full_name if contact else "Client"),
                         company_name=draft.company_name,
                         country=draft.country,
                     )
@@ -841,26 +986,40 @@ def send_draft(
                         resolved_variables,
                         suggested,
                     )
-            wa_draft = comms.create_manual_whatsapp_draft(
-                db,
-                contact_id=contact.id,
-                content=(draft.whatsapp_body or draft.email_body or "").strip(),
-            )
-            wa_interaction_id = wa_draft.id
-            _wa_approved, wa_result = comms.approve_draft(
-                db,
-                wa_draft.id,
-                approved_by=user.username,
-                send=True,
+
+            expires = contact.whatsapp_window_expires_at if contact else None
+            if expires is not None and expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            within_window = bool(expires and expires > datetime.now(timezone.utc))
+
+            components = None
+            if template_name and resolved_variables:
+                from modules.whatsapp_templates import build_body_component
+                components = build_body_component(resolved_variables)
+
+            wa_result = whatsapp_client.send_approved(
+                phone=recipient_wa_phone,
+                message=(draft.whatsapp_body or draft.email_body or "").strip(),
                 template_name=(template_name or "").strip() or None,
                 template_language=template_language or "en_US",
-                template_variables=resolved_variables,
+                template_components=components,
+                within_session_window=within_window,
             )
-            approved_wa = getattr(_wa_approved.status, "value", _wa_approved.status)
-            wa_status = (wa_result or {}).get("status") or (
-                "sent" if str(approved_wa) == "sent" else "error"
-            )
-            wa_message = (wa_result or {}).get("message")
+            wa_status = wa_result.get("status") or "error"
+            wa_message = wa_result.get("message")
+            if wa_status == "sent":
+                if contact:
+                    wa_draft = comms.create_manual_whatsapp_draft(
+                        db,
+                        contact_id=contact.id,
+                        content=(draft.whatsapp_body or draft.email_body or "").strip(),
+                    )
+                    wa_draft.provider_message_id = wa_result.get("provider_message_id")
+                    wa_draft.status = InteractionStatus.sent
+                    wa_draft.wa_status = "sent"
+                    wa_draft.template_name = (template_name or "").strip() or None
+                    db.commit()
+                    wa_interaction_id = wa_draft.id
         except Exception as exc:  # noqa: BLE001
             wa_status = "error"
             wa_message = str(exc)
@@ -870,10 +1029,8 @@ def send_draft(
         try:
             from integrations import whatsapp_bridge_client as bridge
 
-            contact = db.get(Contact, draft.contact_id) if draft.contact_id else None
-            phone = (contact.phone or contact.wa_id or "").strip() if contact else ""
-            if not phone:
-                raise ValueError("Contact has no phone number for WhatsApp Personal")
+            if not recipient_wa_phone:
+                raise ValueError("Recipient has no phone number for WhatsApp Personal")
             status = bridge.bridge_status(user.id)
             if not status.get("connected"):
                 raise ValueError(
@@ -881,11 +1038,11 @@ def send_draft(
                 )
             bridge.bridge_send(
                 user.id,
-                to_phone=phone,
+                to_phone=recipient_wa_phone,
                 message=(draft.whatsapp_body or draft.email_body or "").strip(),
             )
             wa_personal_status = "sent"
-            wa_personal_message = "Sent via personal WhatsApp"
+            wa_personal_message = f"Sent to {recipient_wa_phone} via personal WhatsApp"
         except Exception as exc:  # noqa: BLE001
             wa_personal_status = "error"
             wa_personal_message = str(exc)
