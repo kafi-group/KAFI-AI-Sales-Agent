@@ -122,8 +122,21 @@ def _parse_uploaded_file(file_content: bytes, filename: str) -> list[dict[str, A
         facebook = norm.get("facebook_url") or norm.get("facebook") or norm.get("facebook_company_url") or ""
         instagram = norm.get("instagram_url") or norm.get("instagram") or norm.get("instagram_company_url") or ""
         remarks = norm.get("remarks") or norm.get("notes") or norm.get("comment") or ""
+        buyer_id = norm.get("buyer_id") or norm.get("id") or ""
+        company_grading = (
+            norm.get("company_grading")
+            or norm.get("excel_grading")
+            or norm.get("companies_grading")
+            or norm.get("grading")
+            or norm.get("company_grading_/_excel_grading")
+            or norm.get("excel_/_company_grading")
+            or ""
+        )
+        product_interest = norm.get("product_interest") or norm.get("product") or norm.get("products") or ""
+        industry = norm.get("industry") or norm.get("business_type") or ""
 
         row_dict = {
+            "buyer_id": buyer_id,
             "company_name": company,
             "contact_name": contact,
             "designation": designation,
@@ -135,6 +148,9 @@ def _parse_uploaded_file(file_content: bytes, filename: str) -> list[dict[str, A
             "country": country,
             "city": city,
             "address": address,
+            "company_grading": company_grading,
+            "product_interest": product_interest,
+            "industry": industry,
             "linkedin_url": linkedin,
             "facebook_url": facebook,
             "instagram_url": instagram,
@@ -362,6 +378,7 @@ def execute_safe_fill_merge(
 
     db_buyers = query.all()
 
+    by_id = {buyer.id: buyer for buyer in db_buyers}
     by_name = {}
     by_domain = {}
     by_email = {}
@@ -393,6 +410,9 @@ def execute_safe_fill_merge(
         "city": "city",
         "address": "address",
         "website_url": "website_url",
+        "company_grading": "company_grading",
+        "product_interest": "product_interest",
+        "industry": "industry",
         "remarks": "remarks",
         "facebook_url": "facebook_company_url",
         "instagram_url": "instagram_company_url",
@@ -410,13 +430,16 @@ def execute_safe_fill_merge(
     }
 
     for row in uploaded_rows:
+        buyer_id_raw = str(row.get("buyer_id") or "").strip()
         comp_name = row.get("company_name") or ""
         domain = _dedupe_domain(row.get("website_url"))
         email = (row.get("email") or "").strip().lower()
         phone = (row.get("phone") or "").strip()
 
         buyer = None
-        if comp_name and _normalize_name(comp_name) in by_name:
+        if buyer_id_raw.isdigit() and int(buyer_id_raw) in by_id:
+            buyer = by_id[int(buyer_id_raw)]
+        elif comp_name and _normalize_name(comp_name) in by_name:
             buyer = by_name[_normalize_name(comp_name)]
         elif domain and domain in by_domain:
             buyer = by_domain[domain]
