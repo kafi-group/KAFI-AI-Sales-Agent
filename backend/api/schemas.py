@@ -69,6 +69,7 @@ class DialableContactSuggestion(BaseModel):
 
 class DialableContactSuggestionsResponse(BaseModel):
     q: str = ""
+    section: Optional[str] = None
     country: Optional[str] = None
     grade: Optional[str] = None
     designation: Optional[str] = None
@@ -76,9 +77,10 @@ class DialableContactSuggestionsResponse(BaseModel):
 
 
 class CallFilterOptionsResponse(BaseModel):
-    countries: list[str]
-    grades: list[str]
-    designations: list[str]
+    sections: list[dict[str, object]] = []
+    countries: list[str] = []
+    grades: list[str] = []
+    designations: list[str] = []
 
 
 class QuotationEligibleLeadRead(BuyerRead):

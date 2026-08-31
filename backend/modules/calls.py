@@ -1118,16 +1118,18 @@ def suggest_dialable_contacts(
     db: Session,
     *,
     q: str = "",
+    section: str | None = None,
     country: str | None = None,
     grade: str | None = None,
     designation: str | None = None,
     limit: int = 25,
     assigned_to_user_id: int | None = None,
 ) -> list[dict[str, object]]:
-    """Search/filter dialable contacts with phone numbers by query, country, grade, and designation."""
+    """Search/filter dialable contacts with phone numbers by section/pool, query, country, grade, and designation."""
     from sqlalchemy import or_, func as sa_func
 
     query_str = (q or "").strip()
+    section_str = (section or "").strip().lower()
     country_str = (country or "").strip()
     grade_str = (grade or "").strip()
     desig_str = (designation or "").strip()
@@ -1147,6 +1149,48 @@ def suggest_dialable_contacts(
             sa_func.trim(sa_func.coalesce(Contact.secondary_phone, "")) != "",
         )
     )
+
+    # Section / Pool filter
+    if section_str and section_str not in ("master", "all_sections", ""):
+        if section_str == "targeted_distributor":
+            b_query = b_query.filter(sa_func.lower(Buyer.source) == "targeted_distributor")
+        elif section_str == "old_clients":
+            b_query = b_query.filter(sa_func.lower(Buyer.source) == "old_clients")
+        elif section_str == "hyperstore_targeted":
+            b_query = b_query.filter(sa_func.lower(Buyer.source) == "hyperstore_targeted")
+        elif section_str == "targeted_client":
+            b_query = b_query.filter(sa_func.lower(Buyer.source) == "targeted_client")
+        elif section_str == "khalid_focused_sales":
+            b_query = b_query.filter(sa_func.lower(Buyer.source) == "khalid_focused_sales")
+        elif section_str == "incomplete_archives":
+            b_query = b_query.filter(sa_func.lower(Buyer.source) == "incomplete_archives")
+        elif section_str in ("all", "new_search_lead"):
+            from modules.lead_sources import SCRAPED_LEAD_SOURCES
+
+            b_query = b_query.filter(
+                sa_func.lower(sa_func.coalesce(Buyer.source, "")).in_(
+                    [s.lower() for s in SCRAPED_LEAD_SOURCES]
+                )
+            )
+        elif section_str == "sales_interested_clients":
+            b_query = b_query.filter(Buyer.interested_clients_list_at.isnot(None))
+        elif section_str == "interested_clients":
+            from modules.calls import buyer_ids_with_latest_call_outcome
+
+            matched = buyer_ids_with_latest_call_outcome(db, "follow_up")
+            b_query = b_query.filter(Buyer.id.in_(matched) if matched else Buyer.id == -1)
+        elif section_str == "not_interested_clients":
+            from modules.calls import buyer_ids_with_latest_call_outcome
+
+            matched = buyer_ids_with_latest_call_outcome(db, "not_interested")
+            b_query = b_query.filter(Buyer.id.in_(matched) if matched else Buyer.id == -1)
+        elif section_str == "not_received_call_clients":
+            from modules.calls import buyer_ids_with_latest_call_outcome
+
+            matched = buyer_ids_with_latest_call_outcome(db, "not_received_call")
+            b_query = b_query.filter(Buyer.id.in_(matched) if matched else Buyer.id == -1)
+        elif section_str == "my_assigned" and assigned_to_user_id is not None:
+            b_query = b_query.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
 
     if country_str:
         from modules.countries import country_search_terms
@@ -1263,9 +1307,10 @@ def get_call_filter_options(
     db: Session,
     *,
     assigned_to_user_id: int | None = None,
-) -> dict[str, list[str]]:
-    """Return distinct countries, gradings, and common designations for dialer filters."""
+) -> dict[str, object]:
+    """Return distinct countries, gradings, common designations, and section pools for dialer filters."""
     from sqlalchemy import func as sa_func, or_
+    from modules import leads as leads_module
 
     b_query = db.query(Buyer).join(Contact, Contact.buyer_id == Buyer.id)
     if assigned_to_user_id is not None:
@@ -1309,7 +1354,25 @@ def get_call_filter_options(
     )
     designations = [r[0] for r in raw_desigs if r[0]]
 
+    # Sections / Pools
+    counts = leads_module.get_lead_table_counts(db, assigned_to_user_id=assigned_to_user_id)
+    sections = [
+        {"id": "", "label": "All Sections / Master", "icon": "🌐", "count": counts.get("master", 0) or counts.get("all", 0)},
+        {"id": "targeted_distributor", "label": "Targeted Distributors", "icon": "🎯", "count": counts.get("targeted_distributor", 0)},
+        {"id": "old_clients", "label": "Old clients", "icon": "👥", "count": counts.get("old_clients", 0)},
+        {"id": "hyperstore_targeted", "label": "Hyperstore Target", "icon": "🛒", "count": counts.get("hyperstore_targeted", 0)},
+        {"id": "all", "label": "New search lead", "icon": "🆕", "count": counts.get("all", 0)},
+        {"id": "interested_clients", "label": "Follow up clients", "icon": "⏰", "count": counts.get("interested_clients", 0)},
+        {"id": "sales_interested_clients", "label": "Interested Clients", "icon": "⭐", "count": counts.get("sales_interested_clients", 0)},
+        {"id": "not_received_call_clients", "label": "Did not receive call", "icon": "📞", "count": counts.get("not_received_call_clients", 0)},
+        {"id": "not_interested_clients", "label": "Not interested", "icon": "🚫", "count": counts.get("not_interested_clients", 0)},
+        {"id": "khalid_focused_sales", "label": "Khalid Focused Sales", "icon": "💼", "count": counts.get("khalid_focused_sales", 0)},
+        {"id": "targeted_client", "label": "Targeted Client", "icon": "🎯", "count": counts.get("targeted_client", 0)},
+        {"id": "incomplete_archives", "label": "Incomplete Archives", "icon": "📦", "count": counts.get("incomplete_archives", 0)},
+    ]
+
     return {
+        "sections": sections,
         "countries": countries,
         "grades": grades,
         "designations": designations,

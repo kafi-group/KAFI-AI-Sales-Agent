@@ -43,6 +43,7 @@ router = APIRouter(tags=["calls"])
 @router.get("/calls/contact-suggestions", response_model=DialableContactSuggestionsResponse)
 def suggest_dialable_contacts(
     q: str = Query("", min_length=0, max_length=200),
+    section: str | None = Query(None),
     country: str | None = Query(None),
     grade: str | None = Query(None),
     designation: str | None = Query(None),
@@ -55,6 +56,7 @@ def suggest_dialable_contacts(
     rows = calls_module.suggest_dialable_contacts(
         db,
         q=q,
+        section=section,
         country=country,
         grade=grade,
         designation=designation,
@@ -63,6 +65,7 @@ def suggest_dialable_contacts(
     )
     return DialableContactSuggestionsResponse(
         q=q.strip(),
+        section=section,
         country=country,
         grade=grade,
         designation=designation,

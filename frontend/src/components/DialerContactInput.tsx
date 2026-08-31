@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { client, type DialableContactSuggestion } from "../api/client";
+import {
+  client,
+  type CallFilterSectionOption,
+  type DialableContactSuggestion,
+} from "../api/client";
 import { parsePhoneForDialpad } from "../data/countryDialCodes";
 import { findCountry } from "../data/countries";
 
@@ -23,11 +27,13 @@ export function DialerContactInput({
   const [loading, setLoading] = useState(false);
 
   // Multi-filter states
+  const [sectionFilter, setSectionFilter] = useState("");
   const [countryFilter, setCountryFilter] = useState("");
   const [gradeFilter, setGradeFilter] = useState("");
   const [designationFilter, setDesignationFilter] = useState("");
 
   // Options loaded from backend
+  const [availableSections, setAvailableSections] = useState<CallFilterSectionOption[]>([]);
   const [availableCountries, setAvailableCountries] = useState<string[]>([]);
   const [availableGrades, setAvailableGrades] = useState<string[]>([]);
   const [availableDesignations, setAvailableDesignations] = useState<string[]>([]);
@@ -41,13 +47,24 @@ export function DialerContactInput({
       .getCallFilterOptions()
       .then((res) => {
         if (!active) return;
+        if (res.sections?.length) setAvailableSections(res.sections);
         if (res.countries?.length) setAvailableCountries(res.countries);
         if (res.grades?.length) setAvailableGrades(res.grades);
         if (res.designations?.length) setAvailableDesignations(res.designations);
       })
       .catch(() => {
-        // Fallback to top countries
         if (!active) return;
+        setAvailableSections([
+          { id: "", label: "All Sections / Master", icon: "🌐" },
+          { id: "targeted_distributor", label: "Targeted Distributors", icon: "🎯" },
+          { id: "old_clients", label: "Old clients", icon: "👥" },
+          { id: "hyperstore_targeted", label: "Hyperstore Target", icon: "🛒" },
+          { id: "all", label: "New search lead", icon: "🆕" },
+          { id: "interested_clients", label: "Follow up clients", icon: "⏰" },
+          { id: "sales_interested_clients", label: "Interested Clients", icon: "⭐" },
+          { id: "not_received_call_clients", label: "Did not receive call", icon: "📞" },
+          { id: "not_interested_clients", label: "Not interested", icon: "🚫" },
+        ]);
         setAvailableCountries([
           "Pakistan",
           "United Arab Emirates",
@@ -67,14 +84,14 @@ export function DialerContactInput({
   }, []);
 
   const hasActiveFilters = Boolean(
-    countryFilter || gradeFilter || designationFilter || value.trim(),
+    sectionFilter || countryFilter || gradeFilter || designationFilter || value.trim(),
   );
 
   // Query suggestions when search or any filter changes
   useEffect(() => {
     const query = value.trim();
-    // Only search if user typed something OR if a filter is active
-    if (!query && !countryFilter && !gradeFilter && !designationFilter) {
+    // Only search if user typed something OR if any filter is active
+    if (!query && !sectionFilter && !countryFilter && !gradeFilter && !designationFilter) {
       setSuggestions([]);
       setOpen(false);
       return;
@@ -85,6 +102,7 @@ export function DialerContactInput({
       try {
         const res = await client.suggestDialableContacts({
           q: query || undefined,
+          section: sectionFilter || undefined,
           country: countryFilter || undefined,
           grade: gradeFilter || undefined,
           designation: designationFilter || undefined,
@@ -102,7 +120,7 @@ export function DialerContactInput({
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [value, countryFilter, gradeFilter, designationFilter]);
+  }, [value, sectionFilter, countryFilter, gradeFilter, designationFilter]);
 
   // Click outside to close dropdown
   useEffect(() => {
@@ -136,6 +154,7 @@ export function DialerContactInput({
   }
 
   function handleClearFilters() {
+    setSectionFilter("");
     setCountryFilter("");
     setGradeFilter("");
     setDesignationFilter("");
@@ -146,7 +165,31 @@ export function DialerContactInput({
 
   return (
     <div ref={containerRef} className="relative w-full space-y-2">
-      {/* Filter Row 1: Country & Grade Selectors */}
+      {/* Top Filter: Lead List / Section Selector */}
+      <div>
+        <label className="block text-[11px] font-medium text-cyan-400 mb-1 flex items-center justify-between">
+          <span>📂 Filter by Lead List / Pool</span>
+          {sectionFilter && (
+            <span className="text-[10px] text-cyan-300 font-mono">Scoped Search Active</span>
+          )}
+        </label>
+        <select
+          value={sectionFilter}
+          onChange={(e) => {
+            setSectionFilter(e.target.value);
+          }}
+          className="w-full rounded-md bg-slate-900 border border-cyan-800/60 px-2.5 py-1.5 text-xs text-cyan-200 font-medium focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-500/40 transition cursor-pointer"
+        >
+          <option value="">🌐 All Sections / Master Table</option>
+          {availableSections.map((sec) => (
+            <option key={sec.id} value={sec.id}>
+              {sec.icon ? `${sec.icon} ` : ""}{sec.label}{sec.count != null ? ` (${sec.count.toLocaleString()})` : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Filter Row 2: Country & Grade Selectors */}
       <div className="grid grid-cols-2 gap-1.5">
         <div>
           <label className="block text-[11px] font-medium text-slate-400 mb-1">
@@ -195,7 +238,7 @@ export function DialerContactInput({
         </div>
       </div>
 
-      {/* Filter Row 2: Designation Selector & Search Input */}
+      {/* Filter Row 3: Designation Selector */}
       <div>
         <label className="block text-[11px] font-medium text-slate-400 mb-1">
           Filter Designation
@@ -220,7 +263,7 @@ export function DialerContactInput({
       <div className="relative">
         <div className="flex items-center justify-between mb-1">
           <label className="block text-[11px] font-medium text-slate-400">
-            Search Contact / Company
+            Search Contact / Company / Phone
           </label>
           {hasActiveFilters && (
             <button
@@ -240,7 +283,11 @@ export function DialerContactInput({
             onFocus={() => {
               if (suggestions.length > 0) setOpen(true);
             }}
-            placeholder={placeholder}
+            placeholder={
+              sectionFilter
+                ? `Search within ${availableSections.find((s) => s.id === sectionFilter)?.label || "selected pool"}…`
+                : placeholder
+            }
             className={`w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition ${className}`}
           />
           {loading && (
@@ -263,7 +310,10 @@ export function DialerContactInput({
         {open && suggestions.length > 0 && (
           <div className="absolute z-50 left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-lg border border-slate-700 bg-slate-950 shadow-2xl divide-y divide-slate-800/80">
             <div className="px-3 py-1.5 bg-slate-900/90 text-[10px] text-slate-400 font-medium flex items-center justify-between sticky top-0 backdrop-blur z-10">
-              <span>Matching Contacts ({suggestions.length})</span>
+              <span>
+                Matching Contacts ({suggestions.length})
+                {sectionFilter && ` • ${availableSections.find((s) => s.id === sectionFilter)?.label || ""}`}
+              </span>
               <span>Click to Dial</span>
             </div>
             {suggestions.map((item, idx) => {

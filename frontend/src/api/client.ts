@@ -1204,13 +1204,22 @@ export interface DialableContactSuggestion {
 
 export interface DialableContactSuggestionsResponse {
   q: string;
+  section?: string | null;
   country?: string | null;
   grade?: string | null;
   designation?: string | null;
   rows: DialableContactSuggestion[];
 }
 
+export interface CallFilterSectionOption {
+  id: string;
+  label: string;
+  count?: number;
+  icon?: string;
+}
+
 export interface CallFilterOptionsResponse {
+  sections?: CallFilterSectionOption[];
   countries: string[];
   grades: string[];
   designations: string[];
@@ -2243,6 +2252,7 @@ export const client = {
       | string
       | {
           q?: string;
+          section?: string;
           country?: string;
           grade?: string;
           designation?: string;
@@ -2256,6 +2266,7 @@ export const client = {
       if (limit) query.set("limit", String(limit));
     } else if (params) {
       if (params.q) query.set("q", params.q);
+      if (params.section) query.set("section", params.section);
       if (params.country) query.set("country", params.country);
       if (params.grade) query.set("grade", params.grade);
       if (params.designation) query.set("designation", params.designation);
