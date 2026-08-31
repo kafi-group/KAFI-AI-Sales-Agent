@@ -31,18 +31,18 @@ _IMAP_LOCKS: dict[str, threading.RLock] = {}
 _IMAP_LOCKS_GUARD = threading.Lock()
 # Caches keyed by mailbox email so users never share each other's list/unread state.
 _FOLDER_COUNT_CACHE: dict[str, dict[str, Any]] = {}
-_FOLDER_COUNT_TTL_SEC = 45.0
+_FOLDER_COUNT_TTL_SEC = 60.0
 _UNREAD_CACHE: dict[str, dict[str, Any]] = {}
-_UNREAD_TTL_SEC = 20.0
-# Short TTL for list endpoints — App + InboxPage polls used to hammer IMAP.
+_UNREAD_TTL_SEC = 45.0
+# List endpoints cache (prevents hammering IMAP on tab switches)
 _LIST_CACHE: dict[str, Any] = {}
-_LIST_CACHE_TTL_SEC = 20.0
+_LIST_CACHE_TTL_SEC = 45.0
 # OAuth access tokens — refreshing on every IMAP connect was a large fixed cost.
 _TOKEN_CACHE: dict[str, dict[str, Any]] = {}
 # Recent conversation summaries reused by get_thread so opening a mail does not
 # re-download the whole Inbox+Sent list.
 _CONV_SUMMARY_CACHE: dict[str, dict[str, Any]] = {}
-_CONV_SUMMARY_TTL_SEC = 30.0
+_CONV_SUMMARY_TTL_SEC = 60.0
 
 
 def _account_cache_key() -> str:
@@ -916,11 +916,14 @@ class OutlookClient:
 
         _list_cache_set(cache_key, unique)
         if not unread_only and not search_text and offset == 0:
-            _CONV_SUMMARY_CACHE[_account_cache_key()] = {
+            acct_k = _account_cache_key()
+            _CONV_SUMMARY_CACHE[acct_k] = {
                 "at": time.monotonic(),
                 "limit": limit,
                 "data": list(unique),
             }
+            inbox_unseen = sum(1 for m in inbox if m.get("unread") or m.get("seen") is False)
+            _UNREAD_CACHE[acct_k] = {"at": time.monotonic(), "count": inbox_unseen}
         return unique
 
     def get_message(self, uid: str, *, folder: str = "INBOX") -> dict[str, Any] | None:

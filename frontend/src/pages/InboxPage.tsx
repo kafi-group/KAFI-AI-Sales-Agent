@@ -3,12 +3,15 @@ import {
   client,
   type InboxAnalyzeResponse,
   type InboxMessageDetail,
+  type InboxMessageListResponse,
   type InboxMessageSummary,
   type InboxStatus,
   type InboxThreadDetail,
+  type InboxThreadListResponse,
   type InboxThreadSummary,
   type MailComposeDraft,
   type MailLabel,
+  type MailLabelMessageKey,
 } from "../api/client";
 import {
   isMailLabelSection,
@@ -257,6 +260,9 @@ function messageListLabel(message: InboxMessageSummary, section: MailSection): s
   return senderLabel(message.from_name, message.from_email);
 }
 
+const _MEM_THREAD_CACHE = new Map<string, { items: InboxThreadSummary[]; total: number; has_more: boolean }>();
+const _MEM_MESSAGE_CACHE = new Map<string, { items: InboxMessageSummary[]; total: number; has_more: boolean }>();
+
 function isRichHtml(html: string): boolean {
   // Keep the white iframe only when the mail needs real HTML layout
   // (images, tables, heavy styling). Simple Outlook wrappers stay as dark text.
@@ -494,92 +500,153 @@ export function InboxPage({
   const loadList = useCallback(
     async (options?: { silent?: boolean }) => {
       const generation = ++loadGenerationRef.current;
-      if (!options?.silent) setLoading(true);
-      try {
-        const [s, labelRows] = await Promise.all([
-          client.getInboxStatus(),
-          client.listMailLabels().catch(() => [] as MailLabel[]),
-        ]);
-        if (generation !== loadGenerationRef.current) return;
-        setStatus(s);
-        setLabels(labelRows);
-        onUnreadChangeRef.current?.(s.unread_count);
 
-        if (section === "drafts") {
-          const rows = await client.listMailDrafts();
-          if (generation !== loadGenerationRef.current) return;
-          setDrafts(rows);
-          setThreads([]);
-          setMessages([]);
-          onMailExtrasChangeRef.current?.();
-          return;
-        }
-
-        if (!s.configured) {
-          setThreads([]);
+      // 1. Instant Cache Render (Stale-While-Revalidate): Show cached mail immediately
+      let hadCachedRender = false;
+      if (section === "inbox") {
+        const cacheKey = `threads:${threadPage}:${unreadOnly}:${triageFilter || ""}`;
+        const cached = _MEM_THREAD_CACHE.get(cacheKey);
+        if (cached) {
+          setThreads(cached.items);
+          setThreadTotal(cached.total);
+          setThreadHasMore(cached.has_more);
           setMessages([]);
           setDrafts([]);
-          return;
+          hadCachedRender = true;
         }
+      } else if (section === "sent" || section === "trash" || section === "archive") {
+        const cacheKey = `messages:${section}:${messagePage}:${unreadOnly}`;
+        const cached = _MEM_MESSAGE_CACHE.get(cacheKey);
+        if (cached) {
+          setMessages(cached.items);
+          setMessageTotal(cached.total);
+          setMessageHasMore(cached.has_more);
+          setThreads([]);
+          setDrafts([]);
+          hadCachedRender = true;
+        }
+      }
 
+      if (!options?.silent && !hadCachedRender) setLoading(true);
+
+      try {
+        // 2. Parallelize status, labels, and list queries concurrently
+        const statusPromise = client.getInboxStatus().catch(() => null);
+        const labelsPromise = client.listMailLabels().catch(() => [] as MailLabel[]);
+
+        let listPromise: Promise<unknown>;
         if (section === "inbox") {
           const offset = (threadPage - 1) * PAGE_SIZE;
-          const result = await client.listInboxThreads({
+          listPromise = client.listInboxThreads({
             limit: PAGE_SIZE,
             offset,
             unread_only: unreadOnly,
             triage_category: triageFilter || undefined,
           });
-          if (generation !== loadGenerationRef.current) return;
-          setThreads(result.items);
-          setThreadTotal(result.total);
-          setThreadHasMore(result.has_more);
-          setMessages([]);
-          setDrafts([]);
+        } else if (section === "drafts") {
+          listPromise = client.listMailDrafts();
         } else if (isMailLabelSection(section)) {
           const id = mailLabelIdFromSection(section);
           if (id == null) {
-            setMessages([]);
-            setThreads([]);
-            return;
+            listPromise = Promise.resolve(null);
+          } else {
+            listPromise = Promise.all([
+              client.listMailLabelMessages(id),
+              client.listInboxMessages({ limit: 60, folder: "inbox" }),
+              client.listInboxMessages({ limit: 30, folder: "sent" }),
+            ]);
           }
-          const activeLabel = labelRows.find((l) => l.id === id) || null;
-          const [keys, inboxRows, sentRows] = await Promise.all([
-            client.listMailLabelMessages(id),
-            client.listInboxMessages({ limit: 100, folder: "inbox" }),
-            client.listInboxMessages({ limit: 40, folder: "sent" }),
-          ]);
-          if (generation !== loadGenerationRef.current) return;
-          const combined = [...inboxRows.items, ...sentRows.items].filter((m) => {
-            if (activeLabel && messageMatchesLabelRules(m, activeLabel)) return true;
-            return messageMatchesLabelKeys(m, keys);
-          });
-          setMessages(combined);
-          setThreads([]);
-          setDrafts([]);
         } else if (
           section === "sent" ||
           section === "trash" ||
           section === "archive"
         ) {
           const offset = (messagePage - 1) * PAGE_SIZE;
-          const result = await client.listInboxMessages({
+          listPromise = client.listInboxMessages({
             limit: PAGE_SIZE,
             offset,
             unread_only: unreadOnly && section !== "sent",
             folder: section,
           });
-          if (generation !== loadGenerationRef.current) return;
-          setMessages(result.items);
-          setMessageTotal(result.total);
-          setMessageHasMore(result.has_more);
+        } else {
+          listPromise = Promise.resolve(null);
+        }
+
+        const [s, labelRows, listResult] = await Promise.all([
+          statusPromise,
+          labelsPromise,
+          listPromise,
+        ]);
+
+        if (generation !== loadGenerationRef.current) return;
+
+        if (s) {
+          setStatus(s);
+          onUnreadChangeRef.current?.(s.unread_count);
+        }
+        setLabels(labelRows);
+
+        if (section === "drafts") {
+          setDrafts(Array.isArray(listResult) ? listResult : []);
+          setThreads([]);
+          setMessages([]);
+          onMailExtrasChangeRef.current?.();
+          return;
+        }
+
+        if (s && !s.configured) {
+          setThreads([]);
+          setMessages([]);
+          setDrafts([]);
+          return;
+        }
+
+        if (section === "inbox" && listResult) {
+          const threadList = listResult as InboxThreadListResponse;
+          setThreads(threadList.items || []);
+          setThreadTotal(threadList.total || 0);
+          setThreadHasMore(Boolean(threadList.has_more));
+          setMessages([]);
+          setDrafts([]);
+          const cacheKey = `threads:${threadPage}:${unreadOnly}:${triageFilter || ""}`;
+          _MEM_THREAD_CACHE.set(cacheKey, {
+            items: threadList.items || [],
+            total: threadList.total || 0,
+            has_more: Boolean(threadList.has_more),
+          });
+        } else if (isMailLabelSection(section) && Array.isArray(listResult)) {
+          const [keys, inboxRows, sentRows] = listResult as [MailLabelMessageKey[], InboxMessageListResponse, InboxMessageListResponse];
+          const id = mailLabelIdFromSection(section);
+          const activeLabel = labelRows.find((l) => l.id === id) || null;
+          const combined = [...(inboxRows?.items || []), ...(sentRows?.items || [])].filter((m) => {
+            if (activeLabel && messageMatchesLabelRules(m, activeLabel)) return true;
+            return messageMatchesLabelKeys(m, keys || []);
+          });
+          setMessages(combined);
           setThreads([]);
           setDrafts([]);
-        } else {
+        } else if (
+          (section === "sent" || section === "trash" || section === "archive") &&
+          listResult
+        ) {
+          const msgList = listResult as InboxMessageListResponse;
+          setMessages(msgList.items || []);
+          setMessageTotal(msgList.total || 0);
+          setMessageHasMore(Boolean(msgList.has_more));
+          setThreads([]);
+          setDrafts([]);
+          const cacheKey = `messages:${section}:${messagePage}:${unreadOnly}`;
+          _MEM_MESSAGE_CACHE.set(cacheKey, {
+            items: msgList.items || [],
+            total: msgList.total || 0,
+            has_more: Boolean(msgList.has_more),
+          });
+        } else if (!isMailLabelSection(section)) {
           setThreads([]);
           setMessages([]);
           setDrafts([]);
         }
+
         void refreshFolderCounts();
         onMailExtrasChangeRef.current?.();
       } catch (e) {
@@ -587,7 +654,7 @@ export function InboxPage({
           onErrorRef.current(e instanceof Error ? e.message : "Failed to load mail");
         }
       } finally {
-        if (!options?.silent && generation === loadGenerationRef.current) {
+        if (generation === loadGenerationRef.current) {
           setLoading(false);
         }
       }

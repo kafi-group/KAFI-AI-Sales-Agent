@@ -443,7 +443,8 @@ def list_threads(
     account = resolve_user_mailbox(user)
     if not account:
         return {"items": [], "total": 0, "offset": offset, "limit": limit, "has_more": False}
-    window = min(max((offset + limit) * 3, 100), 500)
+    # Fast window sizing: 40-50 messages for page 1 is plenty for thread grouping
+    window = min(max((offset + limit) * 2, 40), 200)
     with use_mailbox(account, user_id=user.id):
         raw = outlook_client.list_conversation_messages(
             limit=window,
@@ -471,20 +472,6 @@ def list_threads(
         from modules.inbox_triage import enrich_thread_with_triage
 
         visible = [enrich_thread_with_triage(t) for t in visible]
-        # Auto-archive low-priority info threads on inbox sync (newsletters, noreply, etc.)
-        kept: list[dict[str, Any]] = []
-        archived_info = 0
-        for t in visible:
-            if t.get("triage_category") == "info" and archived_info < 12:
-                try:
-                    result = move_thread_messages(user, t["thread_id"], to_folder="archive")
-                    if result.get("status") == "ok" and (result.get("moved_count") or 0) > 0:
-                        archived_info += 1
-                        continue
-                except Exception:  # noqa: BLE001
-                    pass
-            kept.append(t)
-        visible = kept
         triage_key = (triage_category or "").strip().lower()
         if triage_key:
             visible = [t for t in visible if (t.get("triage_category") or "") == triage_key]
