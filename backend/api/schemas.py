@@ -76,8 +76,15 @@ class DialableContactSuggestionsResponse(BaseModel):
     rows: list[DialableContactSuggestion]
 
 
+class CallFilterSectionOption(BaseModel):
+    id: str = ""
+    label: str = ""
+    icon: Optional[str] = None
+    count: Optional[int] = 0
+
+
 class CallFilterOptionsResponse(BaseModel):
-    sections: list[dict[str, object]] = []
+    sections: list[CallFilterSectionOption] = []
     countries: list[str] = []
     grades: list[str] = []
     designations: list[str] = []
