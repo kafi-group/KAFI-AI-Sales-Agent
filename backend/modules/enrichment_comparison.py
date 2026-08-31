@@ -487,8 +487,8 @@ def execute_safe_fill_merge(
 
         # 2. Update Primary Contact fields
         if not buyer.contacts:
-            # Create a primary contact if missing
-            primary_contact = Contact(buyer_id=buyer.id, full_name=row.get("contact_name") or buyer.company_name)
+            contact_name = row.get("contact_name") or buyer.company_name or "General Contact"
+            primary_contact = Contact(buyer_id=buyer.id, full_name=str(contact_name)[:255])
             db.add(primary_contact)
             buyer.contacts.append(primary_contact)
             buyer_modified = True
@@ -501,6 +501,8 @@ def execute_safe_fill_merge(
             if not current_val or not str(current_val).strip():
                 if new_val and str(new_val).strip():
                     setattr(primary_contact, db_attr, str(new_val).strip())
+                    if db_attr == "phone" and (not getattr(primary_contact, "primary_phone", None) or not str(primary_contact.primary_phone).strip()):
+                        primary_contact.primary_phone = str(new_val).strip()
                     buyer_modified = True
                     total_fields_filled += 1
             else:
