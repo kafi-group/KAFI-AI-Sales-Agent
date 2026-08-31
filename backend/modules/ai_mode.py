@@ -1963,10 +1963,11 @@ def lifecycle_pipeline_counts(
     return counts
 
 
-_POTENTIAL_GRADES = frozenset({"AAA", "AA"})
+_POTENTIAL_GRADES = frozenset({"AAAA", "AAA", "AA"})
 _POTENTIAL_GRADE_ALIASES = {
     "HOT": "AAA",
     "WARM": "AA",
+    "AAAA": "AAAA",
     "AAA": "AAA",
     "AA": "AA",
 }
@@ -1986,7 +1987,7 @@ def list_potential_clients(
     offset: int = 0,
     assigned_to_user_id: int | None = None,
 ) -> dict[str, Any]:
-    """Scrapped Leads (not Old clients) with company grading AND AI grade AA/AAA."""
+    """Scrapped Leads (not Old clients) with company grading AND AI grade AA/AAA/AAAA."""
     from sqlalchemy import func, or_
     from db.models import LeadScore, LeadScoreLabel
 
@@ -2022,9 +2023,9 @@ def list_potential_clients(
         .filter(
             # Scrapped / Discover pool — never Old clients.
             ~func.lower(func.coalesce(Buyer.source, "")).in_(["old_clients"]),
-            latest.c.score.in_([LeadScoreLabel.AAA, LeadScoreLabel.AA]),
+            latest.c.score.in_([LeadScoreLabel.AAAA, LeadScoreLabel.AAA, LeadScoreLabel.AA]),
             or_(
-                company_grade.in_(["AAA", "AA"]),
+                company_grade.in_(["AAAA", "AAA", "AA"]),
                 company_grade.in_(["HOT", "WARM"]),  # legacy Excel labels
             ),
         )

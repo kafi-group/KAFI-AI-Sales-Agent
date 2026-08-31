@@ -628,9 +628,9 @@ class CommerceModule:
 
             raise ValueError("Lead must be scored before creating quotations")
 
-        if score_record.score not in (LeadScoreLabel.AAA, LeadScoreLabel.AA):
+        if score_record.score not in (LeadScoreLabel.AAAA, LeadScoreLabel.AAA, LeadScoreLabel.AA):
 
-            raise ValueError("Quotations are only auto-created for AAA or AA graded companies")
+            raise ValueError("Quotations are only auto-created for AAAA, AAA, or AA graded companies")
 
 
 

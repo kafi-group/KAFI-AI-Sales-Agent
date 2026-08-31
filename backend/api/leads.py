@@ -287,8 +287,8 @@ def create_product_interest_email(
     score = leads_module.get_latest_score(db, lead_id)
     if not score:
         raise HTTPException(400, "Lead must be scored before drafting outreach")
-    if score.score not in (LeadScoreLabel.AAA, LeadScoreLabel.AA):
-        raise HTTPException(400, "Product interest emails are for AAA or AA graded companies only")
+    if score.score not in (LeadScoreLabel.AAAA, LeadScoreLabel.AAA, LeadScoreLabel.AA):
+        raise HTTPException(400, "Product interest emails are for AAAA, AAA, or AA graded companies only")
 
     from db.models import MarketRole, ProducerTier
 

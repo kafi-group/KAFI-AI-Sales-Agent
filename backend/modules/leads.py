@@ -56,7 +56,7 @@ def is_new_search_lead_source(source: str | None) -> bool:
 def is_targeted_pool_source(source: str | None) -> bool:
     return (source or "").strip().lower() in TARGETED_POOL_SOURCES
 
-_SCORE_ORDER = {"AAA": 0, "AA": 1, "A": 2}
+_SCORE_ORDER = {"AAAA": 0, "AAA": 1, "AA": 2, "A": 3}
 _SORT_FIELDS = {
     "company_name",
     "country",
@@ -402,7 +402,7 @@ def list_quotation_eligible_leads(db: Session) -> list[dict]:
             if buyer.producer_conversion_pct is None or float(buyer.producer_conversion_pct) < 40:
                 continue
         score = get_latest_score(db, buyer.id)
-        if not score or score.score not in (LeadScoreLabel.AAA, LeadScoreLabel.AA):
+        if not score or score.score not in (LeadScoreLabel.AAAA, LeadScoreLabel.AAA, LeadScoreLabel.AA):
             continue
 
         contact = buyers_module.primary_contact_with_email(db, buyer.id)
@@ -482,6 +482,22 @@ def _compute_lead_table_filters(
         values = [row[0] for row in query.all()]
         return _unique_sorted_labels(values)
 
+    def _company_grading_labels(*, scoped: bool) -> list[str]:
+        query = db.query(distinct(Buyer.company_grading)).filter(
+            Buyer.company_grading.isnot(None), Buyer.company_grading != ""
+        )
+        if scoped and source:
+            source_key = source.strip().lower()
+            query = query.filter(sa_func.lower(Buyer.source) == source_key)
+        values = [row[0] for row in query.all()]
+        standard_tiers = ["AAAA", "AAA", "AA", "A"]
+        tier_set = {t.lower() for t in standard_tiers}
+        other_labels = []
+        for val in values:
+            if val and val.strip() and val.strip().lower() not in tier_set:
+                other_labels.append(val.strip())
+        return standard_tiers + _unique_sorted_labels(other_labels)
+
     def _product_category_labels() -> list[str]:
         query = db.query(distinct(Buyer.product_interest)).filter(
             Buyer.product_interest.isnot(None), Buyer.product_interest != ""
@@ -496,9 +512,9 @@ def _compute_lead_table_filters(
         "countries": [country["name"] for country in list_countries()],
         "industries": _distinct_labels(Buyer.industry, scoped=True),
         "sources": _distinct_labels(Buyer.source, scoped=False),
-        "scores": ["AAA", "AA", "A", "Unscored"],
+        "scores": ["AAAA", "AAA", "AA", "A", "Unscored"],
         "market_roles": ["consumer", "producer", "hybrid", "unknown"],
-        "company_gradings": _distinct_labels(Buyer.company_grading, scoped=True),
+        "company_gradings": _company_grading_labels(scoped=True),
         "products": _product_category_labels(),
         "cities": _distinct_labels(Buyer.city, scoped=True),
     }
@@ -1412,7 +1428,23 @@ def get_lead_table_column_values(
             if v and v not in {"—", "-"}:
                 counts[v] = counts.get(v, 0) + cnt
 
-    sorted_vals = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+    if field in {"excel_file_grading", "company_grading"}:
+        standard_tiers = ["AAAA", "AAA", "AA", "A"]
+        for tier in standard_tiers:
+            if tier not in counts:
+                counts[tier] = 0
+        standard_order = {"AAAA": 0, "AAA": 1, "AA": 2, "A": 3}
+        standard_items = [
+            (k, v) for k, v in counts.items() if k in standard_order
+        ]
+        standard_items.sort(key=lambda x: standard_order.get(x[0], 99))
+        other_items = [
+            (k, v) for k, v in counts.items() if k not in standard_order
+        ]
+        other_items.sort(key=lambda x: x[1], reverse=True)
+        sorted_vals = standard_items + other_items
+    else:
+        sorted_vals = sorted(counts.items(), key=lambda x: x[1], reverse=True)
     return {
         "field": field,
         "total_matching": filtered_count,

@@ -75,7 +75,7 @@ export function DialerContactInput({
           "China",
           "Afghanistan",
         ]);
-        setAvailableGrades(["AAA", "AA", "A", "B", "Ungraded"]);
+        setAvailableGrades(["AAAA", "AAA", "AA", "A", "B", "Ungraded"]);
         setAvailableDesignations(["Managing Director", "Director", "CEO", "Owner", "Manager"]);
       });
     return () => {

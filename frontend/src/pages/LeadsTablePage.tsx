@@ -1392,6 +1392,22 @@ export function LeadsTablePage({
     ],
   );
 
+  const companyGradingOptions = useMemo(() => {
+    const raw = filters?.company_gradings ?? [];
+    const standard = ["AAAA", "AAA", "AA", "A"];
+    const standardSet = new Set(standard.map((s) => s.toLowerCase()));
+    const other = raw.filter((g) => g && !standardSet.has(g.trim().toLowerCase()));
+    return stringOptions([...standard, ...other]);
+  }, [filters?.company_gradings]);
+
+  const aiScoreOptions = useMemo(() => {
+    const raw = filters?.scores ?? ["AAAA", "AAA", "AA", "A", "Unscored"];
+    const standard = ["AAAA", "AAA", "AA", "A", "Unscored"];
+    const standardSet = new Set(standard.map((s) => s.toLowerCase()));
+    const other = raw.filter((s) => s && !standardSet.has(s.trim().toLowerCase()));
+    return stringOptions([...standard, ...other]);
+  }, [filters?.scores]);
+
   useEffect(() => {
     if (!colFilterModal) {
       setColModalColumnData(null);
@@ -3667,7 +3683,7 @@ export function LeadsTablePage({
                 label="Excel / file grading"
                 value={companyGrading}
                 onChange={setCompanyGrading}
-                options={stringOptions(filters?.company_gradings ?? [])}
+                options={companyGradingOptions}
                 allowEmpty
                 emptyLabel="All gradings"
                 placeholder="Search gradings…"
@@ -3719,8 +3735,8 @@ export function LeadsTablePage({
                     className="w-full rounded-lg border border-violet-500/50 bg-violet-500/15 px-3 py-2 text-sm font-medium text-violet-100 hover:bg-violet-500/25 disabled:opacity-50 inline-flex items-center justify-center gap-2 min-h-[42px]"
                     title="Fetch matching leads from Searched by AI into this list (AI / search rows)"
                   >
-                    <IconSearch className="h-4 w-4 shrink-0" />
-                    {populatingPool ? "Fetching…" : "Fetch"}
+                    <IconSearch size="sm" />
+                    Fetch AI search leads
                   </button>
                 </div>
               ) : null}
@@ -3735,7 +3751,7 @@ export function LeadsTablePage({
                 />
               </label>
 
-              {canBulkAssign && (
+              {isAdmin && (
                 <SearchableSelect
                   label="Assign to"
                   multiSelect={false}
@@ -3790,7 +3806,7 @@ export function LeadsTablePage({
                 label="AI company grading"
                 value={score}
                 onChange={setScore}
-                options={stringOptions(filters?.scores ?? ["AAA", "AA", "A", "Unscored"])}
+                options={aiScoreOptions}
                 allowEmpty
                 emptyLabel="All grades"
                 placeholder="Search grades…"
