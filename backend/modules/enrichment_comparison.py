@@ -6,9 +6,10 @@ preserving existing non-empty DB values 100%).
 
 from __future__ import annotations
 
+import csv
 import io
 from typing import Any
-import pandas as pd
+import openpyxl
 from sqlalchemy.orm import Session, joinedload
 from db.models import Buyer, Contact, AppUser
 from modules.buyers import normalize_buyer_key as _normalize_name, buyer_website_domain as _dedupe_domain
@@ -35,29 +36,59 @@ COMPARE_COLUMNS = [
 def _parse_uploaded_file(file_content: bytes, filename: str) -> list[dict[str, Any]]:
     """Parse uploaded bytes into a list of row dicts."""
     fname = filename.lower()
+    raw_records: list[dict[str, Any]] = []
+
     if fname.endswith(".csv"):
-        df = pd.read_csv(io.BytesIO(file_content), dtype=str).fillna("")
-    elif fname.endswith((".xlsx", ".xls", ".xlsm")):
-        xl = pd.ExcelFile(io.BytesIO(file_content))
-        df = None
+        text = file_content.decode("utf-8-sig", errors="replace")
+        reader = csv.DictReader(io.StringIO(text))
+        for r in reader:
+            raw_records.append({str(k).strip(): str(v).strip() for k, v in r.items() if k is not None})
+    elif fname.endswith((".xlsx", ".xlsm")):
+        wb = openpyxl.load_workbook(io.BytesIO(file_content), data_only=True, read_only=True)
         max_rows = -1
-        for s in xl.sheet_names:
-            try:
-                sample_df = pd.read_excel(xl, sheet_name=s, nrows=5)
-                cols_lower = [str(c).lower() for c in sample_df.columns]
-                if any("company" in c or "buyer" in c or "contact" in c for c in cols_lower):
-                    full_s_df = pd.read_excel(xl, sheet_name=s, dtype=str).fillna("")
-                    if len(full_s_df) > max_rows:
-                        max_rows = len(full_s_df)
-                        df = full_s_df
-            except Exception:
-                pass
-        if df is None:
-            df = pd.read_excel(io.BytesIO(file_content), dtype=str).fillna("")
+        best_records: list[dict[str, Any]] = []
+
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            sheet_rows = list(ws.iter_rows(values_only=True))
+            if not sheet_rows:
+                continue
+            header_row = [str(c).strip() if c is not None else "" for c in sheet_rows[0]]
+            cols_lower = [c.lower() for c in header_row]
+            has_contacts = any("company" in c or "buyer" in c or "contact" in c for c in cols_lower)
+            records = []
+            for r_vals in sheet_rows[1:]:
+                if not any(r_vals):
+                    continue
+                r_dict = {}
+                for i, h in enumerate(header_row):
+                    if h:
+                        v = r_vals[i] if i < len(r_vals) else ""
+                        r_dict[h] = str(v).strip() if v is not None else ""
+                records.append(r_dict)
+
+            if (has_contacts and len(records) > max_rows) or (not best_records and records):
+                max_rows = len(records)
+                best_records = records
+
+        raw_records = best_records
+    elif fname.endswith(".xls"):
+        import xlrd
+        book = xlrd.open_workbook(file_contents=file_content)
+        sheet = book.sheet_by_index(0)
+        header_row = [str(sheet.cell_value(0, c)).strip() for c in range(sheet.ncols)]
+        for r in range(1, sheet.nrows):
+            r_dict = {}
+            for c in range(sheet.ncols):
+                h = header_row[c]
+                if h:
+                    v = sheet.cell_value(r, c)
+                    r_dict[h] = str(v).strip() if v is not None else ""
+            raw_records.append(r_dict)
     else:
         raise ValueError("Unsupported file format. Please upload an Excel (.xlsx) or CSV file.")
 
-    rows = df.to_dict(orient="records")
+    rows = raw_records
     normalized_rows = []
     for r in rows:
         norm = {}
