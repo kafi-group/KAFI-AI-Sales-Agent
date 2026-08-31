@@ -1542,14 +1542,18 @@ async def safe_merge_enrichment_file_endpoint(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
-    from modules import enrichment_comparison as comparison_module
-    content = await file.read()
-    parsed_user_id = None
-    if user_id is not None:
-        u_str = str(user_id).strip().lower()
-        if u_str and u_str not in ("none", "null", "undefined", "nan", "") and u_str.isdigit():
-            parsed_user_id = int(u_str)
+    import traceback
+    import logging
+    logger = logging.getLogger(__name__)
     try:
+        from modules import enrichment_comparison as comparison_module
+        content = await file.read()
+        parsed_user_id = None
+        if user_id is not None:
+            u_str = str(user_id).strip().lower()
+            if u_str and u_str not in ("none", "null", "undefined", "nan", "") and u_str.isdigit():
+                parsed_user_id = int(u_str)
+
         return comparison_module.execute_safe_fill_merge(
             db,
             file_content=content,
@@ -1559,7 +1563,9 @@ async def safe_merge_enrichment_file_endpoint(
             master_type=master_type,
         )
     except Exception as exc:
-        raise HTTPException(400, f"Could not execute safe merge: {exc}") from exc
+        tb = traceback.format_exc()
+        logger.error(f"Error in safe merge endpoint: {exc}\n{tb}")
+        raise HTTPException(500, f"Could not execute safe merge: {exc} | Trace: {tb}") from exc
 
 
 @router.get("/missing-data-report")
