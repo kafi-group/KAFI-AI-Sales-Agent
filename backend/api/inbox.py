@@ -71,6 +71,18 @@ def inbox_unread_count(user: AppUser = Depends(get_current_user_released)):
     return {"count": inbox_module.unread_count(user)}
 
 
+@router.get("/urgent-unreplied")
+def get_urgent_unreplied_emails(user: AppUser = Depends(get_current_user_released)):
+    """Fetch unreplied urgent and action-required threads for the active mailbox."""
+    if not inbox_module.resolve_user_mailbox(user):
+        return {"urgent_threads": [], "count": 0}
+    try:
+        threads = inbox_module.get_urgent_unreplied_threads(user)
+        return {"urgent_threads": threads, "count": len(threads)}
+    except Exception as exc:
+        return {"urgent_threads": [], "count": 0, "error": str(exc)}
+
+
 @router.post("/reset-cutoff")
 def reset_inbox_cutoff(user: AppUser = Depends(get_current_user_released)):
     _guard_configured(user)

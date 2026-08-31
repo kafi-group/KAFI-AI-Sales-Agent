@@ -430,6 +430,28 @@ export interface InboxMailAiQueryResponse {
   unread_count: number;
 }
 
+export interface UrgentEmailItem {
+  thread_id: string;
+  subject: string;
+  from_name: string;
+  from_email: string;
+  latest_date: string;
+  days_ago: number;
+  hours_ago: number;
+  is_overdue: boolean;
+  preview: string;
+  triage_category: string;
+  triage_label: string;
+  unread_count: number;
+  message_count: number;
+}
+
+export interface UrgentEmailsResponse {
+  urgent_threads: UrgentEmailItem[];
+  count: number;
+  error?: string;
+}
+
 export interface InboxThreadSummary {
   thread_id: string;
   subject: string;
@@ -2649,6 +2671,8 @@ export const client = {
     request<void>(`/kpi/manual/${entryId}`, { method: "DELETE" }),
 
   getInboxStatus: () => request<InboxStatus>("/inbox/status"),
+  getUrgentUnrepliedEmails: () =>
+    request<UrgentEmailsResponse>("/inbox/urgent-unreplied"),
   listInboxFolders: () => request<InboxFoldersResponse>("/inbox/folders"),
   composeInboxMail: (payload: {
     to: string;

@@ -64,6 +64,9 @@ interface InboxPageProps {
   onSelectMailSection?: (section: MailSection) => void;
   /** Open Vercel mailer compose (mailer-pied). */
   onOpenMailerCompose?: () => void;
+  initialThreadId?: string | null;
+  autoOpenReply?: boolean;
+  onThreadOpened?: () => void;
 }
 
 const PAGE_SIZE = 50;
@@ -336,6 +339,9 @@ export function InboxPage({
   onMailExtrasChange,
   onSelectMailSection,
   onOpenMailerCompose,
+  initialThreadId,
+  autoOpenReply,
+  onThreadOpened,
 }: InboxPageProps) {
   const [status, setStatus] = useState<InboxStatus | null>(null);
   const [threads, setThreads] = useState<InboxThreadSummary[]>([]);
@@ -751,6 +757,17 @@ export function InboxPage({
     },
     [runThreadAnalyze],
   );
+
+  useEffect(() => {
+    if (initialThreadId) {
+      void openThread(initialThreadId).then(() => {
+        if (autoOpenReply) {
+          setShowReplyForm(true);
+        }
+      });
+      onThreadOpened?.();
+    }
+  }, [initialThreadId, autoOpenReply, onThreadOpened, openThread]);
 
   const openMessage = useCallback(
     async (message: InboxMessageSummary) => {

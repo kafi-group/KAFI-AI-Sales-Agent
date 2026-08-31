@@ -546,6 +546,112 @@ def get_thread(
         return summary
 
 
+def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
+    """Scan recent inbox threads and return all unreplied threads that are urgent or action-required."""
+    import datetime
+    from modules.inbox_cutoff import date_sort_key
+    from modules.inbox_triage import enrich_thread_with_triage
+
+    account = resolve_user_mailbox(user)
+    if not account:
+        return []
+
+    with use_mailbox(account, user_id=user.id):
+        raw = outlook_client.list_conversation_messages(limit=80, unread_only=False)
+        stamped = [{**m, "provider": _mailbox_provider()} for m in raw]
+        threads = group_messages_into_threads(stamped, mailbox_email=account.email)
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        urgent_list: list[dict[str, Any]] = []
+
+        for raw_t in threads:
+            t = enrich_thread_with_triage(raw_t)
+            category = (t.get("triage_category") or "").strip().lower()
+            subject = str(t.get("subject") or "").strip()
+            preview = str(t.get("latest_preview") or "").strip()
+
+            is_urgent_category = category in ("urgent", "action_required", "opportunity")
+            is_urgent_subject = any(
+                k in subject.lower()
+                for k in ("urgent", "asap", "immediate", "enquiry", "inquiry", "quotation", "price list")
+            )
+
+            if not (is_urgent_category or is_urgent_subject):
+                continue
+
+            messages = list(t.get("messages") or [])
+            if not messages:
+                continue
+
+            messages_sorted = sorted(messages, key=lambda m: date_sort_key(m.get("date")))
+            latest_msg = messages_sorted[-1]
+
+            is_outbound = (
+                latest_msg.get("direction") == "outbound"
+                or (latest_msg.get("folder") or "").lower() == "sent"
+                or (
+                    account.email
+                    and str(latest_msg.get("from_email") or "").strip().lower()
+                    == account.email.strip().lower()
+                )
+            )
+            if is_outbound:
+                continue
+
+            date_val = latest_msg.get("date") or t.get("latest_date")
+            days_ago = 0
+            hours_ago = 0
+            date_str = ""
+
+            if date_val:
+                try:
+                    if isinstance(date_val, str):
+                        dt = datetime.datetime.fromisoformat(date_val.replace("Z", "+00:00"))
+                    elif isinstance(date_val, datetime.datetime):
+                        dt = date_val
+                    else:
+                        dt = None
+
+                    if dt:
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=datetime.timezone.utc)
+                        delta = now - dt
+                        days_ago = max(0, delta.days)
+                        hours_ago = max(0, int(delta.total_seconds() // 3600))
+                        date_str = dt.isoformat()
+                except Exception:
+                    date_str = str(date_val)
+
+            from_name = t.get("latest_from_name") or latest_msg.get("from_name") or ""
+            from_email = t.get("latest_from_email") or latest_msg.get("from_email") or ""
+
+            urgent_list.append(
+                {
+                    "thread_id": t.get("thread_id"),
+                    "subject": subject,
+                    "from_name": from_name,
+                    "from_email": from_email,
+                    "latest_date": date_str or str(date_val),
+                    "days_ago": days_ago,
+                    "hours_ago": hours_ago,
+                    "is_overdue": hours_ago >= 24,
+                    "preview": preview,
+                    "triage_category": category,
+                    "triage_label": t.get("triage_label") or "Urgent",
+                    "unread_count": t.get("unread_count", 0),
+                    "message_count": t.get("message_count", 1),
+                }
+            )
+
+        urgent_list.sort(
+            key=lambda x: (
+                0 if x["triage_category"] == "urgent" else 1,
+                -x["hours_ago"],
+            )
+        )
+        return urgent_list
+
+
 def _reply_subject(original_subject: str | None) -> str:
     subject = (original_subject or "").strip()
     if subject.lower().startswith("re:"):

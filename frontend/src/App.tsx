@@ -23,6 +23,8 @@ import {
 import { mailLabelSectionId } from "./lib/mailLabelRules";
 import { displayDashboardUserLabel } from "./utils/displayUserName";
 import { InboxAlertToasts } from "./components/InboxAlertToasts";
+import { UrgentEmailAlertModal } from "./components/UrgentEmailAlertModal";
+import type { UrgentEmailItem } from "./api/client";
 import { WhatsAppAlertToasts } from "./components/WhatsAppAlertToasts";
 import { InterestedFollowUpAlertToasts } from "./components/InterestedFollowUpAlertToasts";
 import { QuotationMeetingAlertToasts } from "./components/QuotationMeetingAlertToasts";
@@ -197,6 +199,10 @@ function DashboardApp() {
   const [discoverLeadsCount, setDiscoverLeadsCount] = useState(0);
 
   const [inboxUnread, setInboxUnread] = useState(0);
+  const [urgentEmails, setUrgentEmails] = useState<UrgentEmailItem[]>([]);
+  const [urgentAlertDismissed, setUrgentAlertDismissed] = useState(false);
+  const [targetThreadId, setTargetThreadId] = useState<string | null>(null);
+  const [autoOpenReply, setAutoOpenReply] = useState(false);
   const seenMessageUidsRef = useRef<Set<string> | null>(null);
   const lastInboxUnreadRef = useRef(0);
   const seenWhatsAppKeysRef = useRef<Set<string> | null>(null);
@@ -376,6 +382,29 @@ function DashboardApp() {
       .catch(() => {
         /* mailbox may be unconfigured — ignore */
       });
+  }, []);
+
+  const pollUrgentEmails = useCallback(() => {
+    client
+      .getUrgentUnrepliedEmails()
+      .then((res) => {
+        const list = res.urgent_threads || [];
+        setUrgentEmails(list);
+        if (list.length === 0) {
+          setUrgentAlertDismissed(false);
+        }
+      })
+      .catch(() => {
+        /* mailbox may be unconfigured — ignore */
+      });
+  }, []);
+
+  const handleOpenUrgentAndReply = useCallback((item: UrgentEmailItem) => {
+    setTargetThreadId(item.thread_id);
+    setAutoOpenReply(true);
+    setMailSection("inbox");
+    setTab("inbox");
+    setUrgentAlertDismissed(true);
   }, []);
 
   const pollWhatsAppInbox = useCallback(() => {
@@ -559,6 +588,7 @@ function DashboardApp() {
       .then((r) => setWhatsappActivityUnread(r.unread_count))
       .catch(() => setWhatsappActivityUnread(0));
     pollInbox();
+    pollUrgentEmails();
     pollWhatsAppInbox();
     pollInterestedFollowUps();
     pollQuotationMeetings();
@@ -572,6 +602,7 @@ function DashboardApp() {
     loadTableCounts,
     loadAssigneeNavUsers,
     pollInbox,
+    pollUrgentEmails,
     pollWhatsAppInbox,
     pollInterestedFollowUps,
     pollQuotationMeetings,
@@ -595,6 +626,7 @@ function DashboardApp() {
     window.addEventListener("keydown", unlock, { once: true });
 
     pollInbox();
+    pollUrgentEmails();
     pollWhatsAppInbox();
     pollInterestedFollowUps();
     pollQuotationMeetings();
@@ -608,6 +640,7 @@ function DashboardApp() {
       .then((r) => setWhatsappActivityUnread(r.unread_count))
       .catch(() => setWhatsappActivityUnread(0));
     const inboxTimer = window.setInterval(pollInbox, INBOX_POLL_INTERVAL_MS);
+    const urgentTimer = window.setInterval(pollUrgentEmails, 45_000);
     const whatsappTimer = window.setInterval(pollWhatsAppInbox, WHATSAPP_POLL_INTERVAL_MS);
     const followUpTimer = window.setInterval(pollInterestedFollowUps, FOLLOW_UP_POLL_INTERVAL_MS);
     const meetingTimer = window.setInterval(pollQuotationMeetings, MEETING_POLL_INTERVAL_MS);
@@ -627,6 +660,7 @@ function DashboardApp() {
     }, INBOX_POLL_INTERVAL_MS);
     return () => {
       window.clearInterval(inboxTimer);
+      window.clearInterval(urgentTimer);
       window.clearInterval(whatsappTimer);
       window.clearInterval(followUpTimer);
       window.clearInterval(meetingTimer);
@@ -644,6 +678,7 @@ function DashboardApp() {
     loadTableCounts,
     loadAssigneeNavUsers,
     pollInbox,
+    pollUrgentEmails,
     pollWhatsAppInbox,
     pollInterestedFollowUps,
     pollQuotationMeetings,
@@ -1304,6 +1339,13 @@ function DashboardApp() {
                 onMailExtrasChange={() => void loadMailExtras()}
                 onSelectMailSection={handleSelectMailSection}
                 onOpenMailerCompose={() => void openMailerApp("/compose")}
+                initialThreadId={targetThreadId}
+                autoOpenReply={autoOpenReply}
+                onThreadOpened={() => {
+                  setTargetThreadId(null);
+                  setAutoOpenReply(false);
+                  void pollUrgentEmails();
+                }}
               />
             )}
             {tab === "calls" && selectedLeadId !== null && (
@@ -1363,6 +1405,13 @@ function DashboardApp() {
           </main>
         </div>
       </div>
+      {!urgentAlertDismissed && urgentEmails.length > 0 && (
+        <UrgentEmailAlertModal
+          urgentEmails={urgentEmails}
+          onOpenAndReply={handleOpenUrgentAndReply}
+          onDismiss={() => setUrgentAlertDismissed(true)}
+        />
+      )}
       </CallQueueProvider>
     </TwilioVoiceProvider>
   );
