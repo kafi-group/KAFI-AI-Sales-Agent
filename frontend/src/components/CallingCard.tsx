@@ -5,6 +5,9 @@ import {
   type Contact,
   type Lead,
 } from "../api/client";
+import { useTwilioVoiceOptional } from "../hooks/useTwilioVoice";
+
+const DTMF_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"] as const;
 
 export interface CallingCardFallback {
   companyName?: string | null;
@@ -37,11 +40,24 @@ function productFitTone(score: number | null | undefined): string {
 }
 
 export function CallingCard({ leadId, fallback, onDismiss, className = "" }: CallingCardProps) {
+  const voice = useTwilioVoiceOptional();
   const [lead, setLead] = useState<Lead | null>(null);
   const [profile, setProfile] = useState<BuyerProfile | null>(null);
   const [contact, setContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showKeypad, setShowKeypad] = useState(true);
+  const [lastSentDtmf, setLastSentDtmf] = useState<string | null>(null);
+  const [sentDtmfHistory, setSentDtmfHistory] = useState("");
+
+  const handleSendDtmf = (digit: string) => {
+    if (voice?.active) {
+      voice.sendDigits(digit);
+      setLastSentDtmf(digit);
+      setSentDtmfHistory((prev) => `${prev}${digit}`);
+      window.setTimeout(() => setLastSentDtmf((c) => (c === digit ? null : c)), 800);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -219,6 +235,56 @@ export function CallingCard({ leadId, fallback, onDismiss, className = "" }: Cal
                 ? "Loading product fit…"
                 : "No catalog matches yet — research this lead for fit signals."}
             </p>
+          )}
+        </div>
+
+        {/* In-Call Keypad for IVR / Automated Operator Menus */}
+        <div className="pt-2 border-t border-slate-800/80 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-300">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              In-Call Keypad (DTMF / IVR)
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowKeypad((v) => !v)}
+              className="text-[11px] text-sky-400 hover:text-sky-300 font-medium"
+            >
+              {showKeypad ? "Hide keypad" : "Show keypad (123)"}
+            </button>
+          </div>
+
+          {showKeypad && (
+            <div className="space-y-2 rounded-xl bg-slate-900/90 border border-slate-800 p-2.5">
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <span>Click digits for operator / IVR options:</span>
+                {sentDtmfHistory && (
+                  <span className="font-mono text-emerald-300 font-bold bg-slate-950 px-1.5 py-0.5 rounded border border-emerald-800/60">
+                    Sent: {sentDtmfHistory}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-6 sm:grid-cols-12 gap-1">
+                {DTMF_KEYS.map((key) => {
+                  const isSent = lastSentDtmf === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => handleSendDtmf(key)}
+                      className={`h-9 rounded-lg font-bold text-sm border transition flex items-center justify-center ${
+                        isSent
+                          ? "border-emerald-400 bg-emerald-600 text-white scale-95 shadow-md shadow-emerald-950"
+                          : "border-slate-700 bg-slate-950 text-slate-200 hover:bg-slate-800 active:bg-slate-700"
+                      }`}
+                      title={`Send ${key} to phone line`}
+                    >
+                      {key}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           )}
         </div>
       </div>

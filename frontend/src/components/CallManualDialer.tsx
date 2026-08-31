@@ -41,6 +41,18 @@ export function CallManualDialer({ onError, onSuccess }: CallManualDialerProps) 
 
   const canCall = Boolean(voice?.ready && formattedNumber && !voice.active && !calling);
 
+  const [lastSentDtmf, setLastSentDtmf] = useState<string | null>(null);
+
+  const handleDigitClick = (key: string) => {
+    if (voice?.active) {
+      voice.sendDigits(key);
+      setLastSentDtmf(key);
+      window.setTimeout(() => setLastSentDtmf((curr) => (curr === key ? null : curr)), 800);
+    } else {
+      appendDigit(key);
+    }
+  };
+
   function appendDigit(key: string) {
     setDigits((prev) => `${prev}${key}`);
   }
@@ -159,16 +171,23 @@ export function CallManualDialer({ onError, onSuccess }: CallManualDialerProps) 
       </div>
 
       <div className="grid grid-cols-3 gap-1.5">
-        {DIAL_KEYS.map((key) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => appendDigit(key)}
-            className="rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 py-2.5 text-base text-slate-100 font-medium"
-          >
-            {key}
-          </button>
-        ))}
+        {DIAL_KEYS.map((key) => {
+          const isSent = lastSentDtmf === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => handleDigitClick(key)}
+              className={`rounded-lg border py-2.5 text-base font-medium transition ${
+                isSent
+                  ? "border-emerald-400 bg-emerald-700 text-white scale-95 shadow-md shadow-emerald-900/50"
+                  : "border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800 active:bg-slate-700"
+              }`}
+            >
+              {key}
+            </button>
+          );
+        })}
       </div>
 
       <div className="flex gap-2">

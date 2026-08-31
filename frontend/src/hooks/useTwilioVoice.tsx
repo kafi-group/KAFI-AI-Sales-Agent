@@ -48,6 +48,7 @@ interface TwilioVoiceContextValue {
     options?: { contactName?: string; country?: string },
   ) => Promise<CallInitiateResult>;
   hangUp: () => void;
+  sendDigits: (digits: string) => void;
   retryInit: () => Promise<void>;
 }
 
@@ -227,6 +228,17 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
     setActiveCall(null);
   }, []);
 
+  const sendDigits = useCallback((digits: string) => {
+    const call = callRef.current;
+    if (call && digits) {
+      try {
+        call.sendDigits(digits);
+      } catch (e) {
+        console.error("Failed to send DTMF digits:", e);
+      }
+    }
+  }, []);
+
   const connectPreparedCall = useCallback((activeDevice: Device, prep: CallInitiateResult) => {
     activePrepRef.current = prep;
     setCallError(null);
@@ -367,6 +379,7 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
         placeCall,
         placeManualCall,
         hangUp,
+        sendDigits,
         retryInit,
       }}
     >

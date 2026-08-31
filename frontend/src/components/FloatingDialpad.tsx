@@ -79,10 +79,21 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
   const [countryOpen, setCountryOpen] = useState(false);
   const [countryQuery, setCountryQuery] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [lastSentDtmf, setLastSentDtmf] = useState<string | null>(null);
+  const [sentDtmfHistory, setSentDtmfHistory] = useState("");
   const openRef = useRef(open);
   const posRef = useRef(pos);
   openRef.current = open;
   posRef.current = pos;
+
+  useEffect(() => {
+    if (voice?.active) {
+      setOpen(true);
+      setSentDtmfHistory("");
+      setLastSentDtmf(null);
+      setPos((prev) => clampPos(prev, PANEL_WIDTH, 460));
+    }
+  }, [voice?.active]);
 
   const selectedCountry = useMemo(() => findCountry(countryCode), [countryCode]);
   const dialPrefix = formatDialCode(countryCode);
@@ -134,6 +145,23 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
   const appendDigit = useCallback((key: string) => {
     setDigits((prev) => `${prev}${key}`.slice(0, 20));
   }, []);
+
+  const handleKeyClick = useCallback(
+    (key: string) => {
+      if (voice?.active) {
+        voice.sendDigits(key);
+        setLastSentDtmf(key);
+        setSentDtmfHistory((prev) => `${prev}${key}`);
+        window.setTimeout(
+          () => setLastSentDtmf((curr) => (curr === key ? null : curr)),
+          800,
+        );
+      } else {
+        appendDigit(key);
+      }
+    },
+    [voice, appendDigit],
+  );
 
   function backspace() {
     setDigits((prev) => prev.slice(0, -1));
@@ -382,41 +410,71 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
               </div>
             </div>
 
-            <div className="rounded-xl border border-emerald-700/40 bg-slate-900 px-3 py-3 min-h-[4.5rem] flex flex-col justify-center">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Number</p>
-              <p className="font-mono text-xl text-emerald-300 break-all leading-tight">
-                {digits ? (
-                  <>
-                    <span className="text-slate-500 text-base mr-1">{dialPrefix}</span>
-                    {digits}
-                  </>
-                ) : (
-                  <span className="text-slate-600 text-base">{dialPrefix || "+"}…</span>
+            {voice?.active ? (
+              <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/40 px-3 py-2.5 min-h-[4.5rem] flex flex-col justify-center">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-300">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Call Connected
+                  </span>
+                  <span className="text-[10px] uppercase font-mono tracking-wider px-1.5 py-0.5 rounded bg-emerald-900/60 text-emerald-200 border border-emerald-700/50">
+                    DTMF / Keypad Mode
+                  </span>
+                </div>
+                <p className="mt-1 font-mono text-sm text-slate-200 truncate">
+                  {voice.activeCall?.phone || contactName || "On Live Call"}
+                </p>
+                <div className="mt-1 flex items-center justify-between text-xs">
+                  <span className="text-slate-400 text-[11px]">Sent digits:</span>
+                  <span className="font-mono font-bold text-emerald-300 bg-slate-900 border border-emerald-700/60 px-2 py-0.5 rounded min-w-[2.5rem] text-center">
+                    {sentDtmfHistory || "—"}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-emerald-700/40 bg-slate-900 px-3 py-3 min-h-[4.5rem] flex flex-col justify-center">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Number</p>
+                <p className="font-mono text-xl text-emerald-300 break-all leading-tight">
+                  {digits ? (
+                    <>
+                      <span className="text-slate-500 text-base mr-1">{dialPrefix}</span>
+                      {digits}
+                    </>
+                  ) : (
+                    <span className="text-slate-600 text-base">{dialPrefix || "+"}…</span>
+                  )}
+                </p>
+                {formattedNumber && (
+                  <p className="mt-1 text-[11px] font-mono text-slate-500">{formattedNumber}</p>
                 )}
-              </p>
-              {formattedNumber && (
-                <p className="mt-1 text-[11px] font-mono text-slate-500">{formattedNumber}</p>
-              )}
-            </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-3 gap-1.5">
-              {DIAL_KEYS.map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => appendDigit(key)}
-                  className="rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-700 border border-slate-700 py-3 text-lg text-slate-100 font-semibold"
-                >
-                  {key}
-                </button>
-              ))}
+              {DIAL_KEYS.map((key) => {
+                const isSent = lastSentDtmf === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => handleKeyClick(key)}
+                    className={`rounded-xl border py-3 text-lg font-semibold transition ${
+                      isSent
+                        ? "border-emerald-400 bg-emerald-700 text-white scale-95 shadow-md shadow-emerald-900/50"
+                        : "border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800 active:bg-slate-700"
+                    }`}
+                  >
+                    {key}
+                  </button>
+                );
+              })}
             </div>
 
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={backspace}
-                disabled={!digits}
+                disabled={!digits || Boolean(voice?.active)}
                 className="flex-1 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 py-2.5 text-sm text-slate-300 disabled:opacity-40"
               >
                 Delete
