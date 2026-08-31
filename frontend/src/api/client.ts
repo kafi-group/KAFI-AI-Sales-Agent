@@ -969,6 +969,9 @@ export interface PersonalizedFollowupListResponse {
 export interface PersonalizedFollowupSendPayload {
   channels?: string;
   target_phone?: string;
+  subject?: string;
+  email_body?: string;
+  whatsapp_body?: string;
   template_name?: string;
   template_language?: string;
   template_variables?: string[];

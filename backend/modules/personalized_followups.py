@@ -767,7 +767,7 @@ def update_draft(
     email_body: str | None = None,
     whatsapp_body: str | None = None,
 ) -> PersonalizedFollowupDraft:
-    """Update draft. Email is source of truth; WhatsApp is kept in sync."""
+    """Update draft subject, email body, and/or WhatsApp message."""
     draft = db.get(PersonalizedFollowupDraft, draft_id)
     if not draft:
         raise ValueError("Personalized draft not found")
@@ -777,12 +777,10 @@ def update_draft(
         draft.subject = subject.strip()[:500]
     if email_body is not None:
         draft.email_body = email_body.strip()
-    # Always mirror WhatsApp from email so channels cannot diverge.
-    # (whatsapp_body in the payload is accepted for API compatibility but ignored when email exists.)
-    draft.whatsapp_body = sync_whatsapp_with_email(
-        draft.email_body or "",
-        whatsapp_body if email_body is None else None,
-    )
+    if whatsapp_body is not None:
+        draft.whatsapp_body = whatsapp_body.strip()
+    elif email_body is not None and not draft.whatsapp_body:
+        draft.whatsapp_body = derive_whatsapp_from_email(draft.email_body or "")
     if draft.status in {"awaiting_transcript", "failed", "generating"} and draft.email_body:
         draft.status = "ready"
     db.commit()
@@ -807,6 +805,9 @@ def send_draft(
     user: AppUser,
     channels: str | list[str] | None = None,
     target_phone: str | None = None,
+    subject: str | None = None,
+    email_body: str | None = None,
+    whatsapp_body: str | None = None,
     template_name: str | None = None,
     template_language: str = "en_US",
     template_variables: list[str] | None = None,
@@ -869,7 +870,19 @@ def send_draft(
     if not send_email and not send_whatsapp and not send_whatsapp_personal:
         raise ValueError("Selected channel(s) were already sent")
 
+    if subject is not None:
+        draft.subject = subject.strip()[:500]
+    if email_body is not None:
+        draft.email_body = email_body.strip()
+    if whatsapp_body is not None:
+        draft.whatsapp_body = whatsapp_body.strip()
+    elif not draft.whatsapp_body:
+        draft.whatsapp_body = derive_whatsapp_from_email(draft.email_body or "")
+    db.commit()
+
     body_text = (draft.email_body or "").strip()
+    wa_text = (draft.whatsapp_body or draft.email_body or "").strip()
+
     if send_email:
         if not (draft.subject or "").strip() or not body_text:
             raise ValueError("Subject and email body are required before sending email")
@@ -893,14 +906,10 @@ def send_draft(
             raise ValueError(
                 "Remove any quoted profanity from the draft before sending — keep the tone professional."
             )
-    if send_whatsapp and not body_text and not (template_name or "").strip():
+    if send_whatsapp and not wa_text and not (template_name or "").strip():
         raise ValueError("Message body is required before sending WhatsApp (Meta)")
-    if send_whatsapp_personal and not body_text:
+    if send_whatsapp_personal and not wa_text:
         raise ValueError("Message body is required before sending WhatsApp Personal")
-
-    # Final sync: free-text WhatsApp carries the same information as the email.
-    draft.whatsapp_body = derive_whatsapp_from_email(draft.email_body or "")
-    db.commit()
 
     from modules.comms_generator import get_comms
     from integrations.voice_client import normalize_e164

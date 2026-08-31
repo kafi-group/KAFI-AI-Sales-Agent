@@ -51,6 +51,8 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
   const [needsWaTemplate, setNeedsWaTemplate] = useState(false);
   const [selectedPhone, setSelectedPhone] = useState("");
   const [customPhone, setCustomPhone] = useState("");
+  const [whatsappBody, setWhatsappBody] = useState("");
+  const [waBodyCustomized, setWaBodyCustomized] = useState(false);
 
   useEffect(() => {
     if (!pendingFollowUp) return;
@@ -59,6 +61,8 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     setDraft(null);
     setSubject("");
     setEmailBody("");
+    setWhatsappBody("");
+    setWaBodyCustomized(false);
     setAttachments([]);
     setSelectedPhone("");
     setCustomPhone("");
@@ -112,7 +116,11 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
   useEffect(() => {
     if (!draft) return;
     setSubject(draft.subject || "");
-    setEmailBody(draft.email_body || draft.whatsapp_body || "");
+    const email = draft.email_body || "";
+    setEmailBody(email);
+    const wa = draft.whatsapp_body || deriveWhatsAppFromEmail(email);
+    setWhatsappBody(wa);
+    setWaBodyCustomized(Boolean(draft.whatsapp_body && draft.whatsapp_body !== deriveWhatsAppFromEmail(email)));
     setAttachments([]);
     if (draft.selected_phone) {
       setSelectedPhone(draft.selected_phone);
@@ -169,12 +177,14 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
       const updated = await client.updatePersonalizedFollowup(draft.id, {
         subject,
         email_body: emailBody,
+        whatsapp_body: whatsappBody,
       });
       setDraft(updated);
       setSubject(updated.subject || subject);
       setEmailBody(updated.email_body || emailBody);
+      setWhatsappBody(updated.whatsapp_body || whatsappBody);
       if (showNotice) {
-        setDraftNotice("Draft saved. WhatsApp will mirror the email text when sent.");
+        setDraftNotice("Draft saved successfully.");
       }
       return true;
     } catch (e) {
@@ -201,6 +211,9 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
       const result = await client.sendPersonalizedFollowup(draft.id, {
         channels,
         target_phone: selectedPhone.trim() || undefined,
+        subject,
+        email_body: emailBody,
+        whatsapp_body: whatsappBody,
         attachments: channels === "email" || channels === "all" ? attachments : undefined,
         ...(useWaTemplate
           ? {
@@ -249,7 +262,6 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     clearPendingFollowUp();
   }
 
-  const whatsappPreview = deriveWhatsAppFromEmail(emailBody);
   const availablePhones = draft?.available_phones || [];
   const selectedPhoneObj = availablePhones.find((p) => p.phone === selectedPhone);
 
@@ -329,7 +341,13 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                   <textarea
                     rows={8}
                     value={emailBody}
-                    onChange={(e) => setEmailBody(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEmailBody(val);
+                      if (!waBodyCustomized) {
+                        setWhatsappBody(deriveWhatsAppFromEmail(val));
+                      }
+                    }}
                     className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-sky-500"
                   />
                 </label>
@@ -429,12 +447,32 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                 </div>
 
                 <label className="block">
-                  <span className="text-xs text-slate-400">WhatsApp preview (auto-synced from email)</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-400">
+                      WhatsApp message {waBodyCustomized ? "(customized)" : "(auto-synced from email)"}
+                    </span>
+                    {waBodyCustomized && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWhatsappBody(deriveWhatsAppFromEmail(emailBody));
+                          setWaBodyCustomized(false);
+                        }}
+                        className="text-[11px] text-sky-400 hover:text-sky-300 font-medium transition"
+                      >
+                        ↺ Reset to email sync
+                      </button>
+                    )}
+                  </div>
                   <textarea
-                    readOnly
-                    rows={4}
-                    value={whatsappPreview}
-                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-400"
+                    rows={5}
+                    value={whatsappBody}
+                    onChange={(e) => {
+                      setWhatsappBody(e.target.value);
+                      setWaBodyCustomized(true);
+                    }}
+                    placeholder="Type or customize your WhatsApp message…"
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-emerald-500"
                   />
                 </label>
                 <div
