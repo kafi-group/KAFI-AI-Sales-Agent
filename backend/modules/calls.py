@@ -1355,20 +1355,23 @@ def get_call_filter_options(
     designations = [r[0] for r in raw_desigs if r[0]]
 
     # Sections / Pools
-    counts = leads_module.get_lead_table_counts(db, assigned_to_user_id=assigned_to_user_id)
+    try:
+        counts = leads_module.count_leads_table_sections(db, assigned_to_user_id=assigned_to_user_id)
+    except Exception:
+        counts = {}
     sections = [
-        {"id": "", "label": "All Sections / Master", "icon": "🌐", "count": counts.get("master", 0) or counts.get("all", 0)},
-        {"id": "targeted_distributor", "label": "Targeted Distributors", "icon": "🎯", "count": counts.get("targeted_distributor", 0)},
-        {"id": "old_clients", "label": "Old clients", "icon": "👥", "count": counts.get("old_clients", 0)},
-        {"id": "hyperstore_targeted", "label": "Hyperstore Target", "icon": "🛒", "count": counts.get("hyperstore_targeted", 0)},
-        {"id": "all", "label": "New search lead", "icon": "🆕", "count": counts.get("all", 0)},
-        {"id": "interested_clients", "label": "Follow up clients", "icon": "⏰", "count": counts.get("interested_clients", 0)},
-        {"id": "sales_interested_clients", "label": "Interested Clients", "icon": "⭐", "count": counts.get("sales_interested_clients", 0)},
-        {"id": "not_received_call_clients", "label": "Did not receive call", "icon": "📞", "count": counts.get("not_received_call_clients", 0)},
-        {"id": "not_interested_clients", "label": "Not interested", "icon": "🚫", "count": counts.get("not_interested_clients", 0)},
-        {"id": "khalid_focused_sales", "label": "Khalid Focused Sales", "icon": "💼", "count": counts.get("khalid_focused_sales", 0)},
-        {"id": "targeted_client", "label": "Targeted Client", "icon": "🎯", "count": counts.get("targeted_client", 0)},
-        {"id": "incomplete_archives", "label": "Incomplete Archives", "icon": "📦", "count": counts.get("incomplete_archives", 0)},
+        {"id": "", "label": "All Sections / Master", "icon": "🌐", "count": int(counts.get("master") or counts.get("all") or 0)},
+        {"id": "targeted_distributor", "label": "Targeted Distributors", "icon": "🎯", "count": int(counts.get("targeted_distributor") or 0)},
+        {"id": "old_clients", "label": "Old clients", "icon": "👥", "count": int(counts.get("old_clients") or 0)},
+        {"id": "hyperstore_targeted", "label": "Hyperstore Target", "icon": "🛒", "count": int(counts.get("hyperstore_targeted") or 0)},
+        {"id": "all", "label": "New search lead", "icon": "🆕", "count": int(counts.get("all") or 0)},
+        {"id": "interested_clients", "label": "Follow up clients", "icon": "⏰", "count": int(counts.get("interested_clients") or 0)},
+        {"id": "sales_interested_clients", "label": "Interested Clients", "icon": "⭐", "count": int(counts.get("sales_interested_clients") or 0)},
+        {"id": "not_received_call_clients", "label": "Did not receive call", "icon": "📞", "count": int(counts.get("not_received_call_clients") or 0)},
+        {"id": "not_interested_clients", "label": "Not interested", "icon": "🚫", "count": int(counts.get("not_interested_clients") or 0)},
+        {"id": "khalid_focused_sales", "label": "Khalid Focused Sales", "icon": "💼", "count": int(counts.get("khalid_focused_sales") or 0)},
+        {"id": "targeted_client", "label": "Targeted Client", "icon": "🎯", "count": int(counts.get("targeted_client") or 0)},
+        {"id": "incomplete_archives", "label": "Incomplete Archives", "icon": "📦", "count": int(counts.get("incomplete_archives") or 0)},
     ]
 
     return {
