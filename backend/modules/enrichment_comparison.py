@@ -475,6 +475,26 @@ def execute_safe_fill_merge(
         "linkedin_url": "linkedin_profile_url",
     }
 
+MAX_FIELD_LENGTHS = {
+    "country": 100,
+    "city": 255,
+    "company_grading": 50,
+    "website_url": 512,
+    "industry": 255,
+    "product_interest": 512,
+    "full_name": 255,
+    "designation": 255,
+    "email": 255,
+    "secondary_email": 255,
+    "phone": 50,
+    "secondary_phone": 50,
+    "primary_phone": 50,
+    "linkedin_profile_url": 512,
+    "linkedin_company_url": 512,
+    "facebook_company_url": 512,
+    "instagram_company_url": 512,
+}
+
     for row in uploaded_rows:
         buyer_id_raw = str(row.get("buyer_id") or "").strip()
         comp_name = row.get("company_name") or ""
@@ -505,7 +525,11 @@ def execute_safe_fill_merge(
             new_val = row.get(file_key)
             if not current_val or not str(current_val).strip():
                 if new_val and str(new_val).strip():
-                    setattr(buyer, db_attr, str(new_val).strip())
+                    val_str = str(new_val).strip()
+                    max_len = MAX_FIELD_LENGTHS.get(db_attr)
+                    if max_len and len(val_str) > max_len:
+                        val_str = val_str[:max_len].strip()
+                    setattr(buyer, db_attr, val_str)
                     buyer_modified = True
                     total_fields_filled += 1
             else:
@@ -531,9 +555,13 @@ def execute_safe_fill_merge(
             new_val = row.get(file_key)
             if not current_val or not str(current_val).strip():
                 if new_val and str(new_val).strip():
-                    setattr(primary_contact, db_attr, str(new_val).strip())
+                    val_str = str(new_val).strip()
+                    max_len = MAX_FIELD_LENGTHS.get(db_attr)
+                    if max_len and len(val_str) > max_len:
+                        val_str = val_str[:max_len].strip()
+                    setattr(primary_contact, db_attr, val_str)
                     if db_attr == "phone" and (not getattr(primary_contact, "primary_phone", None) or not str(primary_contact.primary_phone).strip()):
-                        primary_contact.primary_phone = str(new_val).strip()
+                        primary_contact.primary_phone = val_str[:50]
                     buyer_modified = True
                     total_fields_filled += 1
             else:
