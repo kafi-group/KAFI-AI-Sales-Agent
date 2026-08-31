@@ -32,6 +32,26 @@ COMPARE_COLUMNS = [
     ("remarks", "Remarks / Notes"),
 ]
 
+MAX_FIELD_LENGTHS = {
+    "country": 100,
+    "city": 255,
+    "company_grading": 50,
+    "website_url": 512,
+    "industry": 255,
+    "product_interest": 512,
+    "full_name": 255,
+    "designation": 255,
+    "email": 255,
+    "secondary_email": 255,
+    "phone": 50,
+    "secondary_phone": 50,
+    "primary_phone": 50,
+    "linkedin_profile_url": 512,
+    "linkedin_company_url": 512,
+    "facebook_company_url": 512,
+    "instagram_company_url": 512,
+}
+
 
 def _parse_uploaded_file(file_content: bytes, filename: str) -> list[dict[str, Any]]:
     """Parse uploaded bytes into a list of row dicts."""
@@ -474,26 +494,6 @@ def execute_safe_fill_merge(
         "secondary_phone": "secondary_phone",
         "linkedin_url": "linkedin_profile_url",
     }
-
-MAX_FIELD_LENGTHS = {
-    "country": 100,
-    "city": 255,
-    "company_grading": 50,
-    "website_url": 512,
-    "industry": 255,
-    "product_interest": 512,
-    "full_name": 255,
-    "designation": 255,
-    "email": 255,
-    "secondary_email": 255,
-    "phone": 50,
-    "secondary_phone": 50,
-    "primary_phone": 50,
-    "linkedin_profile_url": 512,
-    "linkedin_company_url": 512,
-    "facebook_company_url": 512,
-    "instagram_company_url": 512,
-}
 
     for row in uploaded_rows:
         buyer_id_raw = str(row.get("buyer_id") or "").strip()
