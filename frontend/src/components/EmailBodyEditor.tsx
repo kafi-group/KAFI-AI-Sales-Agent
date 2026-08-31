@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, type MouseEvent, type ReactNode } from "react";
+import { IconPaperclip } from "./icons/AppIcons";
 
 export type EmailBodyEditorProps = {
   value: string;
@@ -9,6 +10,12 @@ export type EmailBodyEditorProps = {
   className?: string;
   /** Extra class on the editable surface */
   editorClassName?: string;
+  /** Optional attach button handler in the toolbar */
+  onAttachClick?: () => void;
+  /** Optional count of attachments to show in the toolbar */
+  attachmentCount?: number;
+  /** Whether an attachment is currently uploading */
+  isUploadingAttachment?: boolean;
 };
 
 const FONT_SIZES = [
@@ -113,6 +120,9 @@ export function EmailBodyEditor({
   disabled = false,
   className = "",
   editorClassName = "",
+  onAttachClick,
+  attachmentCount,
+  isUploadingAttachment = false,
 }: EmailBodyEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const lastHtml = useRef<string>("");
@@ -297,6 +307,30 @@ export function EmailBodyEditor({
         >
           <span className="text-base leading-none">•</span>
         </ToolbarButton>
+
+        {onAttachClick && (
+          <>
+            <Divider />
+            <button
+              type="button"
+              title="Attach Document / Files"
+              disabled={disabled || isUploadingAttachment}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onAttachClick();
+              }}
+              className="h-8 px-2.5 rounded-md text-xs font-semibold inline-flex items-center gap-1.5 border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-200 transition-colors cursor-pointer disabled:opacity-40 ml-auto"
+            >
+              <IconPaperclip size="xs" className="text-emerald-400" />
+              <span>{isUploadingAttachment ? "Attaching…" : "Attach file"}</span>
+              {attachmentCount != null && attachmentCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/30 border border-emerald-400/50 text-[10px] text-white font-bold">
+                  {attachmentCount}
+                </span>
+              )}
+            </button>
+          </>
+        )}
       </div>
 
       <div

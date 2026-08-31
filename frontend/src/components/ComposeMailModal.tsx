@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { client, type EmailAttachment, type EmailTemplate, type MailComposeDraft } from "../api/client";
 import { EmailBodyEditor, emailBodyHasContent } from "./EmailBodyEditor";
+import { AttachedFilesList } from "./AttachedFilesList";
 import { ProseInput } from "./ProseTextField";
 import { IconPaperclip } from "./icons/AppIcons";
 
@@ -329,33 +330,18 @@ export function ComposeMailModal({
               rows={12}
               disabled={sending}
               placeholder="Write your email…"
+              onAttachClick={() => fileInputRef.current?.click()}
+              attachmentCount={attachments.length}
+              isUploadingAttachment={uploadingAttachment}
             />
           </div>
 
-          {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 pt-1 pb-1">
-              {attachments.map((att) => (
-                <div
-                  key={att.id}
-                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-200"
-                >
-                  <IconPaperclip size="xs" className="text-emerald-400" />
-                  <span className="font-medium max-w-[200px] truncate">{att.filename}</span>
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    ({(att.size / 1024).toFixed(0)} KB)
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveAttachment(att.id)}
-                    className="text-slate-400 hover:text-rose-400 transition ml-1 cursor-pointer"
-                    title="Remove attachment"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          <AttachedFilesList
+            attachments={attachments}
+            onRemove={handleRemoveAttachment}
+            onClearAll={() => setAttachments([])}
+            uploading={uploadingAttachment}
+          />
         </div>
 
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-slate-800 bg-slate-950/40">
@@ -408,9 +394,13 @@ export function ComposeMailModal({
               type="button"
               onClick={() => void handleSend()}
               disabled={sending || discarding || !to.trim() || !emailBodyHasContent(body) || uploadingAttachment}
-              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium text-white disabled:opacity-50"
+              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium text-white disabled:opacity-50 font-semibold"
             >
-              {sending ? "Sending…" : "Send"}
+              {sending
+                ? "Sending…"
+                : attachments.length > 0
+                  ? `Send (${attachments.length} attached)`
+                  : "Send"}
             </button>
           </div>
         </div>

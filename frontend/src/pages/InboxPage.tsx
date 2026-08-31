@@ -21,6 +21,7 @@ import {
 } from "../components/AppSidebar";
 import { CreateLabelModal } from "../components/CreateLabelModal";
 import { ComposeMailModal } from "../components/ComposeMailModal";
+import { AttachedFilesList } from "../components/AttachedFilesList";
 import {
   EmailBodyEditor,
   emailBodyHasContent,
@@ -2054,40 +2055,15 @@ export function InboxPage({
                       onChange={setReplyBody}
                       placeholder="Write your reply…"
                       rows={7}
+                      onAttachClick={() => replyFileInputRef.current?.click()}
+                      attachmentCount={replyAttachments.length}
+                      isUploadingAttachment={uploadingAttachment}
                     />
-                    {replyAttachments.length > 0 && (
-                      <div className="flex flex-wrap gap-2 pt-1 pb-1">
-                        {replyAttachments.map((att) => (
-                          <div
-                            key={att.id}
-                            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-200"
-                          >
-                            <IconPaperclip size="xs" className="text-emerald-400" />
-                            <span className="font-medium max-w-[200px] truncate">
-                              {att.filename}
-                            </span>
-                            <span className="text-[10px] text-slate-400 font-mono">
-                              ({(att.size / 1024).toFixed(0)} KB)
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveReplyAttachment(att.id)}
-                              className="text-slate-400 hover:text-rose-400 transition ml-1 cursor-pointer"
-                              title="Remove attachment"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <input
-                      type="file"
-                      ref={replyFileInputRef}
-                      onChange={handleReplyFileUpload}
-                      multiple
-                      className="hidden"
-                      accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp,.gif"
+                    <AttachedFilesList
+                      attachments={replyAttachments}
+                      onRemove={handleRemoveReplyAttachment}
+                      onClearAll={() => setReplyAttachments([])}
+                      uploading={uploadingAttachment}
                     />
                     <div className="flex items-center justify-between gap-2 pt-1">
                       <div className="flex items-center gap-2">
@@ -2135,7 +2111,11 @@ export function InboxPage({
                           }
                           title="Send reply"
                         >
-                          {sending ? "Sending…" : "Send reply"}
+                          {sending
+                            ? "Sending…"
+                            : replyAttachments.length > 0
+                              ? `Send reply (${replyAttachments.length} file${replyAttachments.length > 1 ? "s" : ""})`
+                              : "Send reply"}
                         </ActionButton>
                       </div>
                     </div>
@@ -2458,33 +2438,16 @@ export function InboxPage({
                     onChange={setReplyBody}
                     placeholder="Write your reply…"
                     rows={7}
+                    onAttachClick={() => replyFileInputRef.current?.click()}
+                    attachmentCount={replyAttachments.length}
+                    isUploadingAttachment={uploadingAttachment}
                   />
-                  {replyAttachments.length > 0 && (
-                    <div className="flex flex-wrap gap-2 pt-1 pb-1">
-                      {replyAttachments.map((att) => (
-                        <div
-                          key={att.id}
-                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-200"
-                        >
-                          <IconPaperclip size="xs" className="text-emerald-400" />
-                          <span className="font-medium max-w-[200px] truncate">
-                            {att.filename}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            ({(att.size / 1024).toFixed(0)} KB)
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveReplyAttachment(att.id)}
-                            className="text-slate-400 hover:text-rose-400 transition ml-1 cursor-pointer"
-                            title="Remove attachment"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <AttachedFilesList
+                    attachments={replyAttachments}
+                    onRemove={handleRemoveReplyAttachment}
+                    onClearAll={() => setReplyAttachments([])}
+                    uploading={uploadingAttachment}
+                  />
                   <div className="flex items-center justify-between gap-2 pt-1">
                     <div className="flex items-center gap-2">
                       <ActionButton
@@ -2531,7 +2494,11 @@ export function InboxPage({
                         }
                         title="Send reply"
                       >
-                        {sending ? "Sending…" : "Send reply"}
+                        {sending
+                          ? "Sending…"
+                          : replyAttachments.length > 0
+                            ? `Send reply (${replyAttachments.length} file${replyAttachments.length > 1 ? "s" : ""})`
+                            : "Send reply"}
                       </ActionButton>
                     </div>
                   </div>
@@ -2545,6 +2512,15 @@ export function InboxPage({
           )}
         </div>
       </div>
+
+      <input
+        type="file"
+        ref={replyFileInputRef}
+        onChange={handleReplyFileUpload}
+        multiple
+        className="hidden"
+        accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp,.gif"
+      />
 
       {showCompose && (
         <ComposeMailModal
