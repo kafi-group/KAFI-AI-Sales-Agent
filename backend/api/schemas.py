@@ -58,16 +58,27 @@ class CompanyNameSuggestionsResponse(BaseModel):
 class DialableContactSuggestion(BaseModel):
     buyer_id: int
     contact_id: Optional[int] = None
-    company_name: str
-    contact_name: str
+    company_name: Optional[str] = ""
+    contact_name: Optional[str] = ""
     phone: str
     country: Optional[str] = None
+    designation: Optional[str] = None
+    grading: Optional[str] = None
     label: str
 
 
 class DialableContactSuggestionsResponse(BaseModel):
-    q: str
+    q: str = ""
+    country: Optional[str] = None
+    grade: Optional[str] = None
+    designation: Optional[str] = None
     rows: list[DialableContactSuggestion]
+
+
+class CallFilterOptionsResponse(BaseModel):
+    countries: list[str]
+    grades: list[str]
+    designations: list[str]
 
 
 class QuotationEligibleLeadRead(BuyerRead):

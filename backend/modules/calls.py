@@ -1117,29 +1117,28 @@ def list_dialable_leads(
 def suggest_dialable_contacts(
     db: Session,
     *,
-    q: str,
-    limit: int = 15,
+    q: str = "",
+    country: str | None = None,
+    grade: str | None = None,
+    designation: str | None = None,
+    limit: int = 25,
     assigned_to_user_id: int | None = None,
 ) -> list[dict[str, object]]:
-    """Typeahead search for contacts/companies with phone numbers for dialer autocomplete."""
+    """Search/filter dialable contacts with phone numbers by query, country, grade, and designation."""
     from sqlalchemy import or_, func as sa_func
 
     query_str = (q or "").strip()
-    if len(query_str) < 1:
-        return []
-    limit = max(1, min(int(limit or 15), 30))
+    country_str = (country or "").strip()
+    grade_str = (grade or "").strip()
+    desig_str = (designation or "").strip()
 
-    safe = (
-        query_str.replace("\\", "\\\\")
-        .replace("%", "\\%")
-        .replace("_", "\\_")
-    )
-    pattern = f"%{safe}%"
+    limit = max(1, min(int(limit or 25), 50))
 
     b_query = db.query(Buyer).join(Contact, Contact.buyer_id == Buyer.id)
     if assigned_to_user_id is not None:
         b_query = b_query.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
 
+    # Must have a dialable phone
     b_query = b_query.filter(
         or_(
             sa_func.trim(sa_func.coalesce(Contact.phone, "")) != "",
@@ -1147,20 +1146,69 @@ def suggest_dialable_contacts(
             sa_func.trim(sa_func.coalesce(Contact.secondary_mobile, "")) != "",
             sa_func.trim(sa_func.coalesce(Contact.secondary_phone, "")) != "",
         )
-    ).filter(
-        or_(
-            Buyer.company_name.ilike(pattern, escape="\\"),
-            Contact.full_name.ilike(pattern, escape="\\"),
-            Contact.phone.ilike(pattern, escape="\\"),
-            Contact.primary_phone.ilike(pattern, escape="\\"),
-            Contact.secondary_mobile.ilike(pattern, escape="\\"),
-            Contact.secondary_phone.ilike(pattern, escape="\\"),
-        )
     )
 
-    matching_buyers = b_query.order_by(
-        sa_func.lower(Buyer.company_name).asc()
-    ).limit(limit * 2).all()
+    if country_str:
+        from modules.countries import country_search_terms
+
+        terms = [term for term in country_search_terms(country_str) if term]
+        if terms:
+            b_query = b_query.filter(
+                or_(
+                    *[
+                        sa_func.lower(sa_func.coalesce(Buyer.country, "")).like(f"%{term}%")
+                        for term in terms
+                    ]
+                )
+            )
+        else:
+            b_query = b_query.filter(
+                sa_func.lower(sa_func.coalesce(Buyer.country, "")).like(f"%{country_str.lower()}%")
+            )
+
+    if grade_str:
+        if grade_str.lower() == "ungraded":
+            b_query = b_query.filter(
+                or_(
+                    Buyer.company_grading.is_(None),
+                    sa_func.trim(sa_func.coalesce(Buyer.company_grading, "")) == "",
+                    sa_func.lower(Buyer.company_grading) == "ungraded",
+                )
+            )
+        else:
+            b_query = b_query.filter(
+                sa_func.lower(sa_func.coalesce(Buyer.company_grading, "")) == grade_str.lower()
+            )
+
+    if desig_str:
+        b_query = b_query.filter(
+            sa_func.lower(sa_func.coalesce(Contact.designation, "")).like(f"%{desig_str.lower()}%")
+        )
+
+    if query_str:
+        safe = (
+            query_str.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        pattern = f"%{safe}%"
+        b_query = b_query.filter(
+            or_(
+                Buyer.company_name.ilike(pattern, escape="\\"),
+                Contact.full_name.ilike(pattern, escape="\\"),
+                Contact.designation.ilike(pattern, escape="\\"),
+                Contact.phone.ilike(pattern, escape="\\"),
+                Contact.primary_phone.ilike(pattern, escape="\\"),
+                Contact.secondary_mobile.ilike(pattern, escape="\\"),
+                Contact.secondary_phone.ilike(pattern, escape="\\"),
+            )
+        )
+
+    matching_buyers = (
+        b_query.order_by(sa_func.lower(sa_func.coalesce(Buyer.company_name, "")).asc())
+        .limit(limit * 3)
+        .all()
+    )
 
     items: list[dict[str, object]] = []
     seen_keys: set[str] = set()
@@ -1173,19 +1221,24 @@ def suggest_dialable_contacts(
         contact_id = phone_opts[0].get("contact_id")
         contact_obj = db.get(Contact, contact_id) if contact_id else None
 
-        contact_name = (contact_obj.full_name if contact_obj else None) or buyer.company_name
-        company_name = buyer.company_name
+        contact_name = (contact_obj.full_name if contact_obj else None) or buyer.company_name or "Contact"
+        company_name = buyer.company_name or ""
+        designation_val = (contact_obj.designation if contact_obj else None) or ""
+        grading_val = buyer.company_grading or ""
+        country_val = buyer.country or (contact_obj.nationality if contact_obj else None) or ""
 
         key = f"{buyer.id}:{primary_phone}"
         if key in seen_keys:
             continue
         seen_keys.add(key)
 
-        label = (
-            f"{company_name} — {contact_name} ({primary_phone})"
-            if contact_name != company_name
-            else f"{company_name} ({primary_phone})"
-        )
+        parts = [company_name]
+        if contact_name and contact_name != company_name:
+            parts.append(contact_name)
+        if designation_val:
+            parts.append(f"({designation_val})")
+        parts.append(f"[{primary_phone}]")
+        label = " — ".join(p for p in parts if p)
 
         items.append(
             {
@@ -1194,7 +1247,9 @@ def suggest_dialable_contacts(
                 "company_name": company_name,
                 "contact_name": contact_name,
                 "phone": primary_phone,
-                "country": buyer.country or (contact_obj.country if contact_obj else None),
+                "country": country_val,
+                "designation": designation_val or None,
+                "grading": grading_val or None,
                 "label": label,
             }
         )
@@ -1202,3 +1257,60 @@ def suggest_dialable_contacts(
             break
 
     return items
+
+
+def get_call_filter_options(
+    db: Session,
+    *,
+    assigned_to_user_id: int | None = None,
+) -> dict[str, list[str]]:
+    """Return distinct countries, gradings, and common designations for dialer filters."""
+    from sqlalchemy import func as sa_func, or_
+
+    b_query = db.query(Buyer).join(Contact, Contact.buyer_id == Buyer.id)
+    if assigned_to_user_id is not None:
+        b_query = b_query.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
+
+    b_query = b_query.filter(
+        or_(
+            sa_func.trim(sa_func.coalesce(Contact.phone, "")) != "",
+            sa_func.trim(sa_func.coalesce(Contact.primary_phone, "")) != "",
+            sa_func.trim(sa_func.coalesce(Contact.secondary_mobile, "")) != "",
+            sa_func.trim(sa_func.coalesce(Contact.secondary_phone, "")) != "",
+        )
+    )
+
+    # Distinct countries
+    raw_countries = (
+        b_query.with_entities(sa_func.trim(Buyer.country))
+        .filter(Buyer.country.isnot(None), sa_func.trim(Buyer.country) != "")
+        .distinct()
+        .all()
+    )
+    countries = sorted([r[0] for r in raw_countries if r[0]])
+
+    # Distinct grades
+    raw_grades = (
+        b_query.with_entities(sa_func.trim(Buyer.company_grading))
+        .filter(Buyer.company_grading.isnot(None), sa_func.trim(Buyer.company_grading) != "")
+        .distinct()
+        .all()
+    )
+    grades = sorted([r[0] for r in raw_grades if r[0]])
+
+    # Distinct common designations
+    raw_desigs = (
+        b_query.with_entities(sa_func.trim(Contact.designation), sa_func.count(Contact.id))
+        .filter(Contact.designation.isnot(None), sa_func.trim(Contact.designation) != "")
+        .group_by(sa_func.trim(Contact.designation))
+        .order_by(sa_func.count(Contact.id).desc())
+        .limit(25)
+        .all()
+    )
+    designations = [r[0] for r in raw_desigs if r[0]]
+
+    return {
+        "countries": countries,
+        "grades": grades,
+        "designations": designations,
+    }

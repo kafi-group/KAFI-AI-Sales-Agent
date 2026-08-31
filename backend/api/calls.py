@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from api.deps import get_current_user, get_db, require_admin
 from api.schemas import (
     CallConfigRead,
+    CallFilterOptionsResponse,
     CallHistoryItem,
     CallHistoryListResponse,
     CallInitiateRequest,
@@ -42,18 +43,42 @@ router = APIRouter(tags=["calls"])
 @router.get("/calls/contact-suggestions", response_model=DialableContactSuggestionsResponse)
 def suggest_dialable_contacts(
     q: str = Query("", min_length=0, max_length=200),
-    limit: int = Query(15, ge=1, le=30),
+    country: str | None = Query(None),
+    grade: str | None = Query(None),
+    designation: str | None = Query(None),
+    limit: int = Query(25, ge=1, le=50),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
-    """Typeahead search for contacts/companies with phone numbers for dialer autocomplete."""
+    """Typeahead search for contacts/companies with phone numbers for dialer autocomplete with multi-filters."""
     assigned_id = None if _is_admin(user) else user.id
     rows = calls_module.suggest_dialable_contacts(
-        db, q=q, limit=limit, assigned_to_user_id=assigned_id
+        db,
+        q=q,
+        country=country,
+        grade=grade,
+        designation=designation,
+        limit=limit,
+        assigned_to_user_id=assigned_id,
     )
     return DialableContactSuggestionsResponse(
         q=q.strip(),
+        country=country,
+        grade=grade,
+        designation=designation,
         rows=[DialableContactSuggestion(**row) for row in rows],
+    )
+
+
+@router.get("/calls/filter-options", response_model=CallFilterOptionsResponse)
+def get_call_filter_options(
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """Return distinct filter options (countries, grades, designations) for dialer."""
+    assigned_id = None if _is_admin(user) else user.id
+    return CallFilterOptionsResponse(
+        **calls_module.get_call_filter_options(db, assigned_to_user_id=assigned_id)
     )
 
 

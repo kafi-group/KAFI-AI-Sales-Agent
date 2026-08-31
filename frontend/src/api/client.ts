@@ -1175,12 +1175,23 @@ export interface DialableContactSuggestion {
   contact_name: string;
   phone: string;
   country: string | null;
+  designation?: string | null;
+  grading?: string | null;
   label: string;
 }
 
 export interface DialableContactSuggestionsResponse {
   q: string;
+  country?: string | null;
+  grade?: string | null;
+  designation?: string | null;
   rows: DialableContactSuggestion[];
+}
+
+export interface CallFilterOptionsResponse {
+  countries: string[];
+  grades: string[];
+  designations: string[];
 }
 
 export interface Contact {
@@ -2205,14 +2216,34 @@ export const client = {
       `/leads/company-suggestions?${query.toString()}`,
     );
   },
-  suggestDialableContacts: (q: string, limit = 15) => {
+  suggestDialableContacts: (
+    params:
+      | string
+      | {
+          q?: string;
+          country?: string;
+          grade?: string;
+          designation?: string;
+          limit?: number;
+        },
+    limit = 25,
+  ) => {
     const query = new URLSearchParams();
-    query.set("q", q);
-    if (limit) query.set("limit", String(limit));
+    if (typeof params === "string") {
+      if (params) query.set("q", params);
+      if (limit) query.set("limit", String(limit));
+    } else if (params) {
+      if (params.q) query.set("q", params.q);
+      if (params.country) query.set("country", params.country);
+      if (params.grade) query.set("grade", params.grade);
+      if (params.designation) query.set("designation", params.designation);
+      query.set("limit", String(params.limit ?? limit));
+    }
     return request<DialableContactSuggestionsResponse>(
       `/calls/contact-suggestions?${query.toString()}`,
     );
   },
+  getCallFilterOptions: () => request<CallFilterOptionsResponse>("/calls/filter-options"),
   getLead: (id: number) => request<Lead>(`/leads/${id}`),
   getLeadProfile: (id: number) => request<BuyerProfile>(`/leads/${id}/profile`),
   researchLead: (id: number, opts?: { timeoutMs?: number }) =>
