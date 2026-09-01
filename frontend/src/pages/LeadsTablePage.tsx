@@ -89,8 +89,10 @@ import {
   leadFieldSpellingMode,
   spellingPropsForLeadField,
 } from "../utils/spelling";
+import { ManageModulesModal } from "../components/ManageModulesModal";
 import {
   client,
+  type CustomLeadModule,
   type LeadTableFilters,
   type LeadTableRow,
   type LeadTableRowUpdate,
@@ -577,11 +579,22 @@ function sectionTableScope(
   if (section === "targeted_distributor") return { source: "targeted_distributor" };
   if (section === "targeted_client") return { source: "targeted_client" };
   if (section === "incomplete_archives") return { source: "incomplete_archives" };
+  if (section === "testing") return { source: "testing" };
   if (isAssignedLeadsSection(section)) {
     const userId = assignedUserIdFromSection(section);
     return userId != null ? { assigned_to_user_id: userId } : {};
   }
   if (section === "all") return { exclude_source: TARGETED_POOL_EXCLUDE };
+  if (
+    ![
+      "interested_clients",
+      "sales_interested_clients",
+      "not_interested_clients",
+      "not_received_call_clients",
+    ].includes(section)
+  ) {
+    return { source: section };
+  }
   return { exclude_source: "old_clients" };
 }
 
@@ -627,6 +640,7 @@ function sectionTableParams(
     };
   }
   if (section === "incomplete_archives") return { source: "incomplete_archives" };
+  if (section === "testing") return { source: "testing" };
   if (section === "interested_clients") return { call_outcome: "follow_up" };
   if (section === "sales_interested_clients") return { in_interested_clients: true };
   if (section === "not_interested_clients") return { call_outcome: "not_interested" };
@@ -638,7 +652,7 @@ function sectionTableParams(
   if (section === "all") {
     return { exclude_source: TARGETED_POOL_EXCLUDE, new_search_lead_only: true };
   }
-  return { exclude_source: "old_clients" };
+  return { source: section };
 }
 
 function sectionTitle(
@@ -646,6 +660,7 @@ function sectionTitle(
   assigneeUsername?: string | null,
   isAdmin = true,
   masterType?: string,
+  customModules?: CustomLeadModule[],
 ): string {
   if (section === "master") {
     return masterType === "minerals_ores"
@@ -661,12 +676,17 @@ function sectionTitle(
   if (section === "targeted_distributor") return "Targeted Distributors";
   if (section === "targeted_client") return "Targeted Client";
   if (section === "incomplete_archives") return "Incomplete Data from Archives";
+  if (section === "testing") return "Testing (Staff Numbers)";
   if (section === "interested_clients") return "Follow up clients";
   if (section === "sales_interested_clients") return "Interested Clients";
   if (section === "not_interested_clients") return "Not interested";
   if (section === "not_received_call_clients") return "Did not receive call";
   if (isAssignedLeadsSection(section)) {
     return `Leads Sent To ${assigneeUsername || "user"}`;
+  }
+  if (customModules) {
+    const cm = customModules.find((m) => m.key === section);
+    if (cm) return `${cm.icon ? cm.icon + " " : ""}${cm.name}`;
   }
   return "New search lead";
 }
@@ -675,6 +695,7 @@ function sectionDescription(
   section: LeadsTableSection,
   assigneeUsername?: string | null,
   isAdmin = true,
+  customModules?: CustomLeadModule[],
 ): string {
   if (section === "master") {
     return "Overview of every lead in the system — including leads sent to Asim, Usman, Sadia, or any other user.";
@@ -693,6 +714,9 @@ function sectionDescription(
   }
   if (section === "incomplete_archives") {
     return "Partial rows from archives — name only, phone only, product only (e.g. Salt), or mixed columns. Edit manually or use Research to fill gaps. Promote to Old clients when complete (manual only).";
+  }
+  if (section === "testing") {
+    return "Official Kafi Commodities staff recipients for daily morning bulk email & WhatsApp testing.";
   }
   if (section === "old_clients") {
     return isAdmin
@@ -716,6 +740,10 @@ function sectionDescription(
   }
   if (isAssignedLeadsSection(section)) {
     return `Only leads an admin sent to ${assigneeUsername || "this user"}. Their own spreadsheet imports stay on their account and do not appear here.`;
+  }
+  if (customModules) {
+    const cm = customModules.find((m) => m.key === section);
+    if (cm && cm.description) return cm.description;
   }
   return "AI-discovered leads from Discover Leads only (web search & scraping). Upload or import spreadsheets in Old clients or Incomplete Data from Archives — not here.";
 }
@@ -1245,34 +1273,68 @@ export function LeadsTablePage({
     : null;
 
   /** Old-clients column set + filters on every leads table section. */
+  const [showManageModules, setShowManageModules] = useState(false);
+  const [customModules, setCustomModules] = useState<CustomLeadModule[]>([]);
+
+  const loadCustomModules = useCallback(async () => {
+    try {
+      const list = await client.listCustomModules(false);
+      setCustomModules(list);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCustomModules();
+  }, [loadCustomModules]);
+
   const useClientsFilters = true;
   const isOldClients = section === "old_clients";
   const isMyAssigned = section === "my_assigned";
   const isIncompleteArchives = section === "incomplete_archives";
   const isMaster = section === "master";
   const isTargetedPool = isTargetedPoolSection(section);
+  const isTestingModule = section === "testing";
+  const isCustomModule =
+    !isOldClients &&
+    !isMyAssigned &&
+    !isIncompleteArchives &&
+    !isMaster &&
+    !isTargetedPool &&
+    !isAssignedLeadsSection(section) &&
+    section !== "all" &&
+    section !== "interested_clients" &&
+    section !== "sales_interested_clients" &&
+    section !== "not_interested_clients" &&
+    section !== "not_received_call_clients";
+
   const canImportSpreadsheet =
     section === "old_clients" ||
     isIncompleteArchives ||
-    isTargetedPool;
-  /** Every user can manually add leads on Clients / Master / targeted pools — not New search lead. */
+    isTargetedPool ||
+    isCustomModule ||
+    isTestingModule;
+  /** Every user can manually add leads on Clients / Master / targeted pools / custom modules — not New search lead. */
   const canAddLead =
     section === "old_clients" ||
     section === "incomplete_archives" ||
     section === "master" ||
-    isTargetedPool;
+    isTargetedPool ||
+    isCustomModule ||
+    isTestingModule;
   const createLeadSource =
     isIncompleteArchives
       ? "incomplete_archives"
-      : isTargetedPool
+      : isTargetedPool || isCustomModule || isTestingModule
         ? section
         : "old_clients";
-  const canBulkAssign = isAdmin && (section === "all" || section === "old_clients" || isMaster);
+  const canBulkAssign = isAdmin && (section === "all" || section === "old_clients" || isMaster || isCustomModule || isTestingModule);
   const importSource = isOldClients
     ? "old_clients"
     : isIncompleteArchives
       ? "incomplete_archives"
-    : isTargetedPool
+    : isTargetedPool || isCustomModule || isTestingModule
       ? section
       : "csv";
   const isCallOutcomeSection =
@@ -1292,10 +1354,21 @@ export function LeadsTablePage({
   const callOutcomeEmptyMessage = sectionEmptyMessage(section);
 
   const isWideLayout =
-    isOldClients || isMyAssigned || isIncompleteArchives || isCallOutcomeSection || isTargetedPool;
+    isOldClients ||
+    isMyAssigned ||
+    isIncompleteArchives ||
+    isCallOutcomeSection ||
+    isTargetedPool ||
+    isCustomModule ||
+    isTestingModule;
   /** Same spreadsheet-style table as Old clients (not Discover narrow layout). */
   const usesOldClientsTable =
-    isOldClients || isMyAssigned || isIncompleteArchives || isCallOutcomeSection;
+    isOldClients ||
+    isMyAssigned ||
+    isIncompleteArchives ||
+    isCallOutcomeSection ||
+    isCustomModule ||
+    isTestingModule;
   const columnDefs = useMemo(() => {
     const base = isTargetedPool
       ? TARGETED_POOL_COLUMNS
@@ -1561,9 +1634,9 @@ export function LeadsTablePage({
     client
       .listLeadTableFilters(isOldClients || isMyAssigned ? { source: "old_clients" } : {})
       .then(setFilters)
-      .catch(() => onError("Failed to load lead filters"));
+      .catch(() => {});
     void loadSectionCounts();
-  }, [isOldClients, isMyAssigned, isMaster, loadSectionCounts, onError]);
+  }, [isOldClients, isMyAssigned, isMaster, loadSectionCounts]);
 
   useEffect(() => {
     void loadTable();
@@ -2935,11 +3008,61 @@ export function LeadsTablePage({
       <div className="flex items-start justify-between gap-4 flex-wrap shrink-0">
         <div>
           <h2 className="text-lg font-medium text-slate-100">
-            {sectionTitle(section, assigneeUsername, isAdmin, masterType)}
+            {sectionTitle(section, assigneeUsername, isAdmin, masterType, customModules)}
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            {sectionDescription(section, assigneeUsername, isAdmin)}
+            {sectionDescription(section, assigneeUsername, isAdmin, customModules)}
           </p>
+          {isTestingModule && (
+            <div className="mt-3 p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 via-slate-900 to-slate-900 border border-emerald-500/40 shadow-lg flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-lg">
+                  🧪
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                    Daily Morning Testing Hub
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold">
+                      Staff QA Recipients
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-slate-300">
+                    Use this list to verify bulk email & WhatsApp dispatches every morning with your own staff before customer campaigns.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelected(new Set(rows.map((r) => r.id)));
+                    setShowBulkEmail(true);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow"
+                >
+                  <span>✉️</span> Test Bulk Email
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelected(new Set(rows.map((r) => r.id)));
+                    setWhatsappTargetIds(rows.map((r) => r.id));
+                    setShowBulkWhatsApp(true);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold flex items-center gap-1.5 shadow"
+                >
+                  <span>💬</span> Test Bulk WhatsApp
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowManageModules(true)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 border border-slate-700"
+                >
+                  <span>⚙️</span> Manage Staff
+                </button>
+              </div>
+            </div>
+          )}
           {isTargetedPool ? (
             <div className="mt-3 space-y-2">
               <div className="inline-flex rounded-lg border border-slate-700 bg-slate-900/80 p-0.5 text-xs">
@@ -3211,8 +3334,10 @@ export function LeadsTablePage({
                     incomplete_archives: "📂 Incomplete Data from Archives",
                     old_clients: "🏛️ Old clients",
                     master: "📋 Master Table (FMCG)",
+                    testing: "🧪 Testing (Staff Numbers)",
                   };
-                  const label = labels[val] || val.replace("_", " ");
+                  const cm = customModules.find((m) => m.key === val);
+                  const label = cm ? `${cm.icon ? cm.icon + " " : ""}${cm.name}` : (labels[val] || val.replace("_", " "));
                   setMoveConfirmTarget({
                     moduleKey: val,
                     moduleLabel: label,
@@ -3230,31 +3355,43 @@ export function LeadsTablePage({
                     ? "Moving…"
                     : `Move ${selected.size} selected lead(s) to…`}
               </option>
-              <option value="khalid_focused_sales">📌 Khalid Focused Sales</option>
-              <option value="follow_up_clients">
-                ⏰ Follow up clients{sectionCounts.follow_up_clients != null ? ` (${sectionCounts.follow_up_clients})` : ""}
-              </option>
-              <option value="interested_clients">
-                💜 Interested Clients{sectionCounts.interested_clients != null ? ` (${sectionCounts.interested_clients})` : ""}
-              </option>
-              <option value="not_interested_clients">
-                🚫 Not interested{sectionCounts.not_interested_clients != null ? ` (${sectionCounts.not_interested_clients})` : ""}
-              </option>
-              <option value="not_received_call_clients">
-                📞 Did not receive call{sectionCounts.not_received_call_clients != null ? ` (${sectionCounts.not_received_call_clients})` : ""}
-              </option>
-              <option value="hyperstore_targeted">
-                🏪 Hyperstore Target{sectionCounts.hyperstore_targeted != null ? ` (${sectionCounts.hyperstore_targeted})` : ""}
-              </option>
-              <option value="targeted_distributor">
-                🚚 Targeted Distributors{sectionCounts.targeted_distributor != null ? ` (${sectionCounts.targeted_distributor})` : ""}
-              </option>
-              <option value="targeted_client">🎯 Targeted Client</option>
-              <option value="incomplete_archives">
-                📂 Incomplete Data from Archives{sectionCounts.incomplete_archives != null ? ` (${sectionCounts.incomplete_archives})` : ""}
-              </option>
-              <option value="old_clients">🏛️ Old clients</option>
-              <option value="master">📋 Master Table (FMCG)</option>
+              {customModules.length > 0 && (
+                <optgroup label="Custom & Testing Lists">
+                  {customModules.map((cm) => (
+                    <option key={cm.key} value={cm.key}>
+                      {cm.icon || "📋"} {cm.name}
+                      {sectionCounts[cm.key] != null ? ` (${sectionCounts[cm.key]})` : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              <optgroup label="Standard CRM Pools">
+                <option value="khalid_focused_sales">📌 Khalid Focused Sales</option>
+                <option value="follow_up_clients">
+                  ⏰ Follow up clients{sectionCounts.follow_up_clients != null ? ` (${sectionCounts.follow_up_clients})` : ""}
+                </option>
+                <option value="interested_clients">
+                  💜 Interested Clients{sectionCounts.interested_clients != null ? ` (${sectionCounts.interested_clients})` : ""}
+                </option>
+                <option value="not_interested_clients">
+                  🚫 Not interested{sectionCounts.not_interested_clients != null ? ` (${sectionCounts.not_interested_clients})` : ""}
+                </option>
+                <option value="not_received_call_clients">
+                  📞 Did not receive call{sectionCounts.not_received_call_clients != null ? ` (${sectionCounts.not_received_call_clients})` : ""}
+                </option>
+                <option value="hyperstore_targeted">
+                  🏪 Hyperstore Target{sectionCounts.hyperstore_targeted != null ? ` (${sectionCounts.hyperstore_targeted})` : ""}
+                </option>
+                <option value="targeted_distributor">
+                  🚚 Targeted Distributors{sectionCounts.targeted_distributor != null ? ` (${sectionCounts.targeted_distributor})` : ""}
+                </option>
+                <option value="targeted_client">🎯 Targeted Client</option>
+                <option value="incomplete_archives">
+                  📂 Incomplete Data from Archives{sectionCounts.incomplete_archives != null ? ` (${sectionCounts.incomplete_archives})` : ""}
+                </option>
+                <option value="old_clients">🏛️ Old clients</option>
+                <option value="master">📋 Master Table (FMCG)</option>
+              </optgroup>
             </select>
           </div>
 
@@ -3501,6 +3638,17 @@ export function LeadsTablePage({
           >
             {savingAll ? "Saving…" : editMode ? "Done" : "Edit"}
           </ActionButton>
+
+          {/* User Requested: Add/Remove Custom Modules Button in Red Box */}
+          <button
+            type="button"
+            onClick={() => setShowManageModules(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-950/70 hover:bg-emerald-900/80 px-3 py-1.5 text-xs font-extrabold text-emerald-300 shadow-sm transition-all hover:scale-105"
+            title="Add or remove modules / lists under Old clients directly, or configure morning testing staff"
+          >
+            <span className="text-emerald-400">⚙️</span>
+            <span>+ Add / Manage Lists</span>
+          </button>
         </div>
       </div>
 
@@ -5383,6 +5531,17 @@ export function LeadsTablePage({
           </div>
         </div>
       )}
+
+      {/* Dynamic Module & List Manager Modal */}
+      <ManageModulesModal
+        isOpen={showManageModules}
+        onClose={() => setShowManageModules(false)}
+        onModulesChanged={() => {
+          void loadCustomModules();
+          void loadSectionCounts();
+          void loadTable();
+        }}
+      />
     </section>
   );
 }

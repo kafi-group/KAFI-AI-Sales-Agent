@@ -118,6 +118,133 @@ def _ensure_horeka_table() -> None:
         print("Created horeka_line_items table.", flush=True)
 
 
+def _ensure_custom_lead_modules_table() -> None:
+    """Ensure custom_lead_modules table exists and seed initial default modules."""
+    from db.models import Base, CustomLeadModule
+    from db.session import SessionLocal
+
+    inspector = inspect(engine)
+    if "custom_lead_modules" not in inspector.get_table_names():
+        Base.metadata.tables["custom_lead_modules"].create(engine, checkfirst=True)
+        print("Created custom_lead_modules table.", flush=True)
+
+    # Seed initial modules if empty
+    db = SessionLocal()
+    try:
+        count = db.query(CustomLeadModule).count()
+        if count == 0:
+            defaults = [
+                CustomLeadModule(
+                    key="testing",
+                    name="Testing",
+                    description="Kafi Commodities staff numbers & emails for daily morning bulk testing",
+                    icon="🧪",
+                    color="#10b981",
+                    is_builtin=False,
+                    is_enabled=True,
+                    order_index=1,
+                ),
+                CustomLeadModule(
+                    key="khalid_focused_sales",
+                    name="Khalid Focused Sales",
+                    description="Leads specially selected for Mr. Khalid's focused sales outreach",
+                    icon="⭐",
+                    color="#f59e0b",
+                    is_builtin=True,
+                    is_enabled=True,
+                    order_index=2,
+                ),
+                CustomLeadModule(
+                    key="interested_clients",
+                    name="Follow up clients",
+                    description="Clients moved here after a call is labeled Follow up",
+                    icon="🕒",
+                    color="#3b82f6",
+                    is_builtin=True,
+                    is_enabled=True,
+                    order_index=3,
+                ),
+                CustomLeadModule(
+                    key="sales_interested_clients",
+                    name="Interested Clients",
+                    description="Clients confirmed interested in Kafi products",
+                    icon="❤️",
+                    color="#ef4444",
+                    is_builtin=True,
+                    is_enabled=True,
+                    order_index=4,
+                ),
+                CustomLeadModule(
+                    key="not_interested_clients",
+                    name="Not interested",
+                    description="Clients marked not interested",
+                    icon="🚫",
+                    color="#6b7280",
+                    is_builtin=True,
+                    is_enabled=True,
+                    order_index=5,
+                ),
+                CustomLeadModule(
+                    key="not_received_call_clients",
+                    name="Did not receive call",
+                    description="Clients who did not answer the phone",
+                    icon="📞",
+                    color="#8b5cf6",
+                    is_builtin=True,
+                    is_enabled=True,
+                    order_index=6,
+                ),
+                CustomLeadModule(
+                    key="hyperstore_targeted",
+                    name="Hyperstore Target",
+                    description="Hypermarkets and multi-branch retail chains",
+                    icon="🛒",
+                    color="#10b981",
+                    is_builtin=True,
+                    is_enabled=True,
+                    order_index=7,
+                ),
+                CustomLeadModule(
+                    key="targeted_distributor",
+                    name="Targeted Distributors",
+                    description="Distributors and wholesale importers",
+                    icon="🏢",
+                    color="#6366f1",
+                    is_builtin=True,
+                    is_enabled=True,
+                    order_index=8,
+                ),
+                CustomLeadModule(
+                    key="targeted_client",
+                    name="Targeted Client",
+                    description="Hand-picked priority target clients",
+                    icon="🎯",
+                    color="#ec4899",
+                    is_builtin=True,
+                    is_enabled=True,
+                    order_index=9,
+                ),
+                CustomLeadModule(
+                    key="incomplete_archives",
+                    name="Incomplete Data from Archives",
+                    description="Partial rows from archives needing research",
+                    icon="📦",
+                    color="#d97706",
+                    is_builtin=True,
+                    is_enabled=True,
+                    order_index=10,
+                ),
+            ]
+            db.add_all(defaults)
+            db.commit()
+            print("Seeded default custom lead modules.", flush=True)
+    except Exception as exc:
+        print(f"Error seeding custom lead modules: {exc}", flush=True)
+        db.rollback()
+    finally:
+        db.close()
+
+
 def run_migrations() -> None:
     alembic_cfg = _alembic_config()
     script = ScriptDirectory.from_config(alembic_cfg)
@@ -132,3 +259,5 @@ def run_migrations() -> None:
     command.upgrade(alembic_cfg, "head")
     _ensure_buyer_social_columns()
     _ensure_horeka_table()
+    _ensure_custom_lead_modules_table()
+

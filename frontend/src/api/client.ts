@@ -3653,7 +3653,86 @@ export const client = {
     request<EmailAttachment>(`/horeka/attach?file_format=${format}`, {
       method: "POST",
     }),
+
+  // ── Custom Lead Modules & Testing Lists ─────────────────────────────────────
+  listCustomModules: (includeDisabled = true) =>
+    request<CustomLeadModule[]>(`/leads/custom-modules?include_disabled=${includeDisabled}`),
+  createCustomModule: (payload: CustomModuleCreatePayload) =>
+    request<CustomLeadModule>("/leads/custom-modules", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateCustomModule: (key: string, payload: CustomModuleUpdatePayload) =>
+    request<CustomLeadModule>(`/leads/custom-modules/${encodeURIComponent(key)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteCustomModule: (key: string) =>
+    request<{ deleted: boolean; key: string; leads_reassigned_to_old_clients: number }>(
+      `/leads/custom-modules/${encodeURIComponent(key)}`,
+      {
+        method: "DELETE",
+      },
+    ),
+  seedModuleStaff: (key: string) =>
+    request<{ status: string; key: string; seeded_count: number; recipients: Array<{ id: number; name: string; status: string }> }>(
+      `/leads/custom-modules/${encodeURIComponent(key)}/seed-staff`,
+      {
+        method: "POST",
+      },
+    ),
+  addModuleRecipient: (key: string, payload: AddRecipientPayload) =>
+    request<{ id: number; company_name: string; contact_person: string; email: string; primary_mobile: string; source: string }>(
+      `/leads/custom-modules/${encodeURIComponent(key)}/add-recipient`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
 };
+
+export interface CustomLeadModule {
+  id: number;
+  key: string;
+  name: string;
+  description: string;
+  icon: string;
+  color: string;
+  is_builtin: boolean;
+  is_enabled: boolean;
+  order_index: number;
+  count: number;
+  created_at?: string | null;
+}
+
+export interface CustomModuleCreatePayload {
+  name: string;
+  key?: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+}
+
+export interface CustomModuleUpdatePayload {
+  name?: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  is_enabled?: boolean;
+  order_index?: number;
+}
+
+export interface AddRecipientPayload {
+  contact_name?: string;
+  company_name?: string;
+  email?: string;
+  secondary_email?: string;
+  primary_mobile?: string;
+  designation?: string;
+  country?: string;
+  city?: string;
+  remarks?: string;
+}
 
 export interface CatalogueItem {
   id: string;

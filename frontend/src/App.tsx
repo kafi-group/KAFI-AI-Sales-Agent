@@ -6,6 +6,7 @@ import {
   QUOTATION_AGENT_URL,
   sanitizeUserFacingError,
   type AppUser,
+  type CustomLeadModule,
   type LeadTableSectionCountsResponse,
 } from "./api/client";
 import { useAuth } from "./auth/AuthContext";
@@ -24,6 +25,7 @@ import { mailLabelSectionId } from "./lib/mailLabelRules";
 import { displayDashboardUserLabel } from "./utils/displayUserName";
 import { InboxAlertToasts } from "./components/InboxAlertToasts";
 import { UrgentEmailAlertModal } from "./components/UrgentEmailAlertModal";
+import { ManageModulesModal } from "./components/ManageModulesModal";
 import type { UrgentEmailItem } from "./api/client";
 import { WhatsAppAlertToasts } from "./components/WhatsAppAlertToasts";
 import { InterestedFollowUpAlertToasts } from "./components/InterestedFollowUpAlertToasts";
@@ -276,6 +278,18 @@ function DashboardApp() {
       /* optional badges */
     }
   }, [masterType]);
+
+  const [customModules, setCustomModules] = useState<CustomLeadModule[]>([]);
+  const [showManageModulesModal, setShowManageModulesModal] = useState(false);
+
+  const loadCustomModules = useCallback(async () => {
+    try {
+      const list = await client.listCustomModules(false);
+      setCustomModules(list);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const loadAssigneeNavUsers = useCallback(async () => {
     try {
@@ -578,6 +592,7 @@ function DashboardApp() {
     setError(null);
     void loadDiscoverLeadsCount();
     void loadTableCounts();
+    void loadCustomModules();
     void loadAssigneeNavUsers();
     void loadMailCounts();
     void loadMailExtras();
@@ -604,6 +619,7 @@ function DashboardApp() {
     loadMailCounts,
     loadMailExtras,
     loadTableCounts,
+    loadCustomModules,
     loadAssigneeNavUsers,
     pollInbox,
     pollUrgentEmails,
@@ -616,6 +632,7 @@ function DashboardApp() {
   useEffect(() => {
     void Promise.all([
       loadTableCounts(),
+      loadCustomModules(),
       loadAssigneeNavUsers(),
       loadMailCounts(),
       loadMailExtras(),
@@ -891,6 +908,67 @@ function DashboardApp() {
       ? "Master Table (Other Items)"
       : "Master Table (FMCG)";
 
+  const enabledCustomNavItems = customModules
+    .filter((m) => m.is_enabled)
+    .map((m) => ({
+      id: m.key as any,
+      label: `${m.icon ? m.icon + " " : ""}${m.name}`,
+      count: (tableCounts as any)[m.key] ?? m.count ?? 0,
+    }));
+
+  const defaultStandardAdminNavItems = [
+    {
+      id: "testing" as const,
+      label: "🧪 Testing",
+      count: (tableCounts as any).testing ?? 0,
+    },
+    {
+      id: "khalid_focused_sales" as const,
+      label: "Khalid Focused Sales",
+      count: tableCounts.khalid_focused_sales ?? 0,
+    },
+    {
+      id: "interested_clients" as const,
+      label: "Follow up clients",
+      count: tableCounts.interested_clients,
+    },
+    {
+      id: "sales_interested_clients" as const,
+      label: "Interested Clients",
+      count: tableCounts.sales_interested_clients ?? 0,
+    },
+    {
+      id: "not_interested_clients" as const,
+      label: "Not interested",
+      count: tableCounts.not_interested_clients,
+    },
+    {
+      id: "not_received_call_clients" as const,
+      label: "Did not receive call",
+      count: tableCounts.not_received_call_clients,
+    },
+    {
+      id: "hyperstore_targeted" as const,
+      label: "Hyperstore Target",
+      count: tableCounts.hyperstore_targeted ?? 0,
+    },
+    {
+      id: "targeted_distributor" as const,
+      label: "Targeted Distributors",
+      count: tableCounts.targeted_distributor ?? 0,
+    },
+    {
+      id: "targeted_client" as const,
+      label: "Targeted Client",
+      count: tableCounts.targeted_client ?? 0,
+    },
+    {
+      id: "incomplete_archives" as const,
+      label: "Incomplete Data from Archives",
+      count: tableCounts.incomplete_archives ?? 0,
+    },
+  ];
+
   const clientSectionNavChildren = isAdmin
     ? [
         {
@@ -908,51 +986,9 @@ function DashboardApp() {
           label: "Old clients",
           count: tableCounts.old_clients,
         },
-        {
-          id: "khalid_focused_sales" as const,
-          label: "Khalid Focused Sales",
-          count: tableCounts.khalid_focused_sales ?? 0,
-        },
-        {
-          id: "interested_clients" as const,
-          label: "Follow up clients",
-          count: tableCounts.interested_clients,
-        },
-        {
-          id: "sales_interested_clients" as const,
-          label: "Interested Clients",
-          count: tableCounts.sales_interested_clients ?? 0,
-        },
-        {
-          id: "not_interested_clients" as const,
-          label: "Not interested",
-          count: tableCounts.not_interested_clients,
-        },
-        {
-          id: "not_received_call_clients" as const,
-          label: "Did not receive call",
-          count: tableCounts.not_received_call_clients,
-        },
-        {
-          id: "hyperstore_targeted" as const,
-          label: "Hyperstore Target",
-          count: tableCounts.hyperstore_targeted ?? 0,
-        },
-        {
-          id: "targeted_distributor" as const,
-          label: "Targeted Distributors",
-          count: tableCounts.targeted_distributor ?? 0,
-        },
-        {
-          id: "targeted_client" as const,
-          label: "Targeted Client",
-          count: tableCounts.targeted_client ?? 0,
-        },
-        {
-          id: "incomplete_archives" as const,
-          label: "Incomplete Data from Archives",
-          count: tableCounts.incomplete_archives ?? 0,
-        },
+        ...(customModules.length > 0
+          ? enabledCustomNavItems
+          : defaultStandardAdminNavItems),
       ]
     : [
         {
@@ -980,6 +1016,9 @@ function DashboardApp() {
           label: "Did not receive call",
           count: tableCounts.not_received_call_clients,
         },
+        ...(customModules.length > 0
+          ? enabledCustomNavItems.filter((m) => !["sales_interested_clients", "interested_clients", "not_interested_clients", "not_received_call_clients"].includes(m.id))
+          : []),
       ];
 
   const defaultTableSection: LeadsTableSection = isAdmin ? "master" : "my_assigned";
@@ -1196,6 +1235,7 @@ function DashboardApp() {
           onOpenSalesAssistant={() => {
             window.dispatchEvent(new CustomEvent(OPEN_SALES_ASSISTANT_EVENT));
           }}
+          onOpenManageModules={() => setShowManageModulesModal(true)}
           userLabel={displayDashboardUserLabel(user)}
           userRole={user?.role}
           mobileOpen={mobileNavOpen}
@@ -1465,6 +1505,18 @@ function DashboardApp() {
           onDismiss={() => setUrgentAlertDismissed(true)}
         />
       )}
+      <ManageModulesModal
+        isOpen={showManageModulesModal}
+        onClose={() => setShowManageModulesModal(false)}
+        onModulesChanged={() => {
+          void loadCustomModules();
+          void loadTableCounts();
+          setLeadsTableRefreshToken((t) => t + 1);
+        }}
+        onNavigateToModule={(key) => {
+          handleSelectTableSection(key);
+        }}
+      />
       </CallQueueProvider>
     </TwilioVoiceProvider>
   );

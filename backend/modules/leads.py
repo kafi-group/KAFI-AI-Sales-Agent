@@ -1706,12 +1706,12 @@ def _compute_section_counts(
     unassigned_other_ids: set[int] = set()
     new_search_lead_ids: set[int] = set()
     by_assignee: dict[str, int] = {}
-    pool_counts = {key: 0 for key in TARGETED_POOL_SOURCES}
+    from collections import defaultdict
+    pool_counts = defaultdict(int)
 
     for buyer_id, source, assignee_id, assigned_by_id in buyer_query.all():
         source_key = (source or "").strip().lower()
-        if source_key in pool_counts:
-            pool_counts[source_key] += 1
+        pool_counts[source_key] += 1
         is_incomplete = source_key == INCOMPLETE_ARCHIVES_SOURCE
         is_old = source_key == "old_clients"
         if is_incomplete:
@@ -1767,7 +1767,7 @@ def _compute_section_counts(
         all_count = len(other_ids - placed_ids)
         old_count = len(old_client_ids - placed_ids)
 
-    return {
+    counts_result = {
         "all": all_count,
         "old_clients": old_count,
         "interested_clients": len(follow_up_ids),
@@ -1782,7 +1782,13 @@ def _compute_section_counts(
         "targeted_client": pool_counts.get("targeted_client", 0),
         "khalid_focused_sales": pool_counts.get("khalid_focused_sales", 0),
         "incomplete_archives": len(incomplete_archives_ids),
+        "testing": pool_counts.get("testing", 0),
     }
+    # Dynamically inject any custom module counts
+    for src_key, cnt in pool_counts.items():
+        if src_key and src_key not in counts_result:
+            counts_result[src_key] = cnt
+    return counts_result
 
 
 def get_lead_table_row(db: Session, buyer_id: int) -> dict[str, object] | None:
@@ -2922,6 +2928,20 @@ def move_leads_to_module(
             if buyer:
                 updated_ids.append(lead_id)
         target_label = "Master Table (FMCG)"
+
+    else:
+        # Dynamic custom module (e.g. testing or user-created custom list)
+        from db.models import CustomLeadModule
+
+        for lead_id in lead_ids:
+            buyer = buyers_module.get_buyer(db, lead_id)
+            if buyer:
+                buyer.source = module
+                buyer.intake_method = "upload"
+                updated_ids.append(lead_id)
+        cm = db.query(CustomLeadModule).filter(CustomLeadModule.key == module).first()
+        if cm:
+            target_label = cm.name
 
     if updated_ids:
         invalidate_section_counts_cache()

@@ -956,3 +956,26 @@ class HorekaLineItem(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+
+class CustomLeadModule(Base):
+    """Dynamic custom lead module/list under Old clients."""
+
+    __tablename__ = "custom_lead_modules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    icon: Mapped[str] = mapped_column(String(50), default="📋")
+    color: Mapped[str] = mapped_column(String(50), default="#3b82f6")
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+

@@ -56,7 +56,9 @@ export type LeadsTableSection =
   | "targeted_client"
   | "khalid_focused_sales"
   | "incomplete_archives"
-  | `assigned:${number}`;
+  | "testing"
+  | `assigned:${number}`
+  | (string & {});
 
 export const TARGETED_POOL_EXCLUDE =
   "old_clients,incomplete_archives,hyperstore_targeted,targeted_distributor,targeted_client,khalid_focused_sales";
@@ -174,6 +176,7 @@ interface AppSidebarProps {
   onToggleDesktop?: () => void;
   masterType?: string;
   onMasterTypeChange?: (masterType: string) => void;
+  onOpenManageModules?: () => void;
 }
 
 export function AppSidebar({
@@ -193,6 +196,7 @@ export function AppSidebar({
   onSelectCatalogueItem,
   onOpenMailer,
   onOpenSalesAssistant,
+  onOpenManageModules,
   userLabel,
   userRole,
   desktopOpen = true,
@@ -703,6 +707,22 @@ export function AppSidebar({
                           </div>
                         );
                       })}
+                      {isTableParent && onOpenManageModules && (
+                        <div className="pt-1 px-0.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onOpenManageModules();
+                              closeMobile();
+                            }}
+                            className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-emerald-400 hover:text-emerald-300 hover:bg-slate-800/90 transition-all border border-dashed border-emerald-500/40 shadow-sm"
+                            title="Add, remove, or toggle modules under Old clients"
+                          >
+                            <span>⚙️</span>
+                            <span>Manage / Add Lists</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -132,9 +132,9 @@ def _table_assignment_filters(
             None,
             True,
         )
-    # Old clients & Incomplete archives & Targeted pools: show every row.
+    # Old clients & Incomplete archives & Targeted pools & Custom modules: show every row.
     norm_source = (source or "").strip().lower()
-    if norm_source in {"old_clients", "incomplete_archives", "hyperstore_targeted", "targeted_distributor", "targeted_client", "khalid_focused_sales"}:
+    if norm_source and norm_source not in {"all", "new_search_lead"}:
         return None, False, True, None, False
     # Other pool sections (New search lead): hide assigned leads.
     unassigned_only = not placed_section
