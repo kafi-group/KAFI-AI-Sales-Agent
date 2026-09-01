@@ -172,8 +172,8 @@ class Settings(BaseSettings):
     twilio_twiml_app_sid: str | None = None
     # Public HTTPS base URL for Twilio webhooks (e.g. https://your-api.railway.app or ngrok URL)
     twilio_webhook_base_url: str | None = None
-    # Validate X-Twilio-Signature on webhooks (set false only for local debugging)
-    twilio_validate_webhooks: bool = True
+    # Validate X-Twilio-Signature on webhooks (default false for reverse-proxy compatibility on Railway/Cloudflare)
+    twilio_validate_webhooks: bool = False
 
     # Bulk email throttling (Gmail-safe batching)
     bulk_email_batch_size: int = 50

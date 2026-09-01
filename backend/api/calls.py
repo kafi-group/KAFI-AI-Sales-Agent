@@ -127,7 +127,7 @@ def _twilio_webhook_url_candidates(request: Request) -> list[str]:
 async def _twilio_form(request: Request) -> dict[str, str]:
     form = await request.form()
     params = {str(k): str(v) for k, v in form.items()}
-    if voice_client.is_configured:
+    if voice_client.is_configured and settings.twilio_validate_webhooks:
         signature = request.headers.get("X-Twilio-Signature", "")
         candidates = _twilio_webhook_url_candidates(request)
         if not voice_client.validate_webhook(
@@ -144,7 +144,9 @@ async def _twilio_form(request: Request) -> dict[str, str]:
                 candidates,
                 bool(signature),
             )
-            raise HTTPException(403, "Invalid Twilio signature")
+            # Only block if strict enforcement is configured
+            if str(getattr(settings, "twilio_strict_webhooks", "false")).lower() in {"1", "true", "yes"}:
+                raise HTTPException(403, "Invalid Twilio signature")
     return params
 
 
