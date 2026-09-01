@@ -1008,12 +1008,18 @@ def append_sent_copy(
     message["Subject"] = subject_clean
     message["Date"] = email_utils.formatdate(localtime=True)
     message["Message-ID"] = email_utils.make_msgid(domain=from_addr.split("@")[-1])
-    message["Reply-To"] = from_addr
-    message.attach(MIMEText(body_clean, "plain", "utf-8"))
-    if html:
-        message.attach(
-            MIMEText(body_clean.replace("\n", "<br/>"), "html", "utf-8")
-        )
+    from modules import email_tracking
+
+    plain_body, html_body = email_tracking.build_tracked_bodies(
+        body_clean,
+        interaction_id=None,
+        send_mode="bulk",
+    )
+    if html_body:
+        message.attach(MIMEText(plain_body, "plain", "utf-8"))
+        message.attach(MIMEText(html_body, "html", "utf-8"))
+    else:
+        message.attach(MIMEText(plain_body or body_clean, "plain", "utf-8"))
 
     raw = (
         message.as_bytes()
