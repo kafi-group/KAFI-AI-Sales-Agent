@@ -491,3 +491,142 @@ def send_bridge_email(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
+
+# ── Outbound CNF Pricing Engine Client (https://kafiai-agents.vercel.app) ──────
+
+CNF_APP_BASE_URL = "https://kafiai-agents.vercel.app"
+
+
+def get_bridge_secret() -> str:
+    import os
+
+    return (
+        os.getenv("AGENT_BRIDGE_SECRET")
+        or os.getenv("SALES_AGENT_BRIDGE_SECRET")
+        or ""
+    )
+
+
+def fetch_live_pricing(sku: str) -> dict[str, Any]:
+    """Fetch real-time live FOB pricing for SKU from CNF/FOB costing engine."""
+    import json
+    import os
+    import urllib.parse
+    import urllib.request
+
+    base_url = os.getenv("CNF_APP_BASE_URL", CNF_APP_BASE_URL).rstrip("/")
+    secret = get_bridge_secret()
+    url = f"{base_url}/api/agent-bridge/pricing?sku={urllib.parse.quote(sku.strip())}"
+    headers = {
+        "User-Agent": "Kafi-Sales-Agent/1.0",
+        "Authorization": f"Bearer {secret}",
+        "x-bridge-secret": secret,
+    }
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data
+    except urllib.error.HTTPError as exc:
+        err_body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"CNF Pricing API error ({exc.code}): {err_body}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Failed to connect to CNF Pricing API: {exc}") from exc
+
+
+def fetch_pricing_card(sku: str, format_type: str = "image") -> dict[str, Any]:
+    """Fetch single-product price card (image or PDF) from CNF costing engine."""
+    import json
+    import os
+    import urllib.parse
+    import urllib.request
+
+    base_url = os.getenv("CNF_APP_BASE_URL", CNF_APP_BASE_URL).rstrip("/")
+    secret = get_bridge_secret()
+    fmt = "pdf" if format_type.lower() == "pdf" else "image"
+    url = f"{base_url}/api/agent-bridge/pricing-card?sku={urllib.parse.quote(sku.strip())}&format={fmt}"
+    headers = {
+        "User-Agent": "Kafi-Sales-Agent/1.0",
+        "Authorization": f"Bearer {secret}",
+        "x-bridge-secret": secret,
+    }
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data
+    except urllib.error.HTTPError as exc:
+        err_body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"CNF Price Card API error ({exc.code}): {err_body}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Failed to fetch CNF price card: {exc}") from exc
+
+
+def fetch_quotation_card(quotation_id: str, format_type: str = "pdf") -> dict[str, Any]:
+    """Fetch full container CNF quotation card (image or PDF) from CNF engine."""
+    import json
+    import os
+    import urllib.parse
+    import urllib.request
+
+    base_url = os.getenv("CNF_APP_BASE_URL", CNF_APP_BASE_URL).rstrip("/")
+    secret = get_bridge_secret()
+    fmt = "pdf" if format_type.lower() == "pdf" else "image"
+    url = f"{base_url}/api/agent-bridge/quotation-card?id={urllib.parse.quote(quotation_id.strip())}&format={fmt}"
+    headers = {
+        "User-Agent": "Kafi-Sales-Agent/1.0",
+        "Authorization": f"Bearer {secret}",
+        "x-bridge-secret": secret,
+    }
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data
+    except urllib.error.HTTPError as exc:
+        err_body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"CNF Quotation Card API error ({exc.code}): {err_body}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Failed to fetch CNF quotation card: {exc}") from exc
+
+
+def attach_live_pricing_card(sku: str, format_type: str = "image") -> dict[str, Any]:
+    """Fetch and register a live price card directly into Sales Agent attachments."""
+    import base64
+    from modules.email_attachments import register_attachment_from_bytes
+
+    card_data = fetch_pricing_card(sku=sku, format_type=format_type)
+    b64_str = card_data.get("base64") or ""
+    if "," in b64_str and ";base64" in b64_str[:50]:
+        b64_str = b64_str.split(",", 1)[1]
+    file_bytes = base64.b64decode(b64_str)
+
+    ext = "pdf" if format_type.lower() == "pdf" else "png"
+    mime = "application/pdf" if format_type.lower() == "pdf" else "image/png"
+    safe_sku = "".join(c if c.isalnum() or c in "-_" else "_" for c in sku).strip("_")
+    filename = f"Kafi_Price_Card_{safe_sku.upper() or 'PRODUCT'}.{ext}"
+
+    reg_att = register_attachment_from_bytes(file_bytes, filename=filename, content_type=mime)
+    return reg_att.to_dict()
+
+
+def attach_live_quotation_card(quotation_id: str, format_type: str = "pdf") -> dict[str, Any]:
+    """Fetch and register a live container quotation card into Sales Agent attachments."""
+    import base64
+    from modules.email_attachments import register_attachment_from_bytes
+
+    card_data = fetch_quotation_card(quotation_id=quotation_id, format_type=format_type)
+    b64_str = card_data.get("base64") or ""
+    if "," in b64_str and ";base64" in b64_str[:50]:
+        b64_str = b64_str.split(",", 1)[1]
+    file_bytes = base64.b64decode(b64_str)
+
+    ext = "pdf" if format_type.lower() == "pdf" else "png"
+    mime = "application/pdf" if format_type.lower() == "pdf" else "image/png"
+    safe_qid = "".join(c if c.isalnum() or c in "-_" else "_" for c in quotation_id).strip("_")
+    filename = f"Kafi_CNF_Quotation_{safe_qid.upper() or 'QUOTE'}.{ext}"
+
+    reg_att = register_attachment_from_bytes(file_bytes, filename=filename, content_type=mime)
+    return reg_att.to_dict()
+
+

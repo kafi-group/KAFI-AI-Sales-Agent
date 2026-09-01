@@ -3689,7 +3689,44 @@ export const client = {
         body: JSON.stringify(payload),
       },
     ),
+
+  // ── CNF / FOB Live Pricing & Cards Handshake (https://kafiai-agents.vercel.app) ──
+  getLiveCnfPricing: (sku: string) =>
+    request<CnfLivePricingResponse>(`/cnf-bridge/live-pricing?sku=${encodeURIComponent(sku)}`),
+  getLiveCnfPriceCard: (sku: string, format = "image") =>
+    request<CnfCardResponse>(
+      `/cnf-bridge/live-card?sku=${encodeURIComponent(sku)}&format=${encodeURIComponent(format)}`,
+    ),
+  getLiveCnfQuotationCard: (id: string, format = "pdf") =>
+    request<CnfCardResponse>(
+      `/cnf-bridge/live-quotation-card?id=${encodeURIComponent(id)}&format=${encodeURIComponent(format)}`,
+    ),
+  attachCnfPriceCard: (sku: string, format = "image") =>
+    request<EmailAttachment>("/cnf-bridge/attach-pricing-card", {
+      method: "POST",
+      body: JSON.stringify({ sku, format }),
+    }),
+  attachCnfQuotationCard: (quotationId: string, format = "pdf") =>
+    request<EmailAttachment>("/cnf-bridge/attach-quotation-card", {
+      method: "POST",
+      body: JSON.stringify({ quotation_id: quotationId, format }),
+    }),
 };
+
+export interface CnfLivePricingResponse {
+  productId?: string;
+  sku: string;
+  name: string;
+  packaging?: string;
+  pricePerUnit: number;
+  unit: string;
+  currency: string;
+}
+
+export interface CnfCardResponse {
+  base64: string;
+  mimeType: string;
+}
 
 export interface CustomLeadModule {
   id: number;

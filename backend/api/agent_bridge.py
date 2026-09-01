@@ -79,6 +79,55 @@ def _mount_bridge_routes(router: APIRouter) -> None:
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(502, f"Could not send email: {exc}") from exc
 
+    @router.get("/live-pricing")
+    def agent_bridge_live_pricing(sku: str = Query(..., min_length=1)) -> dict:
+        try:
+            return bridge_module.fetch_live_pricing(sku)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Could not fetch live pricing: {exc}") from exc
+
+    @router.get("/live-card")
+    def agent_bridge_live_card(
+        sku: str = Query(..., min_length=1),
+        format: str = Query(default="image"),
+    ) -> dict:
+        try:
+            return bridge_module.fetch_pricing_card(sku, format_type=format)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Could not fetch live pricing card: {exc}") from exc
+
+    @router.get("/live-quotation-card")
+    def agent_bridge_live_quotation_card(
+        id: str = Query(..., min_length=1),
+        format: str = Query(default="pdf"),
+    ) -> dict:
+        try:
+            return bridge_module.fetch_quotation_card(id, format_type=format)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Could not fetch live quotation card: {exc}") from exc
+
+    @router.post("/attach-pricing-card")
+    def agent_bridge_attach_pricing_card(payload: dict) -> dict:
+        sku = str(payload.get("sku") or "").strip()
+        if not sku:
+            raise HTTPException(400, "sku is required")
+        fmt = str(payload.get("format") or "image").strip()
+        try:
+            return bridge_module.attach_live_pricing_card(sku, format_type=fmt)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Could not attach pricing card: {exc}") from exc
+
+    @router.post("/attach-quotation-card")
+    def agent_bridge_attach_quotation_card(payload: dict) -> dict:
+        quotation_id = str(payload.get("quotation_id") or payload.get("id") or "").strip()
+        if not quotation_id:
+            raise HTTPException(400, "quotation_id is required")
+        fmt = str(payload.get("format") or "pdf").strip()
+        try:
+            return bridge_module.attach_live_quotation_card(quotation_id, format_type=fmt)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Could not attach quotation card: {exc}") from exc
+
 
 router = APIRouter(
     prefix="/agent-bridge",
@@ -94,3 +143,14 @@ webhook_router = APIRouter(
     dependencies=_BRIDGE_DEPS,
 )
 _mount_bridge_routes(webhook_router)
+
+# Authenticated router for logged-in CRM users in the dashboard
+from api.deps import get_current_user
+
+user_router = APIRouter(
+    prefix="/cnf-bridge",
+    tags=["cnf-bridge"],
+    dependencies=[Depends(get_current_user)],
+)
+_mount_bridge_routes(user_router)
+

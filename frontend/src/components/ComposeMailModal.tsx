@@ -4,6 +4,7 @@ import { client, type EmailAttachment, type EmailTemplate, type MailComposeDraft
 import { EmailBodyEditor, emailBodyHasContent } from "./EmailBodyEditor";
 import { AttachedFilesList } from "./AttachedFilesList";
 import { AttachCatalogueModal } from "./AttachCatalogueModal";
+import { AttachCnfCardModal } from "./AttachCnfCardModal";
 import { ProseInput } from "./ProseTextField";
 import { IconBookOpen, IconPaperclip } from "./icons/AppIcons";
 
@@ -38,6 +39,7 @@ export function ComposeMailModal({
   const [attachments, setAttachments] = useState<EmailAttachment[]>(initialDraft?.attachments || []);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [showAttachCatalogue, setShowAttachCatalogue] = useState(false);
+  const [showAttachCnf, setShowAttachCnf] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [sending, setSending] = useState(false);
   const [showCc, setShowCc] = useState(Boolean(initialDraft?.cc_addrs?.trim()));
@@ -374,6 +376,15 @@ export function ComposeMailModal({
               <IconBookOpen size="sm" className="text-emerald-400" />
               <span>Attach Catalogue</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setShowAttachCnf(true)}
+              disabled={sending || uploadingAttachment}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-cyan-800/60 bg-cyan-950/40 hover:bg-cyan-900/50 text-xs font-medium text-cyan-300 transition cursor-pointer disabled:opacity-50"
+            >
+              <span>🏷️</span>
+              <span>Attach Live Price Card / CNF</span>
+            </button>
             {attachments.length > 0 && (
               <span className="text-xs text-emerald-400 font-medium">
                 {attachments.length} attached
@@ -409,9 +420,9 @@ export function ComposeMailModal({
             >
               {sending
                 ? "Sending…"
-                : attachments.length > 0
-                  ? `Send (${attachments.length} attached)`
-                  : "Send"}
+                : draftId != null
+                  ? "Send (update draft)"
+                  : "Send message"}
             </button>
           </div>
         </div>
@@ -419,18 +430,22 @@ export function ComposeMailModal({
 
       {showTemplates && (
         <div
-          className="absolute inset-0 z-[90] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-6"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) setShowTemplates(false);
-          }}
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Select template"
+          onClick={() => setShowTemplates(false)}
         >
-          <div className="w-full sm:max-w-2xl max-h-[80vh] overflow-hidden rounded-t-2xl sm:rounded-xl border border-slate-700 bg-slate-900 shadow-2xl flex flex-col">
+          <div
+            className="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
-              <h4 className="text-sm font-medium text-slate-100">Email templates</h4>
+              <h4 className="text-sm font-medium text-slate-100">Insert Email Template</h4>
               <button
                 type="button"
                 onClick={() => setShowTemplates(false)}
-                className="text-slate-400 hover:text-slate-200 text-sm"
+                className="text-xs text-slate-400 hover:text-slate-200"
               >
                 Close
               </button>
@@ -465,6 +480,13 @@ export function ComposeMailModal({
       {showAttachCatalogue && (
         <AttachCatalogueModal
           onClose={() => setShowAttachCatalogue(false)}
+          onAttach={(newAtts) => setAttachments((prev) => [...prev, ...newAtts])}
+          onError={onError}
+        />
+      )}
+      {showAttachCnf && (
+        <AttachCnfCardModal
+          onClose={() => setShowAttachCnf(false)}
           onAttach={(newAtts) => setAttachments((prev) => [...prev, ...newAtts])}
           onError={onError}
         />
