@@ -105,11 +105,18 @@ def require_admin(user: AppUser = Depends(get_current_user)) -> AppUser:
 
 def verify_agent_bridge_secret(
     x_bridge_secret: str | None = Header(default=None, alias="x-bridge-secret"),
+    authorization: str | None = Header(default=None, alias="authorization"),
 ) -> None:
-    """Shared secret for bank-recon / PA read-only dashboard bridge."""
+    """Shared secret for bank-recon / PA / CNF bridge (supports x-bridge-secret or Authorization: Bearer)."""
     expected = (settings.agent_bridge_secret or "").strip()
     if not expected:
         raise HTTPException(status_code=503, detail="Agent bridge is not configured")
     provided = (x_bridge_secret or "").strip()
+    if not provided and authorization:
+        auth_clean = authorization.strip()
+        if auth_clean.lower().startswith("bearer "):
+            provided = auth_clean[7:].strip()
+        else:
+            provided = auth_clean
     if not provided or provided != expected:
         raise HTTPException(status_code=401, detail="Unauthorized")

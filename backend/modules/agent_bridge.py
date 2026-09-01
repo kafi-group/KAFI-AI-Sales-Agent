@@ -361,3 +361,133 @@ def bridge_emails(db: Session, *, limit: int = 20) -> dict[str, Any]:
             pass
 
     return {"emails": emails[:limit]}
+
+
+def send_bridge_email(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
+    """Send an outbound email requested via external API / CNF Pricing bridge."""
+    import base64
+    import urllib.request
+    from modules import activity as activity_module
+    from modules import inbox as inbox_module
+    from modules.email_attachments import register_attachment_from_bytes
+
+    to_addr = (payload.get("to") or "").strip()
+    if not to_addr or "@" not in to_addr:
+        raise ValueError("Invalid recipient email address ('to' is required)")
+
+    subject = (payload.get("subject") or "").strip() or "(no subject)"
+    body = (payload.get("body") or "").rstrip()
+    if not body:
+        raise ValueError("Email body cannot be empty ('body' is required)")
+
+    cc = (payload.get("cc") or "").strip() or None
+    bcc = (payload.get("bcc") or "").strip() or None
+    sender_username = (payload.get("sender_username") or "").strip().lower()
+
+    # Resolve sender user
+    sender_user: AppUser | None = None
+    if sender_username:
+        sender_user = (
+            db.query(AppUser)
+            .filter(func.lower(AppUser.username) == sender_username, AppUser.is_active.is_(True))
+            .first()
+        )
+    if not sender_user:
+        sender_user = _admin_viewer(db)
+
+    # Process attachments
+    raw_attachments = payload.get("attachments")
+    if raw_attachments is None and "attachment" in payload:
+        raw_attachments = [payload["attachment"]]
+    elif not isinstance(raw_attachments, list):
+        raw_attachments = []
+
+    processed_attachments: list[dict] = []
+    for att in raw_attachments:
+        if not isinstance(att, dict):
+            continue
+        if "id" in att and not att.get("base64") and not att.get("url"):
+            processed_attachments.append(att)
+            continue
+
+        filename = att.get("filename") or att.get("name") or "attachment.pdf"
+        content_type = (
+            att.get("mimeType")
+            or att.get("mime_type")
+            or att.get("content_type")
+            or "application/octet-stream"
+        )
+        file_bytes: bytes | None = None
+
+        if att.get("base64"):
+            b64_str = str(att["base64"]).strip()
+            if "," in b64_str and ";base64" in b64_str[:50]:
+                b64_str = b64_str.split(",", 1)[1]
+            try:
+                file_bytes = base64.b64decode(b64_str)
+            except Exception as exc:
+                raise ValueError(f"Failed to decode base64 attachment '{filename}': {exc}") from exc
+        elif att.get("url"):
+            url = str(att["url"]).strip()
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Kafi-Sales-Agent/1.0"})
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    file_bytes = resp.read()
+                    if not att.get("mimeType") and not att.get("mime_type"):
+                        content_type = resp.headers.get_content_type() or content_type
+            except Exception as exc:
+                raise ValueError(f"Failed to fetch attachment from URL '{url}': {exc}") from exc
+
+        if file_bytes is not None:
+            reg_att = register_attachment_from_bytes(
+                file_bytes, filename=filename, content_type=content_type
+            )
+            processed_attachments.append(reg_att.to_dict())
+
+    # Send email
+    result = inbox_module.compose(
+        sender_user,
+        to=to_addr,
+        subject=subject,
+        body=body,
+        cc=cc,
+        bcc=bcc,
+        attachments=processed_attachments,
+    )
+
+    if result.get("status") != "sent":
+        err_msg = result.get("message") or "Failed to send email via mail server"
+        raise RuntimeError(err_msg)
+
+    # Activity logging
+    lead_id = payload.get("lead_id")
+    try:
+        activity_module.log_activity(
+            db,
+            user_id=sender_user.id,
+            activity_type=activity_module.INBOX_REPLIED,
+            title="External CNF Bridge email sent",
+            summary=f"Sent “{subject}” → {to_addr}",
+            entity_type="lead" if lead_id else "inbox_compose",
+            entity_id=int(lead_id) if lead_id else None,
+            details={
+                "source": "cnf_pricing_bridge",
+                "to": to_addr,
+                "subject": subject,
+                "cc": cc,
+                "attachments_count": len(processed_attachments),
+                "lead_id": lead_id,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "status": "sent",
+        "from_email": result.get("from") or sender_user.mailbox_email or sender_user.username,
+        "to": to_addr,
+        "subject": subject,
+        "attachments_count": len(processed_attachments),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+

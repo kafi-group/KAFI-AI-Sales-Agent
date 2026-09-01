@@ -67,6 +67,18 @@ def _mount_bridge_routes(router: APIRouter) -> None:
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(502, f"Could not list emails: {exc}") from exc
 
+    @router.post("/send-email")
+    def agent_bridge_send_email(
+        payload: dict,
+        db: Session = Depends(get_db),
+    ) -> dict:
+        try:
+            return bridge_module.send_bridge_email(db, payload)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Could not send email: {exc}") from exc
+
 
 router = APIRouter(
     prefix="/agent-bridge",
