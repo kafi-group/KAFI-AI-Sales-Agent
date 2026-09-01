@@ -442,7 +442,7 @@ def send_bridge_email(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
             reg_att = register_attachment_from_bytes(
                 file_bytes, filename=filename, content_type=content_type
             )
-            processed_attachments.append(reg_att.to_dict())
+            processed_attachments.append(reg_att)
 
     # Send email
     result = inbox_module.compose(
@@ -607,7 +607,7 @@ def attach_live_pricing_card(sku: str, format_type: str = "image") -> dict[str, 
     filename = f"Kafi_Price_Card_{safe_sku.upper() or 'PRODUCT'}.{ext}"
 
     reg_att = register_attachment_from_bytes(file_bytes, filename=filename, content_type=mime)
-    return reg_att.to_dict()
+    return reg_att
 
 
 def attach_live_quotation_card(quotation_id: str, format_type: str = "pdf") -> dict[str, Any]:
@@ -627,6 +627,6 @@ def attach_live_quotation_card(quotation_id: str, format_type: str = "pdf") -> d
     filename = f"Kafi_CNF_Quotation_{safe_qid.upper() or 'QUOTE'}.{ext}"
 
     reg_att = register_attachment_from_bytes(file_bytes, filename=filename, content_type=mime)
-    return reg_att.to_dict()
+    return reg_att
 
 
