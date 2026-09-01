@@ -63,17 +63,15 @@ export function CallManualDialer({ onError, onSuccess }: CallManualDialerProps) 
 
   async function handleCall() {
     if (!voice || !formattedNumber) return;
-    if (!voice.ready) {
-      try {
-        await voice.retryInit();
-      } catch (e) {
-        onError(e instanceof Error ? e.message : "Calling is not ready yet");
-        return;
-      }
-    }
-
     setCalling(true);
+    const safetyTimer = window.setTimeout(() => {
+      setCalling(false);
+    }, 16000);
+
     try {
+      if (!voice.ready) {
+        await voice.retryInit();
+      }
       const result = await voice.placeManualCall(formattedNumber, {
         contactName: contactName.trim() || undefined,
         country: selectedCountry?.name,
@@ -82,6 +80,7 @@ export function CallManualDialer({ onError, onSuccess }: CallManualDialerProps) 
     } catch (e) {
       onError(e instanceof Error ? e.message : "Call failed");
     } finally {
+      window.clearTimeout(safetyTimer);
       setCalling(false);
     }
   }

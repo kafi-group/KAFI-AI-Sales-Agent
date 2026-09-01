@@ -72,22 +72,23 @@ export function CallLeadButton({
     if (assignmentWarning && !confirmAssignmentCallProceed(assignmentWarning)) {
       return;
     }
-    if (!twilioVoice.ready) {
-      try {
-        await twilioVoice.retryInit();
-      } catch (e) {
-        onError(e instanceof Error ? e.message : "Calling is not ready yet");
-        return;
-      }
-    }
 
     setCalling(true);
+    // Safety auto-reset timeout so button is NEVER stuck in "Connecting…"
+    const safetyTimer = window.setTimeout(() => {
+      setCalling(false);
+    }, 16000);
+
     try {
+      if (!twilioVoice.ready) {
+        await twilioVoice.retryInit();
+      }
       const result = await twilioVoice.placeCall(leadId, contactId, phone ?? undefined);
       onSuccess?.(result);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Call failed");
     } finally {
+      window.clearTimeout(safetyTimer);
       setCalling(false);
     }
   }

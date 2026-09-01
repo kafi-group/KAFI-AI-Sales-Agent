@@ -63,13 +63,17 @@ function friendlyCallError(err: unknown): string {
     if (typeof msg === "string" && msg.trim()) raw = msg;
     else if (msg != null && msg !== "") raw = String(msg);
   }
+  if (/13224|invalid phone number/i.test(raw)) {
+    return "Invalid phone number format or the destination country is blocked in Twilio Voice Geographic Permissions.";
+  }
   if (/31005|gateway in HANGUP|application error/i.test(raw)) {
     return (
-      "Call ended before connect (Twilio 31005). Usually the TwiML Voice URL failed, " +
-      "the number/country is blocked in Twilio Geo Permissions, or Railway was busy. " +
-      "Check Twilio Console → Monitor → Logs, and that the TwiML App Voice URL is " +
-      "POST https://YOUR-RAILWAY-API/api/webhooks/twilio/voice/client-dial"
+      "Call ended before connect (Twilio 31005). Usually the number/country is blocked in Twilio Geo Permissions, " +
+      "or the call service is warming up. Please try again."
     );
+  }
+  if (/31402|AcquisitionFailed|getting the media failed|microphone|NotAllowedError|PermissionDeniedError/i.test(raw)) {
+    return "Microphone access failed. Please ensure browser microphone permission is allowed and no other application is blocking the microphone.";
   }
   if (/31000|31002|31003/i.test(raw)) {
     return `${raw}. Check Twilio Debugger and that Voice geo-permissions allow this country.`;
@@ -132,7 +136,16 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
 
   const initDevice = useCallback(async () => {
     setInitError(null);
-    const cfg = await client.getCallConfig();
+    let cfg;
+    try {
+      cfg = await client.getCallConfig();
+    } catch (e) {
+      setReady(false);
+      const msg = e instanceof Error ? e.message : "Calling service warming up";
+      setInitError(msg);
+      throw e;
+    }
+
     if (!cfg.browser_ready) {
       setReady(false);
       setInitError(cfg.setup_message ?? "Twilio browser calling is not configured");
@@ -158,7 +171,7 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
         setCallError(friendlyCallError(err));
         return;
       }
-      setInitError(message);
+      setInitError(friendlyCallError(err));
       setReady(false);
     });
     device.on("tokenWillExpire", () => {
@@ -181,13 +194,13 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
         if (!cancelled) {
           setReady(false);
           const message = e instanceof Error ? e.message : "Failed to initialize calling";
-          if (/cannot reach the api|failed to fetch|network/i.test(message)) {
-            setInitError("Calling is warming up — refresh in a few seconds if this persists.");
+          if (/cannot reach the api|failed to fetch|network|502|failed to respond/i.test(message)) {
+            setInitError("Calling is warming up — auto-reconnecting in a moment.");
             window.setTimeout(() => {
               if (!cancelled) {
                 void initDevice().catch(() => undefined);
               }
-            }, 2500);
+            }, 3000);
           } else {
             setInitError(message);
           }
@@ -221,8 +234,6 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
       setActiveCall(null);
       return;
     }
-    // Do not null callRef here — finishCall must see the same Call instance
-    // so it can attribute the ended interaction correctly.
     call.disconnect();
     setActive(false);
     setActiveCall(null);
@@ -239,89 +250,130 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const connectPreparedCall = useCallback((activeDevice: Device, prep: CallInitiateResult) => {
+  const connectPreparedCall = useCallback(async (activeDevice: Device, prep: CallInitiateResult) => {
     activePrepRef.current = prep;
     setCallError(null);
 
-    return activeDevice
-      .connect({
+    // Pre-flight check: ensure microphone permission is granted
+    if (typeof navigator !== "undefined" && navigator?.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (micErr) {
+        activePrepRef.current = null;
+        const msg =
+          micErr instanceof Error &&
+          (micErr.name === "NotAllowedError" || micErr.name === "PermissionDeniedError")
+            ? "Microphone access is blocked in your browser. Please allow microphone access to place calls."
+            : "Microphone device could not be opened. Please check your audio settings.";
+        setCallError(msg);
+        throw new Error(msg);
+      }
+    }
+
+    try {
+      const connectPromise = activeDevice.connect({
         params: {
           To: prep.lead_phone!,
           interaction_id: String(prep.id),
         },
-      })
-      .then((call) => {
-        callRef.current = call;
-        setActive(true);
-        setActiveCall({
-          buyerId: prep.buyer_id ?? null,
-          contactId: prep.contact_id ?? null,
-          phone: prep.lead_phone ?? null,
-        });
-
-        // Capture prep in closure so a later dial cannot steal this call's follow-up.
-        const prepForThisCall = prep;
-        let finished = false;
-        const finishCall = () => {
-          if (finished) return;
-          finished = true;
-          if (callRef.current === call) {
-            callRef.current = null;
-            setActive(false);
-            setActiveCall(null);
-          }
-          if (activePrepRef.current?.id === prepForThisCall.id) {
-            activePrepRef.current = null;
-          }
-          const buyerId = prepForThisCall.buyer_id ?? null;
-          const dialedPhone = prepForThisCall.lead_phone ?? null;
-          let triedPhones: string[] = [];
-          if (buyerId != null && dialedPhone) {
-            const session = leadDialSessionRef.current;
-            if (session?.buyerId === buyerId) {
-              triedPhones = [...session.triedPhones];
-              if (!triedPhones.some((p) => phonesMatch(p, dialedPhone))) {
-                triedPhones.push(dialedPhone);
-              }
-            } else {
-              triedPhones = [dialedPhone];
-            }
-            leadDialSessionRef.current = { buyerId, triedPhones };
-          }
-          setPendingFollowUp({
-            interactionId: prepForThisCall.id,
-            label:
-              prepForThisCall.company_name ||
-              prepForThisCall.contact_name ||
-              prepForThisCall.subject?.replace(/^Call to /, "") ||
-              "this call",
-            buyerId,
-            contactId: prepForThisCall.contact_id ?? null,
-            dialedPhone,
-            triedPhones,
-          });
-        };
-        call.on("error", (err) => {
-          console.error("Twilio call error:", err);
-          setCallError(friendlyCallError(err));
-          // Keep Device registered — a single failed dial is not "calling offline".
-        });
-        call.on("disconnect", finishCall);
-        call.on("cancel", finishCall);
-
-        return prep;
       });
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        window.setTimeout(
+          () =>
+            reject(
+              new Error(
+                "Call connection timed out (15s). Please check your internet connection and microphone settings."
+              )
+            ),
+          15000,
+        ),
+      );
+
+      const call = await Promise.race([connectPromise, timeoutPromise]);
+      callRef.current = call;
+      setActive(true);
+      setActiveCall({
+        buyerId: prep.buyer_id ?? null,
+        contactId: prep.contact_id ?? null,
+        phone: prep.lead_phone ?? null,
+      });
+
+      // Capture prep in closure so a later dial cannot steal this call's follow-up.
+      const prepForThisCall = prep;
+      let finished = false;
+      const finishCall = () => {
+        if (finished) return;
+        finished = true;
+        if (callRef.current === call) {
+          callRef.current = null;
+          setActive(false);
+          setActiveCall(null);
+        }
+        if (activePrepRef.current?.id === prepForThisCall.id) {
+          activePrepRef.current = null;
+        }
+        const buyerId = prepForThisCall.buyer_id ?? null;
+        const dialedPhone = prepForThisCall.lead_phone ?? null;
+        let triedPhones: string[] = [];
+        if (buyerId != null && dialedPhone) {
+          const session = leadDialSessionRef.current;
+          if (session?.buyerId === buyerId) {
+            triedPhones = [...session.triedPhones];
+            if (!triedPhones.some((p) => phonesMatch(p, dialedPhone))) {
+              triedPhones.push(dialedPhone);
+            }
+          } else {
+            triedPhones = [dialedPhone];
+          }
+          leadDialSessionRef.current = { buyerId, triedPhones };
+        }
+        setPendingFollowUp({
+          interactionId: prepForThisCall.id,
+          label:
+            prepForThisCall.company_name ||
+            prepForThisCall.contact_name ||
+            prepForThisCall.subject?.replace(/^Call to /, "") ||
+            "this call",
+          buyerId,
+          contactId: prepForThisCall.contact_id ?? null,
+          dialedPhone,
+          triedPhones,
+        });
+      };
+
+      call.on("error", (err) => {
+        console.error("Twilio call error:", err);
+        const friendly = friendlyCallError(err);
+        setCallError(friendly);
+        finishCall();
+      });
+      call.on("disconnect", finishCall);
+      call.on("cancel", finishCall);
+      call.on("reject", finishCall);
+
+      return prep;
+    } catch (err) {
+      activePrepRef.current = null;
+      callRef.current = null;
+      setActive(false);
+      setActiveCall(null);
+      const friendly = friendlyCallError(err);
+      setCallError(friendly);
+      throw new Error(friendly);
+    }
   }, []);
 
   const placeCall = useCallback(
     async (leadId: number, contactId?: number, phone?: string) => {
-      const device = deviceRef.current;
-      if (!device) {
+      let device = deviceRef.current;
+      if (!device || device.state !== "registered") {
         await initDevice();
+        device = deviceRef.current;
       }
-      const activeDevice = deviceRef.current;
-      if (!activeDevice) {
-        throw new Error("Twilio calling is not ready. Check your Twilio setup in backend/.env");
+      if (!device) {
+        throw new Error("Twilio calling is not ready. Refresh the page or check Twilio configuration.");
       }
 
       const prep = await client.initiateLeadCall(leadId, {
@@ -332,20 +384,20 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
         throw new Error("Lead phone number missing");
       }
 
-      return connectPreparedCall(activeDevice, { ...prep, buyer_id: leadId });
+      return connectPreparedCall(device, { ...prep, buyer_id: leadId });
     },
     [connectPreparedCall, initDevice],
   );
 
   const placeManualCall = useCallback(
     async (phone: string, options?: { contactName?: string; country?: string }) => {
-      const device = deviceRef.current;
-      if (!device) {
+      let device = deviceRef.current;
+      if (!device || device.state !== "registered") {
         await initDevice();
+        device = deviceRef.current;
       }
-      const activeDevice = deviceRef.current;
-      if (!activeDevice) {
-        throw new Error("Twilio calling is not ready. Check your Twilio setup in backend/.env");
+      if (!device) {
+        throw new Error("Twilio calling is not ready. Refresh the page or check Twilio configuration.");
       }
 
       const prep = await client.initiateManualCall({
@@ -357,7 +409,7 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
         throw new Error("Phone number missing");
       }
 
-      return connectPreparedCall(activeDevice, prep);
+      return connectPreparedCall(device, prep);
     },
     [connectPreparedCall, initDevice],
   );

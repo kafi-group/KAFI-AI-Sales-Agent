@@ -711,7 +711,7 @@ async def twilio_client_dial(request: Request):
 
 @webhooks_router.post("/voice/status")
 async def twilio_call_status(request: Request):
-    """Dial action / status callback — never 5xx (Twilio retries / Debugger noise)."""
+    """Dial action / status callback — always returns valid TwiML so Twilio never errors with 12300."""
     import logging
 
     from sqlalchemy.exc import TimeoutError as SATimeoutError
@@ -719,16 +719,16 @@ async def twilio_call_status(request: Request):
     try:
         form = await _twilio_form(request)
     except HTTPException:
-        return {"ok": True, "skipped": "signature"}
+        return _twiml_response("<Response><Hangup/></Response>")
 
     interaction_id = request.query_params.get("interaction_id")
     if not interaction_id:
-        return {"ok": True}
+        return _twiml_response("<Response><Hangup/></Response>")
 
     try:
         iid = int(interaction_id)
     except ValueError:
-        return {"ok": True}
+        return _twiml_response("<Response><Hangup/></Response>")
 
     # Dial action webhook uses DialCallStatus; parent call uses CallStatus
     status = str(
@@ -746,15 +746,15 @@ async def twilio_call_status(request: Request):
             call_duration=duration,
             call_sid=call_sid,
         )
-        return {"ok": True}
+        return _twiml_response("<Response><Hangup/></Response>")
     except SATimeoutError:
         logging.getLogger("twilio.webhook").warning(
             "voice/status DB pool busy interaction_id=%s status=%s", iid, status
         )
-        return {"ok": True, "skipped": "db_busy"}
+        return _twiml_response("<Response><Hangup/></Response>")
     except Exception as exc:  # noqa: BLE001
         logging.getLogger("twilio.webhook").exception("voice/status failed: %s", exc)
-        return {"ok": True, "skipped": "error"}
+        return _twiml_response("<Response><Hangup/></Response>")
     finally:
         db.close()
 
@@ -766,15 +766,19 @@ async def twilio_call_recording(
     db: Session = Depends(get_db),
 ):
     """Twilio posts here when a Dial recording is ready."""
-    form = await _twilio_form(request)
+    try:
+        form = await _twilio_form(request)
+    except HTTPException:
+        return _twiml_response("<Response/>")
+
     interaction_id = request.query_params.get("interaction_id")
     if not interaction_id:
-        return {"ok": True}
+        return _twiml_response("<Response/>")
 
     try:
         iid = int(interaction_id)
     except ValueError:
-        return {"ok": True}
+        return _twiml_response("<Response/>")
 
     recording_sid = str(form.get("RecordingSid") or "")
     recording_url = str(form.get("RecordingUrl") or "")
@@ -782,7 +786,7 @@ async def twilio_call_recording(
     recording_duration = str(form.get("RecordingDuration") or "") or None
 
     if not recording_sid or not recording_url:
-        return {"ok": True}
+        return _twiml_response("<Response/>")
 
     media = calls_module.save_call_recording(
         db,
@@ -794,7 +798,7 @@ async def twilio_call_recording(
     )
     if media and media.get("local_path") and media.get("transcript_status") == "pending":
         background_tasks.add_task(_transcribe_in_background, iid)
-    return {"ok": True}
+    return _twiml_response("<Response/>")
 
 
 @webhooks_router.post("/ai-agent/intro")
