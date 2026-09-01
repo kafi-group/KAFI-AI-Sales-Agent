@@ -70,7 +70,6 @@ function BulkInner() {
     let cancelled = false;
     void (async () => {
       try {
-        clearSession();
         await loginFromHandoff(token);
         if (!cancelled) await refresh();
       } catch {

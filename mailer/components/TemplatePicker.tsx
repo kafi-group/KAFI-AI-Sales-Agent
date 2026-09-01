@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getStoredToken } from "@/lib/api";
+import { useAuth } from "@/components/AuthProvider";
 
 export type EmailTemplate = {
   id: number;
@@ -18,27 +19,44 @@ type Props = {
 };
 
 export function TemplatePicker({ value, onChange, hint }: Props) {
+  const { user, loading: authLoading } = useAuth();
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    const token = getStoredToken();
+    if (!token) {
+      if (authLoading) {
+        setLoading(true);
+        setError(null);
+        return;
+      }
+      setTemplates([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       const rows = await apiFetch<EmailTemplate[]>("/email-templates");
-      setTemplates(rows);
+      setTemplates(Array.isArray(rows) ? rows : []);
+      setError(null);
     } catch (e) {
       setTemplates([]);
-      setError(e instanceof Error ? e.message : "Could not load templates");
+      const msg = e instanceof Error ? e.message : "Could not load templates";
+      if (!/not authenticated/i.test(msg)) {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authLoading]);
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, user]);
 
   function handleSelect(id: string) {
     if (!id) {
