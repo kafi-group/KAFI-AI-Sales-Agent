@@ -141,7 +141,16 @@ def register_attachment_from_bytes(
 def resolve_path(storage_path: str) -> Path:
     rel = storage_path.replace("\\", "/").lstrip("/")
     if rel.startswith("email_attachments/"):
-        return _BACKEND_DIR / "storage" / rel.split("/", 1)[1]
+        target = _BACKEND_DIR / "storage" / rel
+        if target.is_file():
+            return target
+        flat = _BACKEND_DIR / "storage" / rel.split("/", 1)[1]
+        if flat.is_file():
+            return flat
+        return target
+    cand1 = STORAGE_DIR / rel
+    if cand1.is_file():
+        return cand1
     return _BACKEND_DIR / "storage" / rel
 
 
