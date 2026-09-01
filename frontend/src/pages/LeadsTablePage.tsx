@@ -421,6 +421,135 @@ const COL_CALLING = "w-[110px] max-w-[110px] min-w-[110px]";
 const COL_ROLE = "w-[133px] max-w-[133px] min-w-[133px]";
 const COL_FIXED = "overflow-hidden";
 
+function renderKycDetail(row: LeadTableRow) {
+  const contactName = row.contact_name?.trim() || "";
+  const designation = (row.contact_designation || (row as unknown as { designation?: string }).designation)?.trim() || "";
+  const phone = row.contact_phone?.trim() || "";
+  const secondaryPhone = (row.contact_secondary_mobile || row.contact_secondary_phone)?.trim() || "";
+  const email = row.contact_email?.trim() || "";
+  const secondaryEmail = row.contact_secondary_email?.trim() || "";
+
+  return (
+    <div className="space-y-6 text-left">
+      {/* Contact Person & Role Card */}
+      <div className="rounded-2xl border border-emerald-500/40 bg-slate-950/90 p-5 shadow-xl space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">👤</span>
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+              Primary Contact Person
+            </span>
+          </div>
+          {designation && (
+            <span className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 text-xs font-semibold text-emerald-300">
+              {designation}
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
+              Contact Name
+            </label>
+            <p className="text-xl font-bold text-slate-100 mt-0.5">
+              {contactName || "General Contact / Not specified"}
+            </p>
+          </div>
+
+          <div>
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
+              Designation / Role
+            </label>
+            <p className="text-lg font-semibold text-emerald-300 mt-0.5">
+              {designation || "Not specified"}
+            </p>
+          </div>
+
+          <div>
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
+              Primary Mobile Number
+            </label>
+            <p className="text-base font-mono font-bold text-sky-400 mt-0.5">
+              {phone || "—"}
+            </p>
+          </div>
+
+          <div>
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
+              Secondary Mobile / Phone
+            </label>
+            <p className="text-base font-mono font-medium text-slate-300 mt-0.5">
+              {secondaryPhone || "—"}
+            </p>
+          </div>
+
+          <div className="sm:col-span-2">
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
+              Email Address
+            </label>
+            <p className="text-sm font-medium text-slate-200 mt-0.5">
+              {email || "—"} {secondaryEmail ? `· ${secondaryEmail}` : ""}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Company & Market Information */}
+      <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 space-y-3">
+        <div className="flex items-center gap-2 border-b border-slate-800/80 pb-2">
+          <span className="text-xl">🏢</span>
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+            Company & Market Information
+          </span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+          <div>
+            <span className="text-xs text-slate-400 block">Country / Location</span>
+            <span className="font-semibold text-slate-200">{[row.city, row.country].filter(Boolean).join(", ") || "—"}</span>
+          </div>
+          <div>
+            <span className="text-xs text-slate-400 block">Business Type / Industry</span>
+            <span className="font-semibold text-slate-200">{row.industry || "—"}</span>
+          </div>
+          <div>
+            <span className="text-xs text-slate-400 block">Company Grading</span>
+            <span className="font-semibold text-amber-300">{row.company_grading || "—"}</span>
+          </div>
+          {row.website_url && (
+            <div className="col-span-2 sm:col-span-3">
+              <span className="text-xs text-slate-400 block">Website</span>
+              <a
+                href={row.website_url.startsWith("http") ? row.website_url : `https://${row.website_url}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-emerald-400 hover:underline break-all"
+              >
+                {row.website_url}
+              </a>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* AI Score Reasoning / Research Notes */}
+      {row.score_reasoning && (
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-5 space-y-2">
+          <div className="flex items-center gap-2 border-b border-slate-800/80 pb-2">
+            <span className="text-lg">🤖</span>
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+              AI Research & Scoring Notes
+            </span>
+          </div>
+          <p className="text-sm sm:text-base leading-relaxed text-slate-200 break-words whitespace-pre-wrap">
+            {row.score_reasoning}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ExpandableCell({
   text,
   className,
@@ -4323,13 +4452,7 @@ export function LeadsTablePage({
                             text={row.company_name}
                             title="Know Your Customer"
                             className="text-slate-200 font-medium hover:text-white"
-                            detail={
-                              row.score_reasoning ? (
-                                <p className="text-xl sm:text-2xl font-semibold leading-relaxed text-slate-100 break-words">
-                                  {row.score_reasoning}
-                                </p>
-                              ) : undefined
-                            }
+                            detail={renderKycDetail(row)}
                           />
                         )}
                       </td>
@@ -4801,13 +4924,7 @@ export function LeadsTablePage({
                           text={row.company_name}
                           title="Know Your Customer"
                           className="text-slate-200 font-medium hover:text-white"
-                          detail={
-                            row.score_reasoning ? (
-                              <p className="text-xl sm:text-2xl font-semibold leading-relaxed text-slate-100 break-words">
-                                {row.score_reasoning}
-                              </p>
-                            ) : undefined
-                          }
+                          detail={renderKycDetail(row)}
                         />
                       )}
                     </td>

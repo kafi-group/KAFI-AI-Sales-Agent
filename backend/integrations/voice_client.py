@@ -237,11 +237,10 @@ class VoiceClient:
 
         lead_xml = html.escape(lead, quote=True)
         caller_xml = html.escape(caller_id, quote=True)
-        # timeout lets unanswered calls end cleanly (voicemail / no-answer) instead
-        # of hanging the browser leg with a gateway error.
+        # Timeout 24s auto-ends after 4th beep/ring (~6s per ring cycle) to avoid hitting voicemail.
         dial_attrs = [
             f'callerId="{caller_xml}"',
-            'timeout="45"',
+            'timeout="24"',
             'record="record-from-answer"',
         ]
         if recording_url:

@@ -6,12 +6,15 @@ import {
   confirmAssignmentCallProceed,
   getAssignmentCallWarning,
 } from "../utils/assignmentCallGuard";
+import { detectLeadingZeroAfterCountryCode, type PhoneZeroCheckResult } from "../utils/phoneUtils";
+import { PhoneFixModal } from "./PhoneFixModal";
 import { IconPhone, IconX } from "./icons/AppIcons";
 
 interface CallLeadButtonProps {
   leadId: number;
   phone: string | null | undefined;
   contactId?: number;
+  contactName?: string;
   assignedToUserId?: number | null;
   assignedTo?: string | null;
   onError: (message: string) => void;
@@ -23,6 +26,7 @@ export function CallLeadButton({
   leadId,
   phone,
   contactId,
+  contactName,
   assignedToUserId,
   assignedTo,
   onError,
@@ -32,6 +36,10 @@ export function CallLeadButton({
   const { user } = useAuth();
   const voice = useTwilioVoiceOptional();
   const [calling, setCalling] = useState(false);
+  const [phoneFixCheck, setPhoneFixCheck] = useState<{
+    check: PhoneZeroCheckResult;
+    targetPhone: string;
+  } | null>(null);
 
   if (!phone?.trim()) {
     return null;
@@ -41,7 +49,7 @@ export function CallLeadButton({
     voice?.initError ??
     (!voice?.ready ? "Calling is initializing…" : null);
 
-  async function handleTwilioCall() {
+  async function proceedWithCall(targetPhone: string) {
     if (!voice) {
       onError("In-app calling is initializing. Please wait a few seconds and try again.");
       return;
@@ -65,7 +73,7 @@ export function CallLeadButton({
       if (!voice.ready) {
         await voice.retryInit();
       }
-      const result = await voice.placeCall(leadId, contactId, phone ?? undefined);
+      const result = await voice.placeCall(leadId, contactId, targetPhone);
       onSuccess?.(result);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Call failed");
@@ -73,6 +81,16 @@ export function CallLeadButton({
       window.clearTimeout(safetyTimer);
       setCalling(false);
     }
+  }
+
+  async function handleTwilioCall() {
+    if (!phone) return;
+    const zeroErr = detectLeadingZeroAfterCountryCode(phone);
+    if (zeroErr) {
+      setPhoneFixCheck({ check: zeroErr, targetPhone: phone });
+      return;
+    }
+    await proceedWithCall(phone);
   }
 
   const btnClass = compact
@@ -125,6 +143,22 @@ export function CallLeadButton({
           <IconPhone size={compact ? "xs" : "sm"} />
           {calling ? "Connecting…" : inCall ? "In call" : compact ? "Call" : "Call now"}
         </button>
+      )}
+
+      {phoneFixCheck && (
+        <PhoneFixModal
+          checkResult={phoneFixCheck.check}
+          contactName={contactName}
+          onFixAutoAndCall={(corrected) => {
+            setPhoneFixCheck(null);
+            void proceedWithCall(corrected);
+          }}
+          onFixManualAndCall={(edited) => {
+            setPhoneFixCheck(null);
+            void proceedWithCall(edited);
+          }}
+          onCancel={() => setPhoneFixCheck(null)}
+        />
       )}
     </span>
   );
