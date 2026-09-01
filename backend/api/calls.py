@@ -550,35 +550,38 @@ def initiate_lead_call(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    from modules import ai_mode as ai_mode_module
+    try:
+        from modules import ai_mode as ai_mode_module
 
-    company = ai_mode_module._resolve_call_company_name(
-        db,
-        company_name=result.get("company_name"),
-        buyer_id=lead_id,
-        interaction_id=result.get("id"),
-    )
-    contact_name = result.get("contact_name") or "contact"
-    phone = result.get("lead_phone") or ""
-    activity_module.log_activity(
-        db,
-        user_id=user.id,
-        activity_type=activity_module.CALL_LOGGED,
-        title="Call logged",
-        summary=f"Called {company} ({contact_name}" + (f", {phone}" if phone else "") + ")",
-        entity_type="interaction",
-        entity_id=result.get("id"),
-        details={"buyer_id": lead_id, "company_name": company},
-    )
+        company = ai_mode_module._resolve_call_company_name(
+            db,
+            company_name=result.get("company_name"),
+            buyer_id=lead_id,
+            interaction_id=result.get("id"),
+        )
+        contact_name = result.get("contact_name") or "contact"
+        phone = result.get("lead_phone") or ""
+        activity_module.log_activity(
+            db,
+            user_id=user.id,
+            activity_type=activity_module.CALL_LOGGED,
+            title="Call logged",
+            summary=f"Called {company} ({contact_name}" + (f", {phone}" if phone else "") + ")",
+            entity_type="interaction",
+            entity_id=result.get("id"),
+            details={"buyer_id": lead_id, "company_name": company},
+        )
 
-    ai_mode_module.record_call_activity(
-        db,
-        user_id=user.id,
-        company_name=company,
-        buyer_id=lead_id,
-        interaction_id=result.get("id"),
-        user_label=user.username,
-    )
+        ai_mode_module.record_call_activity(
+            db,
+            user_id=user.id,
+            company_name=company,
+            buyer_id=lead_id,
+            interaction_id=result.get("id"),
+            user_label=user.username,
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return CallInitiateResponse(**result)
 
 
@@ -600,35 +603,38 @@ def initiate_manual_call(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    from modules import ai_mode as ai_mode_module
+    try:
+        from modules import ai_mode as ai_mode_module
 
-    company = ai_mode_module._resolve_call_company_name(
-        db,
-        company_name=result.get("company_name"),
-        buyer_id=result.get("buyer_id"),
-        interaction_id=result.get("id"),
-    )
-    contact_name = result.get("contact_name") or payload.contact_name or "contact"
-    phone = result.get("lead_phone") or payload.phone
-    activity_module.log_activity(
-        db,
-        user_id=user.id,
-        activity_type=activity_module.CALL_LOGGED,
-        title="Call logged",
-        summary=f"Called {company} ({contact_name}, {phone})",
-        entity_type="interaction",
-        entity_id=result.get("id"),
-        details={"buyer_id": result.get("buyer_id"), "company_name": company},
-    )
+        company = ai_mode_module._resolve_call_company_name(
+            db,
+            company_name=result.get("company_name"),
+            buyer_id=result.get("buyer_id"),
+            interaction_id=result.get("id"),
+        )
+        contact_name = result.get("contact_name") or payload.contact_name or "contact"
+        phone = result.get("lead_phone") or payload.phone
+        activity_module.log_activity(
+            db,
+            user_id=user.id,
+            activity_type=activity_module.CALL_LOGGED,
+            title="Call logged",
+            summary=f"Called {company} ({contact_name}, {phone})",
+            entity_type="interaction",
+            entity_id=result.get("id"),
+            details={"buyer_id": result.get("buyer_id"), "company_name": company},
+        )
 
-    ai_mode_module.record_call_activity(
-        db,
-        user_id=user.id,
-        company_name=company,
-        buyer_id=result.get("buyer_id"),
-        interaction_id=result.get("id"),
-        user_label=user.username,
-    )
+        ai_mode_module.record_call_activity(
+            db,
+            user_id=user.id,
+            company_name=company,
+            buyer_id=result.get("buyer_id"),
+            interaction_id=result.get("id"),
+            user_label=user.username,
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return CallInitiateResponse(**result)
 
 

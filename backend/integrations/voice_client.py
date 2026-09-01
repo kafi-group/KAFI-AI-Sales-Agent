@@ -241,7 +241,6 @@ class VoiceClient:
         # of hanging the browser leg with a gateway error.
         dial_attrs = [
             f'callerId="{caller_xml}"',
-            'answerOnBridge="true"',
             'timeout="45"',
             'record="record-from-answer"',
         ]
