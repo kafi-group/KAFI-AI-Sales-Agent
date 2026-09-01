@@ -254,23 +254,6 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
     activePrepRef.current = prep;
     setCallError(null);
 
-    // Pre-flight check: ensure microphone permission is granted
-    if (typeof navigator !== "undefined" && navigator?.mediaDevices?.getUserMedia) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((track) => track.stop());
-      } catch (micErr) {
-        activePrepRef.current = null;
-        const msg =
-          micErr instanceof Error &&
-          (micErr.name === "NotAllowedError" || micErr.name === "PermissionDeniedError")
-            ? "Microphone access is blocked in your browser. Please allow microphone access to place calls."
-            : "Microphone device could not be opened. Please check your audio settings.";
-        setCallError(msg);
-        throw new Error(msg);
-      }
-    }
-
     try {
       const connectPromise = activeDevice.connect({
         params: {

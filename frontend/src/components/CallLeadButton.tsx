@@ -101,11 +101,8 @@ export function CallLeadButton({
   const inCall = Boolean(twilioVoice?.active);
   const isThisCall =
     inCall &&
-    phonesMatch(phone, activeCall?.phone) &&
-    (activeCall?.buyerId == null || activeCall.buyerId === leadId) &&
-    (contactId == null ||
-      activeCall?.contactId == null ||
-      activeCall.contactId === contactId);
+    (phonesMatch(phone, activeCall?.phone) ||
+      (activeCall?.buyerId != null && activeCall.buyerId === leadId));
   const showInitError = twilioVoice && !twilioVoice.ready && twilioVoice.initError;
 
   return (
@@ -146,7 +143,7 @@ export function CallLeadButton({
               }
             >
               <IconPhone size={compact ? "xs" : "sm"} />
-              {calling ? "Connecting…" : compact ? "Call" : "Call now"}
+              {calling ? "Connecting…" : inCall ? "In call" : compact ? "Call" : "Call now"}
             </button>
           )}
         </>
