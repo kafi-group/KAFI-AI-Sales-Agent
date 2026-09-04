@@ -264,8 +264,14 @@ def list_workspace_leads(
     )
 
     if filter_countries:
-        # Match country case-insensitively
-        country_filters = [func.lower(Buyer.country) == c.lower() for c in filter_countries if c]
+        # Match country case-insensitively with trim and substring flexibility
+        country_filters = []
+        for c in filter_countries:
+            if not c or not str(c).strip():
+                continue
+            c_clean = str(c).strip().lower()
+            country_filters.append(func.lower(func.trim(Buyer.country)) == c_clean)
+            country_filters.append(Buyer.country.ilike(f"%{c_clean}%"))
         if country_filters:
             q = q.filter(or_(*country_filters))
 
@@ -336,9 +342,18 @@ def list_workspace_leads(
         emails_sent = (lc.emails_sent_count if lc else 0)
         calls_made = (lc.calls_made_count if lc else 0)
         
-        # Check days since last interaction/update
+        # Check days since last interaction/update with safe timezone math
         last_activity_date = (lc.updated_at if lc and lc.updated_at else b.updated_at or b.created_at)
-        days_no_response = (now_utc - last_activity_date.replace(tzinfo=timezone.utc)).days if last_activity_date else 0
+        days_no_response = 0
+        if last_activity_date:
+            try:
+                if last_activity_date.tzinfo is None:
+                    act_utc = last_activity_date.replace(tzinfo=timezone.utc)
+                else:
+                    act_utc = last_activity_date.astimezone(timezone.utc)
+                days_no_response = max(0, (now_utc - act_utc).days)
+            except Exception:
+                days_no_response = 0
 
         # Meter turns RED if >= 20 emails or >= 30 days without response
         is_dead_lead = emails_sent >= 20 or (days_no_response >= 30 and calls_made > 0)
@@ -354,7 +369,13 @@ def list_workspace_leads(
                     to_do_guidance = opt["action_hint"]
                     break
 
+        contact_person = getattr(b, "contact_person", None) or (primary_contact.full_name if primary_contact else None)
+        email = getattr(b, "primary_email", None) or (primary_contact.email if primary_contact else None)
+        phone = getattr(b, "primary_phone", None) or (primary_contact.phone if primary_contact else None)
+        designation = getattr(b, "designation", None) or (primary_contact.designation if primary_contact else None)
+
         item_data = {
+            "id": b.id,
             "buyer_id": b.id,
             "company_name": b.company_name,
             "country": b.country,
@@ -362,14 +383,21 @@ def list_workspace_leads(
             "industry": b.industry,
             "product_interest": b.product_interest,
             "website_url": b.website_url,
-            "contact_name": primary_contact.full_name if primary_contact else None,
-            "contact_designation": primary_contact.designation if primary_contact else None,
-            "email": primary_contact.email if primary_contact else None,
-            "phone": primary_contact.phone or (primary_contact.primary_phone if primary_contact else None),
+            "contact_person": contact_person,
+            "contact_name": contact_person,
+            "designation": designation,
+            "contact_designation": designation,
+            "primary_email": email,
+            "email": email,
+            "primary_phone": phone,
+            "phone": phone,
+            "assigned_to_user_id": b.assigned_to_user_id,
+            "assigned_to_name": b.assigned_to.full_name if b.assigned_to else None,
             "stage": current_stage,
             "not_interested_reason": lc.not_interested_reason if lc else None,
             "not_interested_remarks": lc.not_interested_remarks if lc else None,
             "to_do_guidance": to_do_guidance,
+            "todo_action_hint": to_do_guidance,
             "follow_up_reason": lc.follow_up_reason if lc else None,
             "follow_up_action": lc.follow_up_action if lc else None,
             "follow_up_date": lc.follow_up_date.isoformat() if lc and lc.follow_up_date else None,
@@ -379,13 +407,17 @@ def list_workspace_leads(
             "searched_internet_phone": lc.searched_internet_phone if lc else False,
             "replacement_email": lc.replacement_email if lc else None,
             "replacement_contact_name": lc.replacement_contact_name if lc else None,
+            "replacement_phone": lc.replacement_phone if lc else None,
             "linkedin_request_sent": lc.linkedin_request_sent if lc else False,
             "linkedin_msg_sent": lc.linkedin_msg_sent if lc else False,
             "emails_sent_count": emails_sent,
             "calls_made_count": calls_made,
+            "days_since_last_response": days_no_response,
             "days_no_response": days_no_response,
+            "is_dead_lead_meter_red": is_dead_lead,
             "is_dead_lead": is_dead_lead,
             "is_drip_candidate": lc.is_drip_candidate if lc else False,
+            "last_contacted_at": (lc.updated_at if lc else b.updated_at).isoformat() if (lc and lc.updated_at) or b.updated_at else None,
             "updated_at": (lc.updated_at if lc else b.updated_at).isoformat() if (lc and lc.updated_at) or b.updated_at else None,
         }
 
@@ -398,15 +430,20 @@ def list_workspace_leads(
     start_idx = (page - 1) * limit
     paginated_items = lead_items[start_idx : start_idx + limit]
 
+    stage_counts["total"] = sum(stage_counts.values())
+
     return {
         "day_of_week": day,
+        "target_countries": assigned_countries,
         "assigned_countries": assigned_countries,
         "selected_country": country,
+        "counts": stage_counts,
         "stage_counts": stage_counts,
         "dead_lead_count": dead_lead_count,
         "total": total,
         "page": page,
         "limit": limit,
+        "leads": paginated_items,
         "items": paginated_items,
     }
 
