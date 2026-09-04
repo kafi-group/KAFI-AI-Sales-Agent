@@ -3918,7 +3918,7 @@ export interface DripCampaignResponse {
 
 export interface WorkspaceReviewOptionItem {
   id: number;
-  category: "follow_up" | "not_interested";
+  category: string;
   label: string;
   action_hint: string | null;
   is_system: boolean;

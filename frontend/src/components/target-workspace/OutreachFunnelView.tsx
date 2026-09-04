@@ -200,8 +200,12 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
   };
 
   // Filter options by category
-  const followUpOptions = reviewOptions.filter((o) => o.category === "follow_up");
-  const notInterestedOptions = reviewOptions.filter((o) => o.category === "not_interested");
+  const followUpOptions = reviewOptions.filter(
+    (o) => o.category === "follow_up" || o.category === "follow_up_reason"
+  );
+  const notInterestedOptions = reviewOptions.filter(
+    (o) => o.category === "not_interested" || o.category === "not_interested_reason"
+  );
 
   return (
     <div className="space-y-6">

@@ -80,38 +80,53 @@ DEFAULT_NOT_INTERESTED_REASONS = [
 ]
 
 
+def seed_default_day_targets(db: Session) -> None:
+    """Seed default target countries per day of week if empty."""
+    try:
+        if db.query(DayCountryTarget).count() == 0:
+            for day, countries in DEFAULT_DAY_TARGETS.items():
+                for c in countries:
+                    db.add(DayCountryTarget(day_of_week=day.lower(), country=c, is_active=True))
+            db.commit()
+    except Exception as exc:
+        db.rollback()
+        print(f"Note on seed_default_day_targets: {exc}", flush=True)
+
+
+def seed_default_review_options(db: Session) -> None:
+    """Seed review reasons and objection actions if empty."""
+    try:
+        if db.query(WorkspaceReviewOption).count() == 0:
+            for item in DEFAULT_FOLLOW_UP_REASONS:
+                db.add(
+                    WorkspaceReviewOption(
+                        category="follow_up_reason",
+                        label=item["label"],
+                        value=item["value"],
+                        action_hint=item["action_hint"],
+                        is_system=True,
+                    )
+                )
+            for item in DEFAULT_NOT_INTERESTED_REASONS:
+                db.add(
+                    WorkspaceReviewOption(
+                        category="not_interested_reason",
+                        label=item["label"],
+                        value=item["value"],
+                        action_hint=item["action_hint"],
+                        is_system=True,
+                    )
+                )
+            db.commit()
+    except Exception as exc:
+        db.rollback()
+        print(f"Note on seed_default_review_options: {exc}", flush=True)
+
+
 def _seed_defaults_if_empty(db: Session) -> None:
     """Seed default target countries and review options if tables are newly created."""
-    # Seed Day Country Targets
-    if db.query(DayCountryTarget).count() == 0:
-        for day, countries in DEFAULT_DAY_TARGETS.items():
-            for c in countries:
-                db.add(DayCountryTarget(day_of_week=day.lower(), country=c, is_active=True))
-        db.commit()
-
-    # Seed Review Options
-    if db.query(WorkspaceReviewOption).count() == 0:
-        for item in DEFAULT_FOLLOW_UP_REASONS:
-            db.add(
-                WorkspaceReviewOption(
-                    category="follow_up_reason",
-                    label=item["label"],
-                    value=item["value"],
-                    action_hint=item["action_hint"],
-                    is_system=True,
-                )
-            )
-        for item in DEFAULT_NOT_INTERESTED_REASONS:
-            db.add(
-                WorkspaceReviewOption(
-                    category="not_interested_reason",
-                    label=item["label"],
-                    value=item["value"],
-                    action_hint=item["action_hint"],
-                    is_system=True,
-                )
-            )
-        db.commit()
+    seed_default_day_targets(db)
+    seed_default_review_options(db)
 
 
 def get_current_day_name() -> str:
@@ -143,18 +158,26 @@ def get_day_country_targets(
         )
 
     rows = q.order_by(DayCountryTarget.country.asc()).all()
-    return [
-        {
-            "id": r.id,
-            "day_of_week": r.day_of_week,
-            "country": r.country,
-            "assigned_user_id": r.assigned_user_id,
-            "assigned_user_name": r.assigned_user.full_name if r.assigned_user else "All Users (Team)",
-            "is_active": r.is_active,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in rows
-    ]
+    results = []
+    for r in rows:
+        user_name = "All Users (Team)"
+        try:
+            if r.assigned_user and hasattr(r.assigned_user, "full_name") and r.assigned_user.full_name:
+                user_name = r.assigned_user.full_name
+        except Exception:
+            pass
+        results.append(
+            {
+                "id": r.id,
+                "day_of_week": r.day_of_week,
+                "country": r.country,
+                "assigned_user_id": r.assigned_user_id,
+                "assigned_user_name": user_name,
+                "is_active": r.is_active,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+        )
+    return results
 
 
 def add_day_country_target(
@@ -252,10 +275,13 @@ def list_workspace_leads(
 
     # 1. Resolve countries assigned for this day
     target_country_records = get_day_country_targets(db, day_of_week=day, user_id=user_id)
-    assigned_countries = [t["country"] for t in target_country_records]
+    assigned_countries = [t["country"] for t in target_country_records if t.get("country")]
 
-    # If specific country selected, narrow down to it
-    filter_countries = [country] if country else assigned_countries
+    # If specific country selected (and not "all"), filter to it; otherwise use all assigned countries for this day
+    if country and str(country).strip().lower() not in ["all", ""]:
+        filter_countries = [str(country).strip()]
+    else:
+        filter_countries = assigned_countries
 
     # 2. Build Buyer Query
     q = (
@@ -267,7 +293,7 @@ def list_workspace_leads(
         # Match country case-insensitively with trim and substring flexibility
         country_filters = []
         for c in filter_countries:
-            if not c or not str(c).strip():
+            if not c or not str(c).strip() or str(c).strip().lower() == "all":
                 continue
             c_clean = str(c).strip().lower()
             country_filters.append(func.lower(func.trim(Buyer.country)) == c_clean)
@@ -275,7 +301,7 @@ def list_workspace_leads(
         if country_filters:
             q = q.filter(or_(*country_filters))
 
-    if search:
+    if search and search.strip():
         s = f"%{search.strip()}%"
         q = q.filter(
             or_(
@@ -298,15 +324,25 @@ def list_workspace_leads(
     buyers = q.all()
     buyer_ids = [b.id for b in buyers]
 
+    # Preload user map for safe assigned_to display
+    try:
+        app_users = db.query(AppUser).all()
+        user_name_map = {u.id: (u.full_name or u.username) for u in app_users}
+    except Exception:
+        user_name_map = {}
+
     # 3. Preload WorkspaceLeadLifecycle records
     lifecycles_map: dict[int, WorkspaceLeadLifecycle] = {}
     if buyer_ids:
-        lcs = (
-            db.query(WorkspaceLeadLifecycle)
-            .filter(WorkspaceLeadLifecycle.buyer_id.in_(buyer_ids))
-            .all()
-        )
-        lifecycles_map = {lc.buyer_id: lc for lc in lcs}
+        try:
+            lcs = (
+                db.query(WorkspaceLeadLifecycle)
+                .filter(WorkspaceLeadLifecycle.buyer_id.in_(buyer_ids))
+                .all()
+            )
+            lifecycles_map = {lc.buyer_id: lc for lc in lcs}
+        except Exception:
+            lifecycles_map = {}
 
     # 4. Map & Categorize leads into 4 Funnel Stages
     stage_counts = {
@@ -321,109 +357,121 @@ def list_workspace_leads(
     now_utc = datetime.now(timezone.utc)
 
     for b in buyers:
-        lc = lifecycles_map.get(b.id)
-        current_stage = lc.stage if lc else "fresh"
-        
-        # If no explicit lifecycle stage set yet, check if there's history on buyer
-        if not lc:
-            if b.remarks and ("not interested" in b.remarks.lower()):
-                current_stage = "not_interested"
-            elif b.follow_up_at or (b.remarks and "follow" in b.remarks.lower()):
-                current_stage = "needs_follow_up"
+        try:
+            lc = lifecycles_map.get(b.id)
+            current_stage = lc.stage if lc else "fresh"
+            
+            # If no explicit lifecycle stage set yet, check if there's history on buyer
+            if not lc:
+                if b.remarks and ("not interested" in str(b.remarks).lower()):
+                    current_stage = "not_interested"
+                elif b.follow_up_at or (b.remarks and "follow" in str(b.remarks).lower()):
+                    current_stage = "needs_follow_up"
+                else:
+                    current_stage = "fresh"
+
+            if current_stage in stage_counts:
+                stage_counts[current_stage] += 1
             else:
+                stage_counts["fresh"] += 1
                 current_stage = "fresh"
 
-        if current_stage in stage_counts:
-            stage_counts[current_stage] += 1
+            contacts = getattr(b, "contacts", None) or []
+            primary_contact = contacts[0] if len(contacts) > 0 else None
 
-        primary_contact = b.contacts[0] if b.contacts else None
+            # Calculate Dead Lead Health Meter
+            emails_sent = (lc.emails_sent_count if lc else 0)
+            calls_made = (lc.calls_made_count if lc else 0)
+            
+            # Check days since last interaction/update with safe timezone math
+            last_activity_date = (lc.updated_at if lc and lc.updated_at else b.updated_at or b.created_at)
+            days_no_response = 0
+            if last_activity_date:
+                try:
+                    if last_activity_date.tzinfo is None:
+                        act_utc = last_activity_date.replace(tzinfo=timezone.utc)
+                    else:
+                        act_utc = last_activity_date.astimezone(timezone.utc)
+                    days_no_response = max(0, (now_utc - act_utc).days)
+                except Exception:
+                    days_no_response = 0
 
-        # Calculate Dead Lead Health Meter
-        emails_sent = (lc.emails_sent_count if lc else 0)
-        calls_made = (lc.calls_made_count if lc else 0)
-        
-        # Check days since last interaction/update with safe timezone math
-        last_activity_date = (lc.updated_at if lc and lc.updated_at else b.updated_at or b.created_at)
-        days_no_response = 0
-        if last_activity_date:
-            try:
-                if last_activity_date.tzinfo is None:
-                    act_utc = last_activity_date.replace(tzinfo=timezone.utc)
-                else:
-                    act_utc = last_activity_date.astimezone(timezone.utc)
-                days_no_response = max(0, (now_utc - act_utc).days)
-            except Exception:
-                days_no_response = 0
+            # Meter turns RED if >= 20 emails or >= 30 days without response
+            is_dead_lead = emails_sent >= 20 or (days_no_response >= 30 and calls_made > 0)
+            if is_dead_lead:
+                dead_lead_count += 1
 
-        # Meter turns RED if >= 20 emails or >= 30 days without response
-        is_dead_lead = emails_sent >= 20 or (days_no_response >= 30 and calls_made > 0)
-        if is_dead_lead:
-            dead_lead_count += 1
+            # Resolve TO DO Guidance for objections
+            to_do_guidance = None
+            if current_stage == "not_interested":
+                reason = (lc.not_interested_reason if lc else None) or "price_high"
+                for opt in DEFAULT_NOT_INTERESTED_REASONS:
+                    if opt["value"] == reason:
+                        to_do_guidance = opt["action_hint"]
+                        break
 
-        # Resolve TO DO Guidance for objections
-        to_do_guidance = None
-        if current_stage == "not_interested":
-            reason = (lc.not_interested_reason if lc else None) or "price_high"
-            for opt in DEFAULT_NOT_INTERESTED_REASONS:
-                if opt["value"] == reason:
-                    to_do_guidance = opt["action_hint"]
-                    break
+            contact_person = (primary_contact.full_name if primary_contact and primary_contact.full_name else None) or getattr(b, "contact_person", None) or None
+            email = (primary_contact.email if primary_contact and primary_contact.email else None) or getattr(b, "primary_email", None) or None
+            phone = (primary_contact.primary_phone or primary_contact.phone if primary_contact else None) or getattr(b, "primary_phone", None) or None
+            designation = (primary_contact.designation if primary_contact and primary_contact.designation else None) or getattr(b, "designation", None) or None
 
-        contact_person = getattr(b, "contact_person", None) or (primary_contact.full_name if primary_contact else None)
-        email = getattr(b, "primary_email", None) or (primary_contact.email if primary_contact else None)
-        phone = getattr(b, "primary_phone", None) or (primary_contact.phone if primary_contact else None)
-        designation = getattr(b, "designation", None) or (primary_contact.designation if primary_contact else None)
+            # Safe assigned to name
+            assigned_name = user_name_map.get(b.assigned_to_user_id)
+            if not assigned_name and b.assigned_to and str(b.assigned_to).lower() != "unassigned":
+                assigned_name = str(b.assigned_to)
 
-        item_data = {
-            "id": b.id,
-            "buyer_id": b.id,
-            "company_name": b.company_name,
-            "country": b.country,
-            "city": b.city,
-            "industry": b.industry,
-            "product_interest": b.product_interest,
-            "website_url": b.website_url,
-            "contact_person": contact_person,
-            "contact_name": contact_person,
-            "designation": designation,
-            "contact_designation": designation,
-            "primary_email": email,
-            "email": email,
-            "primary_phone": phone,
-            "phone": phone,
-            "assigned_to_user_id": b.assigned_to_user_id,
-            "assigned_to_name": b.assigned_to.full_name if b.assigned_to else None,
-            "stage": current_stage,
-            "not_interested_reason": lc.not_interested_reason if lc else None,
-            "not_interested_remarks": lc.not_interested_remarks if lc else None,
-            "to_do_guidance": to_do_guidance,
-            "todo_action_hint": to_do_guidance,
-            "follow_up_reason": lc.follow_up_reason if lc else None,
-            "follow_up_action": lc.follow_up_action if lc else None,
-            "follow_up_date": lc.follow_up_date.isoformat() if lc and lc.follow_up_date else None,
-            "whatsapp_call_tried": lc.whatsapp_call_tried if lc else False,
-            "whatsapp_call_proof": lc.whatsapp_call_proof if lc else None,
-            "searched_internet_email": lc.searched_internet_email if lc else False,
-            "searched_internet_phone": lc.searched_internet_phone if lc else False,
-            "replacement_email": lc.replacement_email if lc else None,
-            "replacement_contact_name": lc.replacement_contact_name if lc else None,
-            "replacement_phone": lc.replacement_phone if lc else None,
-            "linkedin_request_sent": lc.linkedin_request_sent if lc else False,
-            "linkedin_msg_sent": lc.linkedin_msg_sent if lc else False,
-            "emails_sent_count": emails_sent,
-            "calls_made_count": calls_made,
-            "days_since_last_response": days_no_response,
-            "days_no_response": days_no_response,
-            "is_dead_lead_meter_red": is_dead_lead,
-            "is_dead_lead": is_dead_lead,
-            "is_drip_candidate": lc.is_drip_candidate if lc else False,
-            "last_contacted_at": (lc.updated_at if lc else b.updated_at).isoformat() if (lc and lc.updated_at) or b.updated_at else None,
-            "updated_at": (lc.updated_at if lc else b.updated_at).isoformat() if (lc and lc.updated_at) or b.updated_at else None,
-        }
+            item_data = {
+                "id": b.id,
+                "buyer_id": b.id,
+                "company_name": b.company_name or "Unnamed Company",
+                "country": b.country or "",
+                "city": b.city or "",
+                "industry": b.industry or "",
+                "product_interest": b.product_interest or "",
+                "website_url": b.website_url or "",
+                "contact_person": contact_person,
+                "contact_name": contact_person,
+                "designation": designation,
+                "contact_designation": designation,
+                "primary_email": email,
+                "email": email,
+                "primary_phone": phone,
+                "phone": phone,
+                "assigned_to_user_id": b.assigned_to_user_id,
+                "assigned_to_name": assigned_name,
+                "stage": current_stage,
+                "not_interested_reason": lc.not_interested_reason if lc else None,
+                "not_interested_remarks": lc.not_interested_remarks if lc else None,
+                "to_do_guidance": to_do_guidance,
+                "todo_action_hint": to_do_guidance,
+                "follow_up_reason": lc.follow_up_reason if lc else None,
+                "follow_up_action": lc.follow_up_action if lc else None,
+                "follow_up_date": lc.follow_up_date.isoformat() if lc and lc.follow_up_date else None,
+                "whatsapp_call_tried": lc.whatsapp_call_tried if lc else False,
+                "whatsapp_call_proof": lc.whatsapp_call_proof if lc else None,
+                "searched_internet_email": lc.searched_internet_email if lc else False,
+                "searched_internet_phone": lc.searched_internet_phone if lc else False,
+                "replacement_email": lc.replacement_email if lc else None,
+                "replacement_contact_name": lc.replacement_contact_name if lc else None,
+                "replacement_phone": lc.replacement_phone if lc else None,
+                "linkedin_request_sent": lc.linkedin_request_sent if lc else False,
+                "linkedin_msg_sent": lc.linkedin_msg_sent if lc else False,
+                "emails_sent_count": emails_sent,
+                "calls_made_count": calls_made,
+                "days_since_last_response": days_no_response,
+                "days_no_response": days_no_response,
+                "is_dead_lead_meter_red": is_dead_lead,
+                "is_dead_lead": is_dead_lead,
+                "is_drip_candidate": lc.is_drip_candidate if lc else False,
+                "last_contacted_at": (lc.updated_at if lc else b.updated_at).isoformat() if (lc and lc.updated_at) or b.updated_at else None,
+                "updated_at": (lc.updated_at if lc else b.updated_at).isoformat() if (lc and lc.updated_at) or b.updated_at else None,
+            }
 
-        # Stage filter
-        if not stage or stage == "all" or current_stage == stage:
-            lead_items.append(item_data)
+            # Stage filter
+            if not stage or stage == "all" or current_stage == stage:
+                lead_items.append(item_data)
+        except Exception as lead_exc:
+            print(f"Error mapping buyer {getattr(b, 'id', 'unknown')}: {lead_exc}", flush=True)
 
     # 5. Pagination
     total = len(lead_items)
