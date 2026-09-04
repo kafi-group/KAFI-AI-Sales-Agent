@@ -640,6 +640,10 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
                     "triage_label": t.get("triage_label") or "Urgent",
                     "unread_count": t.get("unread_count", 0),
                     "message_count": t.get("message_count", 1),
+                    "user_id": user.id,
+                    "user_name": user.username,
+                    "user_full_name": user.full_name or user.username,
+                    "mailbox_email": account.email,
                 }
             )
 
@@ -650,6 +654,56 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
             )
         )
         return urgent_list
+
+
+def get_all_urgent_unreplied_threads(db: Any, viewer: AppUser) -> list[dict[str, Any]]:
+    """Return urgent unreplied threads.
+
+    For regular users, returns only their own mailbox urgent emails.
+    For admins (Mr. Khalid), scans all active users' mailboxes in parallel so admin sees
+    a complete breakdown by rep (Asim, Usman, Sadia, Khalid).
+    """
+    from db.models import AppUser as AppUserModel, AppUserRole
+    from concurrent.futures import ThreadPoolExecutor
+
+    role = viewer.role.value if isinstance(viewer.role, AppUserRole) else str(viewer.role)
+    if role != AppUserRole.admin.value:
+        return get_urgent_unreplied_threads(viewer)
+
+    users = (
+        db.query(AppUserModel)
+        .filter(
+            AppUserModel.is_active.is_(True),
+            AppUserModel.mailbox_email.isnot(None),
+        )
+        .all()
+    )
+    if not users:
+        return get_urgent_unreplied_threads(viewer)
+
+    all_urgent: list[dict[str, Any]] = []
+
+    def _fetch_user_urgent(u: AppUserModel) -> list[dict[str, Any]]:
+        acc = resolve_user_mailbox(u)
+        if not acc:
+            return []
+        try:
+            return get_urgent_unreplied_threads(u)
+        except Exception:
+            return []
+
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(users)))) as executor:
+        results = list(executor.map(_fetch_user_urgent, users))
+        for thread_list in results:
+            all_urgent.extend(thread_list)
+
+    all_urgent.sort(
+        key=lambda x: (
+            0 if x.get("triage_category") == "urgent" else 1,
+            -x.get("hours_ago", 0),
+        )
+    )
+    return all_urgent
 
 
 def _reply_subject(original_subject: str | None) -> str:

@@ -444,6 +444,10 @@ export interface UrgentEmailItem {
   triage_label: string;
   unread_count: number;
   message_count: number;
+  user_id?: number;
+  user_name?: string;
+  user_full_name?: string;
+  mailbox_email?: string;
 }
 
 export interface UrgentEmailsResponse {

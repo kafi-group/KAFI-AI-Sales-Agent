@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from api.deps import get_current_user_released
+from api.deps import get_current_user_released, get_db
 from db.session import SessionLocal
 from api.schemas import (
     InboxAnalyzeRequest,
@@ -72,12 +72,13 @@ def inbox_unread_count(user: AppUser = Depends(get_current_user_released)):
 
 
 @router.get("/urgent-unreplied")
-def get_urgent_unreplied_emails(user: AppUser = Depends(get_current_user_released)):
-    """Fetch unreplied urgent and action-required threads for the active mailbox."""
-    if not inbox_module.resolve_user_mailbox(user):
-        return {"urgent_threads": [], "count": 0}
+def get_urgent_unreplied_emails(
+    db: SessionLocal = Depends(get_db),
+    user: AppUser = Depends(get_current_user_released),
+):
+    """Fetch unreplied urgent and action-required threads for the active mailbox (or all team mailboxes if admin)."""
     try:
-        threads = inbox_module.get_urgent_unreplied_threads(user)
+        threads = inbox_module.get_all_urgent_unreplied_threads(db, user)
         return {"urgent_threads": threads, "count": len(threads)}
     except Exception as exc:
         return {"urgent_threads": [], "count": 0, "error": str(exc)}
