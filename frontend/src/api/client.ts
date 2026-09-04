@@ -575,6 +575,14 @@ export interface KpiActivityItem {
   entity_id: number | null;
   details: Record<string, unknown> | null;
   created_at: string;
+  company_name?: string | null;
+  contact_name?: string | null;
+  contact_designation?: string | null;
+  country?: string | null;
+  phone?: string | null;
+  outcome?: string | null;
+  remarks?: string | null;
+  duration_seconds?: number | null;
 }
 
 export interface KpiPerUserSummary {

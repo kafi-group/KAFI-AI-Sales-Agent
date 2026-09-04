@@ -400,7 +400,83 @@ def _user_brief(user: AppUser | None) -> dict[str, Any] | None:
     }
 
 
-def _activity_dict(event: UserActivityEvent, user: AppUser | None) -> dict[str, Any]:
+def _activity_dict(
+    event: UserActivityEvent,
+    user: AppUser | None,
+    buyers_by_id: dict[int, Any] | None = None,
+    interactions_by_id: dict[int, Any] | None = None,
+) -> dict[str, Any]:
+    details = event.details or {}
+    buyer_id = details.get("buyer_id")
+    if not buyer_id and event.entity_type in ("buyer", "lead") and event.entity_id:
+        buyer_id = event.entity_id
+
+    interaction_id = details.get("interaction_id")
+    if not interaction_id and event.entity_type == "interaction" and event.entity_id:
+        interaction_id = event.entity_id
+
+    interaction = (interactions_by_id or {}).get(interaction_id) if interaction_id else None
+    contact = interaction.contact if interaction else None
+
+    if not buyer_id and contact and getattr(contact, "buyer_id", None):
+        buyer_id = contact.buyer_id
+
+    buyer = (buyers_by_id or {}).get(buyer_id) if buyer_id else None
+    if not contact and buyer and getattr(buyer, "contacts", None) and len(buyer.contacts) > 0:
+        contact = buyer.contacts[0]
+
+    company_name = (
+        (getattr(buyer, "company_name", None))
+        or details.get("company_name")
+        or details.get("company")
+    )
+    contact_name = (
+        (getattr(contact, "full_name", None))
+        or details.get("contact_name")
+        or details.get("person_name")
+    )
+    contact_designation = (
+        (getattr(contact, "designation", None))
+        or details.get("contact_designation")
+        or details.get("designation")
+    )
+    country = (
+        (getattr(buyer, "country", None))
+        or (getattr(contact, "nationality", None))
+        or details.get("country")
+    )
+    phone = (
+        (getattr(contact, "phone", None) or getattr(contact, "primary_phone", None))
+        or details.get("lead_phone")
+        or details.get("phone")
+    )
+    outcome = details.get("outcome")
+    remarks = (
+        details.get("remarks")
+        or details.get("notes")
+        or (getattr(buyer, "remarks", None) if buyer and event.activity_type in (CALL_REMARKS, CALL_OUTCOME) else None)
+    )
+    duration_seconds = details.get("duration_seconds")
+
+    # Fallback extraction from summary string if still empty
+    if not company_name and event.summary:
+        import re
+        m = re.search(r'(?:Called|Marked|Remarks on call with|Updated)\s+([^(\:\,\.]+)', event.summary)
+        if m:
+            company_name = m.group(1).strip()
+
+    if not contact_name and event.summary:
+        import re
+        m2 = re.search(r'\(([^,\)]+)', event.summary)
+        if m2 and not m2.group(1).startswith("+") and not m2.group(1).isdigit():
+            contact_name = m2.group(1).strip()
+
+    if not phone and event.summary:
+        import re
+        m3 = re.search(r'(\+?\d[\d\s\-]{6,}\d)', event.summary)
+        if m3:
+            phone = m3.group(1).strip()
+
     return {
         "id": event.id,
         "user_id": event.user_id,
@@ -414,6 +490,14 @@ def _activity_dict(event: UserActivityEvent, user: AppUser | None) -> dict[str, 
         "entity_id": event.entity_id,
         "details": event.details,
         "created_at": event.created_at,
+        "company_name": company_name,
+        "contact_name": contact_name,
+        "contact_designation": contact_designation,
+        "country": country,
+        "phone": phone,
+        "outcome": outcome,
+        "remarks": remarks,
+        "duration_seconds": duration_seconds,
     }
 
 
@@ -426,6 +510,9 @@ def get_kpi_report(
     period: str = "day",
 ) -> dict[str, Any]:
     """Build a day/week/month activity report for one user or (admins) the whole team."""
+    from sqlalchemy.orm import joinedload
+    from db.models import Buyer, Interaction
+
     role = viewer.role.value if isinstance(viewer.role, AppUserRole) else str(viewer.role)
     is_admin = role == AppUserRole.admin.value
     normalized_period = _normalize_period(period)
@@ -493,7 +580,47 @@ def get_kpi_report(
             wa_totals["bulk_whatsapp_sent"] += int(bucket.get("bulk_whatsapp_sent") or 0)
         _apply_whatsapp_activity_counts(counts, wa_totals)
 
-    activities = [_activity_dict(e, users.get(e.user_id)) for e in events]
+    # Batch preload buyers & interactions to populate company, contact, country, and phone
+    buyer_ids_to_fetch: set[int] = set()
+    interaction_ids_to_fetch: set[int] = set()
+    for e in events:
+        det = e.details or {}
+        b_id = det.get("buyer_id")
+        if not b_id and e.entity_type in ("buyer", "lead") and e.entity_id:
+            b_id = e.entity_id
+        if b_id and isinstance(b_id, int):
+            buyer_ids_to_fetch.add(b_id)
+
+        i_id = det.get("interaction_id")
+        if not i_id and e.entity_type == "interaction" and e.entity_id:
+            i_id = e.entity_id
+        if i_id and isinstance(i_id, int):
+            interaction_ids_to_fetch.add(i_id)
+
+    buyers_map: dict[int, Any] = {}
+    if buyer_ids_to_fetch:
+        buyers_map = {
+            b.id: b
+            for b in db.query(Buyer)
+            .filter(Buyer.id.in_(buyer_ids_to_fetch))
+            .options(joinedload(Buyer.contacts))
+            .all()
+        }
+
+    interactions_map: dict[int, Any] = {}
+    if interaction_ids_to_fetch:
+        interactions_map = {
+            i.id: i
+            for i in db.query(Interaction)
+            .filter(Interaction.id.in_(interaction_ids_to_fetch))
+            .options(joinedload(Interaction.contact))
+            .all()
+        }
+
+    activities = [
+        _activity_dict(e, users.get(e.user_id), buyers_map, interactions_map)
+        for e in events
+    ]
 
     per_user: list[dict[str, Any]] = []
     scope = "user"

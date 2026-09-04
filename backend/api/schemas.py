@@ -1474,6 +1474,15 @@ class KpiActivityItem(BaseModel):
     entity_id: Optional[int] = None
     details: Optional[dict] = None
     created_at: datetime
+    # Enriched metadata for clickable KPI drill-down views
+    company_name: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_designation: Optional[str] = None
+    country: Optional[str] = None
+    phone: Optional[str] = None
+    outcome: Optional[str] = None
+    remarks: Optional[str] = None
+    duration_seconds: Optional[int] = None
 
 
 class KpiPerUserSummary(BaseModel):

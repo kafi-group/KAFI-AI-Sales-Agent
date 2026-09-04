@@ -9,6 +9,7 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import { ManualKpiSection } from "../components/ManualKpiSection";
 import { ColumnVisibilityMenu } from "../components/ColumnVisibilityMenu";
+import { KpiDrillDownModal } from "../components/KpiDrillDownModal";
 import {
   useColumnVisibility,
   type ColumnDef,
@@ -96,6 +97,8 @@ export function KpiPage({ onError }: KpiPageProps) {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [pdfExporting, setPdfExporting] = useState(false);
+  const [drillDownKey, setDrillDownKey] = useState<keyof KpiCounts | null>(null);
+  const [drillDownLabel, setDrillDownLabel] = useState<string>("");
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -332,25 +335,41 @@ export function KpiPage({ onError }: KpiPageProps) {
           )}
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {COUNT_CARDS.map((card) => (
-              <div
-                key={card.key}
-                className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-3"
-              >
-                <p className="text-xs text-slate-500">{card.label}</p>
-                <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-100">
-                  {report.counts[card.key] ?? 0}
-                </p>
-                {card.key === "personal_emails_sent" &&
-                ((report.counts.emails_after_calls ?? 0) > 0 ||
-                  (report.counts.emails_other_personal ?? 0) > 0) ? (
-                  <p className="mt-1 text-[11px] text-slate-500 leading-snug">
-                    {report.counts.emails_after_calls ?? 0} after calls ·{" "}
-                    {report.counts.emails_other_personal ?? 0} other personal
+            {COUNT_CARDS.map((card) => {
+              const val = report.counts[card.key] ?? 0;
+              return (
+                <button
+                  type="button"
+                  key={card.key}
+                  onClick={() => {
+                    setDrillDownKey(card.key);
+                    setDrillDownLabel(card.label);
+                  }}
+                  className="group relative rounded-xl border border-slate-800 bg-slate-900/70 hover:bg-slate-800/90 hover:border-sky-500/70 p-3.5 text-left transition-all duration-150 hover:shadow-xl hover:shadow-sky-950/40 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer"
+                  title={`Click to view details for ${card.label}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-slate-400 group-hover:text-sky-300 font-medium transition">
+                      {card.label}
+                    </p>
+                    <span className="text-[11px] text-slate-600 group-hover:text-sky-400 opacity-0 group-hover:opacity-100 transition font-mono">
+                      ↗ Details
+                    </span>
+                  </div>
+                  <p className="mt-1.5 text-2xl font-black tabular-nums text-slate-100 group-hover:text-white">
+                    {val}
                   </p>
-                ) : null}
-              </div>
-            ))}
+                  {card.key === "personal_emails_sent" &&
+                  ((report.counts.emails_after_calls ?? 0) > 0 ||
+                    (report.counts.emails_other_personal ?? 0) > 0) ? (
+                    <p className="mt-1 text-[11px] text-slate-500 leading-snug">
+                      {report.counts.emails_after_calls ?? 0} after calls ·{" "}
+                      {report.counts.emails_other_personal ?? 0} other personal
+                    </p>
+                  ) : null}
+                </button>
+              );
+            })}
           </div>
 
           {report.email_attribution_note ? (
@@ -493,6 +512,21 @@ export function KpiPage({ onError }: KpiPageProps) {
         assignees={assignees}
         onError={onError}
       />
+
+      {drillDownKey && report && (
+        <KpiDrillDownModal
+          cardKey={drillDownKey}
+          cardLabel={drillDownLabel}
+          activities={report.activities}
+          counts={report.counts}
+          scopeLabel={scopeLabel}
+          dateLabel={formatRangeLabel(report)}
+          onClose={() => {
+            setDrillDownKey(null);
+            setDrillDownLabel("");
+          }}
+        />
+      )}
     </div>
   );
 }
