@@ -627,8 +627,36 @@ def update_call_status(
     else:
         prefix = body.strip()
 
+    duration_sec = int(call_duration) if (call_duration and call_duration.isdigit()) else 0
+    is_answered = call_status.strip().lower() in ("completed", "answered", "in-progress")
+    # A short drop is an unanswered call that ended in < 15 seconds (before 3rd ring bell) without positive outcome
+    is_short_drop = (not is_answered) and (duration_sec < 15) and (not outcome or outcome == "not_received_call")
+
     interaction.content = f"{prefix} — {call_status}{duration_text}{sid_text}.".strip()
     interaction.content = _build_content(interaction.content, notes, outcome)
+
+    try:
+        from db.models import UserActivityEvent
+
+        event = (
+            db.query(UserActivityEvent)
+            .filter(
+                UserActivityEvent.entity_type == "interaction",
+                UserActivityEvent.entity_id == interaction_id,
+                UserActivityEvent.activity_type == "call_logged",
+            )
+            .first()
+        )
+        if event:
+            det = dict(event.details or {})
+            det["call_duration"] = duration_sec
+            det["call_status"] = call_status
+            det["is_short_drop"] = is_short_drop
+            det["min_rings_met"] = not is_short_drop
+            event.details = det
+    except Exception:  # noqa: BLE001
+        pass
+
     db.commit()
 
 

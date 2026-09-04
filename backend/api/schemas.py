@@ -1442,6 +1442,7 @@ class KpiUserBrief(BaseModel):
 
 class KpiCounts(BaseModel):
     calls_logged: int = 0
+    companies_called: int = 0
     outcomes_interested: int = 0
     outcomes_follow_up: int = 0
     outcomes_not_interested: int = 0

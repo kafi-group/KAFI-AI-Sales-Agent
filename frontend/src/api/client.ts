@@ -539,6 +539,7 @@ export interface AppUser {
 
 export interface KpiCounts {
   calls_logged: number;
+  companies_called?: number;
   outcomes_interested: number;
   outcomes_follow_up?: number;
   outcomes_not_interested: number;

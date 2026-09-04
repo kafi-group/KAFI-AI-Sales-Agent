@@ -49,9 +49,10 @@ const PERIOD_OPTIONS: { value: KpiPeriod; label: string }[] = [
 ];
 
 const COUNT_CARDS: { key: keyof KpiCounts; label: string }[] = [
-  { key: "calls_logged", label: "Calls" },
+  { key: "calls_logged", label: "Calls attempted" },
+  { key: "companies_called", label: "Companies called" },
+  { key: "outcomes_follow_up", label: "Calls picked up" },
   { key: "outcomes_interested", label: "Client interested" },
-  { key: "outcomes_follow_up", label: "Follow up" },
   { key: "outcomes_not_interested", label: "Not interested" },
   { key: "outcomes_not_received_call", label: "No answer" },
   { key: "call_remarks", label: "Call remarks" },
@@ -68,7 +69,7 @@ const COUNT_CARDS: { key: keyof KpiCounts; label: string }[] = [
 
 const KPI_PER_USER_COLUMNS: ColumnDef[] = [
   { id: "user", label: "User", locked: true },
-  { id: "calls", label: "Calls" },
+  { id: "calls", label: "Calls Attempted" },
   { id: "outcomes", label: "Outcomes" },
   { id: "edits", label: "Edits" },
   { id: "email", label: "Email" },
@@ -418,8 +419,22 @@ export function KpiPage({ onError }: KpiPageProps) {
                           <td data-col="user" className="px-3 py-2 text-slate-100">
                             {row.user?.full_name || "Unknown"}
                           </td>
-                          <td data-col="calls" className="px-3 py-2 tabular-nums">{row.counts.calls_logged}</td>
-                          <td data-col="outcomes" className="px-3 py-2 tabular-nums">{outcomes}</td>
+                          <td data-col="calls" className="px-3 py-2 tabular-nums">
+                            <div>{row.counts.calls_logged}</div>
+                            {row.counts.companies_called ? (
+                              <div className="text-[10px] text-slate-500 font-normal">
+                                {row.counts.companies_called} {row.counts.companies_called === 1 ? "company" : "companies"}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td data-col="outcomes" className="px-3 py-2 tabular-nums">
+                            <div>{outcomes}</div>
+                            {(row.counts.outcomes_follow_up ?? 0) > 0 ? (
+                              <div className="text-[10px] text-emerald-400 font-normal">
+                                {row.counts.outcomes_follow_up} picked up
+                              </div>
+                            ) : null}
+                          </td>
                           <td data-col="edits" className="px-3 py-2 tabular-nums">{row.counts.table_edits}</td>
                           <td data-col="email" className="px-3 py-2 tabular-nums">
                             <div>{emails}</div>

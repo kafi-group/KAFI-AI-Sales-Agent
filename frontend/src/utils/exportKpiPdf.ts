@@ -2,9 +2,10 @@ import { jsPDF } from "jspdf";
 import type { DailyKpiReport, KpiCounts } from "../api/client";
 
 const COUNT_LABELS: { key: keyof KpiCounts; label: string }[] = [
-  { key: "calls_logged", label: "Calls" },
+  { key: "calls_logged", label: "Calls attempted" },
+  { key: "companies_called", label: "Companies called" },
+  { key: "outcomes_follow_up", label: "Calls picked up" },
   { key: "outcomes_interested", label: "Client interested" },
-  { key: "outcomes_follow_up", label: "Follow up" },
   { key: "outcomes_not_interested", label: "Not interested" },
   { key: "outcomes_not_received_call", label: "No answer" },
   { key: "call_remarks", label: "Call remarks" },

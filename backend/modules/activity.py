@@ -35,6 +35,7 @@ _OUTCOME_LABELS = {
 
 _EMPTY_COUNTS = {
     "calls_logged": 0,
+    "companies_called": 0,
     "outcomes_interested": 0,
     "outcomes_follow_up": 0,
     "outcomes_not_interested": 0,
@@ -136,13 +137,28 @@ def _empty_counts() -> dict[str, int]:
     return dict(_EMPTY_COUNTS)
 
 
-def _bump_counts(counts: dict[str, int], event: UserActivityEvent) -> None:
+def _bump_counts(
+    counts: dict[str, int],
+    event: UserActivityEvent,
+    companies_set: set[str] | None = None,
+) -> None:
     qty = max(1, int(event.quantity or 1))
     kind = event.activity_type
+    details = event.details or {}
+
+    # Track distinct companies called
+    if kind in (CALL_LOGGED, CALL_OUTCOME, CALL_REMARKS) and companies_set is not None:
+        c_key = details.get("buyer_id") or details.get("company_name")
+        if c_key:
+            companies_set.add(str(c_key).strip().lower())
+
     if kind == CALL_LOGGED:
-        counts["calls_logged"] += qty
+        # If call ended in < 15s without answer/outcome, don't count as a full 3-ring attempt
+        is_short_drop = bool(details.get("is_short_drop"))
+        if not is_short_drop:
+            counts["calls_logged"] += qty
     elif kind == CALL_OUTCOME:
-        outcome = (event.details or {}).get("outcome") or ""
+        outcome = details.get("outcome") or ""
         if outcome == "interested":
             counts["outcomes_interested"] += qty
         elif outcome == "follow_up":
@@ -311,6 +327,7 @@ def _apply_email_activity_counts(
 def _email_attribution_note(counts: dict[str, int]) -> str:
     """Plain-language link between calls and emails for KPI reports."""
     calls = int(counts.get("calls_logged") or 0)
+    companies = int(counts.get("companies_called") or 0)
     after_calls = int(counts.get("emails_after_calls") or 0)
     other = int(counts.get("emails_other_personal") or 0)
     bulk = int(counts.get("bulk_emails_sent") or 0)
@@ -323,7 +340,8 @@ def _email_attribution_note(counts: dict[str, int]) -> str:
 
     parts: list[str] = []
     if calls:
-        parts.append(f"{calls} call{'s' if calls != 1 else ''}")
+        company_txt = f" across {companies} compan{'ies' if companies != 1 else 'y'}" if companies else ""
+        parts.append(f"{calls} call attempt{'s' if calls != 1 else ''}{company_txt}")
     if after_calls:
         parts.append(
             f"{after_calls} email{'s' if after_calls != 1 else ''} linked to calls "
@@ -454,8 +472,11 @@ def get_kpi_report(
     } if user_ids else {}
 
     counts = _empty_counts()
+    target_companies: set[str] = set()
     for event in events:
-        _bump_counts(counts, event)
+        _bump_counts(counts, event, target_companies)
+    counts["companies_called"] = len(target_companies)
+
     if target_user_id is not None:
         _apply_email_activity_counts(counts, email_by_user.get(target_user_id))
         _apply_whatsapp_activity_counts(counts, wa_by_user.get(target_user_id))
@@ -481,6 +502,7 @@ def get_kpi_report(
     if is_admin and target_user_id is None:
         scope = "team"
         by_user: dict[int, dict[str, Any]] = {}
+        user_companies: dict[int, set[str]] = {}
         for event in events:
             bucket = by_user.get(event.user_id)
             if bucket is None:
@@ -491,8 +513,12 @@ def get_kpi_report(
                     "activity_count": 0,
                 }
                 by_user[event.user_id] = bucket
-            _bump_counts(bucket["counts"], event)
+            c_set = user_companies.setdefault(event.user_id, set())
+            _bump_counts(bucket["counts"], event, c_set)
             bucket["activity_count"] += 1
+        for uid, c_set in user_companies.items():
+            if uid in by_user:
+                by_user[uid]["counts"]["companies_called"] = len(c_set)
         for uid, email_counts in email_by_user.items():
             bucket = by_user.get(uid)
             if bucket is None:
@@ -611,8 +637,8 @@ def _build_rule_based_summary(report: dict[str, Any]) -> str:
         [
             "",
             "Key volumes:",
-            f"- Calls placed: {counts.get('calls_logged', 0)}",
-            f"- Call outcomes: {interested} client interested, {follow_up} follow up, "
+            f"- Calls attempted: {counts.get('calls_logged', 0)} ({counts.get('companies_called', 0)} companies called)",
+            f"- Call outcomes: {follow_up} calls picked up, {interested} client interested, "
             f"{not_interested} not interested, {no_answer} did not receive call",
             f"- Call remarks added: {counts.get('call_remarks', 0)}",
             f"- Leads imported: {counts.get('leads_imported', 0)}",
@@ -634,10 +660,10 @@ def _build_rule_based_summary(report: dict[str, Any]) -> str:
         lines.extend(["", "Email vs calls:", attribution])
 
     highlights: list[str] = []
+    if follow_up:
+        highlights.append(f"{follow_up} call{'s' if follow_up != 1 else ''} picked up")
     if interested:
         highlights.append(f"{interested} interested outcome{'s' if interested != 1 else ''}")
-    if follow_up:
-        highlights.append(f"{follow_up} follow-up outcome{'s' if follow_up != 1 else ''}")
     if counts.get("personal_emails_sent"):
         highlights.append(
             f"{counts['personal_emails_sent']} personal email"
@@ -658,7 +684,8 @@ def _build_rule_based_summary(report: dict[str, Any]) -> str:
     if counts.get("leads_imported"):
         highlights.append(f"{counts['leads_imported']} lead{'s' if counts['leads_imported'] != 1 else ''} imported")
     if counts.get("calls_logged"):
-        highlights.append(f"{counts['calls_logged']} call{'s' if counts['calls_logged'] != 1 else ''} logged")
+        comp_txt = f" across {counts.get('companies_called')} companies" if counts.get("companies_called") else ""
+        highlights.append(f"{counts['calls_logged']} call attempt{'s' if counts['calls_logged'] != 1 else ''}{comp_txt}")
 
     if highlights:
         lines.extend(["", "Highlights: " + "; ".join(highlights) + "."])
