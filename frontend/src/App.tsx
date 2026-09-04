@@ -47,6 +47,7 @@ import { IndexesPage } from "./pages/IndexesPage";
 import { UserManualPage } from "./pages/UserManualPage";
 import { LeadsPage } from "./pages/LeadsPage";
 import { DataSynthesisPage } from "./pages/DataSynthesisPage";
+import { TargetWorkspacePage } from "./pages/TargetWorkspacePage";
 import { LeadsTablePage } from "./pages/LeadsTablePage";
 import { ClientHistoryPage } from "./pages/ClientHistoryPage";
 import { HelpfulGuidancePage } from "./pages/HelpfulGuidancePage";
@@ -1062,6 +1063,7 @@ function DashboardApp() {
     },
     { id: "leads" as const, label: "Searched by AI", count: discoverLeadsCount },
     ...(isAdmin ? [{ id: "data-synthesis" as const, label: "Smart Data Clean & Merge", count: 0 }] : []),
+    { id: "target-workspace" as const, label: "Target and Workspace", count: 0 },
     {
       id: "table",
       label: isAdmin ? masterTableLabel : "My Assigned Leads",
@@ -1390,6 +1392,18 @@ function DashboardApp() {
             )}
             {tab === "data-synthesis" && isAdmin && (
               <DataSynthesisPage onError={setError} masterType={masterType} />
+            )}
+            {tab === "target-workspace" && (
+              <TargetWorkspacePage
+                onOpenCall={(_phone, _company, leadId) => {
+                  if (leadId) handleSelectLead(leadId);
+                }}
+                onOpenEmailComposer={(email, company, _contact) => {
+                  void openMailerApp(
+                    `/compose?to=${encodeURIComponent(email)}&subject=${encodeURIComponent(`Inquiry - ${company}`)}`
+                  );
+                }}
+              />
             )}
             {tab === "table" && selectedLeadId !== null && (
               <BuyerProfile

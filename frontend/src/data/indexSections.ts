@@ -105,6 +105,13 @@ export const INDEX_SECTIONS: IndexSection[] = [
         action: { type: "tab", tab: "leads" },
       },
       {
+        id: "2.1b",
+        title: "Target and Workspace",
+        description: "Day-wise country target schedules, 4-stage outreach funnel & 15-day drip campaigns.",
+        icon: "table",
+        action: { type: "tab", tab: "target-workspace" },
+      },
+      {
         id: "2.2",
         title: "Master Table",
         description: "Overview — assign, score, call, and bulk outreach from one table.",

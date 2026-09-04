@@ -627,6 +627,14 @@ export function NavIcon({
       </span>
     );
   }
+  if (navId === "target-workspace") {
+    const emojiSize = size === "xs" ? "text-xs" : size === "md" ? "text-base" : "text-sm";
+    return (
+      <span className={`inline-flex shrink-0 leading-none ${emojiSize}`} aria-hidden>
+        🎯
+      </span>
+    );
+  }
   if (navId === "table" || navId === "all")
     return <IconTable size={size} className="text-emerald-400" />;
   if (navId === "master")

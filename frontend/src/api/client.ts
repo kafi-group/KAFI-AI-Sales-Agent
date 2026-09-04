@@ -3724,7 +3724,205 @@ export const client = {
       method: "POST",
       body: JSON.stringify({ quotation_id: quotationId, format }),
     }),
+
+  // ── Target and Workspace Module ──
+  getTargetWorkspaceTargets: (day?: string, userId?: number) => {
+    const search = new URLSearchParams();
+    if (day) search.set("day", day);
+    if (userId != null) search.set("user_id", String(userId));
+    const query = search.toString();
+    return request<{ day_of_week: string; targets: DayCountryTarget[] }>(
+      `/target-workspace/targets${query ? `?${query}` : ""}`,
+    );
+  },
+  addDayCountryTarget: (data: { day_of_week: string; country: string; assigned_user_id?: number | null }) =>
+    request<{ success: boolean; target: DayCountryTarget }>("/target-workspace/targets", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  removeDayCountryTarget: (targetId: number) =>
+    request<{ success: boolean }>(`/target-workspace/targets/${targetId}`, {
+      method: "DELETE",
+    }),
+  getWorkspaceLeads: (params: {
+    day?: string;
+    country?: string;
+    stage?: string;
+    search?: string;
+    user_id?: number;
+    page?: number;
+    limit?: number;
+  } = {}) => {
+    const search = new URLSearchParams();
+    if (params.day) search.set("day", params.day);
+    if (params.country) search.set("country", params.country);
+    if (params.stage) search.set("stage", params.stage);
+    if (params.search) search.set("search", params.search);
+    if (params.user_id != null) search.set("user_id", String(params.user_id));
+    if (params.page) search.set("page", String(params.page));
+    if (params.limit) search.set("limit", String(params.limit));
+    const query = search.toString();
+    return request<WorkspaceLeadListResponse>(`/target-workspace/workspace${query ? `?${query}` : ""}`);
+  },
+  updateWorkspaceLeadStatus: (data: {
+    buyer_id: number;
+    stage: string;
+    not_interested_reason?: string | null;
+    not_interested_remarks?: string | null;
+    follow_up_reason?: string | null;
+    follow_up_action?: string | null;
+    follow_up_date?: string | null;
+    whatsapp_call_tried?: boolean | null;
+    whatsapp_call_proof?: string | null;
+    searched_internet_email?: boolean | null;
+    searched_internet_phone?: boolean | null;
+    linkedin_request_sent?: boolean | null;
+    linkedin_msg_sent?: boolean | null;
+  }) =>
+    request<{ success: boolean; lead_id: number; stage: string }>("/target-workspace/lead-status", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  replaceContactAndShiftToDrip: (data: {
+    buyer_id: number;
+    new_contact_name: string;
+    new_email: string;
+    new_phone?: string | null;
+    new_designation?: string | null;
+    product_type?: string;
+    notes?: string | null;
+  }) =>
+    request<{
+      success: boolean;
+      drip_lead: DripCampaignLeadItem;
+      message: string;
+    }>("/target-workspace/replace-and-drip", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  getDripCampaignLeads: (params: { search?: string; user_id?: number; page?: number; limit?: number } = {}) => {
+    const search = new URLSearchParams();
+    if (params.search) search.set("search", params.search);
+    if (params.user_id != null) search.set("user_id", String(params.user_id));
+    if (params.page) search.set("page", String(params.page));
+    if (params.limit) search.set("limit", String(params.limit));
+    const query = search.toString();
+    return request<DripCampaignResponse>(`/target-workspace/drip-campaign${query ? `?${query}` : ""}`);
+  },
+  getWorkspaceReviewOptions: (category?: string) => {
+    const search = new URLSearchParams();
+    if (category) search.set("category", category);
+    const query = search.toString();
+    return request<{ options: WorkspaceReviewOptionItem[] }>(
+      `/target-workspace/review-options${query ? `?${query}` : ""}`,
+    );
+  },
+  addWorkspaceReviewOption: (data: { category: string; label: string; action_hint?: string | null }) =>
+    request<WorkspaceReviewOptionItem>("/target-workspace/review-options", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  deleteWorkspaceReviewOption: (optionId: number) =>
+    request<{ success: boolean }>(`/target-workspace/review-options/${optionId}`, {
+      method: "DELETE",
+    }),
 };
+
+export interface DayCountryTarget {
+  id: number;
+  day_of_week: string;
+  country: string;
+  assigned_user_id: number | null;
+  assigned_user_name?: string | null;
+  created_by_user_id: number | null;
+  created_at: string | null;
+}
+
+export interface WorkspaceLeadItem {
+  id: number;
+  company_name: string;
+  contact_person: string | null;
+  designation: string | null;
+  primary_phone: string | null;
+  primary_email: string | null;
+  country: string | null;
+  city: string | null;
+  product_interest: string | null;
+  assigned_to_user_id: number | null;
+  assigned_to_name: string | null;
+  stage: "fresh" | "needs_follow_up" | "not_interested" | "no_response";
+  not_interested_reason: string | null;
+  not_interested_remarks: string | null;
+  follow_up_reason: string | null;
+  follow_up_action: string | null;
+  follow_up_date: string | null;
+  whatsapp_call_tried: boolean;
+  whatsapp_call_proof: string | null;
+  searched_internet_email: boolean;
+  searched_internet_phone: boolean;
+  linkedin_request_sent: boolean;
+  linkedin_msg_sent: boolean;
+  replacement_contact_name: string | null;
+  replacement_email: string | null;
+  replacement_phone: string | null;
+  emails_sent_count: number;
+  calls_made_count: number;
+  last_contacted_at: string | null;
+  days_since_last_response: number;
+  is_dead_lead_meter_red: boolean;
+  is_drip_candidate: boolean;
+  todo_action_hint: string | null;
+}
+
+export interface WorkspaceLeadListResponse {
+  day_of_week: string;
+  target_countries: string[];
+  counts: {
+    fresh: number;
+    needs_follow_up: number;
+    not_interested: number;
+    no_response: number;
+    total: number;
+  };
+  total: number;
+  page: number;
+  limit: number;
+  leads: WorkspaceLeadItem[];
+}
+
+export interface DripCampaignLeadItem {
+  id: number;
+  buyer_id: number;
+  company_name: string;
+  product_type: string;
+  contact_person_name: string | null;
+  contact_designation: string | null;
+  email: string;
+  phone: string | null;
+  country: string | null;
+  days_in_drip: number;
+  drip_emails_sent_count: number;
+  responses_received_count: number;
+  status: string;
+  notes: string | null;
+  cadence_label: string;
+  created_at: string | null;
+}
+
+export interface DripCampaignResponse {
+  total: number;
+  page: number;
+  limit: number;
+  leads: DripCampaignLeadItem[];
+}
+
+export interface WorkspaceReviewOptionItem {
+  id: number;
+  category: "follow_up" | "not_interested";
+  label: string;
+  action_hint: string | null;
+  is_system: boolean;
+}
 
 export interface CnfLivePricingResponse {
   productId?: string;

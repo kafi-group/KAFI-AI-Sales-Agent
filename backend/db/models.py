@@ -979,3 +979,126 @@ class CustomLeadModule(Base):
     )
 
 
+class DayCountryTarget(Base):
+    """Target countries assigned per day of week (and optionally per sales user)."""
+
+    __tablename__ = "day_country_targets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    day_of_week: Mapped[str] = mapped_column(String(20), nullable=False, index=True)  # "monday", "friday", etc.
+    country: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    assigned_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_users.id", ondelete="SET NULL"), nullable=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    assigned_user: Mapped[Optional["AppUser"]] = relationship("AppUser", foreign_keys=[assigned_user_id])
+
+
+class WorkspaceLeadLifecycle(Base):
+    """Outreach lifecycle status and review states for target workspace leads."""
+
+    __tablename__ = "workspace_lead_lifecycles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    buyer_id: Mapped[int] = mapped_column(ForeignKey("buyers.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("app_users.id", ondelete="SET NULL"), nullable=True, index=True)
+    
+    # 4 core stages: "fresh", "needs_follow_up", "not_interested", "no_response"
+    stage: Mapped[str] = mapped_column(String(40), default="fresh", nullable=False, index=True)
+    
+    # Not interested reason & remarks
+    not_interested_reason: Mapped[Optional[str]] = mapped_column(String(80))  # "price_high", "items_mismatch", "client_exporter", "has_supplier", "other"
+    not_interested_remarks: Mapped[Optional[str]] = mapped_column(Text)
+    
+    # Needs follow-up details
+    follow_up_reason: Mapped[Optional[str]] = mapped_column(String(120))  # "need_approval_ho", "call_back_later", "searching_vendors", "quotation_requested", or custom
+    follow_up_action: Mapped[Optional[str]] = mapped_column(String(40))  # "call", "email", "quotation", "whatsapp"
+    follow_up_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    
+    # No-response checks & manual audit proof
+    whatsapp_call_tried: Mapped[bool] = mapped_column(Boolean, default=False)
+    whatsapp_call_proof: Mapped[Optional[str]] = mapped_column(Text)
+    searched_internet_email: Mapped[bool] = mapped_column(Boolean, default=False)
+    searched_internet_phone: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # Contact replacements
+    replacement_email: Mapped[Optional[str]] = mapped_column(String(255))
+    replacement_contact_name: Mapped[Optional[str]] = mapped_column(String(255))
+    replacement_phone: Mapped[Optional[str]] = mapped_column(String(50))
+    
+    # LinkedIn actions
+    linkedin_request_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    linkedin_msg_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # Activity counters for dead lead meter
+    emails_sent_count: Mapped[int] = mapped_column(Integer, default=0)
+    calls_made_count: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Drip campaign flag
+    is_drip_candidate: Mapped[bool] = mapped_column(Boolean, default=False)
+    moved_to_drip_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    buyer: Mapped["Buyer"] = relationship("Buyer")
+    user: Mapped[Optional["AppUser"]] = relationship("AppUser")
+
+
+class DripCampaignLead(Base):
+    """Replaced & stale contacts enrolled in 15-day cadence email nurture."""
+
+    __tablename__ = "drip_campaign_leads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    company_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    product_type: Mapped[str] = mapped_column(String(255), default="FMCG / General")
+    contact_person_name: Mapped[Optional[str]] = mapped_column(String(255))
+    contact_designation: Mapped[Optional[str]] = mapped_column(String(255))
+    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    country: Mapped[Optional[str]] = mapped_column(String(100), index=True)
+    source_buyer_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("app_users.id", ondelete="SET NULL"), nullable=True)
+    
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_drip_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    drip_emails_sent_count: Mapped[int] = mapped_column(Integer, default=0)
+    responses_received_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(40), default="active", index=True)  # "active", "paused", "converted", "unsubscribed"
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    user: Mapped[Optional["AppUser"]] = relationship("AppUser")
+
+
+class WorkspaceReviewOption(Base):
+    """Customizable dropdown options for follow-up review reasons and objection actions."""
+
+    __tablename__ = "workspace_review_options"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    category: Mapped[str] = mapped_column(String(40), nullable=False, index=True)  # "follow_up_reason", "not_interested_reason"
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    value: Mapped[str] = mapped_column(String(100), nullable=False)
+    action_hint: Mapped[Optional[str]] = mapped_column(String(255))
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+

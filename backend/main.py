@@ -30,6 +30,7 @@ from api import (
     personalized_followups,
     sales_assistant,
     scheduler,
+    target_workspace,
     track,
     whatsapp,
     whatsapp_personal,
@@ -370,6 +371,7 @@ app.include_router(ai_mode.router, prefix="/api")
 app.include_router(catalogues.router, prefix="/api")
 app.include_router(horeka.router, prefix="/api")
 app.include_router(custom_modules.router, prefix="/api")
+app.include_router(target_workspace.router, prefix="/api")
 
 
 OLD_CLIENTS_IMPORT_PARSER = "old_clients_v2"

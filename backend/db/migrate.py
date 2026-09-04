@@ -245,6 +245,31 @@ def _ensure_custom_lead_modules_table() -> None:
         db.close()
 
 
+def _ensure_target_workspace_tables() -> None:
+    """Ensure Target and Workspace module tables exist and seed initial defaults."""
+    from db.models import Base
+    from db.session import SessionLocal
+    from modules import target_workspace as tw_module
+
+    inspector = inspect(engine)
+    existing_tables = inspector.get_table_names()
+
+    for tbl_name in ["day_country_targets", "workspace_lead_lifecycles", "drip_campaign_leads", "workspace_review_options"]:
+        if tbl_name not in existing_tables and tbl_name in Base.metadata.tables:
+            Base.metadata.tables[tbl_name].create(engine, checkfirst=True)
+            print(f"Created {tbl_name} table.", flush=True)
+
+    db = SessionLocal()
+    try:
+        tw_module.seed_default_review_options(db)
+        tw_module.seed_default_day_targets(db)
+    except Exception as exc:
+        print(f"Target workspace table init note: {exc}", flush=True)
+        db.rollback()
+    finally:
+        db.close()
+
+
 def run_migrations() -> None:
     alembic_cfg = _alembic_config()
     script = ScriptDirectory.from_config(alembic_cfg)
@@ -260,4 +285,5 @@ def run_migrations() -> None:
     _ensure_buyer_social_columns()
     _ensure_horeka_table()
     _ensure_custom_lead_modules_table()
+    _ensure_target_workspace_tables()
 

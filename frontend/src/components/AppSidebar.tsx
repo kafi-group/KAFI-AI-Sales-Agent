@@ -27,6 +27,7 @@ export type Tab =
   | "whatsapp-mobile"
   | "leads"
   | "data-synthesis"
+  | "target-workspace"
   | "table"
   | "master-table"
   | "inbox"
