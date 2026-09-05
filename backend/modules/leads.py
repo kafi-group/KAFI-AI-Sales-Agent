@@ -570,7 +570,18 @@ def _apply_lead_table_scope(
     from sqlalchemy import or_
 
     if master_type:
-        buyer_query = buyer_query.filter(Buyer.master_type == master_type)
+        if master_type.strip().lower() == "fmcg":
+            buyer_query = buyer_query.filter(
+                or_(
+                    sa_func.lower(Buyer.master_type) == "fmcg",
+                    Buyer.master_type.is_(None),
+                    Buyer.master_type == "",
+                )
+            )
+        else:
+            buyer_query = buyer_query.filter(
+                sa_func.lower(Buyer.master_type) == master_type.strip().lower()
+            )
 
     if assigned_to_user_id is not None:
         buyer_query = buyer_query.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
@@ -607,14 +618,24 @@ def _apply_lead_table_scope(
 
 
 def _apply_intake_method_scope(buyer_query, *, intake_method: str | None):
+    from sqlalchemy import or_
+
     if not intake_method:
         return buyer_query
     normalized = intake_method.strip().lower()
-    if normalized not in {"upload", "discover"}:
-        return buyer_query
-    return buyer_query.filter(
-        sa_func.lower(sa_func.coalesce(Buyer.intake_method, "")) == normalized
-    )
+    if normalized == "upload":
+        return buyer_query.filter(
+            or_(
+                sa_func.lower(sa_func.coalesce(Buyer.intake_method, "")) == "upload",
+                Buyer.intake_method.is_(None),
+                Buyer.intake_method == "",
+            )
+        )
+    if normalized == "discover":
+        return buyer_query.filter(
+            sa_func.lower(sa_func.coalesce(Buyer.intake_method, "")) == "discover"
+        )
+    return buyer_query
 
 
 def _apply_new_search_lead_scope(buyer_query):
@@ -1685,7 +1706,19 @@ def _compute_section_counts(
         Buyer.id, Buyer.source, Buyer.assigned_to_user_id, Buyer.assigned_by_user_id
     )
     if master_type:
-        buyer_query = buyer_query.filter(Buyer.master_type == master_type)
+        from sqlalchemy import or_
+        if master_type.strip().lower() == "fmcg":
+            buyer_query = buyer_query.filter(
+                or_(
+                    sa_func.lower(Buyer.master_type) == "fmcg",
+                    Buyer.master_type.is_(None),
+                    Buyer.master_type == "",
+                )
+            )
+        else:
+            buyer_query = buyer_query.filter(
+                sa_func.lower(Buyer.master_type) == master_type.strip().lower()
+            )
     if pool_for_user_id is not None:
         from sqlalchemy import or_
 
@@ -2732,32 +2765,31 @@ def populate_target_pool_intelligent(
 
 def classify_target_pools_from_old_clients(
     db: Session,
-    *,
-    limit_per_pool: int = 5000,
 ) -> dict[str, object]:
     """Move Old clients into Hyperstore / Distributor pools by keyword match."""
-    from modules.audit import log_action
-
-    limit_per_pool = max(1, min(int(limit_per_pool or 5000), 10000))
-    buyers = _section_buyers_query(db, source="old_clients").all()
+    old_buyers = (
+        db.query(Buyer)
+        .filter(Buyer.source == "old_clients")
+        .all()
+    )
     hyper_ids: list[int] = []
     dist_ids: list[int] = []
-    scanned = 0
 
-    for buyer in buyers:
-        scanned += 1
-        blob = _buyer_match_blob(buyer)
+    for buyer in old_buyers:
+        parts = [
+            buyer.company_name or "",
+            buyer.industry or "",
+            buyer.remarks or "",
+            buyer.address or "",
+        ]
+        blob = " ".join(parts).lower()
         hyper_score = _score_pool_match(blob, "hyperstore_targeted")
         dist_score = _score_pool_match(blob, "targeted_distributor")
-        if hyper_score <= 0 and dist_score <= 0:
-            continue
-        if hyper_score >= dist_score and hyper_score > 0:
+
+        if hyper_score > 0 and hyper_score >= dist_score:
             hyper_ids.append(buyer.id)
         elif dist_score > 0:
             dist_ids.append(buyer.id)
-
-    hyper_ids = hyper_ids[:limit_per_pool]
-    dist_ids = dist_ids[:limit_per_pool]
 
     hyper_result = (
         set_target_pool(db, lead_ids=hyper_ids, source="hyperstore_targeted", intake_method="upload")
@@ -2770,38 +2802,48 @@ def classify_target_pools_from_old_clients(
         else {"updated_count": 0, "updated_ids": []}
     )
 
-    log_action(
-        db,
-        entity_type="buyer",
-        entity_id=0,
-        action="classify_target_pools_from_old_clients",
-        details={
-            "scanned": scanned,
-            "hyperstore_moved": hyper_result.get("updated_count", 0),
-            "distributor_moved": dist_result.get("updated_count", 0),
-        },
-    )
+    if hyper_ids or dist_ids:
+        from modules.audit import log_action
+
+        log_action(
+            db,
+            entity_type="buyer",
+            entity_id=0,
+            action="classify_target_pools",
+            details={
+                "scanned": len(old_buyers),
+                "hyperstore_moved": hyper_result.get("updated_count", 0),
+                "distributor_moved": dist_result.get("updated_count", 0),
+            },
+        )
 
     return {
-        "scanned": scanned,
+        "scanned": len(old_buyers),
         "hyperstore_targeted": hyper_result,
         "targeted_distributor": dist_result,
     }
 
 
-def remove_from_target_pool(db: Session, *, lead_ids: list[int]) -> dict[str, object]:
-    """Move leads out of a targeted pool back to Old clients or New search lead."""
+def remove_from_target_pool(
+    db: Session,
+    *,
+    lead_ids: list[int],
+) -> dict[str, object]:
+    """Move leads out of a targeted pool and return to old_clients or new search leads."""
     from modules.audit import log_action
 
     restored_ids: list[int] = []
     for lead_id in lead_ids:
         buyer = buyers_module.get_buyer(db, lead_id)
-        if not buyer or not is_targeted_pool_source(buyer.source):
+        if not buyer:
             continue
-        if (buyer.intake_method or "").lower() == "upload":
+        norm = (buyer.source or "").strip().lower()
+        if norm not in TARGETED_POOL_SOURCES:
+            continue
+        if (buyer.intake_method or "").strip().lower() == "upload":
             buyer.source = "old_clients"
         else:
-            buyer.source = "manual"
+            buyer.source = "discovery"
         buyer.intake_method = None
         restored_ids.append(lead_id)
 
@@ -2856,6 +2898,10 @@ def move_leads_to_module(
                 buyer.assigned_to_user_id = khalid_id
                 buyer.assigned_to = khalid_name
                 buyer.assigned_at = datetime.utcnow()
+                if not buyer.master_type:
+                    buyer.master_type = "fmcg"
+                if not buyer.intake_method:
+                    buyer.intake_method = "upload"
                 updated_ids.append(lead_id)
         target_label = "Khalid Focused Sales"
 
@@ -2870,6 +2916,10 @@ def move_leads_to_module(
             buyer = buyers_module.get_buyer(db, lead_id)
             if buyer:
                 buyer.source = module
+                if not buyer.master_type:
+                    buyer.master_type = "fmcg"
+                if not buyer.intake_method:
+                    buyer.intake_method = "upload"
                 updated_ids.append(lead_id)
         labels = {
             "hyperstore_targeted": "Hyperstore Target",
@@ -2887,6 +2937,8 @@ def move_leads_to_module(
             buyer = buyers_module.get_buyer(db, lead_id)
             if buyer:
                 buyer.interested_clients_list_at = datetime.utcnow()
+                if not buyer.master_type:
+                    buyer.master_type = "fmcg"
                 set_call_outcome(db, buyer_id=lead_id, outcome="interested", by_user_id=by_user_id)
                 updated_ids.append(lead_id)
         target_label = "Interested Clients"
@@ -2897,6 +2949,8 @@ def move_leads_to_module(
         for lead_id in lead_ids:
             buyer = buyers_module.get_buyer(db, lead_id)
             if buyer:
+                if not buyer.master_type:
+                    buyer.master_type = "fmcg"
                 set_call_outcome(db, buyer_id=lead_id, outcome="callback", by_user_id=by_user_id)
                 updated_ids.append(lead_id)
         target_label = "Follow up clients"
@@ -2908,6 +2962,8 @@ def move_leads_to_module(
             buyer = buyers_module.get_buyer(db, lead_id)
             if buyer:
                 buyer.interested_clients_list_at = None
+                if not buyer.master_type:
+                    buyer.master_type = "fmcg"
                 set_call_outcome(db, buyer_id=lead_id, outcome="not_interested", by_user_id=by_user_id)
                 updated_ids.append(lead_id)
         target_label = "Not interested"
@@ -2918,6 +2974,8 @@ def move_leads_to_module(
         for lead_id in lead_ids:
             buyer = buyers_module.get_buyer(db, lead_id)
             if buyer:
+                if not buyer.master_type:
+                    buyer.master_type = "fmcg"
                 set_call_outcome(db, buyer_id=lead_id, outcome="no_response", by_user_id=by_user_id)
                 updated_ids.append(lead_id)
         target_label = "Did not receive call"
@@ -2926,6 +2984,12 @@ def move_leads_to_module(
         for lead_id in lead_ids:
             buyer = buyers_module.get_buyer(db, lead_id)
             if buyer:
+                if not buyer.source or buyer.source == "master":
+                    buyer.source = "old_clients"
+                if not buyer.master_type:
+                    buyer.master_type = "fmcg"
+                if not buyer.intake_method:
+                    buyer.intake_method = "upload"
                 updated_ids.append(lead_id)
         target_label = "Master Table (FMCG)"
 
@@ -2938,6 +3002,8 @@ def move_leads_to_module(
             if buyer:
                 buyer.source = module
                 buyer.intake_method = "upload"
+                if not buyer.master_type:
+                    buyer.master_type = "fmcg"
                 updated_ids.append(lead_id)
         cm = db.query(CustomLeadModule).filter(CustomLeadModule.key == module).first()
         if cm:
