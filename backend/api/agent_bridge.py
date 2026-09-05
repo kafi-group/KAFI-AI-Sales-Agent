@@ -79,6 +79,13 @@ def _mount_bridge_routes(router: APIRouter) -> None:
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(502, f"Could not send email: {exc}") from exc
 
+    @router.post("/auto-reply-email")
+    def agent_bridge_auto_reply_email(
+        payload: dict,
+        db: Session = Depends(get_db),
+    ) -> dict:
+        return bridge_module.auto_reply_bridge_email(db, payload)
+
     @router.get("/live-pricing")
     def agent_bridge_live_pricing(sku: str = Query(..., min_length=1)) -> dict:
         try:

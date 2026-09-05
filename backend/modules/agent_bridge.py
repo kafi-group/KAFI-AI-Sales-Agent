@@ -363,51 +363,26 @@ def bridge_emails(db: Session, *, limit: int = 20) -> dict[str, Any]:
     return {"emails": emails[:limit]}
 
 
-def send_bridge_email(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
-    """Send an outbound email requested via external API / CNF Pricing bridge."""
+def _process_bridge_attachments(raw_input: Any) -> list[dict]:
     import base64
     import urllib.request
-    from modules import activity as activity_module
-    from modules import inbox as inbox_module
     from modules.email_attachments import register_attachment_from_bytes
 
-    to_addr = (payload.get("to") or "").strip()
-    if not to_addr or "@" not in to_addr:
-        raise ValueError("Invalid recipient email address ('to' is required)")
+    if raw_input is None:
+        return []
+    if isinstance(raw_input, dict):
+        raw_list = [raw_input]
+    elif isinstance(raw_input, list):
+        raw_list = raw_input
+    else:
+        return []
 
-    subject = (payload.get("subject") or "").strip() or "(no subject)"
-    body = (payload.get("body") or "").rstrip()
-    if not body:
-        raise ValueError("Email body cannot be empty ('body' is required)")
-
-    cc = (payload.get("cc") or "").strip() or None
-    bcc = (payload.get("bcc") or "").strip() or None
-    sender_username = (payload.get("sender_username") or "").strip().lower()
-
-    # Resolve sender user
-    sender_user: AppUser | None = None
-    if sender_username:
-        sender_user = (
-            db.query(AppUser)
-            .filter(func.lower(AppUser.username) == sender_username, AppUser.is_active.is_(True))
-            .first()
-        )
-    if not sender_user:
-        sender_user = _admin_viewer(db)
-
-    # Process attachments
-    raw_attachments = payload.get("attachments")
-    if raw_attachments is None and "attachment" in payload:
-        raw_attachments = [payload["attachment"]]
-    elif not isinstance(raw_attachments, list):
-        raw_attachments = []
-
-    processed_attachments: list[dict] = []
-    for att in raw_attachments:
+    processed: list[dict] = []
+    for att in raw_list:
         if not isinstance(att, dict):
             continue
         if "id" in att and not att.get("base64") and not att.get("url"):
-            processed_attachments.append(att)
+            processed.append(att)
             continue
 
         filename = att.get("filename") or att.get("name") or "attachment.pdf"
@@ -442,7 +417,45 @@ def send_bridge_email(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
             reg_att = register_attachment_from_bytes(
                 file_bytes, filename=filename, content_type=content_type
             )
-            processed_attachments.append(reg_att)
+            processed.append(reg_att)
+
+    return processed
+
+
+def send_bridge_email(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
+    """Send an outbound email requested via external API / CNF Pricing bridge."""
+    from modules import activity as activity_module
+    from modules import inbox as inbox_module
+
+    to_addr = (payload.get("to") or "").strip()
+    if not to_addr or "@" not in to_addr:
+        raise ValueError("Invalid recipient email address ('to' is required)")
+
+    subject = (payload.get("subject") or "").strip() or "(no subject)"
+    body = (payload.get("body") or "").rstrip()
+    if not body:
+        raise ValueError("Email body cannot be empty ('body' is required)")
+
+    cc = (payload.get("cc") or "").strip() or None
+    bcc = (payload.get("bcc") or "").strip() or None
+    sender_username = (payload.get("sender_username") or "").strip().lower()
+
+    # Resolve sender user
+    sender_user: AppUser | None = None
+    if sender_username:
+        sender_user = (
+            db.query(AppUser)
+            .filter(func.lower(AppUser.username) == sender_username, AppUser.is_active.is_(True))
+            .first()
+        )
+    if not sender_user:
+        sender_user = _admin_viewer(db)
+
+    # Process attachments
+    raw_attachments = (
+        payload.get("attachments") if "attachments" in payload else payload.get("attachment")
+    )
+    processed_attachments = _process_bridge_attachments(raw_attachments)
 
     # Send email
     result = inbox_module.compose(
@@ -490,6 +503,198 @@ def send_bridge_email(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
         "attachments_count": len(processed_attachments),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def auto_reply_bridge_email(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
+    """Process an inbound email forwarded by an external pipeline (e.g. Kafi Commodities app),
+    generate an AI reply, send it back to the sender, and record logs.
+
+    Accepts: { from, fromName, subject, body, attachment? }
+    Returns: { ok: true, ... } or { ok: false, error: ... }
+    """
+    import hashlib
+    from modules import activity as activity_module
+    from modules import ai_mode as ai_mode_module
+    from modules import inbox as inbox_module
+
+    try:
+        from_addr = (
+            payload.get("from")
+            or payload.get("from_email")
+            or payload.get("sender")
+            or payload.get("fromEmail")
+            or ""
+        ).strip()
+        if not from_addr or "@" not in from_addr:
+            return {"ok": False, "error": "Invalid or missing 'from' email address"}
+
+        from_name = (
+            payload.get("fromName")
+            or payload.get("from_name")
+            or payload.get("name")
+            or ""
+        ).strip()
+        subject = (payload.get("subject") or "").strip()
+        body = (
+            payload.get("body")
+            or payload.get("text")
+            or payload.get("content")
+            or payload.get("preview")
+            or ""
+        ).strip()
+
+        # Deduplication key to prevent double-processing:
+        message_id = str(
+            payload.get("message_id")
+            or payload.get("messageId")
+            or payload.get("id")
+            or ""
+        ).strip()
+
+        # Resolve sender user (mailbox used to send the reply)
+        sender_username = (payload.get("sender_username") or "").strip().lower()
+        sender_user: AppUser | None = None
+        if sender_username:
+            sender_user = (
+                db.query(AppUser)
+                .filter(func.lower(AppUser.username) == sender_username, AppUser.is_active.is_(True))
+                .first()
+            )
+        if not sender_user:
+            sender_user = _admin_viewer(db)
+
+        # Compute unique key for this inbound email to prevent race conditions or double-processing
+        if message_id:
+            msg_key = f"bridge:{from_addr.lower()}:{message_id}"
+        else:
+            content_sig = f"{subject}:{body[:200]}".encode()
+            msg_key = f"bridge:{from_addr.lower()}:{hashlib.sha256(content_sig).hexdigest()[:16]}"
+
+        claimed = ai_mode_module._try_claim_auto_reply(
+            db,
+            user_id=sender_user.id,
+            channel="email",
+            message_key=msg_key,
+            recipient=from_addr,
+            subject=subject or "Inquiry",
+            preview=body[:400] if body else subject[:400],
+        )
+        if not claimed:
+            return {
+                "ok": True,
+                "status": "skipped",
+                "reason": "already_processed_or_claimed",
+                "recipient": from_addr,
+                "message_key": msg_key,
+            }
+
+        # Generate AI reply using Sales Agent AI engine
+        settings = ai_mode_module.get_or_create_settings(db, sender_user.id)
+        draft_result = ai_mode_module._compose_query_auto_reply_email_body(
+            settings=settings,
+            sender_name=from_name,
+            sender_email=from_addr,
+            subject=subject,
+            inbound_body=body or subject,
+        )
+
+        greeting_name = (
+            draft_result.get("greeting_name")
+            or from_name
+            or from_addr.split("@")[0]
+        )
+        reply_body = (draft_result.get("body") or "").strip()
+        if not reply_body:
+            reply_body = ai_mode_module.render_template(
+                settings.email_body_template,
+                name=greeting_name,
+                form_url=settings.form_url,
+                subject=subject,
+            )
+
+        if subject:
+            reply_subject = f"Re: {subject}" if not subject.lower().startswith("re:") else subject
+        else:
+            reply_subject = ai_mode_module.render_template(
+                settings.email_subject_template or "Re: Thank you for contacting Kafi Commodities",
+                name=greeting_name,
+                form_url=settings.form_url,
+                subject="",
+            )
+
+        # Process attachments if provided
+        processed_attachments = _process_bridge_attachments(
+            payload.get("attachments") if "attachments" in payload else payload.get("attachment")
+        )
+
+        send_res = inbox_module.compose(
+            sender_user,
+            to=from_addr,
+            subject=reply_subject,
+            body=reply_body,
+            attachments=processed_attachments,
+        )
+
+        if send_res.get("status") != "sent":
+            err_msg = send_res.get("message") or "Failed to send auto-reply email via mail server"
+            ai_mode_module._log_reply(
+                db,
+                user_id=sender_user.id,
+                channel="email",
+                message_key=msg_key,
+                recipient=from_addr,
+                subject=reply_subject,
+                preview=body[:400] if body else subject[:400],
+                status="error",
+                detail=err_msg,
+            )
+            return {"ok": False, "error": err_msg}
+
+        # Log to AI auto-reply log
+        ai_mode_module._log_reply(
+            db,
+            user_id=sender_user.id,
+            channel="email",
+            message_key=msg_key,
+            recipient=from_addr,
+            subject=reply_subject,
+            preview=body[:400] if body else subject[:400],
+            status="sent",
+            detail=f"source=agent_bridge; reply_source={draft_result.get('source')}; model={draft_result.get('model')}",
+        )
+
+        # Log to activity history
+        try:
+            activity_module.log_activity(
+                db,
+                user_id=sender_user.id,
+                activity_type=activity_module.INBOX_REPLIED,
+                title="Bridge email AI auto-reply sent",
+                summary=f"Auto-replied “{reply_subject}” → {from_addr}",
+                entity_type="inbox_compose",
+                details={
+                    "source": "agent_bridge_auto_reply",
+                    "to": from_addr,
+                    "subject": reply_subject,
+                    "reply_source": draft_result.get("source"),
+                    "model": draft_result.get("model"),
+                    "message_key": msg_key,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        return {
+            "ok": True,
+            "recipient": from_addr,
+            "subject": reply_subject,
+            "reply_body": reply_body,
+            "reply_source": draft_result.get("source"),
+            "model": draft_result.get("model"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
 
 
 # ── Outbound CNF Pricing Engine Client (https://kafiai-agents.vercel.app) ──────
