@@ -418,11 +418,7 @@ export function ComposeMailModal({
               disabled={sending || discarding || !to.trim() || !emailBodyHasContent(body) || uploadingAttachment}
               className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium text-white disabled:opacity-50 font-semibold"
             >
-              {sending
-                ? "Sending…"
-                : draftId != null
-                  ? "Send (update draft)"
-                  : "Send message"}
+              {sending ? "Sending…" : "Send Email"}
             </button>
           </div>
         </div>
