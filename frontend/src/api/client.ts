@@ -778,6 +778,7 @@ export interface EmailAttachment {
   filename: string;
   content_type: string;
   size: number;
+  storage_path?: string;
 }
 
 export interface DraftInteraction {

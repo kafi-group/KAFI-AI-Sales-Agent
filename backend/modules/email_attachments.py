@@ -58,18 +58,41 @@ def _guess_content_type(filename: str, content_type: str | None) -> str:
 
 
 def public_attachment(meta: dict) -> dict:
-    return {
+    res = {
         "id": meta["id"],
         "filename": meta["filename"],
         "content_type": meta["content_type"],
         "size": meta["size"],
     }
+    if meta.get("storage_path"):
+        res["storage_path"] = meta["storage_path"]
+    return res
 
 
 def public_attachments(items: list | None) -> list[dict]:
     if not items:
         return []
     return [public_attachment(item) for item in items if isinstance(item, dict) and item.get("id")]
+
+
+def resolve_catalogue_file(identifier: str) -> Path | None:
+    if not identifier:
+        return None
+    try:
+        from modules.catalogues import resolve_catalogue_file_path, CATALOGUES_DEF
+        clean = identifier.strip().lower()
+        for cat in CATALOGUES_DEF:
+            if (
+                cat["id"].lower() == clean
+                or cat["filename"].lower() == clean
+                or cat["title"].lower() == clean
+            ):
+                p = resolve_catalogue_file_path(cat["filename"])
+                if p and p.is_file():
+                    return p
+        return resolve_catalogue_file_path(identifier.strip())
+    except Exception:
+        return None
 
 
 async def save_upload(file: UploadFile) -> dict:
@@ -139,6 +162,11 @@ def register_attachment_from_bytes(
 
 
 def resolve_path(storage_path: str) -> Path:
+    if not storage_path:
+        return _BACKEND_DIR / "storage" / "nonexistent"
+    p = Path(storage_path)
+    if p.is_file():
+        return p
     rel = storage_path.replace("\\", "/").lstrip("/")
     if rel.startswith("email_attachments/"):
         target = _BACKEND_DIR / "storage" / rel
@@ -155,10 +183,39 @@ def resolve_path(storage_path: str) -> Path:
 
 
 def load_bytes(meta: dict) -> tuple[bytes, str, str]:
-    path = resolve_path(str(meta.get("storage_path", "")))
-    if not path.is_file():
-        raise FileNotFoundError(f"Attachment file missing: {meta.get('filename', 'unknown')}")
-    return path.read_bytes(), str(meta.get("filename", path.name)), str(meta.get("content_type", "application/octet-stream"))
+    storage_path = str(meta.get("storage_path") or "").strip()
+    filename = str(meta.get("filename") or "").strip()
+    content_type = str(meta.get("content_type") or "application/octet-stream").strip()
+    att_id = str(meta.get("id") or "").strip()
+
+    # 1. Try direct path or storage_path if provided
+    if storage_path:
+        p = Path(storage_path)
+        if p.is_file():
+            return p.read_bytes(), filename or p.name, content_type or _guess_content_type(p.name, None)
+        path = resolve_path(storage_path)
+        if path.is_file():
+            return path.read_bytes(), filename or path.name, content_type or _guess_content_type(path.name, None)
+
+    # 2. Try lookup by attachment UUID in STORAGE_DIR
+    if att_id and STORAGE_DIR.is_dir():
+        matches = list(STORAGE_DIR.glob(f"{att_id}_*"))
+        if matches and matches[0].is_file():
+            path = matches[0]
+            return path.read_bytes(), filename or path.name.split("_", 1)[-1], content_type or _guess_content_type(path.name, None)
+
+    # 3. Try lookup in static catalogues
+    cat_file = resolve_catalogue_file(filename) or resolve_catalogue_file(att_id)
+    if cat_file and cat_file.is_file():
+        return cat_file.read_bytes(), filename or cat_file.name, "application/pdf"
+
+    # 4. Try matching direct filename in STORAGE_DIR
+    if filename and STORAGE_DIR.is_dir():
+        cand = STORAGE_DIR / filename
+        if cand.is_file():
+            return cand.read_bytes(), filename, content_type or _guess_content_type(filename, None)
+
+    raise FileNotFoundError(f"Attachment file missing: {filename or att_id or 'unknown'}")
 
 
 def copy_attachments(items: list | None) -> list[dict]:
@@ -191,27 +248,50 @@ def copy_attachments(items: list | None) -> list[dict]:
 
 
 def resolve_attachment(meta: dict, existing: list | None = None) -> dict | None:
-    if meta.get("storage_path"):
-        return meta
-    att_id = str(meta.get("id") or "")
-    if not att_id:
+    if not isinstance(meta, dict):
         return None
+    storage_path = str(meta.get("storage_path") or "").strip()
+    if storage_path:
+        p = Path(storage_path)
+        if p.is_file():
+            return meta
+        resolved_p = resolve_path(storage_path)
+        if resolved_p.is_file():
+            return {**meta, "storage_path": f"email_attachments/{resolved_p.name}"}
+
+    att_id = str(meta.get("id") or "").strip()
+    filename = str(meta.get("filename") or "").strip()
+
+    # Match in existing list
     for item in existing or []:
         if isinstance(item, dict) and item.get("id") == att_id and item.get("storage_path"):
             return item
-    if not STORAGE_DIR.is_dir():
-        return None
-    matches = list(STORAGE_DIR.glob(f"{att_id}_*"))
-    if not matches:
-        return None
-    path = matches[0]
-    return {
-        "id": att_id,
-        "filename": meta.get("filename") or path.name.split("_", 1)[-1],
-        "content_type": meta.get("content_type") or _guess_content_type(path.name, None),
-        "size": meta.get("size") or path.stat().st_size,
-        "storage_path": f"email_attachments/{path.name}",
-    }
+
+    # Match in STORAGE_DIR by att_id
+    if STORAGE_DIR.is_dir() and att_id:
+        matches = list(STORAGE_DIR.glob(f"{att_id}_*"))
+        if matches and matches[0].is_file():
+            path = matches[0]
+            return {
+                "id": att_id,
+                "filename": filename or path.name.split("_", 1)[-1],
+                "content_type": meta.get("content_type") or _guess_content_type(path.name, None),
+                "size": meta.get("size") or path.stat().st_size,
+                "storage_path": f"email_attachments/{path.name}",
+            }
+
+    # Match in static catalogues
+    cat_file = resolve_catalogue_file(filename) or resolve_catalogue_file(att_id)
+    if cat_file and cat_file.is_file():
+        return {
+            "id": att_id or cat_file.stem,
+            "filename": filename or cat_file.name,
+            "content_type": "application/pdf",
+            "size": cat_file.stat().st_size,
+            "storage_path": str(cat_file.resolve()),
+        }
+
+    return None
 
 
 def resolve_attachment_list(items: list | None, existing: list | None = None) -> list[dict]:

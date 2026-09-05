@@ -264,7 +264,7 @@ _PUBLIC_API_PATHS = {
     "/api/mailer/prepare-tracked-body",
     "/api/mailer/schedule-bulk",
 }
-_PUBLIC_API_PREFIXES = ("/api/webhooks/", "/api/track/", "/api/agent-bridge/")
+_PUBLIC_API_PREFIXES = ("/api/webhooks/", "/api/track/", "/api/agent-bridge/", "/api/catalogues")
 
 
 @app.middleware("http")

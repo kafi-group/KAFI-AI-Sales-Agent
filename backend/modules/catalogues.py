@@ -105,7 +105,15 @@ def attach_catalogues_as_attachments(cat_ids: list[str]) -> list[dict[str, Any]]
         try:
             path, meta = get_catalogue_by_id(cid)
             registered = register_attachment_from_path(path, filename=meta["filename"], content_type="application/pdf")
-            attachments.append(public_attachment(registered))
+            attachments.append(
+                {
+                    "id": registered["id"],
+                    "filename": registered["filename"],
+                    "content_type": registered["content_type"],
+                    "size": registered["size"],
+                    "storage_path": registered["storage_path"],
+                }
+            )
         except Exception as exc:
             logger.warning("Failed to register catalogue %s as attachment: %s", cid, exc)
     return attachments

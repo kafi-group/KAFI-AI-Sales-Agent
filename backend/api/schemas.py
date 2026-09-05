@@ -285,6 +285,7 @@ class EmailAttachmentRead(BaseModel):
     filename: str
     content_type: str
     size: int
+    storage_path: Optional[str] = None
 
 
 class InteractionAttachmentsUpdate(BaseModel):
