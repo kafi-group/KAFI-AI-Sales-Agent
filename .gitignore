@@ -46,3 +46,6 @@ backend/storage/call_recordings/
 backend/storage/inbox_cutoff.json
 backend/data/synthesis_outputs/
 .vercel
+scratch/
+SMTP_CREDENTIALS.md
+*.xlsx
