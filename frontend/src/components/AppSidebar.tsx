@@ -1,14 +1,10 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "../auth/AuthContext";
-import { client, type AppUser } from "../api/client";
 import {
   IconBell,
   IconChevronDown,
   IconChevronRight,
   IconExternal,
   IconTrash,
-  IconUser,
-  AdminUserIcon,
   NavIcon,
 } from "./icons/AppIcons";
 import { mailLabelIdFromNavId } from "../lib/mailLabelRules";
@@ -41,7 +37,9 @@ export type Tab =
   | "ai-mode"
   | "ai-sales-agent"
   | "users"
-  | "settings";
+  | "settings"
+  | "ai"
+  | "others";
 
 export type LeadsTableSection =
   | "all"
@@ -116,18 +114,20 @@ export function mailLabelIdFromSection(section: MailSection): number | null {
 export type NavChild = {
   id: string;
   label: string;
-  count: number;
+  count?: number;
   alert?: boolean;
+  external?: string;
+  openMailer?: boolean;
 };
 
 export type NavItem =
   | {
-    id: Tab;
+    id: Tab | string;
     label: string;
     count: number;
     alert?: boolean;
-    external?: undefined;
-    openMailer?: undefined;
+    external?: string;
+    openMailer?: boolean;
     children?: NavChild[];
   }
   | { id: "quotation-agent"; label: string; count: number; external: string }
@@ -198,8 +198,8 @@ export function AppSidebar({
   onOpenMailer,
   onOpenSalesAssistant,
   onOpenManageModules,
-  userLabel,
-  userRole,
+  userLabel: _userLabel,
+  userRole: _userRole,
   desktopOpen = true,
   onToggleDesktop,
   mobileOpen = false,
@@ -207,31 +207,6 @@ export function AppSidebar({
   masterType = "fmcg",
   onMasterTypeChange,
 }: AppSidebarProps) {
-  const {
-    isAdmin,
-    impersonating,
-    impersonatorLabel,
-    switchToUser,
-    switchBackToAdmin,
-  } = useAuth();
-  const [switchMenuOpen, setSwitchMenuOpen] = useState(false);
-  const [switchUsers, setSwitchUsers] = useState<AppUser[]>([]);
-  const [switchBusy, setSwitchBusy] = useState(false);
-  const [switchError, setSwitchError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!isAdmin || impersonating) {
-      setSwitchUsers([]);
-      return;
-    }
-    client
-      .listUsers()
-      .then((rows) =>
-        setSwitchUsers(rows.filter((u) => u.is_active && u.role !== "admin")),
-      )
-      .catch(() => setSwitchUsers([]));
-  }, [isAdmin, impersonating]);
-
   const [leadsMenuOpen, setLeadsMenuOpen] = useState(activeTab === "table");
   const [mailMenuOpen, setMailMenuOpen] = useState(
     activeTab === "inbox" ||
@@ -241,7 +216,28 @@ export function AppSidebar({
   const [whatsappMenuOpen, setWhatsappMenuOpen] = useState(
     activeTab === "whatsapp-inbox" ||
     activeTab === "whatsapp-templates" ||
-    activeTab === "whatsapp-activity",
+    activeTab === "whatsapp-activity" ||
+    activeTab === "whatsapp-mobile",
+  );
+  const [callsMenuOpen, setCallsMenuOpen] = useState(
+    activeTab === "calls" || activeTab === "ai-sales-agent",
+  );
+  const [aiMenuOpen, setAiMenuOpen] = useState(
+    activeTab === "ai-mode" ||
+    activeTab === "leads" ||
+    activeTab === "data-synthesis",
+  );
+  const [othersMenuOpen, setOthersMenuOpen] = useState(
+    activeTab === "catalogue" ||
+    activeTab === "chatbot" ||
+    activeTab === "client-history" ||
+    activeTab === "helpful-guidance" ||
+    activeTab === "target-workspace" ||
+    activeTab === "kpi" ||
+    activeTab === "users",
+  );
+  const [indexesMenuOpen, setIndexesMenuOpen] = useState(
+    activeTab === "indexes" || activeTab === "user-manual",
   );
   const [horekaMenuOpen, setHorekaMenuOpen] = useState(activeTab === "horeka");
   const [catalogueMenuOpen, setCatalogueMenuOpen] = useState(activeTab === "catalogue");
@@ -266,9 +262,46 @@ export function AppSidebar({
     if (
       activeTab === "whatsapp-inbox" ||
       activeTab === "whatsapp-templates" ||
-      activeTab === "whatsapp-activity"
+      activeTab === "whatsapp-activity" ||
+      activeTab === "whatsapp-mobile"
     ) {
       setWhatsappMenuOpen(true);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "calls" || activeTab === "ai-sales-agent") {
+      setCallsMenuOpen(true);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (
+      activeTab === "ai-mode" ||
+      activeTab === "leads" ||
+      activeTab === "data-synthesis"
+    ) {
+      setAiMenuOpen(true);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (
+      activeTab === "catalogue" ||
+      activeTab === "chatbot" ||
+      activeTab === "client-history" ||
+      activeTab === "helpful-guidance" ||
+      activeTab === "target-workspace" ||
+      activeTab === "kpi" ||
+      activeTab === "users"
+    ) {
+      setOthersMenuOpen(true);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "indexes" || activeTab === "user-manual") {
+      setIndexesMenuOpen(true);
     }
   }, [activeTab]);
 
@@ -423,24 +456,49 @@ export function AppSidebar({
               const isActive =
                 item.id === "inbox"
                   ? activeTab === "inbox" ||
-                  activeTab === "activity" ||
-                  activeTab === "email-templates"
+                    activeTab === "activity" ||
+                    activeTab === "email-templates"
                   : item.id === "whatsapp-inbox"
                     ? activeTab === "whatsapp-inbox" ||
-                    activeTab === "whatsapp-templates" ||
-                    activeTab === "whatsapp-activity"
-                    : activeTab === item.id;
+                      activeTab === "whatsapp-templates" ||
+                      activeTab === "whatsapp-activity" ||
+                      activeTab === "whatsapp-mobile"
+                    : item.id === "calls"
+                      ? activeTab === "calls" || activeTab === "ai-sales-agent"
+                      : item.id === "ai"
+                        ? activeTab === "ai-mode" ||
+                          activeTab === "leads" ||
+                          activeTab === "data-synthesis"
+                        : item.id === "others"
+                          ? activeTab === "catalogue" ||
+                            activeTab === "chatbot" ||
+                            activeTab === "client-history" ||
+                            activeTab === "helpful-guidance" ||
+                            activeTab === "target-workspace" ||
+                            activeTab === "kpi" ||
+                            activeTab === "users"
+                          : item.id === "indexes"
+                            ? activeTab === "indexes" || activeTab === "user-manual"
+                            : activeTab === item.id;
               const hasAlert = Boolean(item.alert);
               const hasChildren = Boolean(item.children?.length);
               const isTableParent = item.id === "table" && hasChildren;
               const isMailParent = item.id === "inbox" && hasChildren;
               const isWhatsAppParent = item.id === "whatsapp-inbox" && hasChildren;
+              const isCallsParent = item.id === "calls" && hasChildren;
+              const isAiParent = (item.id === "ai" || item.id === "ai-group") && hasChildren;
+              const isOthersParent = item.id === "others" && hasChildren;
+              const isIndexesParent = item.id === "indexes" && hasChildren;
               const isHorekaParent = item.id === "horeka" && hasChildren;
               const isCatalogueParent = item.id === "catalogue" && hasChildren;
               const isExpandableParent =
                 isTableParent ||
                 isMailParent ||
                 isWhatsAppParent ||
+                isCallsParent ||
+                isAiParent ||
+                isOthersParent ||
+                isIndexesParent ||
                 isHorekaParent ||
                 isCatalogueParent;
               const menuOpen = isTableParent
@@ -449,31 +507,55 @@ export function AppSidebar({
                   ? mailMenuOpen
                   : isWhatsAppParent
                     ? whatsappMenuOpen
-                    : isHorekaParent
-                      ? horekaMenuOpen
-                      : isCatalogueParent
-                        ? catalogueMenuOpen
-                        : false;
+                    : isCallsParent
+                      ? callsMenuOpen
+                      : isAiParent
+                        ? aiMenuOpen
+                        : isOthersParent
+                          ? othersMenuOpen
+                          : isIndexesParent
+                            ? indexesMenuOpen
+                            : isHorekaParent
+                              ? horekaMenuOpen
+                              : isCatalogueParent
+                                ? catalogueMenuOpen
+                                : false;
               const setMenuOpen = isTableParent
                 ? setLeadsMenuOpen
                 : isMailParent
                   ? setMailMenuOpen
                   : isWhatsAppParent
                     ? setWhatsappMenuOpen
-                    : isHorekaParent
-                      ? setHorekaMenuOpen
-                      : isCatalogueParent
-                        ? setCatalogueMenuOpen
-                        : undefined;
+                    : isCallsParent
+                      ? setCallsMenuOpen
+                      : isAiParent
+                        ? setAiMenuOpen
+                        : isOthersParent
+                          ? setOthersMenuOpen
+                          : isIndexesParent
+                            ? setIndexesMenuOpen
+                            : isHorekaParent
+                              ? setHorekaMenuOpen
+                              : isCatalogueParent
+                                ? setCatalogueMenuOpen
+                                : undefined;
               const defaultChildId = isTableParent
                 ? defaultTableSection
                 : isWhatsAppParent
                   ? "whatsapp-inbox"
-                  : isHorekaParent
-                    ? "horeka-all"
-                    : isCatalogueParent
-                      ? "catalogue-all"
-                      : "inbox";
+                  : isCallsParent
+                    ? "calls"
+                    : isAiParent
+                      ? "ai-mode"
+                      : isIndexesParent
+                        ? "indexes"
+                        : isOthersParent
+                          ? "quotation-agent"
+                          : isHorekaParent
+                            ? "horeka-all"
+                            : isCatalogueParent
+                              ? "catalogue-all"
+                              : "inbox";
               const activeChildId = isTableParent
                 ? tableSection
                 : isMailParent
@@ -487,16 +569,30 @@ export function AppSidebar({
                       ? "whatsapp-templates"
                       : activeTab === "whatsapp-activity"
                         ? "whatsapp-activity"
-                        : "whatsapp-inbox"
-                    : isHorekaParent
-                      ? horekaCategory
-                        ? `horeka-${horekaCategory}`
-                        : "horeka-all"
-                      : isCatalogueParent
-                        ? catalogueId
-                          ? `catalogue-${catalogueId}`
-                          : "catalogue-all"
-                        : null;
+                        : activeTab === "whatsapp-mobile"
+                          ? "whatsapp-mobile"
+                          : "whatsapp-inbox"
+                    : isCallsParent
+                      ? activeTab === "ai-sales-agent"
+                        ? "ai-sales-agent"
+                        : "calls"
+                      : isAiParent
+                        ? activeTab
+                        : isIndexesParent
+                          ? activeTab === "user-manual"
+                            ? "user-manual"
+                            : "indexes"
+                          : isOthersParent
+                            ? activeTab
+                            : isHorekaParent
+                              ? horekaCategory
+                                ? `horeka-${horekaCategory}`
+                                : "horeka-all"
+                              : isCatalogueParent
+                                ? catalogueId
+                                  ? `catalogue-${catalogueId}`
+                                  : "catalogue-all"
+                                : null;
               const parentHighlighted =
                 isExpandableParent && isActive && (activeChildId === defaultChildId || !activeChildId)
                   ? true
@@ -517,41 +613,64 @@ export function AppSidebar({
                       type="button"
                       onClick={() => {
                         if (isTableParent) {
-                          setLeadsMenuOpen(true);
+                          setLeadsMenuOpen((open) => !open);
                           onSelectTab("table");
                           onSelectTableSection?.(defaultTableSection);
                           closeMobile();
                           return;
                         }
                         if (isMailParent) {
-                          setMailMenuOpen(true);
+                          setMailMenuOpen((open) => !open);
                           onSelectTab("inbox");
                           onSelectMailSection?.("inbox");
                           closeMobile();
                           return;
                         }
                         if (isWhatsAppParent) {
-                          setWhatsappMenuOpen(true);
+                          setWhatsappMenuOpen((open) => !open);
                           onSelectWhatsAppSection?.("whatsapp-inbox");
                           closeMobile();
                           return;
                         }
+                        if (isCallsParent) {
+                          setCallsMenuOpen((open) => !open);
+                          onSelectTab("calls");
+                          closeMobile();
+                          return;
+                        }
+                        if (isAiParent) {
+                          setAiMenuOpen((open) => !open);
+                          onSelectTab("ai-mode");
+                          closeMobile();
+                          return;
+                        }
+                        if (isOthersParent) {
+                          setOthersMenuOpen((open) => !open);
+                          closeMobile();
+                          return;
+                        }
+                        if (isIndexesParent) {
+                          setIndexesMenuOpen((open) => !open);
+                          onSelectTab("indexes");
+                          closeMobile();
+                          return;
+                        }
                         if (isHorekaParent) {
-                          setHorekaMenuOpen(true);
+                          setHorekaMenuOpen((open) => !open);
                           onSelectTab("horeka");
                           onSelectHorekaCategory?.("All");
                           closeMobile();
                           return;
                         }
                         if (isCatalogueParent) {
-                          setCatalogueMenuOpen(true);
+                          setCatalogueMenuOpen((open) => !open);
                           onSelectTab("catalogue");
                           onSelectCatalogueItem?.("all");
                           closeMobile();
                           return;
                         }
                         if ("openSalesAssistant" in item) return;
-                        onSelectTab(item.id);
+                        onSelectTab(item.id as Tab);
                         closeMobile();
                       }}
                       className="flex-1 min-w-0 flex items-center justify-between gap-2 px-3 py-2.5 text-left rounded-lg group"
@@ -636,11 +755,46 @@ export function AppSidebar({
                                   onSelectTab("table");
                                   onSelectTableSection?.(child.id as LeadsTableSection);
                                 } else if (isMailParent) {
-                                  setMailMenuOpen(true);
-                                  onSelectMailSection?.(child.id as MailSection);
+                                  if (child.id === "mail" || child.openMailer) {
+                                    onOpenMailer?.();
+                                  } else if (child.id === "activity") {
+                                    setMailMenuOpen(true);
+                                    onSelectTab("activity");
+                                  } else if (child.id === "email-templates") {
+                                    setMailMenuOpen(true);
+                                    onSelectTab("email-templates");
+                                  } else {
+                                    setMailMenuOpen(true);
+                                    onSelectTab("inbox");
+                                    onSelectMailSection?.(child.id as MailSection);
+                                  }
                                 } else if (isWhatsAppParent) {
                                   setWhatsappMenuOpen(true);
-                                  onSelectWhatsAppSection?.(child.id as WhatsAppSection);
+                                  if (child.id === "whatsapp-mobile") {
+                                    onSelectTab("whatsapp-mobile");
+                                  } else {
+                                    onSelectWhatsAppSection?.(child.id as WhatsAppSection);
+                                  }
+                                } else if (isCallsParent) {
+                                  setCallsMenuOpen(true);
+                                  onSelectTab(child.id as Tab);
+                                } else if (isAiParent) {
+                                  setAiMenuOpen(true);
+                                  onSelectTab(child.id as Tab);
+                                } else if (isIndexesParent) {
+                                  setIndexesMenuOpen(true);
+                                  onSelectTab(child.id as Tab);
+                                } else if (isOthersParent) {
+                                  if (child.external) {
+                                    window.open(child.external, "_blank", "noopener,noreferrer");
+                                  } else if (child.id === "catalogue") {
+                                    setOthersMenuOpen(true);
+                                    onSelectTab("catalogue");
+                                    onSelectCatalogueItem?.("all");
+                                  } else {
+                                    setOthersMenuOpen(true);
+                                    onSelectTab(child.id as Tab);
+                                  }
                                 } else if (isHorekaParent) {
                                   setHorekaMenuOpen(true);
                                   onSelectTab("horeka");
@@ -675,7 +829,13 @@ export function AppSidebar({
                                 />
                                 <span className="truncate">{child.label}</span>
                               </span>
-                              {child.count != null ? (
+                              {child.external ? (
+                                <IconExternal size="xs" className="text-slate-500 shrink-0" />
+                              ) : null}
+                              {child.openMailer ? (
+                                <IconExternal size="xs" className="text-slate-500 shrink-0" />
+                              ) : null}
+                              {child.count != null && child.count > 0 ? (
                                 <span
                                   className={`shrink-0 text-xs tabular-nums px-1.5 py-0.5 rounded min-w-[1.25rem] text-center ${childActive
                                       ? "bg-emerald-500/30 text-emerald-50"
@@ -730,87 +890,6 @@ export function AppSidebar({
               );
             })}
           </nav>
-
-          {(userLabel || userRole) && (
-            <div className="px-3 py-4 border-t border-slate-800 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-2">
-              {impersonating && impersonatorLabel ? (
-                <div className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-100">
-                  Viewing as <span className="font-medium">{userLabel}</span>
-                </div>
-              ) : null}
-              <div className="px-3 py-2 rounded-lg bg-slate-900/80 border border-slate-800 flex items-start gap-2.5">
-                {isAdmin ? (
-                  <AdminUserIcon className="mt-0.5" />
-                ) : (
-                  <IconUser size="sm" className="text-slate-500 mt-0.5 shrink-0" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-slate-200 truncate">{userLabel}</p>
-                  {userRole && (
-                    <p className="text-xs text-slate-500 mt-0.5 capitalize">{userRole}</p>
-                  )}
-                </div>
-                {isAdmin ? (
-                  <button
-                    type="button"
-                    title={impersonating ? "Return to admin" : "Switch user"}
-                    aria-label={impersonating ? "Return to admin" : "Switch user"}
-                    disabled={switchBusy}
-                    onClick={() => {
-                      if (impersonating) {
-                        setSwitchBusy(true);
-                        setSwitchError(null);
-                        void switchBackToAdmin().catch((e) => {
-                          setSwitchError(
-                            e instanceof Error ? e.message : "Could not switch back",
-                          );
-                          setSwitchBusy(false);
-                        });
-                        return;
-                      }
-                      setSwitchMenuOpen((open) => !open);
-                    }}
-                    className="shrink-0 rounded-lg p-1.5 text-emerald-400 hover:bg-emerald-500/15 hover:text-emerald-300 disabled:opacity-50"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
-                      <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
-                    </svg>
-                  </button>
-                ) : null}
-              </div>
-              {switchError ? (
-                <p className="px-3 text-xs text-red-300">{switchError}</p>
-              ) : null}
-              {isAdmin && switchMenuOpen && !impersonating ? (
-                <div className="rounded-lg border border-slate-800 bg-slate-900/90 overflow-hidden max-h-48 overflow-y-auto">
-                  {switchUsers.length === 0 ? (
-                    <p className="px-3 py-2 text-xs text-slate-500">No other users</p>
-                  ) : (
-                    switchUsers.map((u) => (
-                      <button
-                        key={u.id}
-                        type="button"
-                        disabled={switchBusy}
-                        onClick={() => {
-                          setSwitchBusy(true);
-                          setSwitchError(null);
-                          void switchToUser(u.id).catch((e) => {
-                            setSwitchError(
-                              e instanceof Error ? e.message : "Could not switch user",
-                            );
-                            setSwitchBusy(false);
-                          });
-                        }}
-                        className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-800 hover:text-white disabled:opacity-50"
-                      >
-                        {u.full_name || u.username}
-                      </button>
-                    ))
-                  )}
-                </div>
-              ) : null}
-            </div>
-          )}
         </div>
       </aside>
     </>

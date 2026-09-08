@@ -669,11 +669,18 @@ export function NavIcon({
     return <IconTag size={size} className={labelTagIconClass(navId, className)} />;
   if (navId === "mail") return <LogoOutlook size={size} />;
   if (navId === "calls") return <LogoTwilio size={size} />;
+  if (navId === "ai-sales-agent") return <IconRobot size={size} className="text-cyan-400" />;
+  if (navId === "ai") return <IconSparkles size={size} className="text-emerald-400" />;
+  if (navId === "others") return <IconList size={size} className="text-slate-400" />;
   if (navId === "client-history")
     return <IconCalendar size={size} className="text-sky-400" />;
   if (navId === "quotation-agent")
     return <IconShip size={size} className="text-cyan-400" />;
+  if (navId === "catalogue" || navId.startsWith("catalogue-"))
+    return <IconBook size={size} className="text-emerald-400" />;
   if (navId === "chatbot") return <IconRobot {...props} />;
+  if (navId === "helpful-guidance")
+    return <IconBookOpen size={size} className="text-amber-400" />;
   if (navId === "sales-assistant")
     return <IconBookClosed size={size} className="text-violet-400" />;
   if (navId === "ai-mode") return <IconSparkles {...props} />;

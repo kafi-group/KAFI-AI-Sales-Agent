@@ -1030,8 +1030,17 @@ function DashboardApp() {
   }));
 
   const navItems: NavItem[] = [
-    { id: "indexes", label: "Indexes", count: 0 },
-    { id: "user-manual", label: "User Manual", count: 0 },
+    // #1 Master Table + dropdowns
+    {
+      id: "table",
+      label: isAdmin ? masterTableLabel : "My Assigned Leads",
+      count: isAdmin ? (tableCounts.master ?? 0) : (tableCounts.my_assigned ?? 0),
+      children: [
+        ...clientSectionNavChildren,
+        ...assigneeNavChildren,
+      ],
+    },
+    // #2 WhatsApp + dropdown
     {
       id: "whatsapp-inbox",
       label: "WhatsApp",
@@ -1061,18 +1070,17 @@ function DashboardApp() {
         },
       ],
     },
-    { id: "leads" as const, label: "Searched by AI", count: discoverLeadsCount },
-    ...(isAdmin ? [{ id: "data-synthesis" as const, label: "Smart Data Clean & Merge", count: 0 }] : []),
-    { id: "target-workspace" as const, label: "Target and Workspace", count: 0 },
+    // #3 Call Center (dropdown)
     {
-      id: "table",
-      label: isAdmin ? masterTableLabel : "My Assigned Leads",
-      count: isAdmin ? (tableCounts.master ?? 0) : (tableCounts.my_assigned ?? 0),
+      id: "calls",
+      label: "Call Center",
+      count: 0,
       children: [
-        ...clientSectionNavChildren,
-        ...assigneeNavChildren,
+        { id: "calls", label: "Manual Call Center", count: 0 },
+        { id: "ai-sales-agent", label: "AI Sales Agent", count: 0 },
       ],
     },
+    // #4 Emails (dropdown) with Bulk Email Sender inside
     {
       id: "inbox",
       label: "Emails",
@@ -1080,6 +1088,12 @@ function DashboardApp() {
       alert: inboxUnread > 0,
       children: [
         { id: "inbox", label: "Inbox", count: mailCounts.inbox, alert: inboxUnread > 0 },
+        {
+          id: "mail",
+          label: "Bulk Email Sender",
+          count: 0,
+          openMailer: true,
+        },
         { id: "sent", label: "Sent", count: mailCounts.sent },
         { id: "drafts", label: "Drafts", count: mailDraftCount },
         { id: "trash", label: "Trash", count: mailCounts.trash },
@@ -1101,50 +1115,58 @@ function DashboardApp() {
         })),
       ],
     },
+    // AI (New dropdown module)
     {
-      id: "mail",
-      label: "Bulk Email Sender",
-      count: 0,
-      openMailer: true,
-    },
-    { id: "calls", label: "Call Center", count: 0 },
-    { id: "client-history", label: "Client History", count: 0 },
-    { id: "helpful-guidance", label: "SALES HELP MANAGER", count: 0 },
-    {
-      id: "quotation-agent",
-      label: "CNF or FOB",
-      count: 0,
-      external: QUOTATION_AGENT_URL,
-    },
-    {
-      id: "catalogue" as const,
-      label: "Catalogue",
-      count: 4,
-      children: [
-        { id: "catalogue-all", label: "All Catalogues", count: 4 },
-        { id: "catalogue-all_products", label: "Kafi All Product Catalogue", count: 0 },
-        { id: "catalogue-salt_catalogue", label: "Kafi Salt Catalogue", count: 0 },
-        { id: "catalogue-edible_salt", label: "Edible Salt Catalogue", count: 0 },
-        { id: "catalogue-non_edible_salt", label: "Non-Edible Pink Salt", count: 0 },
-      ],
-    },
-    { id: "chatbot", label: "Brand assistant", count: 0 },
-    {
-      id: "sales-assistant",
-      label: "FAQ (Management & Sales)",
-      count: 0,
-      openSalesAssistant: true,
-    },
-    {
-      id: "ai-mode",
-      label: "AI Mode",
+      id: "ai",
+      label: "AI",
       count: personalizedEmailCount,
       alert: personalizedEmailCount > 0,
+      children: [
+        {
+          id: "ai-mode",
+          label: "AI Mode",
+          count: personalizedEmailCount,
+          alert: personalizedEmailCount > 0,
+        },
+        { id: "leads" as const, label: "Searched by AI", count: discoverLeadsCount },
+        ...(isAdmin ? [{ id: "data-synthesis" as const, label: "Smart Data Clean & Merge", count: 0 }] : []),
+      ],
     },
-    { id: "ai-sales-agent", label: "AI Sales Agent", count: 0 },
-    { id: "kpi", label: "KPI", count: 0 },
-    ...(isAdmin ? [{ id: "users" as const, label: "Users", count: 0 }] : []),
-    ...(isAdmin ? [{ id: "settings" as const, label: "Settings", count: 0 }] : []),
+    // #5 Others (dropdown)
+    {
+      id: "others",
+      label: "Others",
+      count: 0,
+      children: [
+        {
+          id: "quotation-agent",
+          label: "CNF or FOB",
+          count: 0,
+          external: QUOTATION_AGENT_URL,
+        },
+        {
+          id: "catalogue" as const,
+          label: "Catalogue",
+          count: 4,
+        },
+        { id: "chatbot", label: "Brand assistant", count: 0 },
+        { id: "client-history", label: "Client History", count: 0 },
+        { id: "helpful-guidance", label: "SALES HELP MANAGER", count: 0 },
+        { id: "target-workspace" as const, label: "Target and Workspace", count: 0 },
+        { id: "kpi", label: "KPI", count: 0 },
+        ...(isAdmin ? [{ id: "users" as const, label: "Users", count: 0 }] : []),
+      ],
+    },
+    // Indexes at the end (with User Manual inside)
+    {
+      id: "indexes",
+      label: "Indexes",
+      count: 0,
+      children: [
+        { id: "indexes", label: "Indexes Overview", count: 0 },
+        { id: "user-manual", label: "User Manual", count: 0 },
+      ],
+    },
   ];
 
   return (
@@ -1254,6 +1276,7 @@ function DashboardApp() {
             <AppTopActions
               compact
               onRefresh={refreshAll}
+              onOpenSettings={isAdmin ? () => setTab("settings") : undefined}
               onLogout={() => void logout()}
               whatsappUnread={whatsappActivityUnread}
               emailUnread={inboxUnread + emailActivityUnread}
@@ -1286,6 +1309,7 @@ function DashboardApp() {
             )}
             <AppTopActions
               onRefresh={refreshAll}
+              onOpenSettings={isAdmin ? () => setTab("settings") : undefined}
               onLogout={() => void logout()}
               whatsappUnread={whatsappActivityUnread}
               emailUnread={inboxUnread + emailActivityUnread}
