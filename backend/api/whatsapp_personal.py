@@ -35,7 +35,7 @@ class WhatsAppPersonalInboundRequest(BaseModel):
 @router.get("/status")
 def whatsapp_personal_status(user: AppUser = Depends(get_current_user)) -> Any:
     try:
-        return bridge.bridge_status(user.id)
+        return bridge.bridge_status(user.id, username=user.username)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
@@ -45,7 +45,7 @@ def whatsapp_personal_status(user: AppUser = Depends(get_current_user)) -> Any:
 @router.get("/qr")
 def whatsapp_personal_qr(user: AppUser = Depends(get_current_user)) -> Any:
     try:
-        return bridge.bridge_qr(user.id)
+        return bridge.bridge_qr(user.id, username=user.username)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
@@ -54,15 +54,15 @@ def whatsapp_personal_qr(user: AppUser = Depends(get_current_user)) -> Any:
 
 @router.get("/session")
 def whatsapp_personal_session(user: AppUser = Depends(get_current_user)) -> dict[str, str]:
-    return {"session_id": bridge.bridge_session_id(user.id)}
+    return {"session_id": bridge.bridge_session_id(user.id, username=user.username)}
 
 
 @router.post("/pair")
 def whatsapp_personal_pair(user: AppUser = Depends(get_current_user)) -> Any:
     """Reset session and return a fresh QR code for scanning."""
     try:
-        bridge.bridge_disconnect(user.id)
-        return bridge.bridge_qr(user.id)
+        bridge.bridge_disconnect(user.id, username=user.username)
+        return bridge.bridge_qr(user.id, username=user.username)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
@@ -79,7 +79,7 @@ def whatsapp_personal_team_status(
     team_status = []
     for u in users:
         try:
-            st = bridge.bridge_status(u.id)
+            st = bridge.bridge_status(u.id, username=u.username)
         except Exception:  # noqa: BLE001
             st = {"connected": False, "status": "disconnected", "phone": None}
         
@@ -92,7 +92,7 @@ def whatsapp_personal_team_status(
             "username": u.username,
             "full_name": u.full_name or u.username,
             "role": u.role,
-            "session_id": bridge.bridge_session_id(u.id),
+            "session_id": bridge.bridge_session_id(u.id, username=u.username),
             "connected": is_conn,
             "phone": phone_val,
             "profile_picture_url": st.get("profilePictureUrl") or st.get("profile_picture_url") if is_conn else None,
@@ -111,8 +111,10 @@ def whatsapp_personal_disconnect_target_user(
     """Disconnect specific user's WhatsApp session. Only Admin can disconnect other users."""
     if user.id != target_user_id and str(user.role).lower() != "admin":
         raise HTTPException(403, "Only Admin can disconnect another user's WhatsApp session.")
+    target_user = db.get(AppUser, target_user_id)
+    target_username = target_user.username if target_user else None
     try:
-        return bridge.bridge_disconnect(target_user_id)
+        return bridge.bridge_disconnect(target_user_id, username=target_username)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
@@ -126,13 +128,13 @@ def whatsapp_personal_send(
     user: AppUser = Depends(get_current_user),
 ) -> Any:
     try:
-        status = bridge.bridge_status(user.id)
+        status = bridge.bridge_status(user.id, username=user.username)
         if not status.get("connected"):
             raise HTTPException(
                 409,
                 "Personal WhatsApp is not connected. Open WhatsApp QR and scan with your phone.",
             )
-        res = bridge.bridge_send(user.id, to_phone=body.to_phone, message=body.message)
+        res = bridge.bridge_send(user.id, to_phone=body.to_phone, message=body.message, username=user.username)
 
         # Log outbound Interaction to DB so it shows up in Inbox & Activity
         try:

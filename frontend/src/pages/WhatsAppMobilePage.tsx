@@ -149,8 +149,13 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   }
 
   useEffect(() => {
+    setCustomAvatar(localStorage.getItem(`whatsapp_avatar_${user?.id || "default"}`) || null);
+    setCustomPhone(localStorage.getItem(`whatsapp_phone_number_${user?.id || "default"}`) || null);
+    setStatus(null);
+    setQr(null);
+    setLoading(true);
     void refresh();
-  }, [refresh]);
+  }, [user?.id, refresh]);
 
   const pollMs = useMemo(() => {
     if (connected) return 15_000;

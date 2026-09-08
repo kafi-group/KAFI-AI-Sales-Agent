@@ -1040,7 +1040,7 @@ def send_draft(
 
             if not recipient_wa_phone:
                 raise ValueError("Recipient has no phone number for WhatsApp Personal")
-            status = bridge.bridge_status(user.id)
+            status = bridge.bridge_status(user.id, username=user.username)
             if not status.get("connected"):
                 raise ValueError(
                     "Personal WhatsApp is not connected. Open WhatsApp QR and scan your phone."
@@ -1049,6 +1049,7 @@ def send_draft(
                 user.id,
                 to_phone=recipient_wa_phone,
                 message=(draft.whatsapp_body or draft.email_body or "").strip(),
+                username=user.username,
             )
             wa_personal_status = "sent"
             wa_personal_message = f"Sent to {recipient_wa_phone} via personal WhatsApp"

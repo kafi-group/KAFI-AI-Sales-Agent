@@ -197,9 +197,14 @@ class Settings(BaseSettings):
     bulk_whatsapp_message_delay_seconds: float = 2.0
     bulk_whatsapp_max_per_request: int = 250
 
-    # Baileys personal WhatsApp bridge (per-user QR) — separate session namespace from bank-recon.
+    # Baileys personal WhatsApp bridge (per-user QR) — dedicated Railway services per sales rep
     whatsapp_bridge_url: str | None = None
-    whatsapp_bridge_secret: str | None = None
+    whatsapp_bridge_url_admin: str | None = None
+    whatsapp_bridge_url_khalid: str | None = None
+    whatsapp_bridge_url_asim: str | None = None
+    whatsapp_bridge_url_usman: str | None = None
+    whatsapp_bridge_url_sadia: str | None = None
+    whatsapp_bridge_secret: str | None = "4ce746274829595960813f40c4ee4c355b351b5ee41fc83f"
     whatsapp_bridge_session_prefix: str = "kafi-sales-agent"
 
     # Read-only dashboard bridge for bank-recon / PA (x-bridge-secret header).

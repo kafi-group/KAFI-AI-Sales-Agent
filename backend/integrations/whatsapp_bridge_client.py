@@ -10,25 +10,77 @@ import httpx
 from config import settings
 
 
-def bridge_session_id(user_id: int) -> str:
-    """Namespace sessions so bank-recon-demo and Sales Agent never share QR sessions."""
+DEFAULT_USER_BRIDGES: dict[str, str] = {
+    "admin": "https://whatsapp-bridge-production-ffd3.up.railway.app",
+    "khalid": "https://whatsapp-bridge-production-ffd3.up.railway.app",
+    "asim": "https://whatsapp-bridge-production-8eee.up.railway.app",
+    "usmankhan": "https://whatsapp-bridge-production-9587.up.railway.app",
+    "usman": "https://whatsapp-bridge-production-9587.up.railway.app",
+    "sadia": "https://whatsapp-bridge-production-8388.up.railway.app",
+}
+
+DEFAULT_USER_ID_BRIDGES: dict[int, str] = {
+    1: "https://whatsapp-bridge-production-ffd3.up.railway.app",  # admin / khalid
+    2: "https://whatsapp-bridge-production-8eee.up.railway.app",  # asim
+    3: "https://whatsapp-bridge-production-9587.up.railway.app",  # usmankhan
+    4: "https://whatsapp-bridge-production-8388.up.railway.app",  # sadia
+}
+
+
+def bridge_session_id(user_id: int, username: str | None = None) -> str:
+    """Namespace sessions so each user's bridge container has a clean session."""
     prefix = (settings.whatsapp_bridge_session_prefix or "kafi-sales-agent").strip()
+    clean_name = (username or "").strip().lower()
+    if clean_name:
+        return f"{prefix}-{clean_name}"
     return f"{prefix}-u{int(user_id)}"
 
 
 def _headers() -> dict[str, str]:
-    secret = (settings.whatsapp_bridge_secret or "").strip()
+    secret = (settings.whatsapp_bridge_secret or "4ce746274829595960813f40c4ee4c355b351b5ee41fc83f").strip()
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if secret:
         headers["x-bridge-secret"] = secret
     return headers
 
 
-def _base_url() -> str:
-    url = (settings.whatsapp_bridge_url or "").strip().rstrip("/")
-    if not url:
-        raise RuntimeError("WhatsApp bridge is not configured (WHATSAPP_BRIDGE_URL)")
-    return url
+def _base_url(user_id: int | None = None, username: str | None = None) -> str:
+    """Resolve the specific WhatsApp bridge domain for the current user."""
+    clean_name = (username or "").strip().lower()
+
+    # 1. Check environment variables specific to each user
+    if clean_name in ("admin", "khalid"):
+        custom = (settings.whatsapp_bridge_url_khalid or settings.whatsapp_bridge_url_admin or "").strip().rstrip("/")
+        if custom:
+            return custom
+    elif clean_name == "asim":
+        custom = (settings.whatsapp_bridge_url_asim or "").strip().rstrip("/")
+        if custom:
+            return custom
+    elif clean_name in ("usman", "usmankhan"):
+        custom = (settings.whatsapp_bridge_url_usman or "").strip().rstrip("/")
+        if custom:
+            return custom
+    elif clean_name == "sadia":
+        custom = (settings.whatsapp_bridge_url_sadia or "").strip().rstrip("/")
+        if custom:
+            return custom
+
+    # 2. Check default username mapping
+    if clean_name and clean_name in DEFAULT_USER_BRIDGES:
+        return DEFAULT_USER_BRIDGES[clean_name]
+
+    # 3. Check user ID mapping if username wasn't supplied
+    if user_id is not None and user_id in DEFAULT_USER_ID_BRIDGES:
+        return DEFAULT_USER_ID_BRIDGES[user_id]
+
+    # 4. Fallback to general WHATSAPP_BRIDGE_URL if configured
+    general = (settings.whatsapp_bridge_url or "").strip().rstrip("/")
+    if general:
+        return general
+
+    # 5. Default to Admin / Khalid's bridge
+    return DEFAULT_USER_BRIDGES["admin"]
 
 
 def _extract_phone_number(data: dict[str, Any]) -> str | None:
@@ -89,11 +141,12 @@ def _response_is_png(resp: httpx.Response) -> bool:
     return len(body) >= 4 and body[:4] == b"\x89PNG"
 
 
-def bridge_status(user_id: int) -> dict[str, Any]:
-    session = bridge_session_id(user_id)
+def bridge_status(user_id: int, username: str | None = None) -> dict[str, Any]:
+    session = bridge_session_id(user_id, username=username)
+    base_url = _base_url(user_id=user_id, username=username)
     with httpx.Client(timeout=20.0) as client:
         resp = client.get(
-            f"{_base_url()}/status",
+            f"{base_url}/status",
             params={"session": session},
             headers=_headers(),
         )
@@ -107,11 +160,12 @@ def bridge_status(user_id: int) -> dict[str, Any]:
         return _normalize_status(data)
 
 
-def bridge_qr(user_id: int) -> dict[str, Any]:
-    session = bridge_session_id(user_id)
+def bridge_qr(user_id: int, username: str | None = None) -> dict[str, Any]:
+    session = bridge_session_id(user_id, username=username)
+    base_url = _base_url(user_id=user_id, username=username)
     with httpx.Client(timeout=30.0) as client:
         resp = client.get(
-            f"{_base_url()}/qr",
+            f"{base_url}/qr",
             params={"session": session},
             headers=_headers(),
         )
@@ -147,18 +201,19 @@ def bridge_qr(user_id: int) -> dict[str, Any]:
         return {"session": session, "connected": False, "qr": None}
 
 
-def bridge_disconnect(user_id: int) -> dict[str, Any]:
-    session = bridge_session_id(user_id)
+def bridge_disconnect(user_id: int, username: str | None = None) -> dict[str, Any]:
+    session = bridge_session_id(user_id, username=username)
+    base_url = _base_url(user_id=user_id, username=username)
     try:
         with httpx.Client(timeout=20.0) as client:
             client.post(
-                f"{_base_url()}/disconnect",
+                f"{base_url}/disconnect",
                 json={"session": session, "sessionId": session},
                 headers=_headers(),
             )
             try:
                 client.post(
-                    f"{_base_url()}/logout",
+                    f"{base_url}/logout",
                     json={"session": session, "sessionId": session},
                     headers=_headers(),
                 )
@@ -169,8 +224,9 @@ def bridge_disconnect(user_id: int) -> dict[str, Any]:
     return {"ok": True, "session": session, "connected": False, "status": "disconnected"}
 
 
-def bridge_send(user_id: int, *, to_phone: str, message: str) -> dict[str, Any]:
-    session = bridge_session_id(user_id)
+def bridge_send(user_id: int, *, to_phone: str, message: str, username: str | None = None) -> dict[str, Any]:
+    session = bridge_session_id(user_id, username=username)
+    base_url = _base_url(user_id=user_id, username=username)
     phone = (to_phone or "").strip()
     text = (message or "").strip()
     if not phone:
@@ -187,7 +243,7 @@ def bridge_send(user_id: int, *, to_phone: str, message: str) -> dict[str, Any]:
     }
     with httpx.Client(timeout=45.0) as client:
         resp = client.post(
-            f"{_base_url()}/send",
+            f"{base_url}/send",
             json=payload,
             headers=_headers(),
         )
