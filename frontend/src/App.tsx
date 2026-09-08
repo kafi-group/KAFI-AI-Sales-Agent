@@ -1117,21 +1117,6 @@ function DashboardApp() {
       external: QUOTATION_AGENT_URL,
     },
     {
-      id: "horeka" as const,
-      label: "Horeka",
-      count: 177,
-      children: [
-        { id: "horeka-all", label: "Price List Manager", count: 177 },
-        { id: "horeka-spices", label: "Spices & Masala", count: 32 },
-        { id: "horeka-salt", label: "Himalayan Salt", count: 29 },
-        { id: "horeka-pickles", label: "Pickles & Chutneys", count: 13 },
-        { id: "horeka-pastes", label: "Pastes & Sauces", count: 25 },
-        { id: "horeka-rice", label: "Rice & Staples", count: 6 },
-        { id: "horeka-desserts", label: "Desserts & Bakery", count: 20 },
-        { id: "horeka-wellness", label: "Beverages & Wellness", count: 20 },
-      ],
-    },
-    {
       id: "catalogue" as const,
       label: "Catalogue",
       count: 4,
