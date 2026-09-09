@@ -44,6 +44,14 @@ def _headers() -> dict[str, str]:
     return headers
 
 
+# Keep QR/bridge calls short so a disconnect cannot starve email, Cloud inbox, or leads.
+_STATUS_TIMEOUT = 4.0
+_QR_TIMEOUT = 8.0
+_PAIR_TIMEOUT = 12.0
+_DISCONNECT_TIMEOUT = 5.0
+_SEND_TIMEOUT = 15.0
+
+
 def _base_url(user_id: int | None = None, username: str | None = None) -> str:
     """Resolve the specific WhatsApp bridge domain for the current user."""
     clean_name = (username or "").strip().lower()
@@ -145,26 +153,29 @@ def _response_is_png(resp: httpx.Response) -> bool:
 def bridge_status(user_id: int, username: str | None = None) -> dict[str, Any]:
     session = bridge_session_id(user_id, username=username)
     base_url = _base_url(user_id=user_id, username=username)
-    with httpx.Client(timeout=20.0) as client:
-        resp = client.get(
-            f"{base_url}/status",
-            params={"session": session},
-            headers=_headers(),
-        )
-        if resp.status_code == 401:
-            return {"connected": False, "session": session, "error": "Bridge unauthorized"}
-        resp.raise_for_status()
-        data = resp.json() if resp.content else {}
-        if not isinstance(data, dict):
-            data = {}
-        data.setdefault("session", session)
-        return _normalize_status(data)
+    try:
+        with httpx.Client(timeout=_STATUS_TIMEOUT) as client:
+            resp = client.get(
+                f"{base_url}/status",
+                params={"session": session},
+                headers=_headers(),
+            )
+            if resp.status_code == 401:
+                return {"connected": False, "session": session, "status": "disconnected", "error": "Bridge unauthorized"}
+            resp.raise_for_status()
+            data = resp.json() if resp.content else {}
+            if not isinstance(data, dict):
+                data = {}
+            data.setdefault("session", session)
+            return _normalize_status(data)
+    except Exception:  # noqa: BLE001
+        return {"connected": False, "session": session, "status": "disconnected"}
 
 
 def bridge_qr(user_id: int, username: str | None = None) -> dict[str, Any]:
     session = bridge_session_id(user_id, username=username)
     base_url = _base_url(user_id=user_id, username=username)
-    with httpx.Client(timeout=30.0) as client:
+    with httpx.Client(timeout=_QR_TIMEOUT) as client:
         resp = client.get(
             f"{base_url}/qr",
             params={"session": session},
@@ -206,7 +217,7 @@ def bridge_pair(user_id: int, username: str | None = None) -> dict[str, Any]:
     """Force a fresh QR session on the dedicated bridge and wait for the image."""
     session = bridge_session_id(user_id, username=username)
     base_url = _base_url(user_id=user_id, username=username)
-    with httpx.Client(timeout=45.0) as client:
+    with httpx.Client(timeout=_PAIR_TIMEOUT) as client:
         resp = client.post(
             f"{base_url}/pair",
             json={"session": session, "sessionId": session},
@@ -230,7 +241,7 @@ def bridge_disconnect(user_id: int, username: str | None = None) -> dict[str, An
     session = bridge_session_id(user_id, username=username)
     base_url = _base_url(user_id=user_id, username=username)
     try:
-        with httpx.Client(timeout=20.0) as client:
+        with httpx.Client(timeout=_DISCONNECT_TIMEOUT) as client:
             client.post(
                 f"{base_url}/disconnect",
                 json={"session": session, "sessionId": session},
@@ -266,7 +277,7 @@ def bridge_send(user_id: int, *, to_phone: str, message: str, username: str | No
         "message": text,
         "text": text,
     }
-    with httpx.Client(timeout=45.0) as client:
+    with httpx.Client(timeout=_SEND_TIMEOUT) as client:
         resp = client.post(
             f"{base_url}/send",
             json=payload,

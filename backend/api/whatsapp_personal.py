@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -77,10 +78,12 @@ def _interaction_read(db: Session, interaction) -> InteractionRead:
 def whatsapp_personal_status(user: AppUser = Depends(get_current_user)) -> Any:
     try:
         return bridge.bridge_status(user.id, username=user.username)
-    except RuntimeError as exc:
-        raise HTTPException(503, str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(502, f"Could not reach WhatsApp bridge: {exc}") from exc
+    except Exception:  # noqa: BLE001
+        return {
+            "connected": False,
+            "status": "disconnected",
+            "session": bridge.bridge_session_id(user.id, username=user.username),
+        }
 
 
 @router.get("/qr")
@@ -105,12 +108,15 @@ def list_personal_conversations(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> WhatsAppConversationListResponse:
-    rows, total = comms.list_whatsapp_conversations(
-        db,
-        page=page,
-        page_size=page_size,
-        personal_user_id=user.id,
-    )
+    try:
+        rows, total = comms.list_whatsapp_conversations(
+            db,
+            page=page,
+            page_size=page_size,
+            personal_user_id=user.id,
+        )
+    except Exception:  # noqa: BLE001
+        rows, total = [], 0
     total_pages = max(1, (total + page_size - 1) // page_size)
     return WhatsAppConversationListResponse(
         total=total,
@@ -127,9 +133,12 @@ def list_personal_conversation_messages(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> list[InteractionRead]:
-    rows = comms.list_whatsapp_messages(
-        db, contact_id=contact_id, personal_user_id=user.id
-    )
+    try:
+        rows = comms.list_whatsapp_messages(
+            db, contact_id=contact_id, personal_user_id=user.id
+        )
+    except Exception:  # noqa: BLE001
+        rows = []
     return [_interaction_read(db, row) for row in rows]
 
 
@@ -224,10 +233,13 @@ def whatsapp_personal_disconnect(user: AppUser = Depends(get_current_user)) -> A
     """Disconnect the current user's personal WhatsApp Mobile session only."""
     try:
         return bridge.bridge_disconnect(user.id, username=user.username)
-    except RuntimeError as exc:
-        raise HTTPException(503, str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(502, f"Could not disconnect WhatsApp bridge: {exc}") from exc
+    except Exception:  # noqa: BLE001
+        return {
+            "ok": True,
+            "connected": False,
+            "status": "disconnected",
+            "session": bridge.bridge_session_id(user.id, username=user.username),
+        }
 
 
 @router.get("/team-status")
@@ -235,32 +247,42 @@ def whatsapp_personal_team_status(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """Return active WhatsApp mobile connection status for all registered sales team members."""
-    users = db.query(AppUser).filter(AppUser.is_active == True).all()  # noqa: E712
-    team_status = []
-    for u in users:
+    """Return mobile WhatsApp status for the team without blocking other API work."""
+    snapshots = [
+        (u.id, u.username, u.full_name, u.role)
+        for u in db.query(AppUser).filter(AppUser.is_active == True).all()  # noqa: E712
+    ]
+    current_id = user.id
+
+    def _fetch(snap: tuple[int, str | None, str | None, Any]) -> dict[str, Any]:
+        uid, uname, fname, role = snap
         try:
-            st = bridge.bridge_status(u.id, username=u.username)
+            st = bridge.bridge_status(uid, username=uname)
         except Exception:  # noqa: BLE001
             st = {"connected": False, "status": "disconnected", "phone": None}
-        
         raw_st = str(st.get("status") or "").lower()
         is_conn = bool(st.get("connected")) and raw_st in {"connected", "open", "ready"}
         phone_val = (st.get("phone") or st.get("connectedPhone")) if is_conn else None
-
-        team_status.append({
-            "user_id": u.id,
-            "username": u.username,
-            "full_name": u.full_name or u.username,
-            "role": u.role,
-            "session_id": bridge.bridge_session_id(u.id, username=u.username),
+        return {
+            "user_id": uid,
+            "username": uname,
+            "full_name": fname or uname,
+            "role": role,
+            "session_id": bridge.bridge_session_id(uid, username=uname),
             "connected": is_conn,
             "phone": phone_val,
-            "profile_picture_url": st.get("profilePictureUrl") or st.get("profile_picture_url") if is_conn else None,
+            "profile_picture_url": (
+                st.get("profilePictureUrl") or st.get("profile_picture_url") if is_conn else None
+            ),
             "status": "connected" if is_conn else (raw_st if raw_st else "disconnected"),
-            "is_current_user": u.id == user.id,
-        })
-    return team_status
+            "is_current_user": uid == current_id,
+        }
+
+    if not snapshots:
+        return []
+    workers = min(6, len(snapshots))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(_fetch, snapshots))
 
 
 @router.post("/disconnect-user/{target_user_id}")
@@ -276,10 +298,13 @@ def whatsapp_personal_disconnect_target_user(
     target_username = target_user.username if target_user else None
     try:
         return bridge.bridge_disconnect(target_user_id, username=target_username)
-    except RuntimeError as exc:
-        raise HTTPException(503, str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(502, f"Could not disconnect target user WhatsApp bridge: {exc}") from exc
+    except Exception:  # noqa: BLE001
+        return {
+            "ok": True,
+            "connected": False,
+            "status": "disconnected",
+            "session": bridge.bridge_session_id(target_user_id, username=target_username),
+        }
 
 
 @router.post("/send")

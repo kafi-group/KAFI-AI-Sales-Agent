@@ -217,6 +217,7 @@ function DashboardApp() {
   const seenMessageUidsRef = useRef<Set<string> | null>(null);
   const lastInboxUnreadRef = useRef(0);
   const seenWhatsAppKeysRef = useRef<Set<string> | null>(null);
+  const whatsappPollInflightRef = useRef(false);
   const seenFollowUpIdsRef = useRef<Set<string>>(new Set());
   const seenMeetingAlertIdsRef = useRef<Set<string>>(new Set());
   const seenInterestedActivityIdRef = useRef<number | null>(null);
@@ -442,6 +443,8 @@ function DashboardApp() {
   }, []);
 
   const pollWhatsAppInbox = useCallback(() => {
+    if (whatsappPollInflightRef.current) return;
+    whatsappPollInflightRef.current = true;
     client
       .listWhatsAppConversations({ page: 1, page_size: 50 })
       .then((result) => {
@@ -484,6 +487,9 @@ function DashboardApp() {
       })
       .catch(() => {
         /* WhatsApp may be unconfigured — ignore */
+      })
+      .finally(() => {
+        whatsappPollInflightRef.current = false;
       });
   }, []);
 

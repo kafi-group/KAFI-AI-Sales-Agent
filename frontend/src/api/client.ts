@@ -252,6 +252,17 @@ function timeoutForPath(path: string): number {
   ) {
     return 300_000; // bulk repair jobs can take a few minutes under lock waits
   }
+  if (
+    path.startsWith("/whatsapp-personal/status") ||
+    path.startsWith("/whatsapp-personal/team-status") ||
+    path.startsWith("/whatsapp-personal/qr") ||
+    path.startsWith("/whatsapp-personal/session")
+  ) {
+    return 10_000;
+  }
+  if (path.startsWith("/whatsapp-personal/disconnect")) {
+    return 12_000;
+  }
   if (/^\/leads\/\d+\/(onboard|research|score)(\?|$)/.test(path)) {
     return LEAD_ONBOARD_TIMEOUT_MS;
   }

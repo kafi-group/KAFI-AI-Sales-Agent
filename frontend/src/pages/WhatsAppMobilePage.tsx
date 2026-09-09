@@ -132,6 +132,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
 
   const [imgFailed, setImgFailed] = useState(false);
   const pairingLock = useRef(false);
+  const refreshLock = useRef(false);
   const qrRef = useRef<Record<string, unknown> | null>(null);
   const connected = isConnectedStatus(status);
   const connecting = isConnectingStatus(status);
@@ -187,14 +188,18 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   const qrImage = qrImageFromPayload(qr);
   qrRef.current = qr;
 
-  const refresh = useCallback(async (opts?: { silent?: boolean; skipQr?: boolean }) => {
-    if (pairingLock.current) return;
+  const refresh = useCallback(async (opts?: { silent?: boolean; skipQr?: boolean; includeTeam?: boolean }) => {
+    if (pairingLock.current || refreshLock.current) return;
+    refreshLock.current = true;
     if (!opts?.silent) setLoading(true);
+    const includeTeam = opts?.includeTeam ?? !opts?.silent;
     try {
       const [st, session, teamRes] = await Promise.all([
         client.getWhatsAppPersonalStatus(),
         client.getWhatsAppPersonalSession(),
-        client.getWhatsAppPersonalTeamStatus().catch(() => []),
+        includeTeam
+          ? client.getWhatsAppPersonalTeamStatus().catch(() => [])
+          : Promise.resolve(null),
       ]);
       setStatus(st);
       setSessionId(session.session_id);
@@ -233,11 +238,23 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
         qrRef.current = qrData;
       }
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Could not load WhatsApp Mobile status");
+      if (!opts?.silent) {
+        onError(e instanceof Error ? e.message : "Could not load WhatsApp Mobile status");
+      }
     } finally {
       setLoading(false);
+      refreshLock.current = false;
     }
   }, [onError]);
+
+  const refreshTeam = useCallback(async () => {
+    try {
+      const teamRes = await client.getWhatsAppPersonalTeamStatus();
+      if (Array.isArray(teamRes)) setTeamStatus(teamRes);
+    } catch {
+      /* Isolated from the rest of the dashboard — never raise a global header error. */
+    }
+  }, []);
 
   async function handleDisconnectTargetUser(targetUserId: number, targetName: string) {
     if (
@@ -250,7 +267,8 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
     try {
       await client.disconnectWhatsAppPersonalUser(targetUserId);
       setNotice(`Disconnected ${targetName}'s WhatsApp session successfully.`);
-      await refresh();
+      await refresh({ silent: true, skipQr: true, includeTeam: false });
+      void refreshTeam();
     } catch (e) {
       onError(e instanceof Error ? e.message : `Failed to disconnect ${targetName}`);
     }
@@ -273,9 +291,18 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   }, [connected, connecting, qrPending, qrImage]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => void refresh({ silent: true }), pollMs);
+    const timer = window.setInterval(
+      () => void refresh({ silent: true, skipQr: mobileTab === "inbox", includeTeam: false }),
+      pollMs,
+    );
     return () => window.clearInterval(timer);
-  }, [pollMs, refresh]);
+  }, [pollMs, refresh, mobileTab]);
+
+  useEffect(() => {
+    void refreshTeam();
+    const timer = window.setInterval(() => void refreshTeam(), 30_000);
+    return () => window.clearInterval(timer);
+  }, [refreshTeam]);
 
   async function handlePair() {
     pairingLock.current = true;
@@ -328,7 +355,8 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
         `Disconnected ${userName}'s mobile WhatsApp. Unlink this device on your phone (Linked devices), then tap Generate QR Code to pair again.`
       );
       pairingLock.current = false;
-      await refresh({ silent: true, skipQr: true });
+      await refresh({ silent: true, skipQr: true, includeTeam: false });
+      void refreshTeam();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Disconnect failed");
     } finally {

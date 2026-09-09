@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   client,
   type DraftInteraction,
@@ -100,9 +100,12 @@ export function WhatsAppPersonalInbox({
   const [newPhone, setNewPhone] = useState("");
   const [newMessage, setNewMessage] = useState("");
   const [starting, setStarting] = useState(false);
+  const listLock = useRef(false);
 
   const refreshConversations = useCallback(
     async (options?: { silent?: boolean }) => {
+      if (listLock.current) return [] as WhatsAppConversation[];
+      listLock.current = true;
       if (!options?.silent) setLoadingList(true);
       try {
         const result = await client.listWhatsAppPersonalConversations({ page: 1, page_size: 80 });
@@ -119,6 +122,7 @@ export function WhatsAppPersonalInbox({
         return [] as WhatsAppConversation[];
       } finally {
         if (!options?.silent) setLoadingList(false);
+        listLock.current = false;
       }
     },
     [onError],
@@ -129,6 +133,7 @@ export function WhatsAppPersonalInbox({
   }, [refreshConversations]);
 
   useEffect(() => {
+    if (!connected) return;
     const id = window.setInterval(() => {
       void refreshConversations({ silent: true });
       if (selected) {
@@ -139,7 +144,7 @@ export function WhatsAppPersonalInbox({
       }
     }, POLL_MS);
     return () => window.clearInterval(id);
-  }, [refreshConversations, selected]);
+  }, [connected, refreshConversations, selected]);
 
   const loadThread = useCallback(
     async (conversation: WhatsAppConversation, options?: { silent?: boolean }) => {

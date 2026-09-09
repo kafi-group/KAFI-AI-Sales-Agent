@@ -423,12 +423,15 @@ def list_whatsapp_conversations(
         return role == AppUserRole.admin.value
 
     assigned_id = None if _is_admin(user) else user.id
-    rows, total = comms.list_whatsapp_conversations(
-        db,
-        assigned_to_user_id=assigned_id,
-        page=page_val,
-        page_size=page_size_val,
-    )
+    try:
+        rows, total = comms.list_whatsapp_conversations(
+            db,
+            assigned_to_user_id=assigned_id,
+            page=page_val,
+            page_size=page_size_val,
+        )
+    except Exception:  # noqa: BLE001
+        rows, total = [], 0
     page_val = max(1, page_val)
     page_size_val = min(max(1, page_size_val), 100)
     total_pages = max(1, (total + page_size_val - 1) // page_size_val)
@@ -447,7 +450,10 @@ def list_whatsapp_conversation_messages(contact_id: str, db: Session = Depends(g
         cid = int(contact_id)
     except (ValueError, TypeError):
         return []
-    rows = comms.list_whatsapp_messages(db, contact_id=cid)
+    try:
+        rows = comms.list_whatsapp_messages(db, contact_id=cid)
+    except Exception:  # noqa: BLE001
+        rows = []
     return [_interaction_read(db, row) for row in rows]
 
 
