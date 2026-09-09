@@ -20,8 +20,12 @@ function qrImageFromPayload(qr: Record<string, unknown> | null): string | null {
 
 function isConnectedStatus(st: Record<string, unknown> | null): boolean {
   if (!st) return false;
-  if (Boolean(st.connected)) return true;
-  return String(st.status ?? "").toLowerCase() === "connected";
+  const label = String(st.status ?? "").toLowerCase();
+  if (st.connected === false) return false;
+  if (["disconnected", "qr-pending", "connecting", "close", "closed", "logged_out"].includes(label)) {
+    return false;
+  }
+  return Boolean(st.connected) && (label === "connected" || label === "open" || label === "ready" || label === "");
 }
 
 export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
@@ -73,7 +77,7 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
   }, [refresh]);
 
   const pollMs = useMemo(() => {
-    if (connected) return 15_000;
+    if (connected) return 8_000;
     if (qrPending || !qrImage) return 3_000;
     return 8_000;
   }, [connected, qrPending, qrImage]);

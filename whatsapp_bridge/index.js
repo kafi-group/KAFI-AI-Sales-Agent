@@ -37,9 +37,50 @@ const logger = pino({ level: "silent" });
 const activeSessions = new Map();
 const initLocks = new Map();
 
+function socketIsOpen(sock) {
+  if (!sock) return false;
+  const ws = sock.ws;
+  if (!ws) return false;
+  if (typeof ws.isOpen === "boolean") return ws.isOpen;
+  const state = ws.readyState;
+  return state === 1; // OPEN only — never treat a dead/unknown socket as live
+}
+
+function isReallyConnected(sessionObj) {
+  if (!sessionObj || sessionObj.shuttingDown || !sessionObj.sock) return false;
+  return Boolean(sessionObj.connected && sessionObj.sock.user && socketIsOpen(sessionObj.sock));
+}
+
+function markSessionDisconnected(sessionObj, reason) {
+  if (!sessionObj) return;
+  sessionObj.connected = false;
+  if (sessionObj.status === "qr-pending" || sessionObj.status === "connecting") return;
+  sessionObj.status = "disconnected";
+  if (reason) {
+    console.log(`[Session] Marked disconnected (${reason})`);
+  }
+}
+
+function attachSocketWatch(sock, sessionObj, sessionId) {
+  const ws = sock?.ws;
+  if (!ws || ws.__kafiWatchAttached) return;
+  ws.__kafiWatchAttached = true;
+  const onDead = (evt) => {
+    if (sessionObj.shuttingDown) return;
+    markSessionDisconnected(sessionObj, `websocket ${evt || "close"}`);
+    console.log(`[Session ${sessionId}] WebSocket ended without a clean WhatsApp logout event`);
+  };
+  try {
+    ws.on?.("close", () => onDead("close"));
+    ws.on?.("error", () => onDead("error"));
+  } catch {
+    // Some Baileys builds expose a raw browser-style socket.
+  }
+}
+
 function isLiveSession(sessionObj) {
   if (!sessionObj || !sessionObj.sock || sessionObj.shuttingDown) return false;
-  if (sessionObj.connected) return true;
+  if (isReallyConnected(sessionObj)) return true;
   const status = String(sessionObj.status || "").toLowerCase();
   return status === "qr-pending" || status === "connecting";
 }
@@ -52,7 +93,7 @@ async function waitForQrOrConnected(sessionObj, timeoutMs = 10000) {
   const started = Date.now();
   while (sessionObj && Date.now() - started < timeoutMs) {
     if (sessionObj.shuttingDown) break;
-    if (sessionObj.connected || sessionObj.qrDataUrl || sessionObj.qr) return sessionObj;
+    if (isReallyConnected(sessionObj) || sessionObj.qrDataUrl || sessionObj.qr) return sessionObj;
     await sleep(250);
   }
   return sessionObj;
@@ -257,6 +298,7 @@ async function initBaileysSession(sessionId, forceNew = false) {
         const jid = sock.user?.id || "";
         const rawNum = jid.split("@")[0].split(":")[0];
         sessionObj.phone = rawNum ? `+${rawNum}` : null;
+        attachSocketWatch(sock, sessionObj, safeSessionId);
         console.log(`[Session ${safeSessionId}] Connected as ${sessionObj.phone || jid}`);
 
         fetchProfilePicture(sock)
@@ -399,13 +441,18 @@ function sessionPayload(sessionId, sessionObj) {
       qrDataUrl: null,
     };
   }
+  const live = isReallyConnected(sessionObj);
+  if (sessionObj.connected && !live) {
+    markSessionDisconnected(sessionObj, `${sessionId} stale connected flag`);
+  }
+  const pending = ["qr-pending", "connecting"].includes(String(sessionObj.status || "").toLowerCase());
   return {
     session: sessionId,
-    connected: Boolean(sessionObj.connected),
-    status: sessionObj.status || (sessionObj.connected ? "connected" : "disconnected"),
-    phone: sessionObj.phone || null,
-    profilePictureUrl: sessionObj.profilePictureUrl || null,
-    profile_picture_url: sessionObj.profilePictureUrl || null,
+    connected: live,
+    status: live ? "connected" : pending ? sessionObj.status : "disconnected",
+    phone: live ? sessionObj.phone || null : null,
+    profilePictureUrl: live ? sessionObj.profilePictureUrl || null : null,
+    profile_picture_url: live ? sessionObj.profilePictureUrl || null : null,
     qr: sessionObj.qr || null,
     qrDataUrl: sessionObj.qrDataUrl || null,
   };
@@ -415,12 +462,15 @@ app.get("/status", async (req, res) => {
   const sessionId = req.query.session || req.query.sessionId || "default";
   try {
     let sessionObj = activeSessions.get(sessionId);
+    if (sessionObj && sessionObj.connected && !isReallyConnected(sessionObj)) {
+      markSessionDisconnected(sessionObj, `${sessionId} dead socket on /status`);
+    }
     // Restore a previously scanned session from saved creds, but do not start a
     // brand-new QR socket from status polling (that used to kill in-progress logins).
     if (!isLiveSession(sessionObj) && hasSavedCreds(sessionId)) {
       sessionObj = await initBaileysSession(sessionId, false);
     }
-    if (sessionObj && sessionObj.connected && !sessionObj.profilePictureUrl && sessionObj.sock) {
+    if (sessionObj && isReallyConnected(sessionObj) && !sessionObj.profilePictureUrl && sessionObj.sock) {
       try {
         sessionObj.profilePictureUrl = await fetchProfilePicture(sessionObj.sock);
       } catch (e) {
@@ -443,7 +493,7 @@ app.get("/qr", async (req, res) => {
 
     sessionObj = await waitForQrOrConnected(sessionObj, 10000);
 
-    if (sessionObj && sessionObj.connected) {
+    if (sessionObj && isReallyConnected(sessionObj)) {
       return res.json(sessionPayload(sessionId, sessionObj));
     }
 
@@ -520,7 +570,8 @@ app.post("/send", async (req, res) => {
 
   try {
     let sessionObj = activeSessions.get(sessionId);
-    if (!sessionObj || !sessionObj.connected) {
+    if (!isReallyConnected(sessionObj)) {
+      if (sessionObj) markSessionDisconnected(sessionObj, `${sessionId} send while socket dead`);
       return res.status(409).json({
         error: "Personal WhatsApp is not connected. Open WhatsApp Mobile and scan QR.",
         connected: false,
@@ -553,6 +604,20 @@ app.post("/send", async (req, res) => {
     return res.status(500).json({ error: err.message || "Failed to send message" });
   }
 });
+
+setInterval(() => {
+  for (const [sessionId, sessionObj] of activeSessions.entries()) {
+    if (!sessionObj || sessionObj.shuttingDown) continue;
+    if (sessionObj.connected && !isReallyConnected(sessionObj)) {
+      markSessionDisconnected(sessionObj, `${sessionId} watchdog`);
+      if (hasSavedCreds(sessionId)) {
+        initBaileysSession(sessionId, false).catch((err) => {
+          console.error(`[Session ${sessionId}] Watchdog reconnect failed:`, err?.message || err);
+        });
+      }
+    }
+  }
+}, 15_000);
 
 app.listen(PORT, () => {
   console.log(`[WhatsApp Bridge] Listening on port ${PORT}`);
