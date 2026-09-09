@@ -40,6 +40,7 @@ export function CataloguePage({
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [whatsAppRecipient, setWhatsAppRecipient] = useState("");
   const [whatsAppMessage, setWhatsAppMessage] = useState("");
+  const [whatsAppSending, setWhatsAppSending] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -116,15 +117,49 @@ export function CataloguePage({
   function handleOpenWhatsApp(specificCatId?: string) {
     const idsToAttach = specificCatId ? [specificCatId] : selectedCatIds;
     const selected = catalogues.filter((c) => idsToAttach.includes(c.id));
-    const titles = selected.map((c) => c.title).join(" & ");
+    const titles = selected.map((c) => c.title).join(" & ") || "product catalogue";
+    const links = selected
+      .map((c) => {
+        const path = c.download_url.startsWith("http")
+          ? c.download_url
+          : `${window.location.origin}${c.download_url.startsWith("/") ? "" : "/"}${c.download_url}`;
+        return `• ${c.title}: ${path}`;
+      })
+      .join("\n");
 
     setWhatsAppMessage(
       `Hello! 👋 Greetings from *Kafi Commodities (Pvt.) Ltd. (Brand: ESSENCE)*.\n\n` +
       `Here is our official *${titles}*.\n\n` +
+      (links ? `Download PDF:\n${links}\n\n` : "") +
       `Our range covers Basmati Rice, Himalayan Pink Salt, Spices, Pickles, Chutneys, Pastes, Sauces, and Desserts.\n\n` +
       `Let us know your destination port and quantity requirements so we can share instant CNF/FOB quotations.`
     );
     setShowWhatsAppModal(true);
+  }
+
+  async function handleSendPersonalWhatsApp() {
+    const phone = whatsAppRecipient.trim();
+    if (!phone) {
+      onError("Enter a recipient phone number, e.g. +923001234567");
+      return;
+    }
+    if (!whatsAppMessage.trim()) {
+      onError("Message text is required");
+      return;
+    }
+    setWhatsAppSending(true);
+    try {
+      await client.sendWhatsAppPersonal({
+        to_phone: phone,
+        message: whatsAppMessage.trim(),
+      });
+      setShowWhatsAppModal(false);
+      setNotice("Catalogue sent from your scanned personal WhatsApp.");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Failed to send catalogue via personal WhatsApp");
+    } finally {
+      setWhatsAppSending(false);
+    }
   }
 
   return (
@@ -370,6 +405,9 @@ export function CataloguePage({
             </div>
 
             <div className="space-y-3 text-xs">
+              <p className="text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2">
+                Sends from your scanned WhatsApp Mobile session — not WhatsApp Web.
+              </p>
               <label className="block space-y-1">
                 <span className="text-slate-400">Recipient Phone Number (e.g. +971501234567 or +923330313518)</span>
                 <input
@@ -402,19 +440,12 @@ export function CataloguePage({
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  const cleaned = whatsAppRecipient.replace(/[^0-9+]/g, "");
-                  const url = cleaned
-                    ? `https://wa.me/${cleaned.replace(/^\+/, "")}?text=${encodeURIComponent(whatsAppMessage)}`
-                    : `https://api.whatsapp.com/send?text=${encodeURIComponent(whatsAppMessage)}`;
-                  window.open(url, "_blank");
-                  setShowWhatsAppModal(false);
-                  setNotice("WhatsApp web dispatch launched.");
-                }}
-                className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white flex items-center gap-1.5 shadow-sm"
+                onClick={() => void handleSendPersonalWhatsApp()}
+                disabled={whatsAppSending || !whatsAppRecipient.trim() || !whatsAppMessage.trim()}
+                className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-xs font-semibold text-white flex items-center gap-1.5 shadow-sm"
               >
                 <IconWhatsApp size="xs" />
-                <span>Open in WhatsApp</span>
+                <span>{whatsAppSending ? "Sending…" : "Send from personal"}</span>
               </button>
             </div>
           </div>

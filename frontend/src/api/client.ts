@@ -3582,10 +3582,13 @@ export const client = {
     contact_name?: string;
     language?: string;
   }) =>
-    request<{ task: AiSalesAgentTask }>("/ai-sales-agent/tasks/self-test", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
+    request<{ task: AiSalesAgentTask; followup?: AiSalesAgentFollowup }>(
+      "/ai-sales-agent/tasks/self-test",
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    ),
   deleteAiSalesAgentTask: (taskId: number) =>
     request<void>(`/ai-sales-agent/tasks/${taskId}`, {
       method: "DELETE",
@@ -4052,6 +4055,14 @@ export interface AiSalesAgentRunner {
   twilio_ready: boolean;
 }
 
+export interface AiSalesAgentFollowup {
+  whatsapp_status?: string | null;
+  whatsapp_message?: string | null;
+  email_status?: string | null;
+  email_message?: string | null;
+  email_to?: string | null;
+}
+
 export interface AiSalesAgentTask {
   id: number;
   persona: string;
@@ -4060,6 +4071,7 @@ export interface AiSalesAgentTask {
   company_name: string | null;
   contact_name: string | null;
   contact_phone: string | null;
+  contact_email?: string | null;
   country?: string | null;
   status: string;
   interaction_id: number | null;
@@ -4069,6 +4081,7 @@ export interface AiSalesAgentTask {
   error_message: string | null;
   ready?: boolean;
   warnings?: string[];
+  followup?: AiSalesAgentFollowup;
   created_at: string | null;
   started_at: string | null;
   completed_at: string | null;

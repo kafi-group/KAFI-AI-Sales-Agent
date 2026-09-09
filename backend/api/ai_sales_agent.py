@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -65,6 +66,143 @@ _RUNNERS = [
 ]
 
 _TASKS: list[dict[str, Any]] = []
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _contact_email_for_phone(db: Session, phone: str | None) -> str | None:
+    if not phone:
+        return None
+    try:
+        from modules.calls import _find_contact_by_phone
+
+        matched = _find_contact_by_phone(db, phone)
+    except Exception:
+        matched = None
+    if not matched:
+        return None
+    return (matched.email or matched.secondary_email or "").strip() or None
+
+
+def _auto_followup_after_call(
+    db: Session,
+    *,
+    user: AppUser,
+    agent_name: str,
+    contact_name: str,
+    phone: str | None,
+    email: str | None,
+    company_name: str | None = None,
+) -> dict[str, Any]:
+    """Send personal WhatsApp (Baileys) + email when Sara/Rayan place a call.
+
+    Does not use Meta WhatsApp Cloud API.
+    """
+    from integrations import whatsapp_bridge_client as bridge
+    from integrations.mail_client import mail_client
+
+    company = (company_name or "").strip()
+    greet_name = (contact_name or "there").strip() or "there"
+    wa_text = (
+        f"Hello {greet_name}, this is {agent_name} from Kafi Commodities (Brand: ESSENCE).\n\n"
+        "I am calling you now regarding our export range — Basmati Rice, Himalayan Pink Salt, "
+        "spices, pickles, and more.\n\n"
+        "Please pick up if you can. If we miss each other, reply here and I will share catalogues and pricing.\n\n"
+        f"Best regards,\n{agent_name}\nKafi Commodities Export Team"
+    )
+    if company:
+        wa_text = wa_text.replace(
+            "regarding our export range",
+            f"regarding supply for {company} — our export range",
+            1,
+        )
+
+    result: dict[str, Any] = {
+        "whatsapp_status": "skipped",
+        "whatsapp_message": None,
+        "email_status": "skipped",
+        "email_message": None,
+        "email_to": email,
+    }
+
+    if phone:
+        try:
+            status = bridge.bridge_status(user.id, username=user.username)
+            if not status.get("connected"):
+                result["whatsapp_status"] = "not_connected"
+                result["whatsapp_message"] = (
+                    "Personal WhatsApp is not connected. Open WhatsApp Mobile and scan QR."
+                )
+            else:
+                bridge.bridge_send(
+                    user.id,
+                    to_phone=phone,
+                    message=wa_text,
+                    username=user.username,
+                )
+                result["whatsapp_status"] = "sent"
+                result["whatsapp_message"] = f"Personal WhatsApp sent to {phone}"
+                try:
+                    from db.models import (
+                        Channel,
+                        Direction,
+                        HandledBy,
+                        Interaction,
+                        InteractionStatus,
+                    )
+                    from modules.comms_generator import get_comms
+
+                    contact = get_comms()._ensure_whatsapp_contact(db, wa_id=phone)
+                    outbound = Interaction(
+                        contact_id=contact.id,
+                        channel=Channel.whatsapp,
+                        direction=Direction.outbound,
+                        content=wa_text,
+                        status=InteractionStatus.sent,
+                        handled_by=HandledBy.agent,
+                        provider_message_id="baileys_ai_call_followup",
+                    )
+                    db.add(outbound)
+                    db.commit()
+                except Exception:
+                    pass
+        except Exception as exc:  # noqa: BLE001
+            result["whatsapp_status"] = "error"
+            result["whatsapp_message"] = str(exc)[:300]
+
+    if email:
+        try:
+            subject = f"{agent_name} from Kafi Commodities is calling you"
+            body = (
+                f"<p>Dear {greet_name},</p>"
+                f"<p>This is <strong>{agent_name}</strong> from "
+                f"<strong>Kafi Commodities (Pvt.) Ltd. (Brand: ESSENCE)</strong>.</p>"
+                "<p>I am calling you now regarding our export range — Basmati Rice, "
+                "Himalayan Pink Salt, spices, pickles, chutneys, and more.</p>"
+                "<p>If we miss each other on the call, please reply to this email and we will "
+                "share catalogues, packaging options, and CNF/FOB pricing.</p>"
+                f"<p>Best regards,<br/><strong>{agent_name}</strong><br/>"
+                "Kafi Commodities Export Team<br/>"
+                '<a href="https://www.kafi-group.com">www.kafi-group.com</a></p>'
+            )
+            send_result = mail_client.send_approved(
+                to=email,
+                subject=subject,
+                body=body,
+                mailbox_user=user,
+            )
+            result["email_status"] = send_result.get("status") or "error"
+            result["email_message"] = send_result.get("message") or result["email_status"]
+            result["email_to"] = email
+        except Exception as exc:  # noqa: BLE001
+            result["email_status"] = "error"
+            result["email_message"] = str(exc)[:300]
+    else:
+        result["email_message"] = "No email address on file for this contact."
+
+    return result
 
 
 @router.post("/unlock")
@@ -129,18 +267,26 @@ def assign_tasks(
         buyer = db.get(Buyer, bid)
         company_name = buyer.company_name if buyer else f"Lead #{bid}"
         contact_name = buyer.contacts[0].full_name if (buyer and buyer.contacts) else "Purchasing Manager"
-        contact_phone = buyer.contacts[0].mobile if (buyer and buyer.contacts) else getattr(buyer, "phone", None)
+        first_contact = buyer.contacts[0] if (buyer and buyer.contacts) else None
+        contact_phone = None
+        contact_email = None
+        if first_contact:
+            contact_phone = first_contact.phone or first_contact.primary_phone or first_contact.wa_id
+            contact_email = (first_contact.email or first_contact.secondary_email or "").strip() or None
+        if not contact_phone:
+            contact_phone = getattr(buyer, "phone", None)
         task = {
             "id": len(_TASKS) + 1,
             "persona": payload.persona,
             "buyer_id": bid,
-            "contact_id": buyer.contacts[0].id if (buyer and buyer.contacts) else None,
+            "contact_id": first_contact.id if first_contact else None,
             "company_name": company_name,
             "contact_name": contact_name,
             "contact_phone": contact_phone,
+            "contact_email": contact_email,
             "status": "queued",
             "ready": bool(contact_phone),
-            "created_at": "2026-08-24T13:00:00Z",
+            "created_at": _now_iso(),
         }
         _TASKS.append(task)
         created.append(task)
@@ -153,12 +299,10 @@ def queue_self_test(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    _ = user
     from integrations.voice_client import voice_client
 
     agent_name = "Sara" if payload.persona == "female" else "Rayan"
     contact_name = payload.contact_name or "Mr. Khalid"
-    msg = f"Hello {contact_name}, this is {agent_name} calling from Kafi Commodities. Thank you for connecting with us."
 
     call_result = voice_client.place_outbound_ai_call(
         payload.phone,
@@ -175,14 +319,31 @@ def queue_self_test(
 
     # Match contact by phone if present so the call links to this lead's profile
     contact_id = None
+    contact_email = _contact_email_for_phone(db, payload.phone)
     if payload.phone:
         try:
             from modules.calls import _find_contact_by_phone
             matched_contact = _find_contact_by_phone(db, payload.phone)
             if matched_contact:
                 contact_id = matched_contact.id
+                contact_email = contact_email or (
+                    (matched_contact.email or matched_contact.secondary_email or "").strip() or None
+                )
         except Exception:
             pass
+
+    if not contact_email:
+        contact_email = (user.mailbox_email or "").strip() or None
+
+    followup = _auto_followup_after_call(
+        db,
+        user=user,
+        agent_name=agent_name,
+        contact_name=contact_name,
+        phone=payload.phone,
+        email=contact_email,
+        company_name=None,
+    )
 
     # Log interaction to DB for Call Center & Client History
     try:
@@ -207,18 +368,20 @@ def queue_self_test(
         "id": len(_TASKS) + 1,
         "persona": payload.persona,
         "buyer_id": 0,
-        "contact_id": None,
+        "contact_id": contact_id,
         "company_name": "Direct AI Call",
         "contact_name": contact_name,
         "contact_phone": payload.phone,
+        "contact_email": contact_email,
         "call_sid": call_result.get("call_sid"),
         "status": "in_progress",
         "ready": True,
         "is_test": True,
-        "created_at": "2026-08-24T13:00:00Z",
-        "started_at": "2026-08-24T13:00:00Z",
+        "created_at": _now_iso(),
+        "started_at": _now_iso(),
         "outcome": "Calling",
         "remarks": f"Calling {payload.phone} live (SID: {call_result.get('call_sid')})...",
+        "followup": followup,
     }
     _TASKS.insert(0, task)
     for r in _RUNNERS:
@@ -226,7 +389,7 @@ def queue_self_test(
             r["status"] = "running"
             r["current_task_id"] = task["id"]
             r["current_task"] = task
-    return {"task": task, "call_result": call_result}
+    return {"task": task, "call_result": call_result, "followup": followup}
 
 
 class EndCallRequest(BaseModel):
@@ -300,13 +463,73 @@ def skip_task(
 @router.post("/runners/start")
 def start_runner(
     payload: RunnerControlRequest,
+    db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    _ = user
+    from integrations.voice_client import voice_client
+
     for r in _RUNNERS:
-        if r.get("persona") == payload.persona:
-            r["status"] = "running"
+        if r.get("persona") != payload.persona:
+            continue
+        r["status"] = "running"
+        in_prog = next(
+            (
+                t
+                for t in _TASKS
+                if t.get("persona") == payload.persona and t.get("status") in ("in_progress", "running")
+            ),
+            None,
+        )
+        if in_prog:
             return r
+
+        nxt = next(
+            (
+                t
+                for t in _TASKS
+                if t.get("persona") == payload.persona
+                and t.get("status") == "queued"
+                and t.get("ready")
+                and t.get("contact_phone")
+            ),
+            None,
+        )
+        if not nxt:
+            return r
+
+        agent_name = "Sara" if payload.persona == "female" else "Rayan"
+        contact_name = nxt.get("contact_name") or "Purchasing Manager"
+        phone = nxt.get("contact_phone")
+        call_result = voice_client.place_outbound_ai_call(
+            phone,
+            persona=payload.persona,
+            contact_name=contact_name,
+            language="en",
+        )
+        if not call_result.get("ok"):
+            nxt["status"] = "failed"
+            nxt["remarks"] = f"Twilio Voice Error: {call_result.get('error')}"
+            r["status"] = "idle"
+            raise HTTPException(400, f"Twilio Voice Error: {call_result.get('error')}")
+
+        email = nxt.get("contact_email") or _contact_email_for_phone(db, phone)
+        followup = _auto_followup_after_call(
+            db,
+            user=user,
+            agent_name=agent_name,
+            contact_name=contact_name,
+            phone=phone,
+            email=email,
+            company_name=nxt.get("company_name"),
+        )
+        nxt["status"] = "in_progress"
+        nxt["call_sid"] = call_result.get("call_sid")
+        nxt["started_at"] = _now_iso()
+        nxt["followup"] = followup
+        nxt["remarks"] = f"Calling {phone} live (SID: {call_result.get('call_sid')})..."
+        r["current_task_id"] = nxt["id"]
+        r["current_task"] = nxt
+        return r
     raise HTTPException(404, "Runner persona not found")
 
 

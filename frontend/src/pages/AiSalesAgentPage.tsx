@@ -184,7 +184,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     }
     setSelfTesting(true);
     try {
-      await client.queueAiSalesAgentSelfTest({
+      const result = await client.queueAiSalesAgentSelfTest({
         persona: selfTestPersona,
         phone,
         contact_name: selfTestName.trim() || undefined,
@@ -192,8 +192,21 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       });
       await client.startAiSalesAgentRunner(selfTestPersona);
       const agentName = selfTestPersona === "female" ? "Sara" : "Rayan";
-      setQueueNotice(`📞 ${agentName} is initiating an AI call to ${phone} right now!`);
-      setTimeout(() => setQueueNotice(null), 12000);
+      const followup = result.followup;
+      const waBit =
+        followup?.whatsapp_status === "sent"
+          ? " Personal WhatsApp sent."
+          : followup?.whatsapp_message
+            ? ` WhatsApp: ${followup.whatsapp_message}`
+            : "";
+      const emailBit =
+        followup?.email_status === "sent"
+          ? ` Email sent${followup.email_to ? ` to ${followup.email_to}` : ""}.`
+          : followup?.email_message
+            ? ` Email: ${followup.email_message}`
+            : "";
+      setQueueNotice(`📞 ${agentName} is calling ${phone} now.${waBit}${emailBit}`);
+      setTimeout(() => setQueueNotice(null), 14000);
       await load();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Direct call failed");
@@ -232,7 +245,25 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   ) {
     try {
       if (action === "start") {
-        await client.startAiSalesAgentRunner(persona);
+        const runner = await client.startAiSalesAgentRunner(persona);
+        const followup = runner.current_task?.followup;
+        const agentName = persona === "female" ? "Sara" : "Rayan";
+        if (followup) {
+          const waBit =
+            followup.whatsapp_status === "sent"
+              ? " Personal WhatsApp sent."
+              : followup.whatsapp_message
+                ? ` WhatsApp: ${followup.whatsapp_message}`
+                : "";
+          const emailBit =
+            followup.email_status === "sent"
+              ? ` Email sent${followup.email_to ? ` to ${followup.email_to}` : ""}.`
+              : followup.email_message
+                ? ` Email: ${followup.email_message}`
+                : "";
+          setQueueNotice(`${agentName} started calling.${waBit}${emailBit}`);
+          setTimeout(() => setQueueNotice(null), 14000);
+        }
       } else {
         await client.pauseAiSalesAgentRunner(persona);
       }
@@ -479,8 +510,9 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
           <h3 className="font-medium text-slate-100">Test call to your phone</h3>
           <p className="text-xs text-slate-500">
             Fastest way to hear Sara or Rayan: enter your mobile here. Your name is what they
-            will ask for on the call. Then click <strong className="text-slate-300">Start calling</strong>{" "}
-            on the agent card above.
+            will ask for on the call. Then click <strong className="text-slate-300">Call Now</strong>.
+            When the call starts, Sara/Rayan also send a personal WhatsApp from your scanned
+            session and an email if an address is on file.
           </p>
           <div className="flex flex-wrap gap-3 items-end">
             <label className="text-sm text-slate-400">
