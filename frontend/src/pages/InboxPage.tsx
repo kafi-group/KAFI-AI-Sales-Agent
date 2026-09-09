@@ -28,7 +28,7 @@ import {
   emailBodyHasContent,
 } from "../components/EmailBodyEditor";
 import { capitalizeFirstLetter } from "../utils/spelling";
-import { ActionButton, IconButton } from "../components/ui/ActionButton";
+import { ActionButton } from "../components/ui/ActionButton";
 import {
   IconArchive,
   IconBookOpen,
@@ -1416,12 +1416,6 @@ export function InboxPage({
               Unread only
             </label>
           )}
-          <IconButton
-            icon={IconRefresh}
-            label="Refresh"
-            size="md"
-            onClick={() => void loadList()}
-          />
         </div>
       </div>
 
