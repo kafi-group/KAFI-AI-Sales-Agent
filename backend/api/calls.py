@@ -47,7 +47,7 @@ def suggest_dialable_contacts(
     country: str | None = Query(None),
     grade: str | None = Query(None),
     designation: str | None = Query(None),
-    limit: int = Query(25, ge=1, le=50),
+    limit: int = Query(25, ge=1, le=80),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -807,6 +807,33 @@ async def twilio_call_recording(
     if media and media.get("local_path") and media.get("transcript_status") == "pending":
         background_tasks.add_task(_transcribe_in_background, iid)
     return _twiml_response("<Response/>")
+
+
+@webhooks_router.post("/ai-agent/status")
+async def twilio_ai_agent_status(request: Request):
+    """Twilio status callback for Sara/Rayan outbound calls — follow-up + next in queue."""
+    try:
+        form = await _twilio_form(request)
+    except HTTPException:
+        return {"ok": True}
+    task_id_raw = request.query_params.get("task_id")
+    try:
+        task_id = int(task_id_raw) if task_id_raw else None
+    except ValueError:
+        task_id = None
+    status = str(form.get("CallStatus") or form.get("DialCallStatus") or "")
+    duration = form.get("CallDuration") or form.get("DialCallDuration")
+    call_sid = str(form.get("CallSid") or "") or None
+    from api import ai_sales_agent as asa
+
+    asa.handle_ai_call_status(
+        task_id=task_id,
+        call_sid=call_sid,
+        status=status,
+        duration=duration,
+        ended_reason=status,
+    )
+    return {"ok": True}
 
 
 @webhooks_router.post("/ai-agent/intro")

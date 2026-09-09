@@ -363,6 +363,7 @@ class VoiceClient:
         persona: str = "female",
         contact_name: str | None = None,
         language: str | None = "en",
+        task_id: int | None = None,
     ) -> dict[str, Any]:
         """Initiate an outbound PSTN call via Vapi AI Voice Engine (or Twilio fallback)."""
         normalized = normalize_e164(to_phone)
@@ -440,6 +441,19 @@ class VoiceClient:
 
                 if vapi_phone_id:
                     payload["phoneNumberId"] = vapi_phone_id
+                if task_id is not None:
+                    payload["metadata"] = {"task_id": task_id, "persona": persona}
+                if settings.twilio_webhook_base_url:
+                    try:
+                        payload["assistant"]["serverUrl"] = self.webhook_url(
+                            "/api/webhooks/vapi/ai-agent"
+                        )
+                        payload["assistant"]["serverMessages"] = [
+                            "end-of-call-report",
+                            "status-update",
+                        ]
+                    except Exception:
+                        pass
 
                 data = json.dumps(payload).encode("utf-8")
                 req = urllib.request.Request(
@@ -478,12 +492,21 @@ class VoiceClient:
             q_name = urllib.parse.quote(contact_name or "there")
 
             if settings.twilio_webhook_base_url:
-                webhook_url = self.webhook_url(f"/api/webhooks/twilio/ai-agent/intro?persona={q_persona}&name={q_name}")
-                call = client.calls.create(
-                    to=normalized,
-                    from_=settings.twilio_phone_number.strip(),
-                    url=webhook_url,
+                webhook_url = self.webhook_url(
+                    f"/api/webhooks/twilio/ai-agent/intro?persona={q_persona}&name={q_name}"
                 )
+                create_kwargs: dict[str, Any] = {
+                    "to": normalized,
+                    "from_": settings.twilio_phone_number.strip(),
+                    "url": webhook_url,
+                }
+                if task_id is not None:
+                    create_kwargs["status_callback"] = self.webhook_url(
+                        f"/api/webhooks/twilio/ai-agent/status?task_id={int(task_id)}"
+                    )
+                    create_kwargs["status_callback_event"] = ["answered", "completed"]
+                    create_kwargs["status_callback_method"] = "POST"
+                call = client.calls.create(**create_kwargs)
             else:
                 msg = text_message or f"Hello {contact_name or 'there'}, this is {persona} from Kafi Commodities. Thank you for connecting."
                 twiml_content = self.say_twiml(msg)
@@ -527,6 +550,65 @@ class VoiceClient:
                 print(f"Vapi hangup failed: {exc}", flush=True)
 
         return {"ok": True, "engine": "generic"}
+
+    def fetch_outbound_status(self, call_sid: str | None) -> dict[str, Any]:
+        """Best-effort live status for a Vapi or Twilio call (used to detect no-answer)."""
+        if not call_sid:
+            return {"ok": False, "ended": False}
+        sid = str(call_sid).strip()
+        vapi_key = getattr(settings, "vapi_api_key", None)
+        if vapi_key and not sid.startswith("CA"):
+            try:
+                import json
+                import urllib.request
+
+                req = urllib.request.Request(
+                    f"https://api.vapi.ai/call/{sid}",
+                    headers={"Authorization": f"Bearer {vapi_key}"},
+                )
+                with urllib.request.urlopen(req, timeout=8) as res:
+                    data = json.loads(res.read().decode("utf-8"))
+                status = str(data.get("status") or "").lower()
+                ended_reason = str(data.get("endedReason") or data.get("ended_reason") or "")
+                duration = data.get("durationSeconds") or data.get("duration")
+                ended = status in {"ended", "completed", "failed"} or bool(ended_reason)
+                return {
+                    "ok": True,
+                    "ended": ended,
+                    "status": status or ended_reason,
+                    "ended_reason": ended_reason,
+                    "duration": duration,
+                    "engine": "vapi",
+                }
+            except Exception as exc:
+                print(f"Vapi status fetch failed: {exc}", flush=True)
+        if sid.startswith("CA") and settings.twilio_account_sid and settings.twilio_auth_token:
+            try:
+                from twilio.rest import Client
+
+                c = Client(settings.twilio_account_sid.strip(), settings.twilio_auth_token.strip())
+                call = c.calls(sid).fetch()
+                status = str(getattr(call, "status", "") or "").lower()
+                duration = getattr(call, "duration", None)
+                ended = status in {
+                    "completed",
+                    "busy",
+                    "failed",
+                    "no-answer",
+                    "canceled",
+                    "cancelled",
+                }
+                return {
+                    "ok": True,
+                    "ended": ended,
+                    "status": status,
+                    "ended_reason": status,
+                    "duration": duration,
+                    "engine": "twilio",
+                }
+            except Exception as exc:
+                print(f"Twilio status fetch failed: {exc}", flush=True)
+        return {"ok": False, "ended": False}
 
 
 voice_client = VoiceClient()

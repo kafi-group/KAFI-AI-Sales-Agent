@@ -1162,7 +1162,7 @@ def suggest_dialable_contacts(
     grade_str = (grade or "").strip()
     desig_str = (designation or "").strip()
 
-    limit = max(1, min(int(limit or 25), 50))
+    limit = max(1, min(int(limit or 25), 80))
 
     b_query = db.query(Buyer).join(Contact, Contact.buyer_id == Buyer.id)
     if assigned_to_user_id is not None:

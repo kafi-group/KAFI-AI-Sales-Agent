@@ -3574,6 +3574,7 @@ export const client = {
   }) =>
     request<{ tasks: AiSalesAgentTask[] }>("/ai-sales-agent/tasks/assign", {
       method: "POST",
+      headers: aiSalesAgentHeaders(),
       body: JSON.stringify(data),
     }),
   queueAiSalesAgentSelfTest: (data: {
@@ -3581,6 +3582,7 @@ export const client = {
     phone: string;
     contact_name?: string;
     language?: string;
+    dial_now?: boolean;
   }) =>
     request<{ task: AiSalesAgentTask; followup?: AiSalesAgentFollowup }>(
       "/ai-sales-agent/tasks/self-test",
@@ -3601,11 +3603,15 @@ export const client = {
       method: "POST",
       headers: aiSalesAgentHeaders(),
     }),
-  startAiSalesAgentRunner: (persona: string) =>
+  startAiSalesAgentRunner: (persona: string, opts?: { task_id?: number; sequence?: boolean }) =>
     request<AiSalesAgentRunner>("/ai-sales-agent/runners/start", {
       method: "POST",
       headers: aiSalesAgentHeaders(),
-      body: JSON.stringify({ persona }),
+      body: JSON.stringify({
+        persona,
+        task_id: opts?.task_id,
+        sequence: opts?.sequence ?? true,
+      }),
     }),
   pauseAiSalesAgentRunner: (persona: string) =>
     request<AiSalesAgentRunner>("/ai-sales-agent/runners/pause", {
@@ -3614,11 +3620,14 @@ export const client = {
       body: JSON.stringify({ persona }),
     }),
   endAiSalesAgentCall: (payload: { persona?: string; call_sid?: string; task_id?: number } = {}) =>
-    request<{ ok: boolean; task?: AiSalesAgentTask }>("/ai-sales-agent/end-call", {
-      method: "POST",
-      headers: aiSalesAgentHeaders(),
-      body: JSON.stringify(payload),
-    }),
+    request<{ ok: boolean; task?: AiSalesAgentTask; followup?: AiSalesAgentFollowup }>(
+      "/ai-sales-agent/end-call",
+      {
+        method: "POST",
+        headers: aiSalesAgentHeaders(),
+        body: JSON.stringify(payload),
+      },
+    ),
   getAiSalesAgentBriefing: (buyerId: number, contactId?: number) => {
     const qs = contactId ? `?contact_id=${contactId}` : "";
     return request<AiSalesAgentBriefing>(
@@ -4055,6 +4064,7 @@ export interface AiSalesAgentRunner {
   current_task: AiSalesAgentTask | null;
   pending_count: number;
   twilio_ready: boolean;
+  sequence_mode?: boolean;
 }
 
 export interface AiSalesAgentFollowup {

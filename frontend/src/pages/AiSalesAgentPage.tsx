@@ -7,8 +7,10 @@ import {
   isTransientApiError,
   type AiSalesAgentRunner,
   type AiSalesAgentTask,
+  type DialableContactSuggestion,
 } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { AiSalesAgentQueuePicker } from "../components/AiSalesAgentQueuePicker";
 import {
   LeadWhatsAppComposeModal,
   type WhatsAppComposeTarget,
@@ -43,7 +45,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   const [selfTestLanguage, setSelfTestLanguage] = useState<string>("en");
   const [selfTesting, setSelfTesting] = useState(false);
   const [endingCall, setEndingCall] = useState(false);
-  const [postCallPrompt, setPostCallPrompt] = useState<AiSalesAgentTask | null>(null);
+  const [callingTaskId, setCallingTaskId] = useState<number | null>(null);
   const [whatsAppModalTarget, setWhatsAppModalTarget] = useState<WhatsAppComposeTarget | null>(null);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailModalInitial, setEmailModalInitial] = useState<{ to: string; subject: string } | null>(null);
@@ -145,6 +147,23 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     }
   }
 
+  function followupNotice(prefix: string, followup?: AiSalesAgentTask["followup"] | null) {
+    if (!followup) return prefix;
+    const waBit =
+      followup.whatsapp_status === "sent"
+        ? " WhatsApp sent."
+        : followup.whatsapp_message
+          ? ` WhatsApp: ${followup.whatsapp_message}`
+          : "";
+    const emailBit =
+      followup.email_status === "sent"
+        ? ` Email sent${followup.email_to ? ` to ${followup.email_to}` : ""}.`
+        : followup.email_message
+          ? ` Email: ${followup.email_message}`
+          : "";
+    return `${prefix}${waBit}${emailBit}`;
+  }
+
   async function handleSelfTest() {
     const phone = selfTestPhone.trim();
     if (!phone) {
@@ -158,11 +177,12 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         phone,
         contact_name: selfTestName.trim() || undefined,
         language: selfTestLanguage,
+        dial_now: false,
       });
       setFilterPersona(selfTestPersona);
       setQueueNotice(
         `Queued test call to ${phone} as ${selfTestPersona === "female" ? "Sara" : "Rayan"}. ` +
-          "Click Start calling below when ready.",
+          "Use Call this number in the queue, or Start calling (all in sequence).",
       );
       setTimeout(() => setQueueNotice(null), 10000);
       await load();
@@ -184,28 +204,17 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     }
     setSelfTesting(true);
     try {
-      const result = await client.queueAiSalesAgentSelfTest({
+      await client.queueAiSalesAgentSelfTest({
         persona: selfTestPersona,
         phone,
         contact_name: selfTestName.trim() || undefined,
         language: selfTestLanguage,
+        dial_now: true,
       });
-      await client.startAiSalesAgentRunner(selfTestPersona);
       const agentName = selfTestPersona === "female" ? "Sara" : "Rayan";
-      const followup = result.followup;
-      const waBit =
-        followup?.whatsapp_status === "sent"
-          ? " Personal WhatsApp sent."
-          : followup?.whatsapp_message
-            ? ` WhatsApp: ${followup.whatsapp_message}`
-            : "";
-      const emailBit =
-        followup?.email_status === "sent"
-          ? ` Email sent${followup.email_to ? ` to ${followup.email_to}` : ""}.`
-          : followup?.email_message
-            ? ` Email: ${followup.email_message}`
-            : "";
-      setQueueNotice(`📞 ${agentName} is calling ${phone} now.${waBit}${emailBit}`);
+      setQueueNotice(
+        `📞 ${agentName} is calling ${phone} now. When the call ends, WhatsApp and email are sent automatically — including a missed-call email if no one picks up.`,
+      );
       setTimeout(() => setQueueNotice(null), 14000);
       await load();
     } catch (e) {
@@ -226,16 +235,65 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     }
     setAssigning(true);
     try {
-      await client.assignAiSalesAgentTasks({
+      const result = await client.assignAiSalesAgentTasks({
         persona: assignPersona,
         buyer_ids: ids,
       });
       setBuyerIdsRaw("");
+      setQueueNotice(`Added ${result.tasks.length} contact(s) to the queue.`);
+      setTimeout(() => setQueueNotice(null), 8000);
       await load();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Assign failed");
     } finally {
       setAssigning(false);
+    }
+  }
+
+  async function handleAssignContacts(contacts: DialableContactSuggestion[]) {
+    if (!contacts.length) {
+      onError("Tick at least one contact from the Master Table list.");
+      return;
+    }
+    setAssigning(true);
+    try {
+      const result = await client.assignAiSalesAgentTasks({
+        persona: assignPersona,
+        buyer_ids: contacts.map((row) => row.buyer_id),
+        contact_ids: contacts.map((row) => row.contact_id),
+      });
+      setFilterPersona(assignPersona);
+      setQueueNotice(
+        `Added ${result.tasks.length} Master Table contact(s) to ${
+          assignPersona === "female" ? "Sara" : "Rayan"
+        }'s queue.`,
+      );
+      setTimeout(() => setQueueNotice(null), 8000);
+      await load();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Could not add contacts to the queue");
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  async function handleCallOne(task: AiSalesAgentTask) {
+    setCallingTaskId(task.id);
+    try {
+      await client.startAiSalesAgentRunner(task.persona, {
+        task_id: task.id,
+        sequence: false,
+      });
+      const agentName = task.persona === "female" ? "Sara" : "Rayan";
+      setQueueNotice(
+        `${agentName} is calling ${task.contact_name || task.company_name || "this number"} now. Follow-up WhatsApp and email send automatically when the call ends.`,
+      );
+      setTimeout(() => setQueueNotice(null), 12000);
+      await load();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Could not start this call");
+    } finally {
+      setCallingTaskId(null);
     }
   }
 
@@ -245,25 +303,12 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   ) {
     try {
       if (action === "start") {
-        const runner = await client.startAiSalesAgentRunner(persona);
-        const followup = runner.current_task?.followup;
+        await client.startAiSalesAgentRunner(persona, { sequence: true });
         const agentName = persona === "female" ? "Sara" : "Rayan";
-        if (followup) {
-          const waBit =
-            followup.whatsapp_status === "sent"
-              ? " Personal WhatsApp sent."
-              : followup.whatsapp_message
-                ? ` WhatsApp: ${followup.whatsapp_message}`
-                : "";
-          const emailBit =
-            followup.email_status === "sent"
-              ? ` Email sent${followup.email_to ? ` to ${followup.email_to}` : ""}.`
-              : followup.email_message
-                ? ` Email: ${followup.email_message}`
-                : "";
-          setQueueNotice(`${agentName} started calling.${waBit}${emailBit}`);
-          setTimeout(() => setQueueNotice(null), 14000);
-        }
+        setQueueNotice(
+          `${agentName} is calling the queue in sequence. After each call, WhatsApp and email are sent automatically (missed-call email if no pickup), then the next number is dialed.`,
+        );
+        setTimeout(() => setQueueNotice(null), 14000);
       } else {
         await client.pauseAiSalesAgentRunner(persona);
       }
@@ -277,27 +322,9 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     setEndingCall(true);
     try {
       const res = await client.endAiSalesAgentCall({ persona });
-      setQueueNotice("Call ended.");
-      setTimeout(() => setQueueNotice(null), 5000);
+      setQueueNotice(followupNotice("Call ended.", res.followup || res.task?.followup));
+      setTimeout(() => setQueueNotice(null), 12000);
       await load();
-      if (res.task && res.task.contact_phone) {
-        setPostCallPrompt(res.task);
-      } else if (tasks.length > 0 && tasks[0].contact_phone) {
-        setPostCallPrompt(tasks[0]);
-      } else if (selfTestPhone.trim()) {
-        setPostCallPrompt({
-          id: 0,
-          persona: (persona as any) || selfTestPersona,
-          buyer_id: 0,
-          contact_id: null,
-          company_name: selfTestName.trim() || "Test Call",
-          contact_name: selfTestName.trim() || "Test Lead",
-          contact_phone: selfTestPhone.trim(),
-          status: "completed",
-          ready: true,
-          outcome: "Ended",
-        } as unknown as AiSalesAgentTask);
-      }
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to end call");
     } finally {
@@ -420,10 +447,10 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       <div>
         <h2 className="text-lg font-medium text-slate-100">AI Sales Agent</h2>
         <p className="text-sm text-slate-400 mt-1">
-          Rayan and Sara dial the <strong className="text-slate-300">lead&apos;s contact phone</strong>{" "}
-          from the Master Table — not your login name. Queue rows with{" "}
-          <strong className="text-slate-300">Queue AI calls</strong>, unlock this page, filter by
-          agent, then click <strong className="text-slate-300">Start calling</strong>.
+          Rayan and Sara dial leads from the <strong className="text-slate-300">Master Table</strong>.
+          Filter by country, grade, and designation, tick contacts into the queue, then call one
+          number or the full sequence. When a call ends they send WhatsApp and email automatically
+          — no prompt. If nobody picks up, they send a missed-call email asking for a better time.
         </p>
       </div>
 
@@ -463,6 +490,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
             </div>
             <p className="text-sm text-slate-400">
               {runner.pending_count} pending
+              {runner.sequence_mode && runner.status === "running" ? " · sequence" : ""}
               {runner.current_task?.company_name
                 ? ` · Calling ${runner.current_task.company_name}`
                 : ""}
@@ -476,11 +504,15 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  disabled={!runner.twilio_ready || runner.status === "running"}
+                  disabled={
+                    !runner.twilio_ready ||
+                    runner.status === "running" ||
+                    runner.pending_count === 0
+                  }
                   onClick={() => void handleRunnerAction(runner.persona, "start")}
                   className="px-3 py-1.5 text-sm rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-medium"
                 >
-                  Start calling
+                  Start calling (all in sequence)
                 </button>
                 <button
                   type="button"
@@ -509,10 +541,8 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         <div className="rounded-xl border border-violet-500/40 bg-violet-500/5 p-4 space-y-3">
           <h3 className="font-medium text-slate-100">Test call to your phone</h3>
           <p className="text-xs text-slate-500">
-            Fastest way to hear Sara or Rayan: enter your mobile here. Your name is what they
-            will ask for on the call. Then click <strong className="text-slate-300">Call Now</strong>.
-            When the call starts, Sara/Rayan also send a personal WhatsApp from your scanned
-            session and an email if an address is on file.
+            Fastest way to hear Sara or Rayan: enter your mobile here. When the call ends they
+            send WhatsApp and email automatically (a missed-call note if you do not pick up).
           </p>
           <div className="flex flex-wrap gap-3 items-end">
             <label className="text-sm text-slate-400">
@@ -594,91 +624,45 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         </div>
       )}
 
-      {postCallPrompt && (
-        <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/40 p-4 flex flex-wrap items-center justify-between gap-3 shadow-lg">
-          <div>
-            <p className="font-semibold text-emerald-200 flex items-center gap-2 text-sm">
-              <span>📞</span>
-              <span>
-                Call with {postCallPrompt.contact_name || postCallPrompt.company_name} ({postCallPrompt.contact_phone}) ended.
-              </span>
-            </p>
-            <p className="text-xs text-slate-300 mt-0.5">
-              Send follow-up communication to this contact right now:
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {postCallPrompt.contact_phone && (
+      {isAdmin && (
+        <div className="rounded-xl border border-cyan-500/30 bg-slate-900/40 p-4 space-y-3">
+          <h3 className="font-medium text-slate-100">Add contacts to queue</h3>
+          <p className="text-xs text-slate-500">
+            Contacts come from the <strong className="text-slate-300">Master Table</strong>. Choose
+            country, grade, and designation first so the searchable list shrinks, then tick names
+            and add them. Sara or Rayan can then call one number or the whole queue in sequence.
+            After each call they send WhatsApp and email themselves — they do not ask you to draft.
+          </p>
+          <AiSalesAgentQueuePicker
+            persona={assignPersona}
+            onPersonaChange={setAssignPersona}
+            assigning={assigning}
+            onAssign={(contacts) => void handleAssignContacts(contacts)}
+          />
+          <details className="text-xs text-slate-500">
+            <summary className="cursor-pointer text-slate-400 hover:text-slate-200">
+              Or paste Master Table lead IDs
+            </summary>
+            <div className="flex flex-wrap gap-3 items-end mt-3">
+              <label className="text-sm text-slate-400 flex-1 min-w-[200px]">
+                Lead IDs from table # column
+                <input
+                  value={buyerIdsRaw}
+                  onChange={(e) => setBuyerIdsRaw(e.target.value)}
+                  placeholder="e.g. 1204 1205 1206"
+                  className="mt-1 block w-full rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100"
+                />
+              </label>
               <button
                 type="button"
-                onClick={() => openWhatsAppForTask(postCallPrompt)}
-                className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow"
+                disabled={assigning}
+                onClick={() => void handleAssign()}
+                className="px-4 py-2 text-sm rounded-lg border border-slate-600 text-slate-200 hover:bg-slate-800 disabled:opacity-40"
               >
-                <span>💬 Send WhatsApp</span>
+                {assigning ? "Assigning…" : "Assign IDs to queue"}
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => openEmailForTask(postCallPrompt)}
-              className="px-3.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-1.5 shadow"
-            >
-              <span>✉️ Send Email</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setPostCallPrompt(null)}
-              className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-400 hover:text-white text-xs"
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-
-      {isAdmin && (
-        <div className="rounded-xl border border-slate-700/80 bg-slate-900/40 p-4 space-y-3">
-          <h3 className="font-medium text-slate-100">Assign calls (optional)</h3>
-          <p className="text-xs text-slate-500">
-            Easiest: open <strong className="text-slate-300">Master Table</strong> or{" "}
-            <strong className="text-slate-300">Old clients</strong>, select rows, then{" "}
-            <strong className="text-slate-300">Queue AI calls → Rayan</strong> or{" "}
-            <strong className="text-slate-300">Sara</strong>.{" "}
-            <strong className="text-slate-300">Assign to</strong> is for human reps only. The{" "}
-            <strong className="text-slate-300">#</strong> column is the lead ID if you paste here
-            manually.
-          </p>
-          <div className="flex flex-wrap gap-3 items-end">
-            <label className="text-sm text-slate-400">
-              Agent
-              <select
-                value={assignPersona}
-                onChange={(e) =>
-                  setAssignPersona(e.target.value as "male" | "female")
-                }
-                className="mt-1 block w-full min-w-[140px] rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100"
-              >
-                <option value="male">Rayan (male)</option>
-                <option value="female">Sara (female)</option>
-              </select>
-            </label>
-            <label className="text-sm text-slate-400 flex-1 min-w-[200px]">
-              Lead IDs from table # column (optional)
-              <input
-                value={buyerIdsRaw}
-                onChange={(e) => setBuyerIdsRaw(e.target.value)}
-                placeholder="e.g. 1204 1205 1206"
-                className="mt-1 block w-full rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100"
-              />
-            </label>
-            <button
-              type="button"
-              disabled={assigning}
-              onClick={() => void handleAssign()}
-              className="px-4 py-2 text-sm rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40"
-            >
-              {assigning ? "Assigning…" : "Assign to queue"}
-            </button>
-          </div>
+            </div>
+          </details>
         </div>
       )}
 
@@ -792,8 +776,8 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
 
         {!tasks.length ? (
           <p className="text-sm text-slate-500">
-            No tasks in the queue yet. Use <strong className="text-slate-400">Test call to your phone</strong>{" "}
-            above, or queue leads from Master Table → Queue AI calls.
+            No tasks in the queue yet. Filter Master Table contacts above, tick names, and add them
+            to Sara or Rayan.
           </p>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-slate-700/80">
@@ -869,8 +853,17 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                           <span>✉️</span>
                           <span>Email</span>
                         </button>
-                        {isAdmin && task.status === "pending" && (
+                        {isAdmin && (task.status === "queued" || task.status === "pending") && (
                           <>
+                            <button
+                              type="button"
+                              disabled={callingTaskId === task.id || !task.contact_phone}
+                              onClick={() => void handleCallOne(task)}
+                              className="px-2 py-1 rounded bg-violet-600/20 hover:bg-violet-600/30 text-violet-200 border border-violet-500/30 text-xs font-semibold disabled:opacity-40"
+                              title="Call only this number"
+                            >
+                              {callingTaskId === task.id ? "Calling…" : "Call this"}
+                            </button>
                             <button
                               type="button"
                               onClick={() => void handleSkip(task.id)}
