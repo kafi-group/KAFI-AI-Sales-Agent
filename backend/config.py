@@ -213,9 +213,9 @@ class Settings(BaseSettings):
     # DB connection pool — sized for concurrent CRM polls + one background job
     # on a single Railway worker. Raise via DB_POOL_SIZE / DB_MAX_OVERFLOW only
     # after confirming Supabase/session-pooler headroom.
-    db_pool_size: int = 8
-    db_max_overflow: int = 17
-    db_pool_timeout: int = 20
+    db_pool_size: int = 15
+    db_max_overflow: int = 30
+    db_pool_timeout: int = 15
 
     @field_validator("mailbox_imap_port", "mailbox_smtp_port", mode="before")
     @classmethod

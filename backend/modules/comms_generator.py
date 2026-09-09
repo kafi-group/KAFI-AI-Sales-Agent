@@ -505,8 +505,23 @@ class CommsGenerator:
                 .join(Buyer, Contact.buyer_id == Buyer.id)
                 .filter(Buyer.assigned_to_user_id == assigned_to_user_id)
             )
-        latest_sub = latest_q.group_by(Interaction.contact_id).subquery()
-        total = db.query(latest_sub).count()
+        if assigned_to_user_id is not None:
+            total = (
+                db.query(sa_func.count(sa_func.distinct(Interaction.contact_id)))
+                .join(Contact, Interaction.contact_id == Contact.id)
+                .join(Buyer, Contact.buyer_id == Buyer.id)
+                .filter(meta_condition, Buyer.assigned_to_user_id == assigned_to_user_id)
+                .scalar()
+                or 0
+            )
+        else:
+            total = (
+                db.query(sa_func.count(sa_func.distinct(Interaction.contact_id)))
+                .filter(meta_condition)
+                .scalar()
+                or 0
+            )
+
         rows = (
             db.query(latest_sub)
             .order_by(latest_sub.c.last_at.desc())
@@ -577,15 +592,19 @@ class CommsGenerator:
                         candidate_phones.add(digits[-10:])
 
         if candidate_phones:
-            # Query contacts with buyers that have valid full_name and not whatsapp_inbound
+            phone_filters = []
+            for p in list(candidate_phones)[:40]:
+                phone_filters.append(Contact.phone.like(f"%{p}%"))
+                phone_filters.append(Contact.wa_id.like(f"%{p}%"))
+
             master_matches = (
                 db.query(Contact)
                 .join(Buyer, Contact.buyer_id == Buyer.id)
                 .filter(
                     Contact.data_source != "whatsapp_inbound",
-                    (Contact.phone.isnot(None)) | (Contact.wa_id.isnot(None)) | (Contact.primary_phone.isnot(None)),
+                    or_(*phone_filters),
                 )
-                .order_by(Contact.id.desc())
+                .limit(50)
                 .all()
             )
             for mc in master_matches:
