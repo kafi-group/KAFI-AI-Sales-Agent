@@ -139,6 +139,25 @@ class VoiceClient:
             path = f"/{path}"
         return f"{base}{path}"
 
+    def sync_twiml_app_voice_url(self) -> bool:
+        """Ensure the Twilio TwiML App Voice URL points to the live server."""
+        if not self.browser_ready or not settings.twilio_twiml_app_sid:
+            return False
+        expected_url = self.webhook_url("/api/webhooks/twilio/voice/client-dial")
+        try:
+            client = self._client()
+            app = client.applications.get(settings.twilio_twiml_app_sid).fetch()
+            if app.voice_url != expected_url:
+                client.applications.get(settings.twilio_twiml_app_sid).update(
+                    voice_url=expected_url,
+                    voice_method="POST",
+                )
+                print(f"Twilio TwiML App {settings.twilio_twiml_app_sid} voice_url updated to {expected_url}", flush=True)
+            return True
+        except Exception as exc:
+            print(f"WARNING: failed to sync Twilio TwiML App Voice URL: {exc}", flush=True)
+            return False
+
     def validate_webhook(
         self,
         url: str,

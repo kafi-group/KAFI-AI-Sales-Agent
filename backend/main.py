@@ -100,7 +100,8 @@ def _keepalive_ping():
     """Self-ping HTTP endpoint every 2 minutes to keep Railway container warm 24/7."""
     import urllib.request
     try:
-        url = "https://kafi-sales-agent.up.railway.app/api/leads/product-types"
+        base = settings.twilio_webhook_base_url or "https://kafi-sales-agent-production.up.railway.app"
+        url = f"{base}/api/leads/product-types"
         req = urllib.request.Request(url, headers={"User-Agent": "Kafi-KeepAlive/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             resp.read()
@@ -200,6 +201,13 @@ async def lifespan(app: FastAPI):
             db.close()
     except Exception as exc:
         print(f"WARNING: startup seed/admin failed: {exc}", flush=True)
+
+    try:
+        from integrations.voice_client import voice_client
+        if voice_client.browser_ready:
+            voice_client.sync_twiml_app_voice_url()
+    except Exception as exc:
+        print(f"WARNING: failed to sync Twilio TwiML App URL: {exc}", flush=True)
 
     print("Application startup complete.", flush=True)
 
