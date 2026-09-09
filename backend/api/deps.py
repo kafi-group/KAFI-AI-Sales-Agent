@@ -91,7 +91,9 @@ def get_current_user_released(
         _ = (
             user.id,
             user.username,
+            user.full_name,
             user.role,
+            user.is_active,
             user.mailbox_email,
             user.mailbox_password_encrypted,
             user.mailbox_display_name,

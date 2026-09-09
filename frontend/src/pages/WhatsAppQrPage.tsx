@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { client } from "../api/client";
 import { ActionButton } from "../components/ui/ActionButton";
 import { IconRefresh, IconWhatsApp } from "../components/icons/AppIcons";
@@ -38,14 +38,17 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
   const [pairing, setPairing] = useState(false);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const refreshLock = useRef(false);
 
   const connected = isConnectedStatus(status);
   const statusLabel = String(status?.status ?? (connected ? "connected" : "disconnected"));
   const qrPending = statusLabel.toLowerCase() === "qr-pending";
   const qrImage = qrImageFromPayload(qr);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (opts?: { silent?: boolean }) => {
+    if (refreshLock.current) return;
+    refreshLock.current = true;
+    if (!opts?.silent) setLoading(true);
     try {
       const [st, session] = await Promise.all([
         client.getWhatsAppPersonalStatus(),
@@ -66,9 +69,12 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
         setQr(null);
       }
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Could not load WhatsApp Personal status");
+      if (!opts?.silent) {
+        onError(e instanceof Error ? e.message : "Could not load WhatsApp Personal status");
+      }
     } finally {
       setLoading(false);
+      refreshLock.current = false;
     }
   }, [onError]);
 
@@ -83,7 +89,7 @@ export function WhatsAppQrPage({ onError }: WhatsAppQrPageProps) {
   }, [connected, qrPending, qrImage]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => void refresh(), pollMs);
+    const timer = window.setInterval(() => void refresh({ silent: true }), pollMs);
     return () => window.clearInterval(timer);
   }, [pollMs, refresh]);
 

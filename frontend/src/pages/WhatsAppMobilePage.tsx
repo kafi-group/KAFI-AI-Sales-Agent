@@ -801,7 +801,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
           </div>
           <button
             type="button"
-            onClick={() => void refresh()}
+            onClick={() => void refreshTeam()}
             className="text-xs bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 px-3.5 py-2 rounded-xl font-bold transition-colors"
           >
             🔄 Refresh Team Status

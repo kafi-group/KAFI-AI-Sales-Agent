@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import threading
+import time
 from typing import Any
 
 import httpx
@@ -11,8 +13,8 @@ from config import settings
 
 
 DEFAULT_USER_BRIDGES: dict[str, str] = {
-    "admin": "https://whatsapp-bridge-production-ffd3.up.railway.app",
     "khalid": "https://whatsapp-bridge-production-ffd3.up.railway.app",
+    "admin": "https://whatsapp-bridge-production-ffd3.up.railway.app",
     "asim": "https://whatsapp-bridge-production-8eee.up.railway.app",
     "usmankhan": "https://whatsapp-bridge-production-9587.up.railway.app",
     "usman": "https://whatsapp-bridge-production-9587.up.railway.app",
@@ -25,6 +27,36 @@ DEFAULT_USER_ID_BRIDGES: dict[int, str] = {
     3: "https://whatsapp-bridge-production-9587.up.railway.app",  # usmankhan
     4: "https://whatsapp-bridge-production-8388.up.railway.app",  # sadia
 }
+
+_OWNER_ALIASES: dict[str, str] = {
+    "admin": "khalid",
+    "khalid": "khalid",
+    "mrkhalid": "khalid",
+    "khaled": "khalid",
+    "khaledparacha": "khalid",
+    "asim": "asim",
+    "usman": "usman",
+    "usmankhan": "usman",
+    "sadia": "sadia",
+}
+
+_STATUS_CACHE_TTL = 20.0
+_status_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+_status_cache_lock = threading.Lock()
+
+
+def _norm_username(username: str | None) -> str:
+    return "".join(ch for ch in (username or "").strip().lower() if ch.isalnum())
+
+
+def bridge_owner_key(username: str | None, user_id: int | None = None) -> str | None:
+    """Map any login alias to a dedicated bridge owner. Not tied to a PC."""
+    aliased = _OWNER_ALIASES.get(_norm_username(username))
+    if aliased:
+        return aliased
+    if user_id in DEFAULT_USER_ID_BRIDGES:
+        return {1: "khalid", 2: "asim", 3: "usman", 4: "sadia"}.get(int(user_id))
+    return None
 
 
 def bridge_session_id(user_id: int, username: str | None = None) -> str:
@@ -53,42 +85,41 @@ _SEND_TIMEOUT = 15.0
 
 
 def _base_url(user_id: int | None = None, username: str | None = None) -> str:
-    """Resolve the specific WhatsApp bridge domain for the current user."""
+    """Resolve the dedicated WhatsApp bridge for this Sales Agent login (any PC)."""
+    owner = bridge_owner_key(username, user_id)
     clean_name = (username or "").strip().lower()
 
-    # 1. Check environment variables specific to each user
-    if clean_name in ("admin", "khalid"):
+    if owner == "khalid":
         custom = (settings.whatsapp_bridge_url_khalid or settings.whatsapp_bridge_url_admin or "").strip().rstrip("/")
         if custom:
             return custom
-    elif clean_name == "asim":
+        return DEFAULT_USER_BRIDGES["khalid"]
+    if owner == "asim":
         custom = (settings.whatsapp_bridge_url_asim or "").strip().rstrip("/")
         if custom:
             return custom
-    elif clean_name in ("usman", "usmankhan"):
+        return DEFAULT_USER_BRIDGES["asim"]
+    if owner == "usman":
         custom = (settings.whatsapp_bridge_url_usman or "").strip().rstrip("/")
         if custom:
             return custom
-    elif clean_name == "sadia":
+        return DEFAULT_USER_BRIDGES["usman"]
+    if owner == "sadia":
         custom = (settings.whatsapp_bridge_url_sadia or "").strip().rstrip("/")
         if custom:
             return custom
+        return DEFAULT_USER_BRIDGES["sadia"]
 
-    # 2. Check default username mapping
     if clean_name and clean_name in DEFAULT_USER_BRIDGES:
         return DEFAULT_USER_BRIDGES[clean_name]
-
-    # 3. Check user ID mapping if username wasn't supplied
     if user_id is not None and user_id in DEFAULT_USER_ID_BRIDGES:
         return DEFAULT_USER_ID_BRIDGES[user_id]
 
-    # 4. Fallback to general WHATSAPP_BRIDGE_URL if configured
+    # Unknown login: keep a unique session id, but do not steal Khalid's container.
     general = (settings.whatsapp_bridge_url or "").strip().rstrip("/")
     if general:
         return general
-
-    # 5. Default to Admin / Khalid's bridge
-    return DEFAULT_USER_BRIDGES["admin"]
+    return DEFAULT_USER_BRIDGES["khalid"]
 
 
 def _extract_phone_number(data: dict[str, Any]) -> str | None:
@@ -167,9 +198,37 @@ def bridge_status(user_id: int, username: str | None = None) -> dict[str, Any]:
             if not isinstance(data, dict):
                 data = {}
             data.setdefault("session", session)
-            return _normalize_status(data)
+            normalized = _normalize_status(data)
+            _store_status_cache(user_id, normalized)
+            return normalized
     except Exception:  # noqa: BLE001
-        return {"connected": False, "session": session, "status": "disconnected"}
+        disconnected = {"connected": False, "session": session, "status": "disconnected"}
+        _store_status_cache(user_id, disconnected)
+        return disconnected
+
+
+def _store_status_cache(user_id: int, data: dict[str, Any]) -> None:
+    with _status_cache_lock:
+        _status_cache[int(user_id)] = (time.monotonic(), data)
+
+
+def peek_cached_status(user_id: int) -> dict[str, Any] | None:
+    with _status_cache_lock:
+        hit = _status_cache.get(int(user_id))
+        if not hit:
+            return None
+        ts, data = hit
+        if (time.monotonic() - ts) > _STATUS_CACHE_TTL:
+            return None
+        return data
+
+
+def invalidate_status_cache(user_id: int | None = None) -> None:
+    with _status_cache_lock:
+        if user_id is None:
+            _status_cache.clear()
+        else:
+            _status_cache.pop(int(user_id), None)
 
 
 def bridge_qr(user_id: int, username: str | None = None) -> dict[str, Any]:
@@ -257,7 +316,9 @@ def bridge_disconnect(user_id: int, username: str | None = None) -> dict[str, An
                 pass
     except Exception:  # noqa: BLE001
         pass
-    return {"ok": True, "session": session, "connected": False, "status": "disconnected"}
+    disconnected = {"ok": True, "session": session, "connected": False, "status": "disconnected"}
+    invalidate_status_cache(user_id)
+    return disconnected
 
 
 def bridge_send(user_id: int, *, to_phone: str, message: str, username: str | None = None) -> dict[str, Any]:

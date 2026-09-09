@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -11,7 +11,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sa_func
 
-from api.deps import get_current_user, get_db
+from api.deps import get_current_user, get_current_user_released, get_db
+from db.session import SessionLocal
 from api.schemas import (
     InteractionRead,
     WhatsAppConversationListResponse,
@@ -75,7 +76,7 @@ def _interaction_read(db: Session, interaction) -> InteractionRead:
 
 
 @router.get("/status")
-def whatsapp_personal_status(user: AppUser = Depends(get_current_user)) -> Any:
+def whatsapp_personal_status(user: AppUser = Depends(get_current_user_released)) -> Any:
     try:
         return bridge.bridge_status(user.id, username=user.username)
     except Exception:  # noqa: BLE001
@@ -87,7 +88,7 @@ def whatsapp_personal_status(user: AppUser = Depends(get_current_user)) -> Any:
 
 
 @router.get("/qr")
-def whatsapp_personal_qr(user: AppUser = Depends(get_current_user)) -> Any:
+def whatsapp_personal_qr(user: AppUser = Depends(get_current_user_released)) -> Any:
     try:
         return bridge.bridge_qr(user.id, username=user.username)
     except RuntimeError as exc:
@@ -97,7 +98,7 @@ def whatsapp_personal_qr(user: AppUser = Depends(get_current_user)) -> Any:
 
 
 @router.get("/session")
-def whatsapp_personal_session(user: AppUser = Depends(get_current_user)) -> dict[str, str]:
+def whatsapp_personal_session(user: AppUser = Depends(get_current_user_released)) -> dict[str, str]:
     return {"session_id": bridge.bridge_session_id(user.id, username=user.username)}
 
 
@@ -204,7 +205,7 @@ def reply_personal_conversation(
 
 
 @router.post("/pair")
-def whatsapp_personal_pair(user: AppUser = Depends(get_current_user)) -> Any:
+def whatsapp_personal_pair(user: AppUser = Depends(get_current_user_released)) -> Any:
     """Reset session and return a fresh QR code for scanning.
 
     The dedicated Baileys bridge waits internally for the first QR (up to 10 s).
@@ -229,7 +230,7 @@ def whatsapp_personal_pair(user: AppUser = Depends(get_current_user)) -> Any:
 
 
 @router.post("/disconnect")
-def whatsapp_personal_disconnect(user: AppUser = Depends(get_current_user)) -> Any:
+def whatsapp_personal_disconnect(user: AppUser = Depends(get_current_user_released)) -> Any:
     """Disconnect the current user's personal WhatsApp Mobile session only."""
     try:
         return bridge.bridge_disconnect(user.id, username=user.username)
@@ -242,47 +243,76 @@ def whatsapp_personal_disconnect(user: AppUser = Depends(get_current_user)) -> A
         }
 
 
+def _team_row(
+    snap: tuple[int, str | None, str | None, Any],
+    st: dict[str, Any],
+    current_id: int,
+) -> dict[str, Any]:
+    uid, uname, fname, role = snap
+    raw_st = str(st.get("status") or "").lower()
+    is_conn = bool(st.get("connected")) and raw_st in {"connected", "open", "ready"}
+    phone_val = (st.get("phone") or st.get("connectedPhone")) if is_conn else None
+    return {
+        "user_id": uid,
+        "username": uname,
+        "full_name": fname or uname,
+        "role": role,
+        "session_id": bridge.bridge_session_id(uid, username=uname),
+        "connected": is_conn,
+        "phone": phone_val,
+        "profile_picture_url": (
+            st.get("profilePictureUrl") or st.get("profile_picture_url") if is_conn else None
+        ),
+        "status": "connected" if is_conn else (raw_st if raw_st else "disconnected"),
+        "is_current_user": uid == current_id,
+    }
+
+
+def _refresh_other_bridges(snaps: list[tuple[int, str | None, str | None, Any]]) -> None:
+    for uid, uname, _fname, _role in snaps:
+        try:
+            bridge.bridge_status(uid, username=uname)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 @router.get("/team-status")
 def whatsapp_personal_team_status(
-    db: Session = Depends(get_db),
-    user: AppUser = Depends(get_current_user),
+    user: AppUser = Depends(get_current_user_released),
 ) -> list[dict[str, Any]]:
-    """Return mobile WhatsApp status for the team without blocking other API work."""
-    snapshots = [
-        (u.id, u.username, u.full_name, u.role)
-        for u in db.query(AppUser).filter(AppUser.is_active == True).all()  # noqa: E712
-    ]
-    current_id = user.id
+    """Own session is live; teammates come from cache so one laptop cannot block another."""
+    db = SessionLocal()
+    try:
+        snapshots = [
+            (u.id, u.username, u.full_name, u.role)
+            for u in db.query(AppUser).filter(AppUser.is_active == True).all()  # noqa: E712
+        ]
+    finally:
+        db.close()
 
-    def _fetch(snap: tuple[int, str | None, str | None, Any]) -> dict[str, Any]:
-        uid, uname, fname, role = snap
-        try:
-            st = bridge.bridge_status(uid, username=uname)
-        except Exception:  # noqa: BLE001
-            st = {"connected": False, "status": "disconnected", "phone": None}
-        raw_st = str(st.get("status") or "").lower()
-        is_conn = bool(st.get("connected")) and raw_st in {"connected", "open", "ready"}
-        phone_val = (st.get("phone") or st.get("connectedPhone")) if is_conn else None
-        return {
-            "user_id": uid,
-            "username": uname,
-            "full_name": fname or uname,
-            "role": role,
-            "session_id": bridge.bridge_session_id(uid, username=uname),
-            "connected": is_conn,
-            "phone": phone_val,
-            "profile_picture_url": (
-                st.get("profilePictureUrl") or st.get("profile_picture_url") if is_conn else None
-            ),
-            "status": "connected" if is_conn else (raw_st if raw_st else "disconnected"),
-            "is_current_user": uid == current_id,
-        }
+    current_id = int(user.id)
+    try:
+        mine = bridge.bridge_status(current_id, username=user.username)
+    except Exception:  # noqa: BLE001
+        mine = {"connected": False, "status": "disconnected"}
 
-    if not snapshots:
-        return []
-    workers = min(6, len(snapshots))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        return list(pool.map(_fetch, snapshots))
+    stale_others: list[tuple[int, str | None, str | None, Any]] = []
+    rows: list[dict[str, Any]] = []
+    for snap in snapshots:
+        uid = snap[0]
+        if uid == current_id:
+            rows.append(_team_row(snap, mine, current_id))
+            continue
+        cached = bridge.peek_cached_status(uid)
+        if cached is None:
+            stale_others.append(snap)
+            rows.append(_team_row(snap, {"connected": False, "status": "disconnected"}, current_id))
+        else:
+            rows.append(_team_row(snap, cached, current_id))
+
+    if stale_others:
+        threading.Thread(target=_refresh_other_bridges, args=(stale_others,), daemon=True).start()
+    return rows
 
 
 @router.post("/disconnect-user/{target_user_id}")
