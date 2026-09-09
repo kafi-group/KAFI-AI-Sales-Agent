@@ -118,12 +118,19 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
         return;
       }
 
-      try {
-        const qrData = await client.getWhatsAppPersonalQr();
-        setQr(qrData);
-      } catch {
-        setQr(null);
+      // Fetch QR — retry up to 3× (1 s apart) because Baileys needs a moment
+      // to start up and emit the first QR after the session is initialized.
+      let qrData: Record<string, unknown> | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          qrData = await client.getWhatsAppPersonalQr();
+          if (qrData?.qr || qrData?.qrDataUrl) break;
+        } catch {
+          // ignore, retry
+        }
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 1000));
       }
+      setQr(qrData);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Could not load WhatsApp Mobile status");
     } finally {

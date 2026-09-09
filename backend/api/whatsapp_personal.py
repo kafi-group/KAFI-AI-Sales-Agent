@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -65,10 +66,23 @@ def whatsapp_personal_session(user: AppUser = Depends(get_current_user)) -> dict
 
 @router.post("/pair")
 def whatsapp_personal_pair(user: AppUser = Depends(get_current_user)) -> Any:
-    """Reset session and return a fresh QR code for scanning."""
+    """Reset session and return a fresh QR code for scanning.
+
+    After disconnecting, Baileys needs ~1-2 s to restart and generate the first
+    QR.  We retry up to 6 seconds so the caller always gets a scannable QR.
+    """
     try:
         bridge.bridge_disconnect(user.id, username=user.username)
-        return bridge.bridge_qr(user.id, username=user.username)
+        # Wait for the bridge to restart and emit the first QR (up to 6 s)
+        deadline = time.monotonic() + 6.0
+        last_result: dict = {}
+        while time.monotonic() < deadline:
+            time.sleep(0.8)
+            last_result = bridge.bridge_qr(user.id, username=user.username)
+            if last_result.get("qr") or last_result.get("qrDataUrl"):
+                return last_result
+        # Return whatever we got even if no QR yet (UI will poll)
+        return last_result
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001

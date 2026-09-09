@@ -248,6 +248,7 @@ def list_buyers_with_scores(
     page: int = 1,
     page_size: int = 20,
     exclude_source: str | None = "old_clients",
+    assigned_to_user_id: int | None = None,
 ) -> dict[str, object]:
     """Return buyers enriched with latest AAA/AA/A company grade (paginated).
 
@@ -258,6 +259,8 @@ def list_buyers_with_scores(
     page_size = min(max(1, page_size), 100)
 
     buyer_query = db.query(Buyer)
+    if assigned_to_user_id is not None:
+        buyer_query = buyer_query.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
     excluded = {
         part.strip().lower()
         for part in (exclude_source or "").split(",")
