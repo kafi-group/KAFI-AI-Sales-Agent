@@ -823,6 +823,8 @@ export interface TwilioBalance {
   currency?: string | null;
   message?: string | null;
   fetched_at?: string | null;
+  hangup_after_fourth_ring?: boolean;
+  ring_timeout_seconds?: number;
 }
 
 export interface VoiceToken {
@@ -3185,6 +3187,16 @@ export const client = {
 
   getCallConfig: () => request<CallConfig>("/calls/config"),
   getTwilioBalance: () => request<TwilioBalance>("/calls/twilio-balance"),
+  toggleHangupAfterFourthRing: (enabled: boolean) =>
+    request<{
+      ok: boolean;
+      hangup_after_fourth_ring: boolean;
+      ring_timeout_seconds: number;
+      message: string;
+    }>("/calls/hangup-after-fourth-ring", {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    }),
   getVoiceEngineSettings: () => request<VoiceEngineSettings>("/calls/voice-engine-settings"),
   unlockVoiceSettings: (pin: string) =>
     request<VoiceEngineSettings>("/calls/unlock-voice-settings", {

@@ -1089,6 +1089,8 @@ class TwilioBalanceRead(BaseModel):
     currency: Optional[str] = None
     message: Optional[str] = None
     fetched_at: Optional[str] = None
+    hangup_after_fourth_ring: bool = True
+    ring_timeout_seconds: int = 24
 
 
 class VoiceTokenRead(BaseModel):

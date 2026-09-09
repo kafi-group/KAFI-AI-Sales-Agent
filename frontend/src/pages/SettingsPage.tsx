@@ -46,6 +46,7 @@ export function SettingsPage({ onError }: SettingsPageProps) {
   const [pendingVapiState, setPendingVapiState] = useState<boolean>(true);
   const [pendingElevenLabsState, setPendingElevenLabsState] = useState<boolean>(true);
   const [elevenLabsDraft, setElevenLabsDraft] = useState("");
+  const [savingHangup, setSavingHangup] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -170,7 +171,29 @@ export function SettingsPage({ onError }: SettingsPageProps) {
     }
   }
 
+  const hangupAfterFourthRing = twilio?.hangup_after_fourth_ring !== false;
+  const ringSeconds = twilio?.ring_timeout_seconds ?? 24;
   const lowBalance = twilio?.ok && twilio.balance != null && twilio.balance < 5;
+
+  async function handleHangupToggle(next: boolean) {
+    setSavingHangup(true);
+    try {
+      const res = await client.toggleHangupAfterFourthRing(next);
+      setTwilio((prev) =>
+        prev
+          ? {
+              ...prev,
+              hangup_after_fourth_ring: res.hangup_after_fourth_ring,
+              ring_timeout_seconds: res.ring_timeout_seconds,
+            }
+          : prev,
+      );
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Could not update hang-up after 4th ring");
+    } finally {
+      setSavingHangup(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -262,6 +285,45 @@ export function SettingsPage({ onError }: SettingsPageProps) {
             </div>
           </div>
         )}
+
+        <div className="mt-4 rounded-lg border border-emerald-500/25 bg-emerald-950/20 p-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-[220px] flex-1">
+            <p className="text-sm font-medium text-slate-100">Hang up after 4th ring</p>
+            <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+              Default <strong className="text-slate-300">ON</strong> for Sara, Rayan, and every
+              dashboard caller. Unanswered calls drop after about {ringSeconds} seconds (~4 rings)
+              so voicemail does not pick up and Twilio credits are not used.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span
+              className={`text-xs px-2.5 py-1 rounded-full border font-medium ${
+                hangupAfterFourthRing
+                  ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                  : "bg-slate-800 text-slate-400 border-slate-700"
+              }`}
+            >
+              {hangupAfterFourthRing ? "ON (saves credits)" : "OFF (may hit voicemail)"}
+            </span>
+            <button
+              type="button"
+              disabled={savingHangup || loading}
+              onClick={() => void handleHangupToggle(!hangupAfterFourthRing)}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-40 ${
+                hangupAfterFourthRing ? "bg-emerald-600" : "bg-slate-700"
+              }`}
+              role="switch"
+              aria-checked={hangupAfterFourthRing}
+              title="Hang up unanswered calls after the 4th ring"
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  hangupAfterFourthRing ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
       </section>
 
       {/* AI Voice Engine Controls (Secret PIN Protected Container) */}

@@ -3,9 +3,20 @@
 from __future__ import annotations
 
 import re
+import threading
 from typing import Any
 
 from config import settings
+
+_FOURTH_RING_SECONDS = 24
+_RINGING_STATUSES = {
+    "queued",
+    "ringing",
+    "connecting",
+    "initiated",
+    "dialing",
+    "scheduled",
+}
 
 
 def normalize_e164(phone: str | None) -> str | None:
@@ -257,12 +268,14 @@ class VoiceClient:
 
         lead_xml = html.escape(lead, quote=True)
         caller_xml = html.escape(caller_id, quote=True)
-        # Timeout 24s auto-ends after 4th beep/ring (~6s per ring cycle) to avoid hitting voicemail.
         dial_attrs = [
             f'callerId="{caller_xml}"',
-            'timeout="24"',
             'record="record-from-answer"',
         ]
+        ring_timeout = self.ring_timeout_seconds()
+        if ring_timeout:
+            # ~6s per ring; 24s ends after the 4th ring before most voicemail greets.
+            dial_attrs.append(f'timeout="{int(ring_timeout)}"')
         if recording_url:
             recording_xml = html.escape(recording_url, quote=True)
             dial_attrs.extend(
@@ -339,6 +352,48 @@ class VoiceClient:
             missing.append("TWILIO_TWIML_APP_SID")
         return {"missing": missing, "browser_ready": self.browser_ready}
 
+    def hangup_after_fourth_ring_enabled(self) -> bool:
+        return bool(getattr(settings, "hangup_after_fourth_ring", True))
+
+    def ring_timeout_seconds(self) -> int | None:
+        if not self.hangup_after_fourth_ring_enabled():
+            return None
+        try:
+            seconds = int(getattr(settings, "ring_timeout_seconds", _FOURTH_RING_SECONDS) or _FOURTH_RING_SECONDS)
+        except (TypeError, ValueError):
+            seconds = _FOURTH_RING_SECONDS
+        return max(8, min(seconds, 60))
+
+    def schedule_fourth_ring_hangup(self, call_sid: str | None) -> None:
+        """If still ringing after ~4 rings, hang up so voicemail does not consume credits."""
+        seconds = self.ring_timeout_seconds()
+        sid = (call_sid or "").strip()
+        if not seconds or not sid:
+            return
+
+        def _watch() -> None:
+            import time
+
+            time.sleep(seconds)
+            try:
+                info = self.fetch_outbound_status(sid)
+                status = str(info.get("status") or "").lower().replace("_", "-")
+                if info.get("ended"):
+                    return
+                if status in _RINGING_STATUSES:
+                    print(
+                        f"Fourth-ring hangup call={sid[-8:]} status={status or 'unknown'}",
+                        flush=True,
+                    )
+                    self.end_call(sid)
+            except Exception as exc:  # noqa: BLE001
+                print(f"Fourth-ring hangup skipped: {exc}", flush=True)
+
+        threading.Thread(
+            target=_watch,
+            name=f"ring-limit-{sid[-8:]}",
+            daemon=True,
+        ).start()
 
     def ai_gather_twiml(self, message: str, action_url: str, voice: str = "Polly.Joanna-Neural") -> str:
         """Build TwiML with <Gather input='speech'> for interactive voice conversation."""
@@ -467,9 +522,11 @@ class VoiceClient:
                 )
                 with urllib.request.urlopen(req, timeout=12) as res:
                     resp_data = json.loads(res.read().decode("utf-8"))
+                    call_id = resp_data.get("id")
+                    self.schedule_fourth_ring_hangup(call_id)
                     return {
                         "ok": True,
-                        "call_sid": resp_data.get("id"),
+                        "call_sid": call_id,
                         "status": resp_data.get("status", "queued"),
                         "engine": "vapi",
                     }
@@ -500,6 +557,9 @@ class VoiceClient:
                     "from_": settings.twilio_phone_number.strip(),
                     "url": webhook_url,
                 }
+                ring_timeout = self.ring_timeout_seconds()
+                if ring_timeout:
+                    create_kwargs["timeout"] = ring_timeout
                 if task_id is not None:
                     create_kwargs["status_callback"] = self.webhook_url(
                         f"/api/webhooks/twilio/ai-agent/status?task_id={int(task_id)}"
@@ -510,11 +570,16 @@ class VoiceClient:
             else:
                 msg = text_message or f"Hello {contact_name or 'there'}, this is {persona} from Kafi Commodities. Thank you for connecting."
                 twiml_content = self.say_twiml(msg)
-                call = client.calls.create(
-                    to=normalized,
-                    from_=settings.twilio_phone_number.strip(),
-                    twiml=twiml_content,
-                )
+                fallback_kwargs: dict[str, Any] = {
+                    "to": normalized,
+                    "from_": settings.twilio_phone_number.strip(),
+                    "twiml": twiml_content,
+                }
+                ring_timeout = self.ring_timeout_seconds()
+                if ring_timeout:
+                    fallback_kwargs["timeout"] = ring_timeout
+                call = client.calls.create(**fallback_kwargs)
+            self.schedule_fourth_ring_hangup(getattr(call, "sid", None))
             return {"ok": True, "call_sid": call.sid, "status": call.status, "engine": "twilio"}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}

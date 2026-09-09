@@ -175,6 +175,30 @@ def get_twilio_balance(_admin: AppUser = Depends(require_admin)):
     return TwilioBalanceRead(**calls_module.twilio_balance())
 
 
+class ToggleHangupAfterFourthRingRequest(BaseModel):
+    enabled: bool
+
+
+@router.post("/calls/hangup-after-fourth-ring")
+def toggle_hangup_after_fourth_ring(
+    payload: ToggleHangupAfterFourthRingRequest,
+    _admin: AppUser = Depends(require_admin),
+):
+    """Default ON: unanswered calls drop after the 4th ring so voicemail does not use credits."""
+    settings.hangup_after_fourth_ring = bool(payload.enabled)
+    seconds = int(getattr(settings, "ring_timeout_seconds", 24) or 24)
+    return {
+        "ok": True,
+        "hangup_after_fourth_ring": settings.hangup_after_fourth_ring,
+        "ring_timeout_seconds": seconds,
+        "message": (
+            "Calls will hang up after the 4th ring if nobody answers."
+            if settings.hangup_after_fourth_ring
+            else "Calls can ring through to voicemail (Twilio credits will be used if voicemail answers)."
+        ),
+    }
+
+
 @router.get("/calls/twilio-status")
 def get_twilio_public_status():
     """Unauthenticated diagnostics for Twilio Console vs Railway mismatches."""

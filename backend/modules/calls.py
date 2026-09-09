@@ -212,8 +212,11 @@ def buyer_ids_with_placed_call_outcome(
 
 def twilio_balance() -> dict:
     """Admin-only Twilio prepaid balance snapshot."""
+    from config import settings
+
     cfg = call_config()
     result = voice_client.fetch_account_balance()
+    ring_seconds = int(getattr(settings, "ring_timeout_seconds", 24) or 24)
     return {
         "configured": bool(cfg.get("configured")),
         "caller_id_masked": cfg.get("caller_id_masked"),
@@ -223,6 +226,8 @@ def twilio_balance() -> dict:
         "currency": result.get("currency"),
         "message": result.get("message"),
         "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "hangup_after_fourth_ring": bool(getattr(settings, "hangup_after_fourth_ring", True)),
+        "ring_timeout_seconds": ring_seconds,
     }
 
 
