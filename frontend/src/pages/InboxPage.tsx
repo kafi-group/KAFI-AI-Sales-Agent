@@ -360,6 +360,7 @@ export function InboxPage({
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [moving, setMoving] = useState(false);
   const [emptyingTrash, setEmptyingTrash] = useState(false);
+  const [filterRibbonOpen, setFilterRibbonOpen] = useState(false);
 
   const [replyBody, setReplyBody] = useState("");
   const [replyTo, setReplyTo] = useState("");
@@ -1425,8 +1426,59 @@ export function InboxPage({
       </div>
 
       {isFolderMail && !isDraftsView ? (
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="rounded-xl border border-slate-800 bg-slate-900/90 overflow-hidden shadow-sm shrink-0">
+          <button
+            type="button"
+            onClick={() => setFilterRibbonOpen((prev) => !prev)}
+            className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-900 hover:bg-slate-800/80 transition-all text-left group cursor-pointer border-b border-transparent data-[open=true]:border-slate-800"
+            data-open={filterRibbonOpen}
+            aria-expanded={filterRibbonOpen}
+            title={filterRibbonOpen ? "Click to collapse mail filter" : "Click to expand mail filter"}
+          >
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-bold">
+                🔍
+              </span>
+              <span className="font-bold text-sm text-slate-100 tracking-wide group-hover:text-emerald-300 transition flex items-center gap-2">
+                Filter &amp; Search
+                {(searchActive || (triageFilter && triageFilter !== "all")) && (
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-extrabold border border-emerald-500/40">
+                    Active: {searchActive ? `"${searchQuery}"` : triageFilter}
+                  </span>
+                )}
+              </span>
+              <span className="text-xs text-slate-400 hidden sm:inline">
+                {filterRibbonOpen
+                  ? "— Click to collapse mail search, triage & assistant"
+                  : "— Click to expand search bar, triage categories & mail assistant"}
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              {(searchActive || (triageFilter && triageFilter !== "all")) && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSearchActive(false);
+                    setSearchQuery("");
+                    setTriageFilter("");
+                    void loadList();
+                  }}
+                  className="text-xs text-slate-400 hover:text-red-300 underline cursor-pointer font-medium"
+                >
+                  Clear filter
+                </span>
+              )}
+              <span className="text-xs text-slate-300 font-mono font-bold flex items-center gap-1 group-hover:text-white">
+                {filterRibbonOpen ? "▲ Hide" : "▼ Show"}
+              </span>
+            </div>
+          </button>
+
+          {filterRibbonOpen && (
+            <div className="p-3.5 space-y-3 border-t border-slate-800 bg-slate-950/40 animate-in fade-in duration-150">
+              <div className="flex flex-wrap items-center gap-2">
             <select
               value={searchScope}
               onChange={(e) => setSearchScope(e.target.value)}
@@ -1545,6 +1597,8 @@ export function InboxPage({
               <p className="text-sm text-slate-300 whitespace-pre-wrap">{mailAiAnswer}</p>
             ) : null}
           </div>
+            </div>
+          )}
         </div>
       ) : null}
 

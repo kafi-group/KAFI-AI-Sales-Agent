@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db
 from config import settings
-from db.models import AppUser, Channel, Direction, HandledBy, Interaction, InteractionStatus
+from db.models import AppUser, Buyer, Channel, Direction, HandledBy, Interaction, InteractionStatus
 from integrations import whatsapp_bridge_client as bridge
 from modules.comms_generator import get_comms
 
@@ -20,6 +20,12 @@ comms = get_comms()
 
 class WhatsAppPersonalSendRequest(BaseModel):
     to_phone: str = Field(min_length=6, max_length=32)
+    message: str = Field(min_length=1, max_length=4096)
+
+
+class WhatsAppPersonalBulkSendRequest(BaseModel):
+    buyer_ids: list[int] = Field(default_factory=list)
+    phones: list[str] = Field(default_factory=list)
     message: str = Field(min_length=1, max_length=4096)
 
 
@@ -176,6 +182,116 @@ def whatsapp_personal_send(
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Personal WhatsApp send failed: {exc}") from exc
+
+
+@router.post("/bulk-send")
+def whatsapp_personal_bulk_send(
+    body: WhatsAppPersonalBulkSendRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> Any:
+    """Send personal WhatsApp message to multiple selected leads/buyers via Baileys QR."""
+    import time
+    from modules import buyers as buyers_module
+    from modules import activity as activity_module
+
+    try:
+        status = bridge.bridge_status(user.id, username=user.username)
+        if not status.get("connected"):
+            raise HTTPException(
+                409,
+                "Personal WhatsApp is not connected. Open WhatsApp QR and scan with your phone.",
+            )
+
+        targets: list[dict[str, Any]] = []
+        for bid in body.buyer_ids:
+            b = db.get(Buyer, bid)
+            if not b:
+                continue
+            c = buyers_module.primary_contact_with_phone(db, bid)
+            phone = (c.phone or c.wa_id) if c else None
+            if phone:
+                targets.append({
+                    "buyer_id": bid,
+                    "company_name": b.company_name,
+                    "contact_name": c.full_name if c else None,
+                    "phone": phone.strip(),
+                })
+
+        for ph in body.phones:
+            cleaned = ph.strip()
+            if cleaned and not any(t["phone"] == cleaned for t in targets):
+                targets.append({
+                    "buyer_id": None,
+                    "company_name": "Lead",
+                    "contact_name": None,
+                    "phone": cleaned,
+                })
+
+        if not targets:
+            raise HTTPException(400, "No valid phone numbers found for the selected leads.")
+
+        sent_count = 0
+        failed_count = 0
+        results: list[dict[str, Any]] = []
+
+        for idx, t in enumerate(targets):
+            if idx > 0:
+                time.sleep(1.2)  # spacing to prevent flood/rate limits
+            phone = t["phone"]
+            try:
+                msg_text = body.message
+                if t.get("contact_name"):
+                    msg_text = msg_text.replace("{{name}}", t["contact_name"]).replace("{{contact_name}}", t["contact_name"])
+                else:
+                    msg_text = msg_text.replace("{{name}}", "Sir/Madam").replace("{{contact_name}}", "Sir/Madam")
+                if t.get("company_name"):
+                    msg_text = msg_text.replace("{{company}}", t["company_name"]).replace("{{company_name}}", t["company_name"])
+
+                res = bridge.bridge_send(user.id, to_phone=phone, message=msg_text, username=user.username)
+                sent_count += 1
+                results.append({"phone": phone, "status": "sent", "company": t.get("company_name")})
+
+                try:
+                    contact = comms._ensure_whatsapp_contact(db, wa_id=phone)
+                    outbound = Interaction(
+                        contact_id=contact.id,
+                        channel=Channel.whatsapp,
+                        direction=Direction.outbound,
+                        content=msg_text,
+                        status=InteractionStatus.sent,
+                        handled_by=HandledBy.human,
+                        provider_message_id=f"baileys_{res.get('messageId')}" if isinstance(res, dict) and res.get("messageId") else "baileys_bulk",
+                    )
+                    db.add(outbound)
+                    db.commit()
+                except Exception:
+                    pass
+            except Exception as exc:
+                failed_count += 1
+                results.append({"phone": phone, "status": "failed", "error": str(exc), "company": t.get("company_name")})
+
+        if sent_count > 0:
+            activity_module.log_activity(
+                db,
+                user_id=user.id,
+                activity_type=activity_module.PERSONAL_WHATSAPP_SENT,
+                title="Bulk Personal WhatsApp sent",
+                summary=f"Sent {sent_count} WhatsApp message(s) via personal scanned QR",
+                quantity=sent_count,
+                details={"mode": "personal_bulk", "channel": "whatsapp", "sent_count": sent_count, "failed_count": failed_count},
+            )
+
+        return {
+            "sent_count": sent_count,
+            "failed_count": failed_count,
+            "skipped_count": 0,
+            "results": results,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"Bulk Personal WhatsApp send failed: {exc}") from exc
 
 
 @router.post("/inbound")

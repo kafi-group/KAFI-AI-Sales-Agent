@@ -1148,6 +1148,7 @@ export function LeadsTablePage({
   const [showCreateLead, setShowCreateLead] = useState(false);
   const [bulkEmailNotice, setBulkEmailNotice] = useState<string | null>(null);
   const [deduping, setDeduping] = useState(false);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [tableZoom, setTableZoom] = useState(TABLE_ZOOM_DEFAULT);
   const [topScrollWidth, setTopScrollWidth] = useState(0);
@@ -3110,6 +3111,32 @@ export function LeadsTablePage({
           search.trim() ||
           Object.values(selectedColValues).some((v) => v && v.length > 0),
       );
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (country) count++;
+    if (industry) count++;
+    if (companyGrading) count++;
+    if (productInterest) count++;
+    if (city) count++;
+    if (callRecommended) count++;
+    if (search.trim()) count++;
+    if (score) count++;
+    if (marketRole) count++;
+    if (Object.values(selectedColValues).some((v) => v && v.length > 0)) count++;
+    return count;
+  }, [
+    country,
+    industry,
+    companyGrading,
+    productInterest,
+    city,
+    callRecommended,
+    search,
+    score,
+    marketRole,
+    selectedColValues,
+  ]);
   const allOnPageSelected =
     displayedRows.length > 0 && displayedRows.every((row) => selected.has(row.id));
   const someOnPageSelected = displayedRows.some((row) => selected.has(row.id));
@@ -3930,12 +3957,61 @@ export function LeadsTablePage({
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3 shrink-0">
-        <div
-          className={`grid gap-3 sm:grid-cols-2 ${
-            useClientsFilters ? "lg:grid-cols-4 xl:grid-cols-4" : "lg:grid-cols-4"
-          }`}
+      {/* Clickable Filter Ribbon */}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/90 overflow-hidden shadow-sm shrink-0">
+        <button
+          type="button"
+          onClick={() => setFiltersExpanded((prev) => !prev)}
+          className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-900 hover:bg-slate-800/80 transition-all text-left group cursor-pointer border-b border-transparent data-[open=true]:border-slate-800"
+          data-open={filtersExpanded}
+          aria-expanded={filtersExpanded}
+          title={filtersExpanded ? "Click to collapse filters" : "Click to expand filters"}
         >
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-bold">
+              🔍
+            </span>
+            <span className="font-bold text-sm text-slate-100 tracking-wide group-hover:text-emerald-300 transition flex items-center gap-2">
+              Filter
+              {activeFiltersCount > 0 && (
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-extrabold border border-emerald-500/40">
+                  {activeFiltersCount} active
+                </span>
+              )}
+            </span>
+            <span className="text-xs text-slate-400 hidden sm:inline">
+              {filtersExpanded
+                ? "— Click to collapse filters"
+                : "— Click to expand search & column filters"}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            {hasActiveFilters && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  clearFilters();
+                }}
+                className="text-xs text-slate-400 hover:text-red-300 underline cursor-pointer font-medium"
+              >
+                Clear all
+              </span>
+            )}
+            <span className="text-xs text-slate-300 font-mono font-bold flex items-center gap-1 group-hover:text-white">
+              {filtersExpanded ? "▲ Hide" : "▼ Show"}
+            </span>
+          </div>
+        </button>
+
+        {filtersExpanded && (
+          <div className="p-4 space-y-3 border-t border-slate-800 bg-slate-950/40 animate-in fade-in duration-150">
+            <div
+              className={`grid gap-3 sm:grid-cols-2 ${
+                useClientsFilters ? "lg:grid-cols-4 xl:grid-cols-4" : "lg:grid-cols-4"
+              }`}
+            >
           {useClientsFilters ? (
             <>
               <SearchableSelect
@@ -4172,6 +4248,8 @@ export function LeadsTablePage({
           >
             Clear filters
           </button>
+        )}
+          </div>
         )}
       </div>
 

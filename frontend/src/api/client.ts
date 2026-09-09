@@ -2843,6 +2843,11 @@ export const client = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  sendWhatsAppPersonalBulk: (payload: { buyer_ids: number[]; message: string }) =>
+    request<WhatsAppCampaignDraftResponse>("/whatsapp-personal/bulk-send", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   getInboxMessage: (uid: string, folder = "INBOX") =>
     request<InboxMessageDetail>(
       `/inbox/messages/${encodeURIComponent(uid)}?folder=${encodeURIComponent(folder)}`,

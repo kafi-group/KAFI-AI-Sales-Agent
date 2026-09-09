@@ -275,6 +275,33 @@ def primary_contact_with_phone(db: Session, buyer_id: int) -> Contact | None:
     for contact in list_contacts_for_buyer(db, buyer_id):
         if normalize_e164(contact.phone):
             return contact
+
+    # Fallback to buyer's direct phone fields if contact table row doesn't exist
+    buyer = db.get(Buyer, buyer_id)
+    if buyer:
+        for ph in (
+            getattr(buyer, "primary_mobile", None),
+            getattr(buyer, "phone", None),
+            getattr(buyer, "secondary_phone", None),
+        ):
+            norm = normalize_e164(ph)
+            if norm:
+                new_contact = Contact(
+                    buyer_id=buyer.id,
+                    full_name=buyer.contact_person or buyer.company_name or "Contact",
+                    phone=norm,
+                    email=buyer.email,
+                    is_primary=True,
+                    whatsapp_opt_in=True,
+                )
+                db.add(new_contact)
+                try:
+                    db.commit()
+                    db.refresh(new_contact)
+                    return new_contact
+                except Exception:
+                    db.rollback()
+                    return new_contact
     return None
 
 

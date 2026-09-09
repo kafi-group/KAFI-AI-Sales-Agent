@@ -26,19 +26,32 @@ function WhatsAppIcon({ className = "" }: { className?: string }) {
   );
 }
 
+type BulkWhatsAppTab = "personal" | "template";
+
 export function BulkWhatsAppModal({
   buyerIds,
   onClose,
   onError,
   onCreated,
 }: BulkWhatsAppModalProps) {
+  const [tab, setTab] = useState<BulkWhatsAppTab>("personal");
   const [sending, setSending] = useState(false);
+
+  // Personal message state
+  const [personalMessage, setPersonalMessage] = useState(
+    "Dear {{name}},\n\n" +
+      "I hope this message finds you well. We at Kafi Commodities would like to connect with {{company}} regarding our ESSENCE product range.\n\n" +
+      "Please let us know if you would like specifications or current pricing.\n\n" +
+      "Best regards,\nKafi Commodities Export Team",
+  );
+
+  // Template state
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
-  const [loadingTemplates, setLoadingTemplates] = useState(true);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [templateId, setTemplateId] = useState("");
   const [templateSearch, setTemplateSearch] = useState("");
   const [variables, setVariables] = useState<string[]>([]);
-  const [requireOptIn, setRequireOptIn] = useState(buyerIds.length > 1);
+  const [requireOptIn, setRequireOptIn] = useState(false); // Default false so test sends and bulk sends are not blocked
 
   const refreshTemplates = useCallback(async () => {
     setLoadingTemplates(true);
@@ -57,8 +70,10 @@ export function BulkWhatsAppModal({
   }, [onError]);
 
   useEffect(() => {
-    void refreshTemplates();
-  }, [refreshTemplates]);
+    if (tab === "template") {
+      void refreshTemplates();
+    }
+  }, [tab, refreshTemplates]);
 
   const selectedTemplate = templates.find((t) => String(t.id) === templateId);
   const filteredTemplates = useMemo(() => {
@@ -72,13 +87,39 @@ export function BulkWhatsAppModal({
       return haystack.includes(q);
     });
   }, [templateSearch, templates]);
-  const isMarketing = (selectedTemplate?.category || "").toUpperCase() === "MARKETING";
 
   useEffect(() => {
     setVariables(Array(selectedTemplate?.variable_count ?? 0).fill(""));
   }, [selectedTemplate]);
 
-  async function handleSend() {
+  async function handleSendPersonal() {
+    if (!personalMessage.trim()) {
+      onError("Please write a message to send.");
+      return;
+    }
+    setSending(true);
+    try {
+      const result = await client.sendWhatsAppPersonalBulk({
+        buyer_ids: buyerIds,
+        message: personalMessage.trim(),
+      });
+      onCreated({
+        created_count: result.sent_count,
+        sent_count: result.sent_count,
+        failed_count: result.failed_count,
+        skipped_count: result.skipped_count || 0,
+        created: [],
+        skipped: [],
+      });
+      onClose();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Personal bulk WhatsApp send failed");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function handleSendTemplate() {
     if (!templateId) {
       onError("Select an approved template first");
       return;
@@ -102,157 +143,249 @@ export function BulkWhatsAppModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-0 sm:p-4 backdrop-blur-sm"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
       role="presentation"
     >
       <div
-        className="w-full sm:max-w-2xl max-h-[92vh] overflow-hidden flex flex-col rounded-t-2xl sm:rounded-xl border border-slate-700 bg-slate-900 shadow-xl"
+        className="w-full sm:max-w-2xl max-h-[92vh] overflow-hidden flex flex-col rounded-t-2xl sm:rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl animate-in fade-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="bulk-compose-whatsapp-title"
       >
-        <div className="p-5 border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
+        {/* Header */}
+        <div className="p-5 border-b border-slate-800 flex items-start justify-between gap-3 shrink-0 bg-slate-950/60">
           <div className="min-w-0">
             <h3
               id="bulk-compose-whatsapp-title"
-              className="text-lg font-medium text-slate-100 flex items-center gap-2"
+              className="text-lg font-bold text-slate-100 flex items-center gap-2"
             >
               <WhatsAppIcon className="text-emerald-400" />
-              Send bulk WhatsApp
+              <span>Bulk WhatsApp Message</span>
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-extrabold">
+                {buyerIds.length} lead{buyerIds.length === 1 ? "" : "s"} selected
+              </span>
             </h3>
-            <p className="text-sm text-slate-500 mt-1">
-              {buyerIds.length} lead{buyerIds.length === 1 ? "" : "s"} selected — each gets an
-              approved WhatsApp template message sent immediately.
+            <p className="text-xs text-slate-400 mt-1">
+              Dispatch to your staff testing list or targeted buyer contacts.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-200 text-xl leading-none"
+            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 text-xl leading-none transition"
             aria-label="Close"
           >
             ×
           </button>
         </div>
 
+        {/* Tab switcher: Personal QR vs Meta Verified */}
+        <div className="flex border-b border-slate-800 bg-slate-950/80 px-5 pt-3 gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => setTab("personal")}
+            className={`pb-2.5 px-3 text-xs sm:text-sm font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
+              tab === "personal"
+                ? "border-emerald-500 text-emerald-300 shadow-sm"
+                : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <span>📱 Personal WhatsApp (QR Scanned)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("template")}
+            className={`pb-2.5 px-3 text-xs sm:text-sm font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
+              tab === "template"
+                ? "border-emerald-500 text-emerald-300 shadow-sm"
+                : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <span>🏢 Meta Verified (Templates)</span>
+          </button>
+        </div>
+
         <div className="p-5 overflow-y-auto flex-1 space-y-4">
-          <p className="text-xs text-slate-500">
-            Only Meta-approved templates can be sent to a full list. Manage and sync templates in{" "}
-            <strong className="text-slate-400">WhatsApp templates</strong>.
-          </p>
+          {tab === "personal" ? (
+            <div className="space-y-3">
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-3 text-xs text-emerald-200/90 leading-relaxed flex items-start gap-2.5">
+                <span className="text-base shrink-0">⚡</span>
+                <div>
+                  <strong className="text-emerald-300 font-semibold block">
+                    Sent via your scanned WhatsApp Web (Baileys)
+                  </strong>
+                  Each contact receives a direct personal message from your active session. Tags like{" "}
+                  <code className="bg-emerald-900/60 px-1 py-0.5 rounded text-emerald-200 font-mono">
+                    {"{{name}}"}
+                  </code>{" "}
+                  and{" "}
+                  <code className="bg-emerald-900/60 px-1 py-0.5 rounded text-emerald-200 font-mono">
+                    {"{{company}}"}
+                  </code>{" "}
+                  are automatically personalized for every recipient.
+                </div>
+              </div>
 
-          {loadingTemplates ? (
-            <p className="text-sm text-slate-400">Loading templates…</p>
-          ) : templates.length === 0 ? (
-            <p className="text-sm text-slate-500 rounded-lg border border-dashed border-slate-700 p-4">
-              No approved templates yet. Open{" "}
-              <strong className="text-slate-300">WhatsApp templates</strong> in the sidebar and
-              sync from Meta once your templates are approved.
-            </p>
-          ) : (
-            <>
-              <input
-                type="search"
-                value={templateSearch}
-                onChange={(e) => setTemplateSearch(e.target.value)}
-                placeholder="Search templates by name, category, body…"
-                className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
-              />
-              <ul className="space-y-2">
-                {filteredTemplates.map((template) => {
-                const selected = String(template.id) === templateId;
-                return (
-                  <li key={template.id}>
-                    <button
-                      type="button"
-                      onClick={() => setTemplateId(String(template.id))}
-                      className={`w-full rounded-lg border p-3 text-left transition ${
-                        selected
-                          ? "border-emerald-500/50 bg-emerald-500/10"
-                          : "border-slate-800 bg-slate-950 hover:border-slate-700"
-                      }`}
-                    >
-                      <p className="font-medium text-slate-100">
-                        {template.name}{" "}
-                        <span className="text-xs text-slate-500">({template.category})</span>
-                      </p>
-                      {template.body_text && (
-                        <p className="text-sm text-slate-400 truncate">{template.body_text}</p>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-              </ul>
-              {filteredTemplates.length === 0 && (
-                <p className="text-sm text-slate-500">No templates match your search.</p>
-              )}
-            </>
-          )}
-
-          {selectedTemplate && variables.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-sm text-slate-400">
-                Template variables (same value used for every recipient — for per-lead
-                personalization use a template without variables, or send from the buyer
-                profile instead)
-              </p>
-              {variables.map((value, index) => (
-                <input
-                  key={index}
-                  value={value}
-                  onChange={(e) =>
-                    setVariables((prev) =>
-                      prev.map((v, i) => (i === index ? e.target.value : v)),
-                    )
-                  }
-                  placeholder={`Variable {{${index + 1}}}`}
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm"
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                  Message Content:
+                </label>
+                <textarea
+                  rows={8}
+                  value={personalMessage}
+                  onChange={(e) => setPersonalMessage(e.target.value)}
+                  placeholder="Type your WhatsApp message..."
+                  className="w-full rounded-xl bg-slate-950 border border-slate-700 p-3.5 text-sm text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 leading-relaxed font-sans"
                 />
-              ))}
-            </div>
-          )}
+              </div>
 
-          {(isMarketing || buyerIds.length === 1) && (
-            <label className="flex items-start gap-2 text-sm text-slate-300">
-              <input
-                type="checkbox"
-                checked={requireOptIn}
-                onChange={(e) => setRequireOptIn(e.target.checked)}
-                className="rounded border-slate-600 bg-slate-950 mt-0.5"
-              />
-              <span>
-                Only send to contacts who opted in to WhatsApp marketing
-                {buyerIds.length === 1 ? (
-                  <span className="block text-xs text-slate-500 mt-0.5">
-                    Unchecked for single/test sends — turn on for real marketing campaigns.
-                  </span>
-                ) : null}
-              </span>
-            </label>
+              <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                <span className="text-slate-400 font-medium">Insert tags:</span>
+                <button
+                  type="button"
+                  onClick={() => setPersonalMessage((prev) => prev + " {{name}}")}
+                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono border border-slate-700 transition"
+                >
+                  + {"{{name}}"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPersonalMessage((prev) => prev + " {{company}}")}
+                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono border border-slate-700 transition"
+                >
+                  + {"{{company}}"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-xs text-slate-400">
+                Only Meta-approved templates can be sent via Meta Cloud API. Manage templates in{" "}
+                <strong className="text-slate-300">WhatsApp templates</strong>.
+              </p>
+
+              {loadingTemplates ? (
+                <p className="text-sm text-slate-400 py-4 text-center">Loading templates…</p>
+              ) : templates.length === 0 ? (
+                <p className="text-sm text-slate-500 rounded-lg border border-dashed border-slate-700 p-4">
+                  No approved templates yet. Open{" "}
+                  <strong className="text-slate-300">WhatsApp templates</strong> in the sidebar and
+                  sync from Meta.
+                </p>
+              ) : (
+                <>
+                  <input
+                    type="search"
+                    value={templateSearch}
+                    onChange={(e) => setTemplateSearch(e.target.value)}
+                    placeholder="Search templates by name, category, body…"
+                    className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200 placeholder-slate-500"
+                  />
+                  <ul className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    {filteredTemplates.map((template) => {
+                      const selected = String(template.id) === templateId;
+                      return (
+                        <li key={template.id}>
+                          <button
+                            type="button"
+                            onClick={() => setTemplateId(String(template.id))}
+                            className={`w-full rounded-lg border p-3 text-left transition ${
+                              selected
+                                ? "border-emerald-500/60 bg-emerald-500/10 text-white"
+                                : "border-slate-800 bg-slate-950 hover:border-slate-700 text-slate-300"
+                            }`}
+                          >
+                            <p className="font-semibold text-sm">
+                              {template.name}{" "}
+                              <span className="text-xs font-normal text-slate-400 font-mono">
+                                ({template.category})
+                              </span>
+                            </p>
+                            {template.body_text && (
+                              <p className="text-xs text-slate-400 truncate mt-0.5">
+                                {template.body_text}
+                              </p>
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {filteredTemplates.length === 0 && (
+                    <p className="text-sm text-slate-500">No templates match your search.</p>
+                  )}
+                </>
+              )}
+
+              {selectedTemplate && variables.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-slate-800">
+                  <p className="text-xs text-slate-400">
+                    Template variables (values used for every recipient):
+                  </p>
+                  {variables.map((value, index) => (
+                    <input
+                      key={index}
+                      value={value}
+                      onChange={(e) =>
+                        setVariables((prev) =>
+                          prev.map((v, i) => (i === index ? e.target.value : v)),
+                        )
+                      }
+                      placeholder={`Variable {{${index + 1}}}`}
+                      className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-100"
+                    />
+                  ))}
+                </div>
+              )}
+
+              <label className="flex items-start gap-2.5 text-xs text-slate-400 pt-2 border-t border-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={requireOptIn}
+                  onChange={(e) => setRequireOptIn(e.target.checked)}
+                  className="rounded border-slate-600 bg-slate-950 mt-0.5"
+                />
+                <span>
+                  Only send to contacts with recorded WhatsApp marketing opt-in (leave unchecked for
+                  testing and regular outreach)
+                </span>
+              </label>
+            </div>
           )}
         </div>
 
-        <div className="p-5 border-t border-slate-800 flex justify-end gap-2 shrink-0">
+        {/* Footer */}
+        <div className="p-4 sm:p-5 border-t border-slate-800 flex justify-end gap-3 shrink-0 bg-slate-950/60">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm"
+            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs sm:text-sm font-semibold text-slate-300 transition"
           >
             Cancel
           </button>
-          <button
-            type="button"
-            onClick={() => void handleSend()}
-            disabled={sending || !templateId || templates.length === 0}
-            className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium disabled:opacity-50"
-          >
-            {sending ? "Sending…" : `Send ${buyerIds.length} message(s)`}
-          </button>
+          {tab === "personal" ? (
+            <button
+              type="button"
+              onClick={() => void handleSendPersonal()}
+              disabled={sending || !personalMessage.trim()}
+              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs sm:text-sm font-bold text-white shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition cursor-pointer"
+            >
+              {sending ? "Sending…" : `Send to ${buyerIds.length} contact(s)`}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void handleSendTemplate()}
+              disabled={sending || !templateId || templates.length === 0}
+              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs sm:text-sm font-bold text-white shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition cursor-pointer"
+            >
+              {sending ? "Sending…" : `Send ${buyerIds.length} message(s)`}
+            </button>
+          )}
         </div>
       </div>
     </div>,

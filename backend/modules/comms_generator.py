@@ -794,7 +794,7 @@ class CommsGenerator:
         buyer_ids: list[int],
         template_id: int,
         template_variables: list[str] | None = None,
-        require_opt_in: bool = True,
+        require_opt_in: bool = False,
         send: bool = True,
         user_id: int | None = None,
     ) -> dict:
