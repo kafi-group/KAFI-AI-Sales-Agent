@@ -570,15 +570,6 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
             subject = str(t.get("subject") or "").strip()
             preview = str(t.get("latest_preview") or "").strip()
 
-            is_urgent_category = category in ("urgent", "action_required", "opportunity")
-            is_urgent_subject = any(
-                k in subject.lower()
-                for k in ("urgent", "asap", "immediate", "enquiry", "inquiry", "quotation", "price list")
-            )
-
-            if not (is_urgent_category or is_urgent_subject):
-                continue
-
             messages = list(t.get("messages") or [])
             if not messages:
                 continue
@@ -586,6 +577,7 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
             messages_sorted = sorted(messages, key=lambda m: date_sort_key(m.get("date")))
             latest_msg = messages_sorted[-1]
 
+            # Must be an inbound email awaiting reply (not sent by us)
             is_outbound = (
                 latest_msg.get("direction") == "outbound"
                 or (latest_msg.get("folder") or "").lower() == "sent"
@@ -597,6 +589,107 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
             )
             if is_outbound:
                 continue
+
+            from_name = t.get("latest_from_name") or latest_msg.get("from_name") or ""
+            from_email = t.get("latest_from_email") or latest_msg.get("from_email") or ""
+            text_corpus = f"{subject} {preview}".lower()
+            from_lower = from_email.lower()
+
+            # Exclude banking/system notifications/receipts
+            is_excluded = any(
+                ex in text_corpus or ex in from_lower
+                for ex in (
+                    "mt103",
+                    "mt 103",
+                    "swift transfer",
+                    "bank statement",
+                    "remittance",
+                    "payment confirmation",
+                    "payment receipt",
+                    "receipt of payment",
+                    "no-reply",
+                    "noreply",
+                    "mailer-daemon",
+                    "mail delivery",
+                    "security alert",
+                    "verify your",
+                    "newsletter",
+                    "unsubscribe",
+                    "notification@",
+                    "alert@",
+                )
+            )
+            if is_excluded:
+                continue
+
+            # Filter ONLY for new inquiry emails where a reply is to be made (quotation, order, products)
+            is_quote_inquiry = any(
+                k in text_corpus
+                for k in (
+                    "quotation",
+                    "quote",
+                    "pricing",
+                    "price list",
+                    "rates",
+                    "rate list",
+                    "rfq",
+                    "price inquiry",
+                    "price enquiry",
+                    "c&f",
+                    "cnf",
+                    "fob",
+                )
+            )
+            is_order_inquiry = any(
+                k in text_corpus
+                for k in (
+                    "order inquiry",
+                    "order enquiry",
+                    "purchase order",
+                    "place order",
+                    "placing order",
+                    "confirm order",
+                    "order requirement",
+                    "buying requirement",
+                    "want to buy",
+                    "looking to buy",
+                    "order confirmation",
+                )
+            )
+            is_product_inquiry = any(
+                k in text_corpus
+                for k in (
+                    "inquiry",
+                    "enquiry",
+                    "specification",
+                    "product requirement",
+                    "sample request",
+                    "catalogue request",
+                    "catalog request",
+                    "can you provide",
+                    "please quote",
+                    "interested in purchasing",
+                )
+            )
+
+            if not (is_quote_inquiry or is_order_inquiry or is_product_inquiry):
+                continue
+
+            if is_order_inquiry:
+                inquiry_type = "Inquiry for Order"
+            elif is_quote_inquiry:
+                inquiry_type = "Inquiry for Quotation"
+            else:
+                inquiry_type = "New Product Inquiry"
+
+            clean_preview = preview.strip()
+            if len(clean_preview) > 160:
+                clean_preview = clean_preview[:157] + "…"
+            inquiry_description = (
+                f"{inquiry_type}: {clean_preview}"
+                if clean_preview
+                else f"{inquiry_type} regarding {subject}"
+            )
 
             date_val = latest_msg.get("date") or t.get("latest_date")
             days_ago = 0
@@ -622,9 +715,6 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
                 except Exception:
                     date_str = str(date_val)
 
-            from_name = t.get("latest_from_name") or latest_msg.get("from_name") or ""
-            from_email = t.get("latest_from_email") or latest_msg.get("from_email") or ""
-
             urgent_list.append(
                 {
                     "thread_id": t.get("thread_id"),
@@ -636,8 +726,10 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
                     "hours_ago": hours_ago,
                     "is_overdue": hours_ago >= 24,
                     "preview": preview,
+                    "inquiry_type": inquiry_type,
+                    "inquiry_description": inquiry_description,
                     "triage_category": category,
-                    "triage_label": t.get("triage_label") or "Urgent",
+                    "triage_label": inquiry_type,
                     "unread_count": t.get("unread_count", 0),
                     "message_count": t.get("message_count", 1),
                     "user_id": user.id,

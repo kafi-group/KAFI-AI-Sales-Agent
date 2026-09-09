@@ -198,6 +198,37 @@ def create_label(
     return label
 
 
+def rename_label(
+    db: Session,
+    user_id: int,
+    label_id: int,
+    *,
+    new_name: str,
+    new_color: str | None = None,
+) -> MailLabel:
+    cleaned = (new_name or "").strip()
+    if not cleaned:
+        raise ValueError("Label name is required")
+    if len(cleaned) > 100:
+        raise ValueError("Label name is too long")
+    label = db.query(MailLabel).filter(MailLabel.id == label_id, MailLabel.user_id == user_id).first()
+    if not label:
+        raise ValueError("Label not found")
+    existing = (
+        db.query(MailLabel)
+        .filter(MailLabel.user_id == user_id, MailLabel.name == cleaned, MailLabel.id != label_id)
+        .first()
+    )
+    if existing:
+        raise ValueError("A label with that name already exists")
+    label.name = cleaned
+    if new_color and new_color.strip():
+        label.color = new_color.strip()
+    db.commit()
+    db.refresh(label)
+    return label
+
+
 def delete_label(db: Session, user_id: int, label_id: int) -> bool:
     """Remove label and all app-level assignments. IMAP messages are never deleted."""
     label = db.query(MailLabel).filter(MailLabel.id == label_id, MailLabel.user_id == user_id).first()

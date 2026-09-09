@@ -48,24 +48,44 @@ function formatChatTime(value: string | null | undefined): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function chatTitle(conv: WhatsAppConversation): string {
-  return (
-    conv.contact_phone?.trim() ||
-    conv.contact_name?.trim() ||
-    conv.company_name?.trim() ||
-    "Unknown"
-  );
+function isCleanName(val: string | null | undefined, phone?: string | null): boolean {
+  if (!val) return false;
+  const s = val.trim();
+  if (!s) return false;
+  const stripped = s.replace(/[\s+\-()_./]/g, "");
+  if (!stripped || /^\d+$/.test(stripped)) return false;
+  if (phone) {
+    const pDigits = phone.replace(/\D/g, "");
+    const sDigits = s.replace(/\D/g, "");
+    if (pDigits && sDigits && pDigits === sDigits) return false;
+  }
+  return true;
 }
 
-function chatSubtitle(conv: WhatsAppConversation): string {
-  if (conv.contact_phone && conv.company_name) return conv.company_name;
-  if (conv.contact_name && conv.contact_name !== chatTitle(conv)) {
-    return conv.contact_name;
+function chatTitle(conv: WhatsAppConversation): string {
+  if (conv.contact_phone?.trim()) return conv.contact_phone.trim();
+  if (isCleanName(conv.contact_name)) return conv.contact_name!.trim();
+  if (isCleanName(conv.company_name)) return conv.company_name!.trim();
+  return "Unknown";
+}
+
+function chatSubtitle(conv: WhatsAppConversation): string | null {
+  const phone = conv.contact_phone || null;
+  // 1. Display contact person name if available in our master contact list
+  if (isCleanName(conv.contact_name, phone)) {
+    return conv.contact_name!.trim();
   }
-  return conv.contact_name || conv.company_name || "";
+  // 2. If contact name not available then company name
+  if (isCleanName(conv.company_name, phone)) {
+    return conv.company_name!.trim();
+  }
+  // 3. If neither, do not display name, just phone number
+  return null;
 }
 
 function initialsFrom(label: string): string {
+  const clean = label.replace(/[\s+\-()_./]/g, "");
+  if (!clean || /^\d+$/.test(clean)) return "#";
   return label.trim().charAt(0).toUpperCase() || "?";
 }
 
@@ -454,7 +474,7 @@ export function WhatsAppInboxPage({
                 }`}
               >
                 <div className="w-12 h-12 rounded-full bg-[#6b7178] text-[#e9edef] flex items-center justify-center text-sm font-medium shrink-0">
-                  {initialsFrom(conv.contact_name || conv.company_name || "?")}
+                  {initialsFrom(subtitle || chatTitle(conv))}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2">
@@ -506,11 +526,13 @@ export function WhatsAppInboxPage({
                   ← Back to list
                 </button>
                 <p className="text-sm font-medium text-[#e9edef]">
-                  {selected.company_name || selected.contact_name}
+                  {chatTitle(selected)}
                 </p>
-                <p className="text-xs text-[#8696a0]">
-                  {selected.contact_name} · {selected.contact_phone}
-                </p>
+                {chatSubtitle(selected) && (
+                  <p className="text-xs text-[#8696a0]">
+                    {chatSubtitle(selected)}
+                  </p>
+                )}
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[50vh] bg-[#0b141a]">
                 {loadingThread ? (

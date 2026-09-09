@@ -211,6 +211,7 @@ def queue_self_test(
         "company_name": "Direct AI Call",
         "contact_name": contact_name,
         "contact_phone": payload.phone,
+        "call_sid": call_result.get("call_sid"),
         "status": "in_progress",
         "ready": True,
         "is_test": True,
@@ -226,6 +227,50 @@ def queue_self_test(
             r["current_task_id"] = task["id"]
             r["current_task"] = task
     return {"task": task, "call_result": call_result}
+
+
+class EndCallRequest(BaseModel):
+    persona: str | None = None
+    call_sid: str | None = None
+    task_id: int | None = None
+
+
+@router.post("/end-call")
+def end_ai_call(
+    payload: EndCallRequest,
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    _ = user
+    from integrations.voice_client import voice_client
+
+    ended_task = None
+    for t in _TASKS:
+        matches = False
+        if payload.task_id and t.get("id") == payload.task_id:
+            matches = True
+        elif payload.persona and t.get("persona") == payload.persona and t.get("status") in ("in_progress", "running", "queued"):
+            matches = True
+        elif not payload.task_id and not payload.persona and t.get("status") in ("in_progress", "running"):
+            matches = True
+
+        if matches:
+            t["status"] = "completed"
+            t["outcome"] = "Ended by user"
+            t["remarks"] = "Call ended manually by user."
+            ended_task = t
+            sid = payload.call_sid or t.get("call_sid")
+            if sid:
+                voice_client.end_call(sid)
+            break
+
+    target_persona = payload.persona or (ended_task.get("persona") if ended_task else None)
+    for r in _RUNNERS:
+        if not target_persona or r.get("persona") == target_persona:
+            r["status"] = "idle"
+            r["current_task_id"] = None
+            r["current_task"] = None
+
+    return {"ok": True, "task": ended_task}
 
 
 @router.delete("/tasks/{task_id}")

@@ -126,6 +126,39 @@ def create_mail_label(
     )
 
 
+class MailLabelUpdateRequest(BaseModel):
+    name: str
+    color: str | None = None
+
+
+@router.patch("/labels/{label_id}", response_model=MailLabelRead)
+def update_mail_label(
+    label_id: int,
+    body: MailLabelUpdateRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> MailLabelRead:
+    try:
+        label = labels_module.rename_label(
+            db,
+            user.id,
+            label_id=label_id,
+            new_name=body.name,
+            new_color=body.color,
+        )
+        count = labels_module.count_messages_for_label(db, user.id, label)
+        return MailLabelRead(
+            id=label.id,
+            name=label.name,
+            color=label.color,
+            match_query=label.match_query,
+            match_keyword=label.match_keyword,
+            count=count,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.delete("/labels/{label_id}", status_code=204)
 def delete_mail_label(
     label_id: int,

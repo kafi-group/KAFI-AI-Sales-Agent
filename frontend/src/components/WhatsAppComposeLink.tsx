@@ -8,10 +8,8 @@ import {
 } from "../api/client";
 import { ActionButton } from "./ui/ActionButton";
 import {
-  IconExternal,
   IconEye,
   IconSend,
-  IconTemplate,
   IconWhatsApp,
   IconX,
 } from "./icons/AppIcons";
@@ -40,36 +38,6 @@ function WhatsAppIcon({ className = "h-5 w-5" }: { className?: string }) {
   );
 }
 
-function phoneKey(value: string | null | undefined): string {
-  return (value || "").replace(/\D/g, "");
-}
-
-function contactMatchesPhone(
-  contact: { phone?: string | null; wa_id?: string | null },
-  targetPhone: string,
-): boolean {
-  const key = phoneKey(targetPhone);
-  if (!key) return false;
-  return phoneKey(contact.phone) === key || phoneKey(contact.wa_id) === key;
-}
-
-/** wa.me digits for deep links (handles common PK local numbers like 03…). */
-function whatsAppWaMeDigits(phone: string): string {
-  let digits = phone.replace(/\D/g, "");
-  if (digits.startsWith("00")) digits = digits.slice(2);
-  if (digits.startsWith("0") && digits.length >= 10 && digits.length <= 11) {
-    digits = `92${digits.slice(1)}`;
-  }
-  return digits;
-}
-
-function whatsAppDeepLink(phone: string, text: string): string {
-  const digits = whatsAppWaMeDigits(phone);
-  if (!digits) return "https://wa.me/";
-  const query = text.trim() ? `?text=${encodeURIComponent(text.trim())}` : "";
-  return `https://wa.me/${digits}${query}`;
-}
-
 export function LeadWhatsAppComposeModal({
   target,
   onClose,
@@ -77,10 +45,7 @@ export function LeadWhatsAppComposeModal({
   onSent,
 }: LeadWhatsAppComposeModalProps) {
   const { row, phone } = target;
-  const [tab, setTab] = useState<ComposeTab>("template");
-  const [contactId, setContactId] = useState<number | null>(row.contact_id);
-  const [withinSessionWindow, setWithinSessionWindow] = useState(false);
-  const [resolvingContact, setResolvingContact] = useState(true);
+  const [tab, setTab] = useState<ComposeTab>("personal");
   const [sending, setSending] = useState(false);
 
   const [message, setMessage] = useState(
@@ -118,40 +83,6 @@ export function LeadWhatsAppComposeModal({
     void refreshTemplates();
   }, [refreshTemplates]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setResolvingContact(true);
-    client
-      .listLeadContacts(row.id)
-      .then((contacts) => {
-        if (cancelled) return;
-        const matched =
-          (row.contact_id
-            ? contacts.find((c) => c.id === row.contact_id)
-            : undefined) ||
-          contacts.find((c) => contactMatchesPhone(c, phone)) ||
-          contacts.find((c) => (c.phone || c.wa_id || "").trim());
-        setContactId(matched?.id ?? null);
-        const within = Boolean(matched?.within_session_window);
-        setWithinSessionWindow(within);
-        setTab(within ? "personal" : "template");
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setContactId(row.contact_id ?? null);
-          setWithinSessionWindow(false);
-          setTab("template");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setResolvingContact(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [row.contact_id, row.id, phone]);
-
   const selectedTemplate = templates.find((t) => String(t.id) === templateId);
   const filteredTemplates = useMemo(() => {
     const q = templateSearch.trim().toLowerCase();
@@ -171,37 +102,25 @@ export function LeadWhatsAppComposeModal({
   }, [selectedTemplate]);
 
   async function handleSendPersonal() {
-    if (!contactId) {
-      onError("No contact with this phone number found for this lead.");
-      return;
-    }
-    if (!withinSessionWindow) {
-      onError(
-        "Meta only allows free-text WhatsApp after the customer has messaged you in the last 24 hours. " +
-          "Use Open in WhatsApp for a manual send, or the WhatsApp template tab for cold outreach via the API.",
-      );
-      return;
-    }
     if (!message.trim()) {
       onError("Message is required");
       return;
     }
+    const targetPhone = (phone || "").trim();
+    if (!targetPhone) {
+      onError("Contact has no phone number.");
+      return;
+    }
     setSending(true);
     try {
-      const result = await client.replyToWhatsAppConversation(contactId, {
-        content: message.trim(),
-        send: true,
+      await client.sendWhatsAppPersonal({
+        to_phone: targetPhone,
+        message: message.trim(),
       });
-      if (result.sent) {
-        onSent(`WhatsApp sent to ${row.company_name}. Open WhatsApp inbox to see the thread.`);
-      } else {
-        onError(
-          result.send_message ||
-            "Send did not complete. If the 24-hour window has closed, use the WhatsApp template tab.",
-        );
-      }
+      onSent(`WhatsApp message sent to ${row.company_name} via your connected WhatsApp!`);
+      onClose();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to send WhatsApp message");
+      onError(e instanceof Error ? e.message : "Failed to send WhatsApp message via connected device");
     } finally {
       setSending(false);
     }
@@ -235,9 +154,6 @@ export function LeadWhatsAppComposeModal({
       setSending(false);
     }
   }
-
-  const waDeepLink = whatsAppDeepLink(phone, message);
-  const canSendPersonalViaApi = Boolean(contactId && withinSessionWindow && message.trim());
 
   return createPortal(
     <div
@@ -309,27 +225,12 @@ export function LeadWhatsAppComposeModal({
         <div className="p-5 overflow-y-auto overflow-x-hidden flex-1 space-y-4 max-w-full">
           {tab === "personal" ? (
             <>
-              {resolvingContact ? (
-                <p className="text-sm text-slate-400">Looking up contact…</p>
-              ) : !contactId ? (
-                <p className="text-sm text-amber-200 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-                  No contact record matches this phone number. Add or update the contact on this
-                  lead, or use the <strong>WhatsApp template</strong> tab for cold outreach.
-                </p>
-              ) : !withinSessionWindow ? (
-                <p className="text-sm text-amber-200 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-                  This contact has not messaged you on WhatsApp in the last 24 hours. Meta&apos;s
-                  Cloud API cannot send this free-text message automatically. Use{" "}
-                  <strong>Open in WhatsApp</strong> below to send from your phone or WhatsApp Web,
-                  or switch to <strong>WhatsApp template</strong> for an API send with an approved
-                  Meta template.
-                </p>
-              ) : (
-                <p className="text-sm text-emerald-200 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3">
-                  24-hour reply window is open — your message will send directly via WhatsApp Cloud
-                  API.
-                </p>
-              )}
+              <div className="flex items-center gap-2.5 text-xs text-emerald-300 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3">
+                <IconWhatsApp size="sm" className="text-emerald-400 shrink-0" />
+                <span>
+                  Sending directly from your <strong>QR-scanned WhatsApp</strong> to <strong className="text-white">{phone}</strong>.
+                </span>
+              </div>
               <label className="block">
                 <span className="text-sm text-slate-400">Message</span>
                 <ProseTextarea
@@ -340,9 +241,7 @@ export function LeadWhatsAppComposeModal({
                 />
               </label>
               <p className="text-xs text-slate-500">
-                {withinSessionWindow
-                  ? "Free-text sends through your connected WhatsApp Business number."
-                  : "For cold outreach, Meta requires an approved template. Open in WhatsApp sends the text below manually from your device."}
+                Personal messages are sent directly from your connected WhatsApp device to this contact.
               </p>
             </>
           ) : (
@@ -449,42 +348,16 @@ export function LeadWhatsAppComposeModal({
             Cancel
           </ActionButton>
           {tab === "personal" ? (
-            <>
-              {!withinSessionWindow && (
-                <ActionButton
-                  icon={IconTemplate}
-                  size="md"
-                  onClick={() => setTab("template")}
-                  title="Use approved template"
-                >
-                  Use template
-                </ActionButton>
-              )}
-              {!withinSessionWindow ? (
-                <a
-                  href={waDeepLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium text-white border border-emerald-500/40"
-                  title="Open in WhatsApp"
-                >
-                  <IconWhatsApp size="sm" />
-                  Open in WhatsApp
-                  <IconExternal size="xs" className="opacity-80" />
-                </a>
-              ) : (
-                <ActionButton
-                  icon={IconSend}
-                  variant="primary"
-                  size="md"
-                  onClick={() => void handleSendPersonal()}
-                  disabled={sending || resolvingContact || !canSendPersonalViaApi}
-                  title="Send message"
-                >
-                  {sending ? "Sending…" : "Send message"}
-                </ActionButton>
-              )}
-            </>
+            <ActionButton
+              icon={IconSend}
+              variant="primary"
+              size="md"
+              onClick={() => void handleSendPersonal()}
+              disabled={sending || !message.trim()}
+              title="Send message"
+            >
+              {sending ? "Sending…" : "Send"}
+            </ActionButton>
           ) : (
             <ActionButton
               icon={IconSend}

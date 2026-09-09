@@ -547,6 +547,62 @@ class CommsGenerator:
             if ix.contact_id and ix.contact_id not in latest_interaction_by_contact:
                 latest_interaction_by_contact[ix.contact_id] = ix
 
+        def _is_clean_name(val: str | None, phone_str: str | None = None) -> bool:
+            if not val:
+                return False
+            s = str(val).strip()
+            if not s:
+                return False
+            stripped = "".join(ch for ch in s if ch.isalnum())
+            if not stripped or stripped.isdigit():
+                return False
+            if phone_str:
+                p_digits = "".join(ch for ch in phone_str if ch.isdigit())
+                s_digits = "".join(ch for ch in s if ch.isdigit())
+                if p_digits and s_digits and p_digits == s_digits:
+                    return False
+            return True
+
+        # Pre-lookup master contacts for any inbound/unresolved contacts by phone
+        phone_to_master: dict[str, tuple[str | None, str | None]] = {}
+        candidate_phones: set[str] = set()
+        for cid in contact_ids:
+            c = contacts_by_id.get(cid)
+            if c:
+                raw_phone = (c.phone or c.wa_id or "").strip()
+                digits = "".join(ch for ch in raw_phone if ch.isdigit())
+                if digits:
+                    candidate_phones.add(digits)
+                    if len(digits) >= 10:
+                        candidate_phones.add(digits[-10:])
+
+        if candidate_phones:
+            # Query contacts with buyers that have valid full_name and not whatsapp_inbound
+            master_matches = (
+                db.query(Contact)
+                .join(Buyer, Contact.buyer_id == Buyer.id)
+                .filter(
+                    Contact.data_source != "whatsapp_inbound",
+                    (Contact.phone.isnot(None)) | (Contact.wa_id.isnot(None)) | (Contact.primary_phone.isnot(None)),
+                )
+                .order_by(Contact.id.desc())
+                .all()
+            )
+            for mc in master_matches:
+                for ph in (mc.phone, mc.wa_id, mc.primary_phone, mc.secondary_mobile):
+                    if not ph:
+                        continue
+                    digs = "".join(ch for ch in ph if ch.isdigit())
+                    if not digs:
+                        continue
+                    mbuyer = mc.buyer
+                    cname = mc.full_name if _is_clean_name(mc.full_name, ph) else None
+                    comp = mbuyer.company_name if mbuyer and _is_clean_name(mbuyer.company_name, ph) else None
+                    if cname or comp:
+                        phone_to_master[digs] = (cname, comp)
+                        if len(digs) >= 10:
+                            phone_to_master[digs[-10:]] = (cname, comp)
+
         conversations: list[dict] = []
         now_utc = datetime.now(timezone.utc)
         for row in rows:
@@ -561,13 +617,28 @@ class CommsGenerator:
             if expires is not None and expires.tzinfo is None:
                 expires = expires.replace(tzinfo=timezone.utc)
             within_window = bool(expires and expires > now_utc)
+
+            contact_phone = contact.phone or contact.wa_id
+            contact_name = contact.full_name if _is_clean_name(contact.full_name, contact_phone) else None
+            company_name = buyer.company_name if (buyer and _is_clean_name(buyer.company_name, contact_phone)) else None
+
+            # Fallback to master contact list match if available
+            raw_digs = "".join(ch for ch in (contact_phone or "") if ch.isdigit())
+            master_info = phone_to_master.get(raw_digs) or (phone_to_master.get(raw_digs[-10:]) if len(raw_digs) >= 10 else None)
+            if master_info:
+                master_cname, master_comp = master_info
+                if not contact_name and master_cname:
+                    contact_name = master_cname
+                if not company_name and master_comp:
+                    company_name = master_comp
+
             conversations.append(
                 {
                     "contact_id": contact.id,
                     "buyer_id": contact.buyer_id,
-                    "company_name": buyer.company_name if buyer else None,
-                    "contact_name": contact.full_name,
-                    "contact_phone": contact.phone or contact.wa_id,
+                    "company_name": company_name,
+                    "contact_name": contact_name,
+                    "contact_phone": contact_phone,
                     "whatsapp_opt_in": contact.whatsapp_opt_in,
                     "within_session_window": within_window,
                     "window_expires_at": contact.whatsapp_window_expires_at,

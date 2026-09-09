@@ -382,6 +382,9 @@ export function InboxPage({
   const [messageLabels, setMessageLabels] = useState<MailLabel[]>([]);
   const [creatingLabel, setCreatingLabel] = useState(false);
   const [deletingLabel, setDeletingLabel] = useState(false);
+  const [renamingLabel, setRenamingLabel] = useState(false);
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
   const [labelMenuOpen, setLabelMenuOpen] = useState(false);
   const [assigningLabel, setAssigningLabel] = useState(false);
   const [showLabelModal, setShowLabelModal] = useState(false);
@@ -1173,6 +1176,40 @@ export function InboxPage({
     }
   }
 
+  function startRenameCurrentLabel() {
+    if (labelId == null) return;
+    const active = labels.find((l) => l.id === labelId);
+    setRenameValue(active?.name || "");
+    setShowRenameModal(true);
+  }
+
+  async function handleRenameSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (labelId == null) return;
+    const clean = renameValue.trim();
+    if (!clean) return;
+    const active = labels.find((l) => l.id === labelId);
+    if (active && active.name === clean) {
+      setShowRenameModal(false);
+      return;
+    }
+    setRenamingLabel(true);
+    try {
+      const updated = await client.renameMailLabel(labelId, { name: clean });
+      setLabels((prev) =>
+        prev.map((l) => (l.id === labelId ? { ...l, name: updated.name } : l)),
+      );
+      setNotice(`Label renamed to “${updated.name}”.`);
+      setShowRenameModal(false);
+      onMailExtrasChangeRef.current?.();
+      await loadList({ silent: true });
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Failed to rename label");
+    } finally {
+      setRenamingLabel(false);
+    }
+  }
+
   async function discardDraftById(draftId: number) {
     try {
       await client.deleteMailDraft(draftId);
@@ -1304,17 +1341,30 @@ export function InboxPage({
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {isLabelView && labelId != null ? (
-            <ActionButton
-              icon={IconTrash}
-              variant="ghost"
-              size="md"
-              disabled={deletingLabel}
-              onClick={() => void deleteCurrentLabel()}
-              title="Delete label — emails return to Inbox"
-              className="text-rose-300 hover:text-rose-200 border border-rose-500/30"
-            >
-              {deletingLabel ? "Deleting…" : "Delete label"}
-            </ActionButton>
+            <>
+              <ActionButton
+                icon={IconTag}
+                variant="ghost"
+                size="md"
+                disabled={renamingLabel || deletingLabel}
+                onClick={startRenameCurrentLabel}
+                title="Rename this label"
+                className="text-emerald-300 hover:text-emerald-200 border border-emerald-500/30"
+              >
+                Rename label
+              </ActionButton>
+              <ActionButton
+                icon={IconTrash}
+                variant="ghost"
+                size="md"
+                disabled={deletingLabel || renamingLabel}
+                onClick={() => void deleteCurrentLabel()}
+                title="Delete label — emails return to Inbox"
+                className="text-rose-300 hover:text-rose-200 border border-rose-500/30"
+              >
+                {deletingLabel ? "Deleting…" : "Delete label"}
+              </ActionButton>
+            </>
           ) : null}
           <ActionButton
             icon={IconPlus}
@@ -1504,6 +1554,64 @@ export function InboxPage({
         onCreate={createLabelFromModal}
         creating={creatingLabel}
       />
+
+      {showRenameModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+          <div
+            className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-950 shadow-xl p-5 space-y-4"
+            role="dialog"
+            aria-labelledby="rename-label-title"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 id="rename-label-title" className="text-base font-medium text-slate-100">
+                  Rename label
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Enter a new name for this email label.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRenameModal(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                aria-label="Close"
+              >
+                <IconX size="sm" />
+              </button>
+            </div>
+            <form onSubmit={(e) => void handleRenameSubmit(e)} className="space-y-4">
+              <label className="block text-sm text-slate-400">
+                Label name
+                <input
+                  required
+                  autoFocus
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  placeholder="e.g. Finance - KAFI"
+                  className="mt-1.5 w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                />
+              </label>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRenameModal(false)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-700 text-sm text-slate-400 hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={renamingLabel || !renameValue.trim()}
+                  className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {renamingLabel ? "Renaming…" : "Save"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {notice && !showReplyForm && !showCompose && (
         <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-sm">

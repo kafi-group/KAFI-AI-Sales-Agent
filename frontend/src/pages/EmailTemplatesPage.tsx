@@ -351,6 +351,19 @@ export function EmailTemplatesPage({ onError, onCountChange }: EmailTemplatesPag
                   value={templateForm.body}
                   onChange={(body) => setTemplateForm((p) => ({ ...p, body }))}
                   placeholder="Write the template body…"
+                  onAttachFiles={async (files) => {
+                    for (const file of files) {
+                      try {
+                        const uploaded = await client.uploadEmailAttachment(file);
+                        setTemplateForm((p) => ({
+                          ...p,
+                          attachments: [...(p.attachments ?? []), uploaded],
+                        }));
+                      } catch (err) {
+                        onError(err instanceof Error ? err.message : "Failed to attach image");
+                      }
+                    }
+                  }}
                 />
               </div>
               <EmailAttachmentsField

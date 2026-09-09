@@ -476,5 +476,37 @@ class VoiceClient:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def end_call(self, call_sid: str) -> dict[str, Any]:
+        """Hang up a live call via Twilio or Vapi."""
+        if not call_sid:
+            return {"ok": False, "error": "No call SID provided"}
+        
+        # If Twilio call
+        if call_sid.startswith("CA") or (settings.twilio_account_sid and settings.twilio_auth_token):
+            try:
+                from twilio.rest import Client
+                c = Client(settings.twilio_account_sid.strip(), settings.twilio_auth_token.strip())
+                c.calls(call_sid).update(status="completed")
+                return {"ok": True, "engine": "twilio"}
+            except Exception as exc:
+                print(f"Twilio hangup failed: {exc}", flush=True)
+
+        # If Vapi call
+        vapi_key = getattr(settings, "vapi_api_key", None)
+        if vapi_key:
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    f"https://api.vapi.ai/call/{call_sid}",
+                    headers={"Authorization": f"Bearer {vapi_key}"},
+                    method="DELETE",
+                )
+                with urllib.request.urlopen(req, timeout=10) as res:
+                    return {"ok": True, "engine": "vapi"}
+            except Exception as exc:
+                print(f"Vapi hangup failed: {exc}", flush=True)
+
+        return {"ok": True, "engine": "generic"}
+
 
 voice_client = VoiceClient()

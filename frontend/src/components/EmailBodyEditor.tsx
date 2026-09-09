@@ -1,4 +1,11 @@
-import { useEffect, useId, useRef, type MouseEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { IconPaperclip } from "./icons/AppIcons";
 
 export type EmailBodyEditorProps = {
@@ -12,6 +19,8 @@ export type EmailBodyEditorProps = {
   editorClassName?: string;
   /** Optional attach button handler in the toolbar */
   onAttachClick?: () => void;
+  /** Optional callback when image files are dropped or pasted and user chooses to attach */
+  onAttachFiles?: (files: File[]) => void;
   /** Optional count of attachments to show in the toolbar */
   attachmentCount?: number;
   /** Whether an attachment is currently uploading */
@@ -121,12 +130,111 @@ export function EmailBodyEditor({
   className = "",
   editorClassName = "",
   onAttachClick,
+  onAttachFiles,
   attachmentCount,
   isUploadingAttachment = false,
 }: EmailBodyEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const lastHtml = useRef<string>("");
   const reactId = useId();
+
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [pendingImage, setPendingImage] = useState<File | null>(null);
+  const [pendingImagePreview, setPendingImagePreview] = useState<string | null>(null);
+  const savedRangeRef = useRef<Range | null>(null);
+
+  function saveSelection() {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      savedRangeRef.current = sel.getRangeAt(0).cloneRange();
+    }
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    if (disabled) return;
+    if (Array.from(e.dataTransfer.types).includes("Files")) {
+      e.preventDefault();
+      setIsDraggingOver(true);
+    }
+  }
+
+  function handleDragLeave() {
+    setIsDraggingOver(false);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    if (disabled) return;
+    setIsDraggingOver(false);
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
+    if (files.length > 0) {
+      e.preventDefault();
+      saveSelection();
+      const file = files[0];
+      setPendingImage(file);
+      setPendingImagePreview(URL.createObjectURL(file));
+    }
+  }
+
+  function handlePaste(e: React.ClipboardEvent) {
+    if (disabled) return;
+    const items = Array.from(e.clipboardData.items);
+    const imgItem = items.find((item) => item.type.startsWith("image/"));
+    if (imgItem) {
+      const file = imgItem.getAsFile();
+      if (file) {
+        e.preventDefault();
+        saveSelection();
+        setPendingImage(file);
+        setPendingImagePreview(URL.createObjectURL(file));
+      }
+    }
+  }
+
+  function closeImageModal() {
+    if (pendingImagePreview) {
+      URL.revokeObjectURL(pendingImagePreview);
+    }
+    setPendingImage(null);
+    setPendingImagePreview(null);
+  }
+
+  function handleChooseAttach() {
+    if (!pendingImage) return;
+    if (onAttachFiles) {
+      onAttachFiles([pendingImage]);
+    } else if (onAttachClick) {
+      onAttachClick();
+    }
+    closeImageModal();
+  }
+
+  function handleChoosePasteInline() {
+    if (!pendingImage) return;
+    const file = pendingImage;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result as string;
+      const imgTag = `<p><img src="${base64}" alt="${file.name}" style="max-width: 100%; height: auto; border-radius: 6px; margin: 8px 0; display: block;" /></p>`;
+      const el = editorRef.current;
+      if (!el) return;
+      el.focus();
+      const sel = window.getSelection();
+      if (savedRangeRef.current && sel) {
+        try {
+          sel.removeAllRanges();
+          sel.addRange(savedRangeRef.current);
+          document.execCommand("insertHTML", false, imgTag);
+        } catch {
+          el.innerHTML += imgTag;
+        }
+      } else {
+        el.innerHTML += imgTag;
+      }
+      emitChange();
+      closeImageModal();
+    };
+    reader.readAsDataURL(file);
+  }
 
   // Sync external value → editor (avoid cursor jumps when unchanged).
   useEffect(() => {
@@ -343,9 +451,82 @@ export function EmailBodyEditor({
         data-placeholder={placeholder}
         onInput={emitChange}
         onBlur={emitChange}
-        className={`email-body-editor w-full px-3 py-2 text-sm text-slate-100 outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-slate-600 ${editorClassName}`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        onPaste={handlePaste}
+        className={`email-body-editor w-full px-3 py-2 text-sm text-slate-100 outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-slate-600 transition-colors ${
+          isDraggingOver ? "bg-emerald-950/20 ring-2 ring-emerald-500/50" : ""
+        } ${editorClassName}`}
         style={{ minHeight: `${minHeight}rem` }}
       />
+
+      {pendingImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-2xl space-y-4"
+            role="dialog"
+            aria-labelledby="image-choice-title"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h4 id="image-choice-title" className="text-sm font-semibold text-white">
+                  Add Image to Email
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5 truncate max-w-[240px]">
+                  {pendingImage.name} ({(pendingImage.size / 1024).toFixed(0)} KB)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeImageModal}
+                className="text-slate-400 hover:text-white text-lg leading-none"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            {pendingImagePreview && (
+              <div className="max-h-40 overflow-hidden rounded-lg border border-slate-800 bg-slate-950 flex items-center justify-center p-2">
+                <img
+                  src={pendingImagePreview}
+                  alt="Preview"
+                  className="max-h-36 max-w-full object-contain rounded"
+                />
+              </div>
+            )}
+
+            <p className="text-xs text-slate-300">
+              How would you like to add this image?
+            </p>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={handleChooseAttach}
+                className="flex flex-col items-center justify-center gap-1.5 p-3 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-slate-700 hover:border-slate-600 text-slate-100 text-xs font-medium transition cursor-pointer"
+              >
+                <span className="text-xl">📎</span>
+                <span className="font-semibold">Attach as file</span>
+                <span className="text-[10px] text-slate-400">Add to email attachments</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleChoosePasteInline}
+                className="flex flex-col items-center justify-center gap-1.5 p-3 rounded-lg border border-emerald-500/50 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-200 text-xs font-semibold transition cursor-pointer"
+              >
+                <span className="text-xl">🖼️</span>
+                <span className="font-semibold">Paste in body</span>
+                <span className="text-[10px] text-emerald-300/70">Insert inline image</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

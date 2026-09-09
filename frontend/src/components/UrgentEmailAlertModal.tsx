@@ -67,7 +67,7 @@ export function UrgentEmailAlertModal({
             <div>
               <div className="flex flex-wrap items-center gap-2.5">
                 <h2 className="text-lg sm:text-xl font-black text-red-100 tracking-wide">
-                  URGENT EMAIL REQUIRES IMMEDIATE REPLY
+                  NEW INQUIRY EMAIL REQUIRES REPLY
                 </h2>
                 {globalTotal > 1 && (
                   <span className="rounded-full bg-red-600 px-3 py-0.5 text-xs font-black text-white shadow-md shadow-red-600/50">
@@ -76,7 +76,7 @@ export function UrgentEmailAlertModal({
                 )}
               </div>
               <p className="text-xs text-red-300/90 mt-0.5 font-medium">
-                This critical customer enquiry is waiting for response. Alert remains active until an email reply is sent.
+                New inquiry email from prospect/buyer awaiting your response. Alert remains active until an email reply is sent.
               </p>
             </div>
           </div>
@@ -178,7 +178,7 @@ export function UrgentEmailAlertModal({
             </span>
           </div>
           <span className="text-[11px] font-mono font-black px-2.5 py-0.5 rounded-lg bg-red-900 border border-red-500 text-red-100 uppercase tracking-wider">
-            {currentEmail.triage_label || "Urgent"}
+            {currentEmail.inquiry_type || currentEmail.triage_label || "New Inquiry"}
           </span>
         </div>
 
@@ -220,11 +220,24 @@ export function UrgentEmailAlertModal({
             </span>
             <div className="text-sm sm:text-base font-black text-emerald-300 flex flex-wrap items-center gap-2">
               <span className="px-2 py-0.5 rounded-lg bg-red-950 text-red-200 border border-red-600 text-[11px] font-black tracking-wide">
-                {currentEmail.triage_category === "urgent" ? "🚨 URGENT" : "⚡ ACTION REQUIRED"}
+                {currentEmail.inquiry_type || "🚨 INQUIRY AWAITING REPLY"}
               </span>
               <span className="truncate">{currentEmail.subject}</span>
             </div>
           </div>
+
+          {/* Description of what the inquiry is about */}
+          {currentEmail.inquiry_description && (
+            <div className="pt-2 border-t border-slate-800">
+              <span className="block text-[11px] uppercase font-bold text-amber-400 mb-1 tracking-wider flex items-center gap-1.5">
+                <span>📋</span>
+                <span>Inquiry Summary &amp; Requirement:</span>
+              </span>
+              <div className="text-xs sm:text-sm leading-relaxed text-amber-100 bg-amber-950/40 p-2.5 sm:p-3 rounded-xl border border-amber-500/40 font-medium shadow-inner">
+                {currentEmail.inquiry_description}
+              </div>
+            </div>
+          )}
 
           {currentEmail.preview && (
             <div className="pt-2 border-t border-slate-800">

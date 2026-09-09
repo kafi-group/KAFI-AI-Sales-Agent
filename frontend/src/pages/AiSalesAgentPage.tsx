@@ -9,6 +9,11 @@ import {
   type AiSalesAgentTask,
 } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import {
+  LeadWhatsAppComposeModal,
+  type WhatsAppComposeTarget,
+} from "../components/WhatsAppComposeLink";
+import { ComposeMailModal } from "../components/ComposeMailModal";
 
 interface AiSalesAgentPageProps {
   onError: (message: string) => void;
@@ -37,6 +42,11 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   const [selfTestPersona, setSelfTestPersona] = useState<"male" | "female">("female");
   const [selfTestLanguage, setSelfTestLanguage] = useState<string>("en");
   const [selfTesting, setSelfTesting] = useState(false);
+  const [endingCall, setEndingCall] = useState(false);
+  const [postCallPrompt, setPostCallPrompt] = useState<AiSalesAgentTask | null>(null);
+  const [whatsAppModalTarget, setWhatsAppModalTarget] = useState<WhatsAppComposeTarget | null>(null);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [emailModalInitial, setEmailModalInitial] = useState<{ to: string; subject: string } | null>(null);
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
 
   // AI Agent Training & Knowledge Base State
@@ -232,6 +242,61 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     }
   }
 
+  async function handleEndCall(persona?: string) {
+    setEndingCall(true);
+    try {
+      const res = await client.endAiSalesAgentCall({ persona });
+      setQueueNotice("Call ended.");
+      setTimeout(() => setQueueNotice(null), 5000);
+      await load();
+      if (res.task && res.task.contact_phone) {
+        setPostCallPrompt(res.task);
+      } else if (tasks.length > 0 && tasks[0].contact_phone) {
+        setPostCallPrompt(tasks[0]);
+      } else if (selfTestPhone.trim()) {
+        setPostCallPrompt({
+          id: 0,
+          persona: (persona as any) || selfTestPersona,
+          buyer_id: 0,
+          contact_id: null,
+          company_name: selfTestName.trim() || "Test Call",
+          contact_name: selfTestName.trim() || "Test Lead",
+          contact_phone: selfTestPhone.trim(),
+          status: "completed",
+          ready: true,
+          outcome: "Ended",
+        } as unknown as AiSalesAgentTask);
+      }
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to end call");
+    } finally {
+      setEndingCall(false);
+    }
+  }
+
+  function openWhatsAppForTask(task: AiSalesAgentTask) {
+    if (!task.contact_phone) {
+      onError("No phone number available for this contact.");
+      return;
+    }
+    setWhatsAppModalTarget({
+      phone: task.contact_phone,
+      row: {
+        id: task.buyer_id || 0,
+        company_name: task.company_name || "Lead",
+        country: task.country || null,
+      } as unknown as any,
+    });
+  }
+
+  function openEmailForTask(task: AiSalesAgentTask) {
+    setEmailModalInitial({
+      to: (task as any).contact_email || "",
+      subject: `Follow-up from Kafi Commodities · ${task.company_name || ""}`,
+    });
+    setEmailModalOpen(true);
+  }
+
   async function handleSkip(taskId: number) {
     try {
       await client.skipAiSalesAgentTask(taskId);
@@ -377,12 +442,12 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
               </p>
             )}
             {isAdmin && (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
                   disabled={!runner.twilio_ready || runner.status === "running"}
                   onClick={() => void handleRunnerAction(runner.persona, "start")}
-                  className="px-3 py-1.5 text-sm rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white"
+                  className="px-3 py-1.5 text-sm rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-medium"
                 >
                   Start calling
                 </button>
@@ -393,6 +458,15 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                   className="px-3 py-1.5 text-sm rounded-lg border border-slate-600 text-slate-200 hover:bg-slate-800 disabled:opacity-40"
                 >
                   Pause
+                </button>
+                <button
+                  type="button"
+                  disabled={endingCall || (runner.status !== "running" && !runner.current_task)}
+                  onClick={() => void handleEndCall(runner.persona)}
+                  className="px-3 py-1.5 text-sm rounded-lg bg-rose-600 hover:bg-rose-500 text-white disabled:opacity-40 font-medium flex items-center gap-1"
+                  title="End current call immediately"
+                >
+                  <span>🔴 End call</span>
                 </button>
               </div>
             )}
@@ -468,6 +542,15 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
               </button>
               <button
                 type="button"
+                disabled={endingCall}
+                onClick={() => void handleEndCall(selfTestPersona)}
+                className="px-3.5 py-2 text-sm rounded-lg bg-rose-600 hover:bg-rose-500 font-semibold text-white disabled:opacity-40 flex items-center gap-1.5"
+                title="End active call immediately"
+              >
+                <span>🔴 End Call</span>
+              </button>
+              <button
+                type="button"
                 disabled={selfTesting || !selfTestPhone.trim()}
                 onClick={() => void handleSelfTest()}
                 className="px-3.5 py-2 text-sm rounded-lg border border-slate-600 text-slate-200 hover:bg-slate-800 disabled:opacity-40"
@@ -475,6 +558,47 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                 {selfTesting ? "Queueing…" : "Queue test call"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {postCallPrompt && (
+        <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/40 p-4 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+          <div>
+            <p className="font-semibold text-emerald-200 flex items-center gap-2 text-sm">
+              <span>📞</span>
+              <span>
+                Call with {postCallPrompt.contact_name || postCallPrompt.company_name} ({postCallPrompt.contact_phone}) ended.
+              </span>
+            </p>
+            <p className="text-xs text-slate-300 mt-0.5">
+              Send follow-up communication to this contact right now:
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {postCallPrompt.contact_phone && (
+              <button
+                type="button"
+                onClick={() => openWhatsAppForTask(postCallPrompt)}
+                className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow"
+              >
+                <span>💬 Send WhatsApp</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => openEmailForTask(postCallPrompt)}
+              className="px-3.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-1.5 shadow"
+            >
+              <span>✉️ Send Email</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPostCallPrompt(null)}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-400 hover:text-white text-xs"
+            >
+              Dismiss
+            </button>
           </div>
         </div>
       )}
@@ -691,28 +815,48 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                     <td className="px-3 py-2 text-xs text-slate-400">
                       {task.outcome ?? "—"}
                     </td>
-                    {isAdmin && (
-                      <td className="px-3 py-2 space-x-2 whitespace-nowrap">
-                        {task.status === "pending" && (
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5">
+                        {task.contact_phone && (
+                          <button
+                            type="button"
+                            onClick={() => openWhatsAppForTask(task)}
+                            className="px-2 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1 transition"
+                            title={`Send WhatsApp message to ${task.contact_phone}`}
+                          >
+                            <span>💬</span>
+                            <span>WhatsApp</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => openEmailForTask(task)}
+                          className="px-2 py-1 rounded bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 text-xs font-semibold flex items-center gap-1 transition"
+                          title={`Send Email to ${task.company_name || "Lead"}`}
+                        >
+                          <span>✉️</span>
+                          <span>Email</span>
+                        </button>
+                        {isAdmin && task.status === "pending" && (
                           <>
                             <button
                               type="button"
                               onClick={() => void handleSkip(task.id)}
-                              className="text-xs text-amber-400 hover:underline"
+                              className="text-xs text-amber-400 hover:underline px-1"
                             >
                               Skip
                             </button>
                             <button
                               type="button"
                               onClick={() => void handleRemove(task.id)}
-                              className="text-xs text-red-400 hover:underline"
+                              className="text-xs text-red-400 hover:underline px-1"
                             >
                               Remove
                             </button>
                           </>
                         )}
-                      </td>
-                    )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -720,6 +864,41 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
           </div>
         )}
       </div>
+
+      {whatsAppModalTarget && (
+        <LeadWhatsAppComposeModal
+          target={whatsAppModalTarget}
+          onClose={() => setWhatsAppModalTarget(null)}
+          onError={onError}
+          onSent={(msg) => {
+            setQueueNotice(msg);
+            setTimeout(() => setQueueNotice(null), 8000);
+          }}
+        />
+      )}
+
+      {emailModalOpen && (
+        <ComposeMailModal
+          fromEmail={(user as any)?.mailbox_email || "export@kafi-group.com"}
+          initialDraft={
+            emailModalInitial
+              ? {
+                  to_addrs: emailModalInitial.to,
+                  subject: emailModalInitial.subject,
+                }
+              : null
+          }
+          onClose={() => {
+            setEmailModalOpen(false);
+            setEmailModalInitial(null);
+          }}
+          onError={onError}
+          onSent={(msg) => {
+            setQueueNotice(msg);
+            setTimeout(() => setQueueNotice(null), 8000);
+          }}
+        />
+      )}
     </section>
   );
 }

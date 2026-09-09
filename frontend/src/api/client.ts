@@ -440,6 +440,8 @@ export interface UrgentEmailItem {
   hours_ago: number;
   is_overdue: boolean;
   preview: string;
+  inquiry_type?: string;
+  inquiry_description?: string;
   triage_category: string;
   triage_label: string;
   unread_count: number;
@@ -2896,6 +2898,11 @@ export const client = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  renameMailLabel: (labelId: number, payload: { name: string; color?: string }) =>
+    request<MailLabel>(`/inbox/labels/${labelId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   deleteMailLabel: (labelId: number) =>
     request<void>(`/inbox/labels/${labelId}`, { method: "DELETE" }),
   assignMailLabel: (payload: {
@@ -3595,6 +3602,12 @@ export const client = {
       method: "POST",
       headers: aiSalesAgentHeaders(),
       body: JSON.stringify({ persona }),
+    }),
+  endAiSalesAgentCall: (payload: { persona?: string; call_sid?: string; task_id?: number } = {}) =>
+    request<{ ok: boolean; task?: AiSalesAgentTask }>("/ai-sales-agent/end-call", {
+      method: "POST",
+      headers: aiSalesAgentHeaders(),
+      body: JSON.stringify(payload),
     }),
   getAiSalesAgentBriefing: (buyerId: number, contactId?: number) => {
     const qs = contactId ? `?contact_id=${contactId}` : "";
