@@ -2852,6 +2852,25 @@ export const client = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  listWhatsAppPersonalConversations: (params: { page?: number; page_size?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (params.page) query.set("page", String(params.page));
+    if (params.page_size) query.set("page_size", String(params.page_size));
+    const qs = query.toString();
+    return request<WhatsAppConversationListResponse>(
+      `/whatsapp-personal/conversations${qs ? `?${qs}` : ""}`,
+    );
+  },
+  listWhatsAppPersonalMessages: (contactId: number) =>
+    request<DraftInteraction[]>(`/whatsapp-personal/conversations/${contactId}/messages`),
+  replyWhatsAppPersonalConversation: (contactId: number, content: string) =>
+    request<{ interaction: DraftInteraction; sent: boolean }>(
+      `/whatsapp-personal/conversations/${contactId}/reply`,
+      {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      },
+    ),
   getInboxMessage: (uid: string, folder = "INBOX") =>
     request<InboxMessageDetail>(
       `/inbox/messages/${encodeURIComponent(uid)}?folder=${encodeURIComponent(folder)}`,

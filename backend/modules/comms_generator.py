@@ -379,6 +379,7 @@ class CommsGenerator:
         provider_message_id: str | None = None,
         profile_name: str | None = None,
         create_reply_draft: bool = True,
+        personal_whatsapp_user_id: int | None = None,
     ) -> Interaction | None:
         """Webhook entrypoint — logs inbound WhatsApp, opens the 24h window.
 
@@ -425,6 +426,7 @@ class CommsGenerator:
             handled_by=HandledBy.human,
             status=InteractionStatus.sent,
             provider_message_id=provider_message_id,
+            personal_whatsapp_user_id=personal_whatsapp_user_id,
         )
         db.add(inbound)
         db.commit()
@@ -463,6 +465,21 @@ class CommsGenerator:
         db.refresh(draft)
         return draft
 
+    def _whatsapp_thread_filter(self, *, personal_user_id: int | None = None):
+        """Cloud API threads vs personal Baileys QR threads (per Sales Agent user)."""
+        base = (Interaction.channel == Channel.whatsapp) & (Interaction.contact_id.isnot(None))
+        if personal_user_id is not None:
+            return base & (Interaction.personal_whatsapp_user_id == int(personal_user_id))
+        return base & Interaction.personal_whatsapp_user_id.is_(None) & (
+            (Interaction.template_name.isnot(None))
+            | (Interaction.provider_message_id.like("wamid.%"))
+            | (Interaction.provider_message_id.like("meta_%"))
+            | (Interaction.wa_status.isnot(None))
+        ) & (
+            (Interaction.provider_message_id.is_(None))
+            | (~Interaction.provider_message_id.like("baileys%"))
+        )
+
     def list_whatsapp_conversations(
         self,
         db: Session,
@@ -470,6 +487,7 @@ class CommsGenerator:
         assigned_to_user_id: int | None = None,
         page: int = 1,
         page_size: int = 20,
+        personal_user_id: int | None = None,
     ) -> tuple[list[dict], int]:
         """One row per contact that has at least one WhatsApp interaction, most-recent first."""
         page = max(1, page)
@@ -477,20 +495,7 @@ class CommsGenerator:
 
         from sqlalchemy import func as sa_func, or_
 
-        meta_condition = (
-            (Interaction.channel == Channel.whatsapp)
-            & (Interaction.contact_id.isnot(None))
-            & (
-                (Interaction.template_name.isnot(None))
-                | (Interaction.provider_message_id.like("wamid.%"))
-                | (Interaction.provider_message_id.like("meta_%"))
-                | (Interaction.wa_status.isnot(None))
-            )
-            & (
-                (Interaction.provider_message_id.is_(None))
-                | (~Interaction.provider_message_id.like("baileys%"))
-            )
-        )
+        meta_condition = self._whatsapp_thread_filter(personal_user_id=personal_user_id)
 
         latest_q = (
             db.query(
@@ -679,22 +684,10 @@ class CommsGenerator:
         *,
         contact_id: int,
         limit: int = 200,
+        personal_user_id: int | None = None,
     ) -> list[Interaction]:
-        from sqlalchemy import or_
-
-        meta_condition = (
-            (Interaction.channel == Channel.whatsapp)
-            & (Interaction.contact_id == contact_id)
-            & (
-                (Interaction.template_name.isnot(None))
-                | (Interaction.provider_message_id.like("wamid.%"))
-                | (Interaction.provider_message_id.like("meta_%"))
-                | (Interaction.wa_status.isnot(None))
-            )
-            & (
-                (Interaction.provider_message_id.is_(None))
-                | (~Interaction.provider_message_id.like("baileys%"))
-            )
+        meta_condition = self._whatsapp_thread_filter(personal_user_id=personal_user_id) & (
+            Interaction.contact_id == contact_id
         )
         return (
             db.query(Interaction)

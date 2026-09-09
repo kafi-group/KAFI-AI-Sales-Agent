@@ -5,11 +5,17 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sa_func
 
 from api.deps import get_current_user, get_db
+from api.schemas import (
+    InteractionRead,
+    WhatsAppConversationListResponse,
+    WhatsAppConversationRead,
+)
 from config import settings
 from db.models import AppUser, Buyer, Channel, Direction, HandledBy, Interaction, InteractionStatus
 from integrations import whatsapp_bridge_client as bridge
@@ -39,6 +45,34 @@ class WhatsAppPersonalInboundRequest(BaseModel):
     profile_name: str | None = None
 
 
+class WhatsAppPersonalReplyRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=4096)
+
+
+def _user_id_from_bridge_session(db: Session, session_id: str | None) -> int | None:
+    raw = (session_id or "").strip()
+    if not raw:
+        return None
+    prefix = (settings.whatsapp_bridge_session_prefix or "kafi-sales-agent").strip()
+    name = raw
+    lowered = raw.lower()
+    prefix_l = prefix.lower()
+    if lowered.startswith(f"{prefix_l}-"):
+        name = raw[len(prefix) + 1 :]
+    if name.lower().startswith("u") and name[1:].isdigit():
+        return int(name[1:])
+    user = (
+        db.query(AppUser)
+        .filter(sa_func.lower(AppUser.username) == name.lower())
+        .first()
+    )
+    return int(user.id) if user else None
+
+
+def _interaction_read(db: Session, interaction) -> InteractionRead:
+    return InteractionRead(**comms.interaction_to_dict(db, interaction))
+
+
 @router.get("/status")
 def whatsapp_personal_status(user: AppUser = Depends(get_current_user)) -> Any:
     try:
@@ -62,6 +96,102 @@ def whatsapp_personal_qr(user: AppUser = Depends(get_current_user)) -> Any:
 @router.get("/session")
 def whatsapp_personal_session(user: AppUser = Depends(get_current_user)) -> dict[str, str]:
     return {"session_id": bridge.bridge_session_id(user.id, username=user.username)}
+
+
+@router.get("/conversations", response_model=WhatsAppConversationListResponse)
+def list_personal_conversations(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> WhatsAppConversationListResponse:
+    rows, total = comms.list_whatsapp_conversations(
+        db,
+        page=page,
+        page_size=page_size,
+        personal_user_id=user.id,
+    )
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    return WhatsAppConversationListResponse(
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        rows=[WhatsAppConversationRead(**row) for row in rows],
+    )
+
+
+@router.get("/conversations/{contact_id}/messages", response_model=list[InteractionRead])
+def list_personal_conversation_messages(
+    contact_id: int,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> list[InteractionRead]:
+    rows = comms.list_whatsapp_messages(
+        db, contact_id=contact_id, personal_user_id=user.id
+    )
+    return [_interaction_read(db, row) for row in rows]
+
+
+@router.post("/conversations/{contact_id}/reply")
+def reply_personal_conversation(
+    contact_id: int,
+    payload: WhatsAppPersonalReplyRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    from db.models import Contact
+
+    status = bridge.bridge_status(user.id, username=user.username)
+    if not status.get("connected"):
+        raise HTTPException(
+            409,
+            "Personal WhatsApp is not connected. Open Scan & connect and scan QR.",
+        )
+    contact = db.get(Contact, contact_id)
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    phone = (contact.phone or contact.wa_id or "").strip()
+    if not phone:
+        raise HTTPException(400, "Contact has no phone number on file")
+    res = bridge.bridge_send(user.id, to_phone=phone, message=payload.content, username=user.username)
+    outbound = Interaction(
+        contact_id=contact.id,
+        channel=Channel.whatsapp,
+        direction=Direction.outbound,
+        content=payload.content,
+        status=InteractionStatus.sent,
+        handled_by=HandledBy.human,
+        provider_message_id=(
+            f"baileys_{res.get('messageId')}"
+            if isinstance(res, dict) and res.get("messageId")
+            else "baileys_mobile"
+        ),
+        personal_whatsapp_user_id=user.id,
+    )
+    db.add(outbound)
+    db.commit()
+    db.refresh(outbound)
+    try:
+        from modules import activity as activity_module
+
+        activity_module.log_activity(
+            db,
+            user_id=user.id,
+            activity_type=activity_module.PERSONAL_WHATSAPP_SENT,
+            title="Personal WhatsApp sent",
+            summary=f"Replied on WhatsApp Mobile to {phone}",
+            quantity=1,
+            entity_type="interaction",
+            entity_id=outbound.id,
+            details={"mode": "personal_mobile", "channel": "whatsapp", "to_phone": phone},
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return {
+        "interaction": _interaction_read(db, outbound).model_dump(mode="json"),
+        "sent": True,
+    }
 
 
 @router.post("/pair")
@@ -178,6 +308,7 @@ def whatsapp_personal_send(
                 status=InteractionStatus.sent,
                 handled_by=HandledBy.human,
                 provider_message_id=f"baileys_{res.get('messageId')}" if isinstance(res, dict) and res.get("messageId") else "baileys_mobile",
+                personal_whatsapp_user_id=user.id,
             )
             db.add(outbound)
             db.commit()
@@ -287,6 +418,7 @@ def whatsapp_personal_bulk_send(
                         status=InteractionStatus.sent,
                         handled_by=HandledBy.human,
                         provider_message_id=f"baileys_{res.get('messageId')}" if isinstance(res, dict) and res.get("messageId") else "baileys_bulk",
+                        personal_whatsapp_user_id=user.id,
                     )
                     db.add(outbound)
                     db.commit()
@@ -336,30 +468,18 @@ def whatsapp_personal_inbound(
     if not wa_id or not body.message:
         raise HTTPException(400, "Missing wa_id or message")
 
-    interaction = comms.record_inbound_whatsapp_message(
+    pmid = (body.provider_message_id or "").strip() or None
+    if pmid and not pmid.lower().startswith("baileys"):
+        pmid = f"baileys_{pmid}"
+
+    comms.record_inbound_whatsapp_message(
         db,
         wa_id=wa_id,
         message_text=body.message,
-        provider_message_id=body.provider_message_id,
+        provider_message_id=pmid,
         profile_name=body.profile_name,
         create_reply_draft=False,
+        personal_whatsapp_user_id=_user_id_from_bridge_session(db, body.session_id),
     )
-
-    if interaction is not None:
-        try:
-            from db.models import Contact
-            from modules import ai_mode as ai_mode_module
-
-            contact = db.get(Contact, interaction.contact_id)
-            if contact:
-                ai_mode_module.maybe_auto_reply_whatsapp(
-                    db,
-                    contact=contact,
-                    message_text=body.message,
-                    provider_message_id=body.provider_message_id,
-                )
-        except Exception:  # noqa: BLE001
-            pass
-
     return {"status": "ok"}
 

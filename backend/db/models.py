@@ -318,6 +318,8 @@ class Interaction(Base):
     provider_message_id: Mapped[Optional[str]] = mapped_column(String(128), index=True)
     template_name: Mapped[Optional[str]] = mapped_column(String(255))
     wa_status: Mapped[Optional[str]] = mapped_column(String(50))
+    # Owner of a Baileys (personal QR) WhatsApp message — not used for Cloud API.
+    personal_whatsapp_user_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
 
     contact: Mapped["Contact"] = relationship(back_populates="interactions")
 

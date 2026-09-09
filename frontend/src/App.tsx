@@ -1225,7 +1225,7 @@ function DashboardApp() {
       return "Inbox";
     }
     if ((tab === "leads" || tab === "calls") && selectedLeadId != null) return "Lead profile";
-    if (tab === "whatsapp-qr") return "WhatsApp Mobile";
+    if (tab === "whatsapp-qr" || tab === "whatsapp-mobile") return "WhatsApp Mobile";
     if (tab === "settings") return "Settings";
     for (const item of navItems) {
       const children = "children" in item ? item.children : undefined;
