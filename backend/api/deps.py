@@ -49,9 +49,16 @@ def get_current_user(
     # so polling endpoints don't re-query app_user_sessions every time.
     user_id = getattr(request.state, "user_id", None)
     if user_id is not None:
-        user = db.get(AppUser, int(user_id))
-        if user and user.is_active:
-            return user
+        cached_user = auth_module.get_cached_user_by_id(int(user_id))
+        if cached_user and cached_user.is_active:
+            return cached_user
+        try:
+            user = db.get(AppUser, int(user_id))
+            if user and user.is_active:
+                auth_module.cache_user_object(user)
+                return user
+        except Exception:
+            pass
 
     user = auth_module.get_user_by_token(db, token)
     if not user:

@@ -23,6 +23,7 @@ _PBKDF2_ITERATIONS = 120_000
 # middleware + get_current_user rarely open a second DB session per request.
 _TOKEN_CACHE_TTL_SECONDS = 300
 _token_user_cache: dict[str, tuple[float, int, str]] = {}
+_cached_app_users: dict[int, tuple[float, AppUser]] = {}
 
 
 def session_cookie_kwargs(*, secure: bool) -> dict:
@@ -60,6 +61,25 @@ def extract_session_token(
     return None
 
 
+def cache_user_object(user: AppUser) -> None:
+    if user and getattr(user, "id", None):
+        _cached_app_users[user.id] = (
+            datetime.now(timezone.utc).timestamp() + _TOKEN_CACHE_TTL_SECONDS,
+            user,
+        )
+
+
+def get_cached_user_by_id(user_id: int) -> AppUser | None:
+    hit = _cached_app_users.get(user_id)
+    if not hit:
+        return None
+    expires_at, user = hit
+    if expires_at < datetime.now(timezone.utc).timestamp():
+        _cached_app_users.pop(user_id, None)
+        return None
+    return user
+
+
 def _cache_auth_hit(token: str, user: AppUser) -> None:
     role = user.role.value if isinstance(user.role, AppUserRole) else str(user.role)
     _token_user_cache[token] = (
@@ -67,6 +87,7 @@ def _cache_auth_hit(token: str, user: AppUser) -> None:
         user.id,
         role,
     )
+    cache_user_object(user)
 
 
 def get_cached_auth(token: str | None) -> tuple[int, str] | None:
@@ -88,6 +109,7 @@ def invalidate_token_cache(token: str | None = None) -> None:
         _token_user_cache.pop(token, None)
     else:
         _token_user_cache.clear()
+        _cached_app_users.clear()
 
 
 def hash_password(password: str, *, salt: str | None = None) -> str:
@@ -222,11 +244,16 @@ def get_user_by_token(db: Session, token: str | None) -> AppUser | None:
     cached = get_cached_auth(token)
     if cached:
         user_id, _role = cached
-        user = db.get(AppUser, user_id)
+        user = get_cached_user_by_id(user_id)
         if user and user.is_active:
-            # Refresh TTL while still active.
-            _cache_auth_hit(token, user)
             return user
+        try:
+            user = db.get(AppUser, user_id)
+            if user and user.is_active:
+                _cache_auth_hit(token, user)
+                return user
+        except Exception:
+            pass
         invalidate_token_cache(token)
 
     now = datetime.now(timezone.utc)

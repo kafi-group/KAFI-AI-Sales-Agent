@@ -310,7 +310,7 @@ async def require_api_auth(request, call_next):
         return await call_next(request)
 
     from fastapi.responses import JSONResponse
-    from sqlalchemy.exc import TimeoutError as SATimeoutError
+    from sqlalchemy.exc import DBAPIError, OperationalError, TimeoutError as SATimeoutError
 
     db = SessionLocal()
     try:
@@ -319,12 +319,21 @@ async def require_api_auth(request, call_next):
             return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
         request.state.user_id = user.id
         request.state.user_role = user.role.value if hasattr(user.role, "value") else str(user.role)
-    except SATimeoutError:
-        return JSONResponse(
-            status_code=503,
-            content={"detail": "Database busy — retry shortly"},
-            headers={"Retry-After": "2"},
-        )
+    except (SATimeoutError, OperationalError, DBAPIError):
+        try:
+            db.close()
+            db = SessionLocal()
+            user = auth_module.get_user_by_token(db, token)
+            if not user:
+                return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+            request.state.user_id = user.id
+            request.state.user_role = user.role.value if hasattr(user.role, "value") else str(user.role)
+        except Exception:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Database busy — retry shortly"},
+                headers={"Retry-After": "2"},
+            )
     finally:
         db.close()
 
