@@ -3586,7 +3586,9 @@ export const client = {
       "/ai-sales-agent/tasks/self-test",
       {
         method: "POST",
+        headers: aiSalesAgentHeaders(),
         body: JSON.stringify(data),
+        timeoutMs: 90_000,
       },
     ),
   deleteAiSalesAgentTask: (taskId: number) =>

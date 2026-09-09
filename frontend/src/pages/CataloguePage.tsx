@@ -21,6 +21,18 @@ interface CataloguePageProps {
   onNavigateToMail?: (initialThreadId?: string) => void;
 }
 
+function normalizeWhatsAppPhone(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  let digits = trimmed.replace(/[^\d+]/g, "");
+  if (digits.startsWith("00")) digits = `+${digits.slice(2)}`;
+  if (digits.startsWith("03") && digits.length === 11) return `+92${digits.slice(1)}`;
+  if (/^3\d{9}$/.test(digits)) return `+92${digits}`;
+  if (digits.startsWith("92") && !digits.startsWith("+")) return `+${digits}`;
+  if (digits.startsWith("+")) return digits;
+  return trimmed;
+}
+
 export function CataloguePage({
   initialCatalogueId,
   onError,
@@ -138,7 +150,7 @@ export function CataloguePage({
   }
 
   async function handleSendPersonalWhatsApp() {
-    const phone = whatsAppRecipient.trim();
+    const phone = normalizeWhatsAppPhone(whatsAppRecipient);
     if (!phone) {
       onError("Enter a recipient phone number, e.g. +923001234567");
       return;

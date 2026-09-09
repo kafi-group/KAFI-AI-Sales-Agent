@@ -72,20 +72,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _contact_email_for_phone(db: Session, phone: str | None) -> str | None:
-    if not phone:
-        return None
-    try:
-        from modules.calls import _find_contact_by_phone
-
-        matched = _find_contact_by_phone(db, phone)
-    except Exception:
-        matched = None
-    if not matched:
-        return None
-    return (matched.email or matched.secondary_email or "").strip() or None
-
-
 def _auto_followup_after_call(
     db: Session,
     *,
@@ -319,21 +305,35 @@ def queue_self_test(
 
     # Match contact by phone if present so the call links to this lead's profile
     contact_id = None
-    contact_email = _contact_email_for_phone(db, payload.phone)
+    contact_email = (user.mailbox_email or "").strip() or None
     if payload.phone:
         try:
-            from modules.calls import _find_contact_by_phone
-            matched_contact = _find_contact_by_phone(db, payload.phone)
-            if matched_contact:
-                contact_id = matched_contact.id
-                contact_email = contact_email or (
-                    (matched_contact.email or matched_contact.secondary_email or "").strip() or None
+            from db.models import Contact
+            from sqlalchemy import or_
+
+            digits = "".join(ch for ch in payload.phone if ch.isdigit())
+            tail = digits[-10:] if len(digits) >= 8 else ""
+            if tail:
+                matched_contact = (
+                    db.query(Contact)
+                    .filter(
+                        or_(
+                            Contact.phone.contains(tail),
+                            Contact.primary_phone.contains(tail),
+                            Contact.secondary_mobile.contains(tail),
+                            Contact.wa_id.contains(tail),
+                        )
+                    )
+                    .first()
                 )
+                if matched_contact:
+                    contact_id = matched_contact.id
+                    contact_email = (
+                        (matched_contact.email or matched_contact.secondary_email or "").strip()
+                        or contact_email
+                    )
         except Exception:
             pass
-
-    if not contact_email:
-        contact_email = (user.mailbox_email or "").strip() or None
 
     followup = _auto_followup_after_call(
         db,
@@ -512,7 +512,7 @@ def start_runner(
             r["status"] = "idle"
             raise HTTPException(400, f"Twilio Voice Error: {call_result.get('error')}")
 
-        email = nxt.get("contact_email") or _contact_email_for_phone(db, phone)
+        email = nxt.get("contact_email") or (user.mailbox_email or "").strip() or None
         followup = _auto_followup_after_call(
             db,
             user=user,
