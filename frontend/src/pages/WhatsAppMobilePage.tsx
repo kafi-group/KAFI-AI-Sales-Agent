@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { client } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ActionButton } from "../components/ui/ActionButton";
@@ -23,6 +23,11 @@ function isConnectedStatus(st: Record<string, unknown> | null): boolean {
   if (!st) return false;
   if (Boolean(st.connected)) return true;
   return String(st.status ?? "").toLowerCase() === "connected";
+}
+
+function isConnectingStatus(st: Record<string, unknown> | null): boolean {
+  const label = String(st?.status ?? "").toLowerCase();
+  return label === "connecting";
 }
 
 export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
@@ -54,7 +59,10 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   const [phoneInput, setPhoneInput] = useState("");
 
   const [imgFailed, setImgFailed] = useState(false);
+  const pairingLock = useRef(false);
+  const qrRef = useRef<Record<string, unknown> | null>(null);
   const connected = isConnectedStatus(status);
+  const connecting = isConnectingStatus(status);
   const statusLabel = String(status?.status ?? (connected ? "connected" : "disconnected"));
   const connectedPhone = status?.phone
     ? String(status.phone)
@@ -98,9 +106,11 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   }
   const qrPending = statusLabel.toLowerCase() === "qr-pending";
   const qrImage = qrImageFromPayload(qr);
+  qrRef.current = qr;
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (opts?: { silent?: boolean; skipQr?: boolean }) => {
+    if (pairingLock.current) return;
+    if (!opts?.silent) setLoading(true);
     try {
       const [st, session, teamRes] = await Promise.all([
         client.getWhatsAppPersonalStatus(),
@@ -115,22 +125,34 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
 
       if (isConnectedStatus(st)) {
         setQr(null);
+        qrRef.current = null;
         return;
       }
 
-      // Fetch QR — retry up to 3× (1 s apart) because Baileys needs a moment
-      // to start up and emit the first QR after the session is initialized.
+      if (opts?.skipQr || isConnectingStatus(st) || qrImageFromPayload(qrRef.current)) {
+        return;
+      }
+
       let qrData: Record<string, unknown> | null = null;
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           qrData = await client.getWhatsAppPersonalQr();
-          if (qrData?.qr || qrData?.qrDataUrl) break;
+          if (qrData?.qr || qrData?.qrDataUrl || isConnectedStatus(qrData)) break;
         } catch {
           // ignore, retry
         }
         if (attempt < 2) await new Promise((r) => setTimeout(r, 1000));
       }
-      setQr(qrData);
+      if (isConnectedStatus(qrData)) {
+        setStatus(qrData);
+        setQr(null);
+        qrRef.current = null;
+        return;
+      }
+      if (qrData?.qr || qrData?.qrDataUrl) {
+        setQr(qrData);
+        qrRef.current = qrData;
+      }
     } catch (e) {
       onError(e instanceof Error ? e.message : "Could not load WhatsApp Mobile status");
     } finally {
@@ -166,28 +188,42 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
 
   const pollMs = useMemo(() => {
     if (connected) return 15_000;
-    if (qrPending || !qrImage) return 3_000;
-    return 6_000;
-  }, [connected, qrPending, qrImage]);
+    if (connecting) return 2_000;
+    if (qrPending || qrImage) return 4_000;
+    return 8_000;
+  }, [connected, connecting, qrPending, qrImage]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => void refresh(), pollMs);
+    const timer = window.setInterval(() => void refresh({ silent: true }), pollMs);
     return () => window.clearInterval(timer);
   }, [pollMs, refresh]);
 
   async function handlePair() {
+    pairingLock.current = true;
     setPairing(true);
     setNotice(null);
     setStatus({ connected: false, status: "qr-pending" });
     setQr(null);
+    qrRef.current = null;
     try {
       const qrData = await client.pairWhatsAppPersonal();
-      setQr(qrData);
-      setStatus({ connected: false, status: "qr-pending" });
-      setNotice(`Scan this fresh QR code with WhatsApp on ${userName}'s mobile phone.`);
+      if (isConnectedStatus(qrData)) {
+        setStatus(qrData);
+        setQr(null);
+        qrRef.current = null;
+        setNotice(`${userName}'s WhatsApp is already connected.`);
+      } else {
+        setQr(qrData);
+        qrRef.current = qrData;
+        setStatus({ ...(qrData ?? {}), connected: false, status: "qr-pending" });
+        setNotice(
+          `Scan this fresh QR code with WhatsApp on ${userName}'s mobile phone. Keep this page open until it says Connected.`
+        );
+      }
     } catch (e) {
       onError(e instanceof Error ? e.message : "Could not generate QR code");
     } finally {
+      pairingLock.current = false;
       setPairing(false);
     }
   }
@@ -200,20 +236,24 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
     ) {
       return;
     }
+    pairingLock.current = true;
     setLoading(true);
     setStatus({ connected: false, status: "disconnected" });
     setQr(null);
+    qrRef.current = null;
     localStorage.removeItem(phoneStorageKey);
     setCustomPhone(null);
     try {
       await client.disconnectWhatsAppPersonal();
-      setNotice(`Disconnected ${userName}'s mobile WhatsApp session. Generating fresh QR Code...`);
-      const qrData = await client.pairWhatsAppPersonal();
-      setQr(qrData);
-      setStatus({ connected: false, status: "qr-pending" });
+      setNotice(
+        `Disconnected ${userName}'s mobile WhatsApp. Unlink this device on your phone (Linked devices), then tap Generate QR Code to pair again.`
+      );
+      pairingLock.current = false;
+      await refresh({ silent: true, skipQr: true });
     } catch (e) {
       onError(e instanceof Error ? e.message : "Disconnect failed");
     } finally {
+      pairingLock.current = false;
       setLoading(false);
     }
   }
@@ -438,7 +478,18 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
 
           {!connected ? (
             <div className="space-y-6 text-center py-4">
-              {loading && !qrImage ? (
+              {connecting ? (
+                <div className="py-10 space-y-3">
+                  <div className="text-lg font-bold text-emerald-300">Phone scanned — finishing login…</div>
+                  <p className="text-sm text-slate-300 max-w-md mx-auto leading-relaxed">
+                    WhatsApp is restarting the session. Keep this page open. If your phone stays on “Logging in…”, wait about 10 seconds.
+                  </p>
+                  <div className="inline-flex items-center gap-2 text-sm text-emerald-400 bg-emerald-500/10 px-4 py-1.5 rounded-full border border-emerald-500/30 font-semibold">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+                    Completing connection…
+                  </div>
+                </div>
+              ) : loading && !qrImage ? (
                 <div className="py-12 text-slate-400 text-base font-medium animate-pulse">
                   Initializing WhatsApp Mobile bridge session…
                 </div>
@@ -474,7 +525,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                 </div>
               )}
 
-              {qrImage ? (
+              {qrImage && !connecting ? (
                 <ActionButton
                   icon={IconRefresh}
                   variant="ghost"
@@ -487,6 +538,17 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                   {pairing ? "Refreshing QR…" : "Refresh QR Code"}
                 </ActionButton>
               ) : null}
+
+              <ActionButton
+                icon={IconRefresh}
+                variant="ghost"
+                size="md"
+                onClick={() => void handleDisconnect()}
+                title="Disconnect this WhatsApp session so you can unlink the device on your phone"
+                className="w-full justify-center text-slate-400 hover:text-red-400 text-base py-3 border border-slate-800"
+              >
+                Disconnect / Unpair Mobile
+              </ActionButton>
             </div>
           ) : (
             <div className="pt-6 border-t border-slate-800 space-y-3">

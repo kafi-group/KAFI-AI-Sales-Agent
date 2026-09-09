@@ -33,8 +33,64 @@ if (!fs.existsSync(SESSIONS_DIR)) {
 const logger = pino({ level: "silent" });
 
 // In-memory active session tracking
-// Map<sessionId, { sock, connected, phone, qr, qrDataUrl, status }
+// Map<sessionId, { sock, connected, phone, qr, qrDataUrl, status, shuttingDown }
 const activeSessions = new Map();
+const initLocks = new Map();
+
+function isLiveSession(sessionObj) {
+  if (!sessionObj || !sessionObj.sock || sessionObj.shuttingDown) return false;
+  if (sessionObj.connected) return true;
+  const status = String(sessionObj.status || "").toLowerCase();
+  return status === "qr-pending" || status === "connecting";
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForQrOrConnected(sessionObj, timeoutMs = 10000) {
+  const started = Date.now();
+  while (sessionObj && Date.now() - started < timeoutMs) {
+    if (sessionObj.shuttingDown) break;
+    if (sessionObj.connected || sessionObj.qrDataUrl || sessionObj.qr) return sessionObj;
+    await sleep(250);
+  }
+  return sessionObj;
+}
+
+async function fetchProfilePicture(sock) {
+  try {
+    const rawJid = sock.user?.id || "";
+    if (!rawJid) return null;
+    const cleanNum = rawJid.split("@")[0].split(":")[0];
+    const userJid = cleanNum ? `${cleanNum}@s.whatsapp.net` : rawJid;
+
+    try {
+      const url = await sock.profilePictureUrl(userJid, "image");
+      if (url) return url;
+    } catch (e) {}
+
+    try {
+      const url = await sock.profilePictureUrl(rawJid, "image");
+      if (url) return url;
+    } catch (e) {}
+
+    try {
+      const previewUrl = await sock.profilePictureUrl(userJid, "preview");
+      if (previewUrl) return previewUrl;
+    } catch (e) {}
+
+    try {
+      const previewUrl = await sock.profilePictureUrl(rawJid, "preview");
+      if (previewUrl) return previewUrl;
+    } catch (e) {}
+
+    return null;
+  } catch (err) {
+    console.warn("[ProfilePicture] Error fetching profile picture:", err?.message);
+    return null;
+  }
+}
 
 async function forwardInboundToBackend(sessionId, payload) {
   if (!BACKEND_WEBHOOK_URL) return;
@@ -81,194 +137,222 @@ function getSessionDir(sessionId) {
   return dir;
 }
 
+function hasSavedCreds(sessionId) {
+  const safeId = String(sessionId || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
+  return fs.existsSync(path.join(SESSIONS_DIR, safeId, "creds.json"));
+}
+
 async function initBaileysSession(sessionId, forceNew = false) {
   const safeSessionId = String(sessionId || "default").trim();
   if (!safeSessionId) throw new Error("Session ID is required");
 
+  while (initLocks.has(safeSessionId)) {
+    try {
+      await initLocks.get(safeSessionId);
+    } catch {
+      break;
+    }
+  }
+
   let existing = activeSessions.get(safeSessionId);
-  if (existing && !forceNew) {
+  if (existing && !forceNew && isLiveSession(existing)) {
     return existing;
   }
 
-  if (existing && existing.sock) {
-    try {
-      existing.sock.ev.removeAllListeners();
-      existing.sock.end();
-    } catch (e) {
-      // Ignore cleanup error
-    }
-  }
-
-  const sessionDir = getSessionDir(safeSessionId);
-
-  if (forceNew) {
-    try {
-      fs.rmSync(sessionDir, { recursive: true, force: true });
-      fs.mkdirSync(sessionDir, { recursive: true });
-    } catch (e) {
-      console.error(`[Session ${safeSessionId}] Error clearing directory:`, e);
-    }
-  }
-
-  const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-  const { version } = await fetchLatestBaileysVersion();
-
-  const sock = makeWASocket({
-    version,
-    auth: state,
-    logger,
-    printQRInTerminal: false,
-    defaultQueryTimeoutMs: 60000,
+  let releaseLock = () => {};
+  const lockPromise = new Promise((resolve) => {
+    releaseLock = resolve;
   });
+  initLocks.set(safeSessionId, lockPromise);
 
-async function fetchProfilePicture(sock) {
   try {
-    const rawJid = sock.user?.id || "";
-    if (!rawJid) return null;
-    const cleanNum = rawJid.split("@")[0].split(":")[0];
-    const userJid = cleanNum ? `${cleanNum}@s.whatsapp.net` : rawJid;
-    
-    // Try primary user JID (high res)
-    try {
-      const url = await sock.profilePictureUrl(userJid, "image");
-      if (url) return url;
-    } catch (e) {}
+    existing = activeSessions.get(safeSessionId);
+    if (existing && !forceNew && isLiveSession(existing)) {
+      return existing;
+    }
 
-    // Try raw sock.user.id (high res)
-    try {
-      const url = await sock.profilePictureUrl(rawJid, "image");
-      if (url) return url;
-    } catch (e) {}
-
-    // Fall back to preview thumbnail
-    try {
-      const previewUrl = await sock.profilePictureUrl(userJid, "preview");
-      if (previewUrl) return previewUrl;
-    } catch (e) {}
-
-    try {
-      const previewUrl = await sock.profilePictureUrl(rawJid, "preview");
-      if (previewUrl) return previewUrl;
-    } catch (e) {}
-
-    return null;
-  } catch (err) {
-    console.warn("[ProfilePicture] Error fetching profile picture:", err?.message);
-    return null;
-  }
-}
-
-  const sessionObj = {
-    sock,
-    connected: false,
-    phone: null,
-    profilePictureUrl: null,
-    qr: null,
-    qrDataUrl: null,
-    status: "disconnected",
-  };
-
-  activeSessions.set(safeSessionId, sessionObj);
-
-  sock.ev.on("creds.update", saveCreds);
-
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr) {
-      sessionObj.qr = qr;
-      sessionObj.status = "qr-pending";
-      sessionObj.connected = false;
+    if (existing && existing.sock) {
+      existing.shuttingDown = true;
       try {
-        sessionObj.qrDataUrl = await QRCode.toDataURL(qr);
-      } catch (err) {
-        console.error(`[Session ${safeSessionId}] Error generating QR data URL:`, err);
+        existing.sock.ev.removeAllListeners();
+        existing.sock.end(undefined);
+      } catch (e) {
+        // Ignore cleanup error
       }
     }
 
-    if (connection === "open") {
-      sessionObj.connected = true;
-      sessionObj.status = "connected";
-      sessionObj.qr = null;
-      sessionObj.qrDataUrl = null;
-      const jid = sock.user?.id || "";
-      const rawNum = jid.split("@")[0].split(":")[0];
-      sessionObj.phone = rawNum ? `+${rawNum}` : null;
-      console.log(`[Session ${safeSessionId}] Connected as ${sessionObj.phone || jid}`);
+    const sessionDir = getSessionDir(safeSessionId);
 
-      fetchProfilePicture(sock).then((url) => {
-        sessionObj.profilePictureUrl = url;
-      });
+    if (forceNew) {
+      try {
+        fs.rmSync(sessionDir, { recursive: true, force: true });
+        fs.mkdirSync(sessionDir, { recursive: true });
+      } catch (e) {
+        console.error(`[Session ${safeSessionId}] Error clearing directory:`, e);
+      }
     }
 
-    if (connection === "close") {
-      sessionObj.connected = false;
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      sessionObj.status = "disconnected";
+    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+    let version;
+    try {
+      const latest = await fetchLatestBaileysVersion();
+      version = latest.version;
+    } catch (err) {
+      console.warn(`[Session ${safeSessionId}] Could not fetch WA version, using Baileys default:`, err?.message);
+    }
 
-      console.log(
-        `[Session ${safeSessionId}] Closed. Reason: ${statusCode}, reconnecting: ${shouldReconnect}`
-      );
+    const sock = makeWASocket({
+      ...(version ? { version } : {}),
+      auth: state,
+      logger,
+      printQRInTerminal: false,
+      browser: ["KAFI Sales Agent", "Chrome", "124.0.0"],
+      markOnlineOnConnect: false,
+      syncFullHistory: false,
+      connectTimeoutMs: 60_000,
+      defaultQueryTimeoutMs: 60_000,
+      getMessage: async () => undefined,
+    });
 
-      if (shouldReconnect) {
+    const sessionObj = {
+      sock,
+      connected: false,
+      phone: null,
+      profilePictureUrl: null,
+      qr: null,
+      qrDataUrl: null,
+      status: "connecting",
+      shuttingDown: false,
+    };
+
+    activeSessions.set(safeSessionId, sessionObj);
+
+    sock.ev.on("creds.update", saveCreds);
+
+    sock.ev.on("connection.update", async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (sessionObj.shuttingDown) return;
+
+      if (qr) {
+        sessionObj.qr = qr;
+        sessionObj.status = "qr-pending";
+        sessionObj.connected = false;
+        try {
+          sessionObj.qrDataUrl = await QRCode.toDataURL(qr);
+        } catch (err) {
+          console.error(`[Session ${safeSessionId}] Error generating QR data URL:`, err);
+        }
+      }
+
+      if (connection === "connecting") {
+        sessionObj.status = sessionObj.qr ? "qr-pending" : "connecting";
+      }
+
+      if (connection === "open") {
+        sessionObj.connected = true;
+        sessionObj.status = "connected";
+        sessionObj.qr = null;
+        sessionObj.qrDataUrl = null;
+        const jid = sock.user?.id || "";
+        const rawNum = jid.split("@")[0].split(":")[0];
+        sessionObj.phone = rawNum ? `+${rawNum}` : null;
+        console.log(`[Session ${safeSessionId}] Connected as ${sessionObj.phone || jid}`);
+
+        fetchProfilePicture(sock)
+          .then((url) => {
+            sessionObj.profilePictureUrl = url;
+          })
+          .catch(() => {});
+      }
+
+      if (connection === "close") {
+        sessionObj.connected = false;
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const loggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401;
+        const restartRequired = statusCode === DisconnectReason.restartRequired || statusCode === 515;
+        sessionObj.status = "disconnected";
+
+        console.log(
+          `[Session ${safeSessionId}] Closed. Reason: ${statusCode}, reconnecting: ${!loggedOut && !sessionObj.shuttingDown}`
+        );
+
+        if (sessionObj.shuttingDown) {
+          if (activeSessions.get(safeSessionId) === sessionObj) {
+            activeSessions.delete(safeSessionId);
+          }
+          return;
+        }
+
+        if (loggedOut) {
+          try {
+            fs.rmSync(sessionDir, { recursive: true, force: true });
+          } catch (e) {
+            // Ignore
+          }
+          if (activeSessions.get(safeSessionId) === sessionObj) {
+            activeSessions.delete(safeSessionId);
+          }
+          return;
+        }
+
+        // 515 after QR scan is normal: WhatsApp requires a fresh socket with saved creds.
+        const delay = restartRequired ? 800 : 2500;
         setTimeout(() => {
+          const current = activeSessions.get(safeSessionId);
+          if (current && current.shuttingDown) return;
           initBaileysSession(safeSessionId, false).catch((err) => {
             console.error(`[Session ${safeSessionId}] Reconnect failed:`, err);
           });
-        }, 3000);
-      } else {
-        // Logged out — purge directory
-        try {
-          fs.rmSync(sessionDir, { recursive: true, force: true });
-        } catch (e) {
-          // Ignore
-        }
-        activeSessions.delete(safeSessionId);
+        }, delay);
       }
-    }
-  });
+    });
 
-  // Listener for incoming WhatsApp messages
-  sock.ev.on("messages.upsert", async (m) => {
-    try {
-      if (m.type !== "notify") return;
-      for (const msg of m.messages) {
-        if (msg.key.fromMe) continue;
-        const remoteJid = msg.key.remoteJid || "";
-        if (!remoteJid || remoteJid.includes("@broadcast") || remoteJid.includes("@g.us")) {
-          continue;
+    sock.ev.on("messages.upsert", async (m) => {
+      try {
+        if (m.type !== "notify") return;
+        for (const msg of m.messages) {
+          if (msg.key.fromMe) continue;
+          const remoteJid = msg.key.remoteJid || "";
+          if (!remoteJid || remoteJid.includes("@broadcast") || remoteJid.includes("@g.us")) {
+            continue;
+          }
+
+          const text =
+            msg.message?.conversation ||
+            msg.message?.extendedTextMessage?.text ||
+            msg.message?.imageMessage?.caption ||
+            msg.message?.videoMessage?.caption ||
+            "";
+
+          if (!text.trim()) continue;
+
+          const rawPhone = remoteJid.split("@")[0].split(":")[0];
+          const pushName = msg.pushName || "";
+
+          console.log(
+            `[Session ${safeSessionId}] Incoming WhatsApp message from ${rawPhone}: "${text.trim().slice(0, 50)}"`
+          );
+
+          await forwardInboundToBackend(safeSessionId, {
+            session_id: safeSessionId,
+            from_phone: rawPhone ? `+${rawPhone}` : remoteJid,
+            wa_id: rawPhone || remoteJid,
+            message: text.trim(),
+            provider_message_id: msg.key.id,
+            profile_name: pushName,
+          });
         }
-
-        const text =
-          msg.message?.conversation ||
-          msg.message?.extendedTextMessage?.text ||
-          msg.message?.imageMessage?.caption ||
-          msg.message?.videoMessage?.caption ||
-          "";
-
-        if (!text.trim()) continue;
-
-        const rawPhone = remoteJid.split("@")[0].split(":")[0];
-        const pushName = msg.pushName || "";
-
-        console.log(`[Session ${safeSessionId}] Incoming WhatsApp message from ${rawPhone}: "${text.trim().slice(0, 50)}"`);
-
-        await forwardInboundToBackend(safeSessionId, {
-          session_id: safeSessionId,
-          from_phone: rawPhone ? `+${rawPhone}` : remoteJid,
-          wa_id: rawPhone || remoteJid,
-          message: text.trim(),
-          provider_message_id: msg.key.id,
-          profile_name: pushName,
-        });
+      } catch (err) {
+        console.error(`[Session ${safeSessionId}] Error processing messages.upsert:`, err);
       }
-    } catch (err) {
-      console.error(`[Session ${safeSessionId}] Error processing messages.upsert:`, err);
-    }
-  });
+    });
 
-  return sessionObj;
+    return sessionObj;
+  } finally {
+    initLocks.delete(safeSessionId);
+    releaseLock();
+  }
 }
 
 // Helper to format recipient phone into JID & raw digits
@@ -302,24 +386,48 @@ app.get("/", (req, res) => {
   });
 });
 
+function sessionPayload(sessionId, sessionObj) {
+  if (!sessionObj) {
+    return {
+      session: sessionId,
+      connected: false,
+      status: "disconnected",
+      phone: null,
+      profilePictureUrl: null,
+      profile_picture_url: null,
+      qr: null,
+      qrDataUrl: null,
+    };
+  }
+  return {
+    session: sessionId,
+    connected: Boolean(sessionObj.connected),
+    status: sessionObj.status || (sessionObj.connected ? "connected" : "disconnected"),
+    phone: sessionObj.phone || null,
+    profilePictureUrl: sessionObj.profilePictureUrl || null,
+    profile_picture_url: sessionObj.profilePictureUrl || null,
+    qr: sessionObj.qr || null,
+    qrDataUrl: sessionObj.qrDataUrl || null,
+  };
+}
+
 app.get("/status", async (req, res) => {
   const sessionId = req.query.session || req.query.sessionId || "default";
   try {
     let sessionObj = activeSessions.get(sessionId);
-    if (!sessionObj) {
+    // Restore a previously scanned session from saved creds, but do not start a
+    // brand-new QR socket from status polling (that used to kill in-progress logins).
+    if (!isLiveSession(sessionObj) && hasSavedCreds(sessionId)) {
       sessionObj = await initBaileysSession(sessionId, false);
     }
-    if (sessionObj.connected && !sessionObj.profilePictureUrl && sessionObj.sock) {
-      sessionObj.profilePictureUrl = await fetchProfilePicture(sessionObj.sock);
+    if (sessionObj && sessionObj.connected && !sessionObj.profilePictureUrl && sessionObj.sock) {
+      try {
+        sessionObj.profilePictureUrl = await fetchProfilePicture(sessionObj.sock);
+      } catch (e) {
+        // Never fail status just because the profile photo lookup failed.
+      }
     }
-    return res.json({
-      session: sessionId,
-      connected: Boolean(sessionObj.connected),
-      status: sessionObj.status,
-      phone: sessionObj.phone,
-      profilePictureUrl: sessionObj.profilePictureUrl || null,
-      profile_picture_url: sessionObj.profilePictureUrl || null,
-    });
+    return res.json(sessionPayload(sessionId, sessionObj));
   } catch (err) {
     return res.status(500).json({ error: err.message, session: sessionId });
   }
@@ -329,30 +437,17 @@ app.get("/qr", async (req, res) => {
   const sessionId = req.query.session || req.query.sessionId || "default";
   try {
     let sessionObj = activeSessions.get(sessionId);
-    if (!sessionObj) {
+    if (!sessionObj || !isLiveSession(sessionObj)) {
       sessionObj = await initBaileysSession(sessionId, false);
     }
 
+    sessionObj = await waitForQrOrConnected(sessionObj, 10000);
+
     if (sessionObj && sessionObj.connected) {
-      return res.json({
-        session: sessionId,
-        connected: true,
-        status: "connected",
-        phone: sessionObj.phone,
-        profilePictureUrl: sessionObj.profilePictureUrl || null,
-        qr: null,
-        qrDataUrl: null,
-      });
+      return res.json(sessionPayload(sessionId, sessionObj));
     }
 
-    return res.json({
-      session: sessionId,
-      connected: false,
-      status: sessionObj.status || "qr-pending",
-      qr: sessionObj.qr,
-      qrDataUrl: sessionObj.qrDataUrl,
-      phone: sessionObj.phone || null,
-    });
+    return res.json(sessionPayload(sessionId, sessionObj));
   } catch (err) {
     return res.status(500).json({ error: err.message, session: sessionId });
   }
@@ -361,38 +456,55 @@ app.get("/qr", async (req, res) => {
 app.post("/pair", async (req, res) => {
   const sessionId = req.body?.session || req.body?.sessionId || req.query?.session || "default";
   try {
-    const sessionObj = await initBaileysSession(sessionId, true);
-    return res.json({
-      session: sessionId,
-      connected: false,
-      status: sessionObj.status || "qr-pending",
-      qr: sessionObj.qr,
-      qrDataUrl: sessionObj.qrDataUrl,
-    });
+    let sessionObj = await initBaileysSession(sessionId, true);
+    sessionObj = await waitForQrOrConnected(sessionObj, 10000);
+    return res.json(sessionPayload(sessionId, sessionObj));
   } catch (err) {
     return res.status(500).json({ error: err.message, session: sessionId });
   }
 });
 
-app.post("/disconnect", async (req, res) => {
-  const sessionId = req.body?.session || req.body?.sessionId || req.query?.session || "default";
-  try {
-    const existing = activeSessions.get(sessionId);
-    if (existing && existing.sock) {
+async function stopSession(sessionId) {
+  const existing = activeSessions.get(sessionId);
+  if (existing) {
+    existing.shuttingDown = true;
+    existing.connected = false;
+    existing.status = "disconnected";
+    if (existing.sock) {
       try {
         await existing.sock.logout();
       } catch (e) {
-        existing.sock.end();
+        try {
+          existing.sock.end(undefined);
+        } catch (e2) {
+          // Ignore
+        }
       }
     }
-    const sessionDir = path.join(SESSIONS_DIR, String(sessionId).replace(/[^a-zA-Z0-9_-]/g, "_"));
-    try {
-      fs.rmSync(sessionDir, { recursive: true, force: true });
-    } catch (e) {
-      // Ignore directory removal errors
-    }
-    activeSessions.delete(sessionId);
-    return res.json({ ok: true, session: sessionId, connected: false, status: "disconnected" });
+  }
+  const sessionDir = path.join(SESSIONS_DIR, String(sessionId).replace(/[^a-zA-Z0-9_-]/g, "_"));
+  try {
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+  } catch (e) {
+    // Ignore directory removal errors
+  }
+  activeSessions.delete(sessionId);
+  return { ok: true, session: sessionId, connected: false, status: "disconnected" };
+}
+
+app.post("/disconnect", async (req, res) => {
+  const sessionId = req.body?.session || req.body?.sessionId || req.query?.session || "default";
+  try {
+    return res.json(await stopSession(sessionId));
+  } catch (err) {
+    return res.status(500).json({ error: err.message, session: sessionId });
+  }
+});
+
+app.post("/logout", async (req, res) => {
+  const sessionId = req.body?.session || req.body?.sessionId || req.query?.session || "default";
+  try {
+    return res.json(await stopSession(sessionId));
   } catch (err) {
     return res.status(500).json({ error: err.message, session: sessionId });
   }

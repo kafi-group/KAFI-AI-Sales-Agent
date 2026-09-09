@@ -102,12 +102,13 @@ def _normalize_status(data: dict[str, Any]) -> dict[str, Any]:
     raw_status = str(data.get("status") or "").strip().lower()
     raw_conn = data.get("connected")
     
-    if raw_status in {"disconnected", "qr-pending", "close", "closed", "logged_out", ""}:
+    if raw_status in {"disconnected", "qr-pending", "connecting", "close", "closed", "logged_out", ""}:
         data["connected"] = False
         data["status"] = raw_status if raw_status else "disconnected"
     elif raw_conn is False:
         data["connected"] = False
-        data["status"] = "disconnected"
+        if raw_status not in {"connecting", "qr-pending"}:
+            data["status"] = "disconnected"
     else:
         data["connected"] = bool(raw_conn) or raw_status in {"connected", "open", "ready"}
 
@@ -199,6 +200,30 @@ def bridge_qr(user_id: int, username: str | None = None) -> dict[str, Any]:
                     data["qrDataUrl"] = f"data:image/png;base64,{qr_val}"
             return _normalize_status(data)
         return {"session": session, "connected": False, "qr": None}
+
+
+def bridge_pair(user_id: int, username: str | None = None) -> dict[str, Any]:
+    """Force a fresh QR session on the dedicated bridge and wait for the image."""
+    session = bridge_session_id(user_id, username=username)
+    base_url = _base_url(user_id=user_id, username=username)
+    with httpx.Client(timeout=45.0) as client:
+        resp = client.post(
+            f"{base_url}/pair",
+            json={"session": session, "sessionId": session},
+            headers=_headers(),
+        )
+        resp.raise_for_status()
+        if _response_is_png(resp):
+            return _png_qr_payload(session, resp.content)
+        data = resp.json() if resp.content else {}
+        if not isinstance(data, dict):
+            data = {"session": session, "connected": False, "qr": None}
+        data.setdefault("session", session)
+        qr_val = data.get("qr") or data.get("qrDataUrl") or data.get("dataUrl")
+        if isinstance(qr_val, str) and qr_val and not str(qr_val).startswith("data:"):
+            if qr_val.startswith("iVBOR") or qr_val.startswith("/9j"):
+                data["qrDataUrl"] = f"data:image/png;base64,{qr_val}"
+        return _normalize_status(data)
 
 
 def bridge_disconnect(user_id: int, username: str | None = None) -> dict[str, Any]:
