@@ -167,10 +167,10 @@ export function DialerContactInput({
     <div ref={containerRef} className="relative w-full space-y-2">
       {/* Top Filter: Lead List / Section Selector */}
       <div>
-        <label className="block text-[11px] font-medium text-cyan-400 mb-1 flex items-center justify-between">
+        <label className="block text-[11px] font-medium text-slate-300 mb-1 flex items-center justify-between">
           <span>📂 Filter by Lead List / Pool</span>
           {sectionFilter && (
-            <span className="text-[10px] text-cyan-300 font-mono">Scoped Search Active</span>
+            <span className="text-[10px] text-emerald-300 font-mono">Scoped Search Active</span>
           )}
         </label>
         <select
@@ -178,7 +178,7 @@ export function DialerContactInput({
           onChange={(e) => {
             setSectionFilter(e.target.value);
           }}
-          className="w-full rounded-md bg-slate-900 border border-cyan-800/60 px-2.5 py-1.5 text-xs text-cyan-200 font-medium focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-500/40 transition cursor-pointer"
+          className="w-full rounded-md bg-slate-900 border border-slate-600 px-2.5 py-1.5 text-xs text-slate-100 font-medium focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40 transition cursor-pointer"
         >
           <option value="">🌐 All Sections / Master Table</option>
           {availableSections.map((sec) => (

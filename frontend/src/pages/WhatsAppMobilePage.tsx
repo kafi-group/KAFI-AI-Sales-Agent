@@ -360,7 +360,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                           <span className="text-xs text-emerald-400 font-extrabold uppercase tracking-wider block">
                             📱 Connected Mobile Phone Number
                           </span>
-                          <span className="text-2xl font-extrabold font-mono text-white tracking-wide block">
+                          <span className="text-2xl font-extrabold font-mono text-slate-100 tracking-wide block">
                             {customPhone || connectedPhone || "Phone Number Linked"}
                           </span>
                         </div>
@@ -594,7 +594,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                   1
                 </span>
                 <span className="leading-relaxed">
-                  Open <strong className="text-white font-bold">WhatsApp</strong> on your mobile phone.
+                  Open <strong className="text-slate-50 font-bold">WhatsApp</strong> on your mobile phone.
                 </span>
               </li>
               <li className="flex items-start gap-4">
@@ -602,7 +602,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                   2
                 </span>
                 <span className="leading-relaxed">
-                  Tap <strong className="text-white font-bold">Settings</strong> (on iPhone) or <strong className="text-white font-bold">Menu ⋮</strong> (on Android) → <strong className="text-white font-bold">Linked Devices</strong>.
+                  Tap <strong className="text-slate-50 font-bold">Settings</strong> (on iPhone) or <strong className="text-slate-50 font-bold">Menu ⋮</strong> (on Android) → <strong className="text-slate-50 font-bold">Linked Devices</strong>.
                 </span>
               </li>
               <li className="flex items-start gap-4">
@@ -610,7 +610,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                   3
                 </span>
                 <span className="leading-relaxed">
-                  Tap <strong className="text-white font-bold">Link a Device</strong> and scan the QR code on your computer screen.
+                  Tap <strong className="text-slate-50 font-bold">Link a Device</strong> and scan the QR code on your computer screen.
                 </span>
               </li>
             </ol>

@@ -352,11 +352,11 @@ export function KpiPage({ onError }: KpiPageProps) {
                     <p className="text-xs text-slate-400 group-hover:text-sky-300 font-medium transition">
                       {card.label}
                     </p>
-                    <span className="text-[11px] text-slate-600 group-hover:text-sky-400 opacity-0 group-hover:opacity-100 transition font-mono">
+                    <span className="text-[11px] text-slate-500 group-hover:text-sky-300 opacity-0 group-hover:opacity-100 transition font-mono">
                       ↗ Details
                     </span>
                   </div>
-                  <p className="mt-1.5 text-2xl font-black tabular-nums text-slate-100 group-hover:text-white">
+                  <p className="mt-1.5 text-2xl font-black tabular-nums text-slate-100 group-hover:text-sky-100">
                     {val}
                   </p>
                   {card.key === "personal_emails_sent" &&

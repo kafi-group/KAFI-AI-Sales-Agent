@@ -39,28 +39,26 @@ import { EmailLeadButton } from "../components/EmailLeadButton";
 import { Pagination } from "../components/Pagination";
 import { ColumnVisibilityMenu } from "../components/ColumnVisibilityMenu";
 import { ActionButton } from "../components/ui/ActionButton";
+import { ToolbarDropdown, ToolbarMenuItem, ToolbarMenuLabel } from "../components/ui/ToolbarDropdown";
 import {
   IconCheck,
   IconCheckSquare,
   IconCalendar,
   IconDownload,
   IconEdit,
-  IconHeart,
+  IconGear,
+  IconList,
   IconMail,
-  IconPhone,
   IconPlus,
-  IconRefresh,
   IconSearch,
   IconArchive,
-  IconSparkles,
+  IconSend,
   IconTrash,
   IconUpload,
   IconWhatsApp,
   IconX,
   IconXCircle,
 } from "../components/icons/AppIcons";
-import { useCallQueue, type QueueEntry } from "../hooks/useCallQueue";
-import { getCallBatchSize } from "../utils/callBatchSize";
 import {
   useColumnVisibility,
   type ColumnDef,
@@ -102,6 +100,35 @@ import { useAuth } from "../auth/AuthContext";
 
 const TABLE_PAGE_SIZE = 20;
 const TABLE_VIEW_STORAGE_PREFIX = "kafi_leads_table_view";
+
+const MOVE_MODULE_LABELS: Record<string, string> = {
+  khalid_focused_sales: "📌 Khalid Focused Sales",
+  follow_up_clients: "⏰ Follow up clients",
+  interested_clients: "💜 Interested Clients",
+  not_interested_clients: "🚫 Not interested",
+  not_received_call_clients: "📞 Did not receive call",
+  hyperstore_targeted: "🏪 Hyperstore Target",
+  targeted_distributor: "🚚 Targeted Distributors",
+  targeted_client: "🎯 Targeted Client",
+  incomplete_archives: "📂 Incomplete Data from Archives",
+  old_clients: "🏛️ Old clients",
+  master: "📋 Master Table (FMCG)",
+  testing: "🧪 Testing (Staff Numbers)",
+};
+
+const STANDARD_MOVE_MODULES = [
+  "khalid_focused_sales",
+  "follow_up_clients",
+  "interested_clients",
+  "not_interested_clients",
+  "not_received_call_clients",
+  "hyperstore_targeted",
+  "targeted_distributor",
+  "targeted_client",
+  "incomplete_archives",
+  "old_clients",
+  "master",
+] as const;
 
 interface LeadsTablePageProps {
   section: LeadsTableSection;
@@ -1131,8 +1158,6 @@ export function LeadsTablePage({
   const [whatsappComposeTarget, setWhatsappComposeTarget] =
     useState<WhatsAppComposeTarget | null>(null);
   const [bulkWhatsAppNotice, setBulkWhatsAppNotice] = useState<string | null>(null);
-  const [startingBulkCall, setStartingBulkCall] = useState(false);
-  const callQueue = useCallQueue();
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [intakeMethodFilter, setIntakeMethodFilter] = useState<"all" | "upload" | "discover">("all");
   const [movingToPool, setMovingToPool] = useState(false);
@@ -1143,7 +1168,6 @@ export function LeadsTablePage({
   } | null>(null);
   const [populatingPool, setPopulatingPool] = useState(false);
   const [removingFromPool, setRemovingFromPool] = useState(false);
-  const [classifyingPools, setClassifyingPools] = useState(false);
   const [promotingIncomplete, setPromotingIncomplete] = useState(false);
   const [showCreateLead, setShowCreateLead] = useState(false);
   const [bulkEmailNotice, setBulkEmailNotice] = useState<string | null>(null);
@@ -1476,11 +1500,6 @@ export function LeadsTablePage({
     section === "interested_clients" ||
     section === "sales_interested_clients" ||
     section === "not_received_call_clients";
-  const canMoveToInterestedClients =
-    section !== "sales_interested_clients" &&
-    section !== "not_interested_clients" &&
-    !isAssignedLeadsSection(section) &&
-    section !== "my_assigned";
   const callOutcomeEmptyMessage = sectionEmptyMessage(section);
 
   const isWideLayout =
@@ -2132,35 +2151,6 @@ export function LeadsTablePage({
     }
   }
 
-  async function classifyHyperstoreAndDistributors() {
-    if (!isAdmin || !isOldClients || classifyingPools) return;
-    const confirmed = window.confirm(
-      "Scan all Old clients and move keyword matches into Hyperstore Target and Targeted Distributors?\n\n" +
-        "Hyperstore: hypermarket, hyper mart, hyperstore, multinational mart, etc.\n" +
-        "Distributor: distributor, distribution, wholesale, importer, etc.\n\n" +
-        "Targeted Client is never auto-filled — add those manually from any table.",
-    );
-    if (!confirmed) return;
-
-    setClassifyingPools(true);
-    setSaveNotice(null);
-    try {
-      const result = await client.classifyTargetPoolsFromOldClients();
-      await loadTable();
-      await loadSectionCounts();
-      const hyper = result.hyperstore_targeted?.updated_count ?? 0;
-      const dist = result.targeted_distributor?.updated_count ?? 0;
-      setSaveNotice(
-        `Classified ${result.scanned} Old clients — ${hyper} → Hyperstore Target, ${dist} → Targeted Distributors.`,
-      );
-      window.setTimeout(() => setSaveNotice(null), 8000);
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to classify target pools");
-    } finally {
-      setClassifyingPools(false);
-    }
-  }
-
   async function removeSelectedFromTargetPool() {
     if (!isAdmin || !isTargetedPool || selected.size === 0 || removingFromPool) return;
     const count = selected.size;
@@ -2190,6 +2180,19 @@ export function LeadsTablePage({
     } finally {
       setRemovingFromPool(false);
     }
+  }
+
+  function confirmMoveToModule(moduleKey: string) {
+    if (selected.size === 0 || movingToModule) return;
+    const custom = customModules.find((module) => module.key === moduleKey);
+    const label = custom
+      ? `${custom.icon ? `${custom.icon} ` : ""}${custom.name}`
+      : MOVE_MODULE_LABELS[moduleKey] || moduleKey.replaceAll("_", " ");
+    setMoveConfirmTarget({
+      moduleKey,
+      moduleLabel: label,
+      count: selected.size,
+    });
   }
 
   async function moveSelectedToInterestedClients(inList: boolean) {
@@ -2238,88 +2241,6 @@ export function LeadsTablePage({
 
   function openWhatsAppCompose(row: LeadTableRow, phone: string) {
     setWhatsappComposeTarget({ row, phone: phone.trim() });
-  }
-
-  function dialPhoneForRow(row: LeadTableRow): string | null {
-    const phone =
-      row.contact_phone?.trim() ||
-      row.contact_primary_phone?.trim() ||
-      row.contact_secondary_phone?.trim() ||
-      row.contact_secondary_mobile?.trim() ||
-      "";
-    return phone || null;
-  }
-
-  async function startBulkCallFromTable() {
-    const ids = [...selected];
-    if (!ids.length || startingBulkCall || callQueue.status !== "idle") return;
-
-    setStartingBulkCall(true);
-    try {
-      const idSet = new Set(ids);
-      const byId = new Map<number, LeadTableRow>();
-      for (const row of rows) {
-        if (idSet.has(row.id)) byId.set(row.id, row);
-      }
-
-      if (byId.size < ids.length) {
-        let pageNum = 1;
-        const pageSize = 100;
-        while (byId.size < ids.length && pageNum <= 500) {
-          const result = await client.listLeadsTable({
-            ...tableQueryParams,
-            page: pageNum,
-            page_size: pageSize,
-          });
-          for (const row of result.rows) {
-            if (idSet.has(row.id)) byId.set(row.id, row);
-          }
-          if (pageNum >= result.total_pages || result.rows.length === 0) break;
-          pageNum += 1;
-        }
-      }
-
-      const leads: QueueEntry[] = [];
-      let missingPhone = 0;
-      for (const id of ids) {
-        const row = byId.get(id);
-        if (!row) continue;
-        const phone = dialPhoneForRow(row);
-        if (!phone) {
-          missingPhone += 1;
-          continue;
-        }
-        leads.push({
-          leadId: row.id,
-          contactId: row.contact_id ?? undefined,
-          companyName: row.company_name,
-          contactName: row.contact_name,
-          phone,
-          country: row.country,
-          assignedToUserId: row.assigned_to_user_id,
-          assignedTo: row.assigned_to,
-        });
-      }
-
-      if (!leads.length) {
-        onError("None of the selected leads have a phone number to call.");
-        return;
-      }
-
-      clearSelection();
-      callQueue.start(leads);
-      if (missingPhone > 0) {
-        setSaveNotice(
-          `Bulk call started with ${leads.length} lead${leads.length === 1 ? "" : "s"}. ` +
-            `${missingPhone} skipped (no phone).`,
-        );
-        window.setTimeout(() => setSaveNotice(null), 5000);
-      }
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to start bulk call");
-    } finally {
-      setStartingBulkCall(false);
-    }
   }
 
   async function saveFollowUpAt(rowId: number, followUpAt: string | null) {
@@ -2565,164 +2486,6 @@ export function LeadsTablePage({
       );
     } catch (e) {
       onError(e instanceof Error ? e.message : "Post-import clean failed");
-    } finally {
-      setActionProgress(null);
-      setDeduping(false);
-    }
-  }
-
-  async function cleanOldClientCompanyFields() {
-    if (!isOldClients) return;
-    const confirmed = window.confirm(
-      "Clean Old clients company fields (Usman pass-1)?\n\n" +
-        "• Moves address / postcode / street text out of Company Name → Address.\n" +
-        "• Moves email-like Company Name → Primary Email when empty.\n" +
-        "• Clears dash / N/A placeholders in Company Name.\n" +
-        "• Does not delete rows. Use Fix names afterward to recover missing company names.\n\n" +
-        "Continue?",
-    );
-    if (!confirmed) return;
-
-    setDeduping(true);
-    setSaveNotice(null);
-    setActionProgress({
-      title: "Cleaning Old clients company fields",
-      mode: "indeterminate",
-      detail: "Applying Usman pass-1 rules…",
-      startedAt: Date.now(),
-      accent: "sky",
-    });
-    try {
-      const result = await client.cleanCompanyFields(sectionTableScope(section));
-      await loadTable();
-      await loadSectionCounts();
-      const ruleSummary = Object.entries(result.by_rule)
-        .map(([rule, count]) => `${rule}: ${count}`)
-        .join(", ");
-      setSaveNotice(
-        result.changed > 0
-          ? `Cleaned ${result.changed} of ${result.scanned} Old clients${ruleSummary ? ` (${ruleSummary})` : ""}`
-          : `No company-field fixes needed (${result.scanned} scanned)`,
-      );
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to clean company fields");
-    } finally {
-      setActionProgress(null);
-      setDeduping(false);
-    }
-  }
-
-  async function removeEmptyImports() {
-    const confirmed = window.confirm(
-      isOldClients
-        ? "Remove empty old-client imports?\n\n" +
-            "• Deletes old clients with no website, email, or score (failed enrichments).\n" +
-            "• Use this before re-importing the same file with fresh search data.\n\n" +
-            "Continue?"
-        : "Remove empty CSV imports?\n\n" +
-            "• Deletes CSV leads with no website, email, or score (failed scrapes).\n" +
-            "• Use this before re-importing the same file with fresh scraped data.\n\n" +
-            "Continue?",
-    );
-    if (!confirmed) return;
-
-    setDeduping(true);
-    setSaveNotice(null);
-    setActionProgress({
-      title: isOldClients ? "Removing empty old-client imports" : "Removing empty CSV imports",
-      mode: "indeterminate",
-      detail: "Finding rows with no website, email, or score…",
-      startedAt: Date.now(),
-      accent: "amber",
-    });
-    try {
-      const result = await client.cleanupSparseCsvLeads(sectionTableScope(section));
-      await loadTable();
-      await loadSectionCounts();
-      setSaveNotice(
-        result.removed_count > 0
-          ? `Removed ${result.removed_count} empty import${result.removed_count === 1 ? "" : "s"}`
-          : "No empty imports found",
-      );
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to remove empty imports");
-    } finally {
-      setActionProgress(null);
-      setDeduping(false);
-    }
-  }
-
-  async function removeDuplicates() {
-    const scopeLabel = isOldClients ? "old clients" : "leads table";
-    const confirmed = window.confirm(
-      `Remove duplicate ${scopeLabel} entries?\n\n` +
-        "• Duplicates are matched by company name or website domain within this section only.\n" +
-        "• Old clients and leads table entries are never merged together.\n" +
-        "• The record with the most details (website, email, score) is kept.\n\n" +
-        "Continue?",
-    );
-    if (!confirmed) return;
-
-    setDeduping(true);
-    setSaveNotice(null);
-    setActionProgress({
-      title: `Removing duplicate ${scopeLabel}`,
-      mode: "indeterminate",
-      detail: "Matching by company name and website domain…",
-      startedAt: Date.now(),
-      accent: "amber",
-    });
-    try {
-      const result = await client.dedupeLeadsTable(sectionTableScope(section));
-      await loadTable();
-      await loadSectionCounts();
-      setSaveNotice(
-        result.removed_count > 0
-          ? `Removed ${result.removed_count} duplicate lead${result.removed_count === 1 ? "" : "s"} (${result.groups.length} group${result.groups.length === 1 ? "" : "s"})`
-          : "No duplicate leads found",
-      );
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to remove duplicates");
-    } finally {
-      setActionProgress(null);
-      setDeduping(false);
-    }
-  }
-
-  async function repairLocationAsCompanyNames() {
-    const confirmed = window.confirm(
-      "Fix company names that are actually locations?\n\n" +
-        "• Detects city / country / address stored as the company name.\n" +
-        "• Moves that value into City, Country, or Address.\n" +
-        "• Looks up the real company name from website, email domain, phone, and search.\n" +
-        "• Leaves Company Name empty when no company can be found.\n\n" +
-        "This can take several minutes. Continue?",
-    );
-    if (!confirmed) return;
-
-    setDeduping(true);
-    setSaveNotice(null);
-    setActionProgress({
-      title: "Repairing location-as-company-name rows",
-      mode: "indeterminate",
-      detail: "Scanning and recovering company names…",
-      startedAt: Date.now(),
-      accent: "amber",
-    });
-    try {
-      const result = await client.repairLocationCompanyNames(sectionTableScope(section));
-      await loadTable();
-      await loadSectionCounts();
-      const fixed = result.repaired_with_name + result.relocated_name_empty;
-      setSaveNotice(
-        fixed > 0
-          ? `Location-name repair: ${result.repaired_with_name} renamed, ${result.relocated_name_empty} cleared (of ${result.location_name_candidates} candidates in ${result.scanned} rows)`
-          : result.location_name_candidates === 0
-            ? "No company names looked like locations"
-            : "No rows were updated",
-      );
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to repair location company names");
     } finally {
       setActionProgress(null);
       setDeduping(false);
@@ -3284,31 +3047,6 @@ export function LeadsTablePage({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {canAddLead && !showCreateLead && (
-            <ActionButton
-              icon={IconPlus}
-              variant="emerald"
-              onClick={() => {
-                setShowCreateLead(true);
-                setShowCsvImport(false);
-              }}
-              disabled={bulkOnboarding || deletingSelected || deletingId !== null || editMode}
-              title="Add a new lead to this table"
-            >
-              Add lead
-            </ActionButton>
-          )}
-          {canImportSpreadsheet && (
-            <ActionButton
-              icon={IconUpload}
-              variant="violet"
-              onClick={() => setShowCsvImport(true)}
-              disabled={bulkOnboarding || deletingSelected || deletingId !== null || editMode}
-              title="Import spreadsheet"
-            >
-              Import spreadsheet
-            </ActionButton>
-          )}
           <ActionButton
             icon={IconCheckSquare}
             onClick={() => void selectAllMatching()}
@@ -3339,6 +3077,197 @@ export function LeadsTablePage({
               Clear
             </ActionButton>
           )}
+
+          <ToolbarDropdown label="Action" icon={IconSend} variant="sky">
+            <ToolbarMenuItem
+              icon={IconWhatsApp}
+              tone="emerald"
+              disabled={
+                selected.size === 0 ||
+                bulkOnboarding ||
+                deletingSelected ||
+                deletingId !== null ||
+                editMode
+              }
+              title="Send WhatsApp"
+              onClick={() => {
+                setWhatsappTargetIds([...selected]);
+                setShowBulkWhatsApp(true);
+              }}
+            >
+              WhatsApp ({selected.size})
+            </ToolbarMenuItem>
+            <ToolbarMenuItem
+              icon={IconCalendar}
+              tone="violet"
+              disabled={
+                selected.size === 0 ||
+                bulkOnboarding ||
+                deletingSelected ||
+                deletingId !== null ||
+                editMode ||
+                openingScheduleMailer
+              }
+              title="Schedule bulk email for a later date/time"
+              onClick={() => void openScheduleBulkMailer()}
+            >
+              {openingScheduleMailer
+                ? "Opening…"
+                : `Schedule emails (${selected.size})`}
+            </ToolbarMenuItem>
+            <ToolbarMenuItem
+              icon={IconMail}
+              tone="sky"
+              disabled={
+                selected.size === 0 ||
+                bulkOnboarding ||
+                deletingSelected ||
+                deletingId !== null ||
+                editMode ||
+                openingMailer
+              }
+              title="Send emails"
+              onClick={() => void openBulkMailer()}
+            >
+              {openingMailer ? "Opening mailer…" : `Send emails (${selected.size})`}
+            </ToolbarMenuItem>
+          </ToolbarDropdown>
+
+          <ToolbarDropdown label="Modify" icon={IconEdit} variant="emerald">
+            {canAddLead && !showCreateLead ? (
+              <ToolbarMenuItem
+                icon={IconPlus}
+                tone="emerald"
+                disabled={bulkOnboarding || deletingSelected || deletingId !== null || editMode}
+                title="Add a new lead to this table"
+                onClick={() => {
+                  setShowCreateLead(true);
+                  setShowCsvImport(false);
+                }}
+              >
+                Add lead
+              </ToolbarMenuItem>
+            ) : null}
+            {canImportSpreadsheet ? (
+              <ToolbarMenuItem
+                icon={IconUpload}
+                tone="violet"
+                disabled={bulkOnboarding || deletingSelected || deletingId !== null || editMode}
+                title="Import spreadsheet"
+                onClick={() => setShowCsvImport(true)}
+              >
+                Import spreadsheet
+              </ToolbarMenuItem>
+            ) : null}
+            <ToolbarMenuItem
+              icon={IconTrash}
+              tone="danger"
+              disabled={
+                selected.size === 0 ||
+                deletingSelected ||
+                deletingId !== null ||
+                bulkOnboarding ||
+                deduping
+              }
+              title="Delete selected"
+              onClick={() => void deleteRows([...selected])}
+            >
+              {deletingSelected
+                ? actionProgress?.mode === "determinate" && actionProgress.total
+                  ? `Deleting ${actionProgress.current ?? 0}/${actionProgress.total}…`
+                  : "Deleting…"
+                : `Delete (${selected.size})`}
+            </ToolbarMenuItem>
+            <ToolbarMenuItem
+              icon={IconSearch}
+              tone="emerald"
+              disabled={
+                selected.size === 0 ||
+                bulkOnboarding ||
+                deletingSelected ||
+                deletingId !== null ||
+                deduping ||
+                editMode
+              }
+              title="Research and score"
+              onClick={() => void bulkResearchAndScore()}
+            >
+              {bulkOnboarding
+                ? actionProgress?.mode === "determinate" && actionProgress.total
+                  ? `Researching ${actionProgress.current ?? 0}/${actionProgress.total}…`
+                  : "Starting…"
+                : `Research (${selected.size})`}
+            </ToolbarMenuItem>
+            <ToolbarMenuItem
+              icon={editMode ? IconCheck : IconEdit}
+              disabled={savingAll}
+              title={editMode ? "Done editing" : "Edit table"}
+              onClick={() => {
+                if (editMode) {
+                  void finishEditing();
+                } else {
+                  enterEditMode();
+                }
+              }}
+            >
+              {savingAll ? "Saving…" : editMode ? "Done" : "Edit"}
+            </ToolbarMenuItem>
+          </ToolbarDropdown>
+
+          <ToolbarDropdown
+            label="Lists and Modules"
+            icon={IconList}
+            variant="violet"
+            menuClassName="min-w-[260px]"
+          >
+            <ToolbarMenuItem
+              icon={IconGear}
+              tone="emerald"
+              title="Add or remove modules / lists, or configure morning testing staff"
+              onClick={() => setShowManageModules(true)}
+            >
+              Add / Manage Lists
+            </ToolbarMenuItem>
+            <ToolbarMenuLabel>
+              {selected.size === 0
+                ? "Move to module — select leads first"
+                : movingToModule
+                  ? "Moving…"
+                  : `Move ${selected.size} selected lead${selected.size === 1 ? "" : "s"} to`}
+            </ToolbarMenuLabel>
+            {customModules.length > 0 ? (
+              <>
+                <ToolbarMenuLabel>Custom & Testing Lists</ToolbarMenuLabel>
+                {customModules.map((module) => (
+                  <ToolbarMenuItem
+                    key={module.key}
+                    disabled={selected.size === 0 || movingToModule}
+                    title={`Move selected leads to ${module.name}`}
+                    onClick={() => confirmMoveToModule(module.key)}
+                  >
+                    {module.icon || "📋"} {module.name}
+                    {sectionCounts[module.key] != null ? ` (${sectionCounts[module.key]})` : ""}
+                  </ToolbarMenuItem>
+                ))}
+              </>
+            ) : null}
+            <ToolbarMenuLabel>Standard CRM Pools</ToolbarMenuLabel>
+            {STANDARD_MOVE_MODULES.map((moduleKey) => {
+              const count = sectionCounts[moduleKey];
+              return (
+                <ToolbarMenuItem
+                  key={moduleKey}
+                  disabled={selected.size === 0 || movingToModule}
+                  title={`Move selected leads to ${MOVE_MODULE_LABELS[moduleKey]}`}
+                  onClick={() => confirmMoveToModule(moduleKey)}
+                >
+                  {MOVE_MODULE_LABELS[moduleKey]}
+                  {count != null ? ` (${count})` : ""}
+                </ToolbarMenuItem>
+              );
+            })}
+          </ToolbarDropdown>
+
           {isIncompleteArchives && isAdmin && selected.size > 0 ? (
             <ActionButton
               icon={IconArchive}
@@ -3395,179 +3324,7 @@ export function LeadsTablePage({
               ) : null}
             </>
           ) : null}
-          <ActionButton
-            icon={IconMail}
-            variant="sky"
-            onClick={() => void openBulkMailer()}
-            disabled={
-              selected.size === 0 ||
-              bulkOnboarding ||
-              deletingSelected ||
-              deletingId !== null ||
-              editMode ||
-              openingMailer
-            }
-            title="Send emails"
-          >
-            {openingMailer ? "Opening mailer…" : `Send emails (${selected.size})`}
-          </ActionButton>
-          <ActionButton
-            icon={IconCalendar}
-            variant="violet"
-            onClick={() => void openScheduleBulkMailer()}
-            disabled={
-              selected.size === 0 ||
-              bulkOnboarding ||
-              deletingSelected ||
-              deletingId !== null ||
-              editMode ||
-              openingScheduleMailer
-            }
-            title="Schedule bulk email for a later date/time"
-          >
-            {openingScheduleMailer
-              ? "Opening…"
-              : `Schedule emails (${selected.size})`}
-          </ActionButton>
-          <ActionButton
-            icon={IconPhone}
-            variant="sky"
-            onClick={() => void startBulkCallFromTable()}
-            disabled={
-              selected.size === 0 ||
-              bulkOnboarding ||
-              deletingSelected ||
-              deletingId !== null ||
-              editMode ||
-              startingBulkCall ||
-              callQueue.status !== "idle"
-            }
-            title="Bulk call selected leads"
-          >
-            {startingBulkCall
-              ? "Starting…"
-              : `Bulk call (${selected.size})`}
-            {!startingBulkCall && selected.size > getCallBatchSize()
-              ? ` · ${Math.ceil(selected.size / getCallBatchSize())} batches`
-              : ""}
-          </ActionButton>
-          <ActionButton
-            icon={IconWhatsApp}
-            variant="emerald"
-            onClick={() => {
-              setWhatsappTargetIds([...selected]);
-              setShowBulkWhatsApp(true);
-            }}
-            disabled={
-              selected.size === 0 ||
-              bulkOnboarding ||
-              deletingSelected ||
-              deletingId !== null ||
-              editMode
-            }
-            title="Send WhatsApp"
-          >
-            WhatsApp ({selected.size})
-          </ActionButton>
 
-          <div className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-500/40 bg-indigo-950/70 px-3 py-1.5 text-xs font-bold text-indigo-200 shadow-sm">
-            <span className="text-indigo-300 font-extrabold shrink-0">📦 Move to module:</span>
-            <select
-              value=""
-              disabled={selected.size === 0 || movingToModule}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val) {
-                  const labels: Record<string, string> = {
-                    khalid_focused_sales: "📌 Khalid Focused Sales",
-                    follow_up_clients: "⏰ Follow up clients",
-                    interested_clients: "💜 Interested Clients",
-                    not_interested_clients: "🚫 Not interested",
-                    not_received_call_clients: "📞 Did not receive call",
-                    hyperstore_targeted: "🏪 Hyperstore Target",
-                    targeted_distributor: "🚚 Targeted Distributors",
-                    targeted_client: "🎯 Targeted Client",
-                    incomplete_archives: "📂 Incomplete Data from Archives",
-                    old_clients: "🏛️ Old clients",
-                    master: "📋 Master Table (FMCG)",
-                    testing: "🧪 Testing (Staff Numbers)",
-                  };
-                  const cm = customModules.find((m) => m.key === val);
-                  const label = cm ? `${cm.icon ? cm.icon + " " : ""}${cm.name}` : (labels[val] || val.replace("_", " "));
-                  setMoveConfirmTarget({
-                    moduleKey: val,
-                    moduleLabel: label,
-                    count: selected.size,
-                  });
-                  e.target.value = "";
-                }
-              }}
-              className="bg-slate-900 text-slate-100 font-bold px-2.5 py-1 rounded-lg outline-none cursor-pointer border border-indigo-500/40 hover:border-indigo-300 disabled:opacity-50"
-            >
-              <option value="" disabled>
-                {selected.size === 0
-                  ? "Select leads to move…"
-                  : movingToModule
-                    ? "Moving…"
-                    : `Move ${selected.size} selected lead(s) to…`}
-              </option>
-              {customModules.length > 0 && (
-                <optgroup label="Custom & Testing Lists">
-                  {customModules.map((cm) => (
-                    <option key={cm.key} value={cm.key}>
-                      {cm.icon || "📋"} {cm.name}
-                      {sectionCounts[cm.key] != null ? ` (${sectionCounts[cm.key]})` : ""}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              <optgroup label="Standard CRM Pools">
-                <option value="khalid_focused_sales">📌 Khalid Focused Sales</option>
-                <option value="follow_up_clients">
-                  ⏰ Follow up clients{sectionCounts.follow_up_clients != null ? ` (${sectionCounts.follow_up_clients})` : ""}
-                </option>
-                <option value="interested_clients">
-                  💜 Interested Clients{sectionCounts.interested_clients != null ? ` (${sectionCounts.interested_clients})` : ""}
-                </option>
-                <option value="not_interested_clients">
-                  🚫 Not interested{sectionCounts.not_interested_clients != null ? ` (${sectionCounts.not_interested_clients})` : ""}
-                </option>
-                <option value="not_received_call_clients">
-                  📞 Did not receive call{sectionCounts.not_received_call_clients != null ? ` (${sectionCounts.not_received_call_clients})` : ""}
-                </option>
-                <option value="hyperstore_targeted">
-                  🏪 Hyperstore Target{sectionCounts.hyperstore_targeted != null ? ` (${sectionCounts.hyperstore_targeted})` : ""}
-                </option>
-                <option value="targeted_distributor">
-                  🚚 Targeted Distributors{sectionCounts.targeted_distributor != null ? ` (${sectionCounts.targeted_distributor})` : ""}
-                </option>
-                <option value="targeted_client">🎯 Targeted Client</option>
-                <option value="incomplete_archives">
-                  📂 Incomplete Data from Archives{sectionCounts.incomplete_archives != null ? ` (${sectionCounts.incomplete_archives})` : ""}
-                </option>
-                <option value="old_clients">🏛️ Old clients</option>
-                <option value="master">📋 Master Table (FMCG)</option>
-              </optgroup>
-            </select>
-          </div>
-
-          {canMoveToInterestedClients && (
-            <ActionButton
-              icon={IconHeart}
-              variant="violet"
-              onClick={() => void moveSelectedToInterestedClients(true)}
-              disabled={
-                selected.size === 0 ||
-                bulkOnboarding ||
-                deletingSelected ||
-                deletingId !== null ||
-                editMode
-              }
-              title="Move to Interested Clients"
-            >
-              To Interested ({selected.size})
-            </ActionButton>
-          )}
           {section === "sales_interested_clients" && (
             <ActionButton
               icon={IconXCircle}
@@ -3584,26 +3341,6 @@ export function LeadsTablePage({
               Remove Interested ({selected.size})
             </ActionButton>
           )}
-          <ActionButton
-            icon={IconSearch}
-            variant="emerald"
-            onClick={() => void bulkResearchAndScore()}
-            disabled={
-              selected.size === 0 ||
-              bulkOnboarding ||
-              deletingSelected ||
-              deletingId !== null ||
-              deduping ||
-              editMode
-            }
-            title="Research and score"
-          >
-            {bulkOnboarding
-              ? actionProgress?.mode === "determinate" && actionProgress.total
-                ? `Researching ${actionProgress.current ?? 0}/${actionProgress.total}…`
-                : "Starting…"
-              : `Research (${selected.size})`}
-          </ActionButton>
           <label
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-300"
             title="Max wait per lead — larger batches default to longer patience"
@@ -3622,137 +3359,6 @@ export function LeadsTablePage({
               <option value="patient">Patient 2m</option>
             </select>
           </label>
-          <ActionButton
-            icon={IconTrash}
-            variant="danger"
-            onClick={() => void deleteRows([...selected])}
-            disabled={
-              selected.size === 0 ||
-              deletingSelected ||
-              deletingId !== null ||
-              bulkOnboarding ||
-              deduping
-            }
-            title="Delete selected"
-          >
-            {deletingSelected
-              ? actionProgress?.mode === "determinate" && actionProgress.total
-                ? `Deleting ${actionProgress.current ?? 0}/${actionProgress.total}…`
-                : "Deleting…"
-              : `Delete (${selected.size})`}
-          </ActionButton>
-          {isOldClients && isAdmin && (
-            <ActionButton
-              icon={IconSearch}
-              variant="emerald"
-              onClick={() => void classifyHyperstoreAndDistributors()}
-              disabled={
-                classifyingPools ||
-                deduping ||
-                rows.length === 0 ||
-                loading ||
-                bulkOnboarding ||
-                deletingSelected
-              }
-              title="Scan Old clients for hypermarket / distributor keywords and move matches into target pools"
-            >
-              {classifyingPools ? "Classifying…" : "Classify pools"}
-            </ActionButton>
-          )}
-          {isOldClients && (
-            <ActionButton
-              icon={IconTrash}
-              variant="amber"
-              onClick={() => void removeEmptyImports()}
-              disabled={
-                deduping ||
-                rows.length === 0 ||
-                loading ||
-                bulkOnboarding ||
-                deletingSelected
-              }
-              title="Remove empty imports"
-            >
-              {deduping && actionProgress?.title.includes("empty")
-                ? "Cleaning…"
-                : "Remove empty"}
-            </ActionButton>
-          )}
-          {isOldClients && (
-            <ActionButton
-              icon={IconSparkles}
-              variant="violet"
-              onClick={() => void runPostImportClean()}
-              disabled={
-                deduping ||
-                rows.length === 0 ||
-                loading ||
-                bulkOnboarding ||
-                deletingSelected
-              }
-              title="Full post-import clean: emails, company fields, names, junk, dedupe"
-            >
-              {deduping &&
-              (actionProgress?.title.includes("Post-import") ||
-                actionProgress?.title.includes("Cleaning imported"))
-                ? "Full clean…"
-                : "Full clean"}
-            </ActionButton>
-          )}
-          {isOldClients && (
-            <ActionButton
-              icon={IconSparkles}
-              variant="sky"
-              onClick={() => void cleanOldClientCompanyFields()}
-              disabled={
-                deduping ||
-                rows.length === 0 ||
-                loading ||
-                bulkOnboarding ||
-                deletingSelected
-              }
-              title="Usman pass-1: move address/email/placeholders out of Company Name"
-            >
-              {deduping && actionProgress?.title.includes("Cleaning Old clients")
-                ? "Cleaning data…"
-                : "Clean data"}
-            </ActionButton>
-          )}
-          {isOldClients && (
-            <ActionButton
-              icon={IconEdit}
-              variant="sky"
-              onClick={() => void repairLocationAsCompanyNames()}
-              disabled={
-                deduping ||
-                rows.length === 0 ||
-                loading ||
-                bulkOnboarding ||
-                deletingSelected
-              }
-              title="Move city/country/address out of Company Name and recover the real company"
-            >
-              {deduping && actionProgress?.title.includes("location-as-company")
-                ? "Fixing names…"
-                : "Fix names"}
-            </ActionButton>
-          )}
-          <ActionButton
-            icon={IconRefresh}
-            onClick={() => void removeDuplicates()}
-            disabled={
-              deduping ||
-              rows.length === 0 ||
-              loading ||
-              bulkOnboarding ||
-              deletingSelected
-            }
-            title="Remove duplicates"
-          >
-            {deduping && actionProgress?.title.includes("duplicate")
-              ? "Removing duplicates…"
-              : "Deduplicate"}
-          </ActionButton>
           {isAdmin && section === "all" && (
             <ActionButton
               icon={IconXCircle}
@@ -3779,32 +3385,6 @@ export function LeadsTablePage({
           >
             {exporting ? "Exporting…" : "Export"}
           </ActionButton>
-          <ActionButton
-            icon={editMode ? IconCheck : IconEdit}
-            variant={editMode ? "amber" : "primary"}
-            onClick={() => {
-              if (editMode) {
-                void finishEditing();
-              } else {
-                enterEditMode();
-              }
-            }}
-            disabled={savingAll}
-            title={editMode ? "Done editing" : "Edit table"}
-          >
-            {savingAll ? "Saving…" : editMode ? "Done" : "Edit"}
-          </ActionButton>
-
-          {/* User Requested: Add/Remove Custom Modules Button in Red Box */}
-          <button
-            type="button"
-            onClick={() => setShowManageModules(true)}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-950/70 hover:bg-emerald-900/80 px-3 py-1.5 text-xs font-extrabold text-emerald-300 shadow-sm transition-all hover:scale-105"
-            title="Add or remove modules / lists under Old clients directly, or configure morning testing staff"
-          >
-            <span className="text-emerald-400">⚙️</span>
-            <span>+ Add / Manage Lists</span>
-          </button>
         </div>
       </div>
 

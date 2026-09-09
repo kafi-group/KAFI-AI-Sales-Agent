@@ -1420,7 +1420,7 @@ export function InboxPage({
       </div>
 
       {isFolderMail && !isDraftsView ? (
-        <div className="rounded-xl border border-slate-800 bg-slate-900/90 overflow-hidden shadow-sm shrink-0">
+        <div className="rounded-xl border border-slate-700 bg-slate-900 overflow-hidden shadow-sm shrink-0">
           <button
             type="button"
             onClick={() => setFilterRibbonOpen((prev) => !prev)}
@@ -1464,7 +1464,7 @@ export function InboxPage({
                   Clear filter
                 </span>
               )}
-              <span className="text-xs text-slate-300 font-mono font-bold flex items-center gap-1 group-hover:text-white">
+              <span className="text-xs text-slate-300 font-mono font-bold flex items-center gap-1 group-hover:text-slate-100">
                 {filterRibbonOpen ? "▲ Hide" : "▼ Show"}
               </span>
             </div>

@@ -15,18 +15,18 @@ html {
 html[data-theme="light"] {
   color-scheme: light;
 
-  /* Soft cool gray surfaces — brighter than dark, not stark white */
+  /* Soft cool gray surfaces — white cards on a cool page, readable borders */
   --color-slate-50: #0b1220;
   --color-slate-100: #152033;
-  --color-slate-200: #243044;
+  --color-slate-200: #1e293b;
   --color-slate-300: #334155;
-  --color-slate-400: #4b596c;
-  --color-slate-500: #64748b;
-  --color-slate-600: #8b97a8;
-  --color-slate-700: #c5cdd8;
-  --color-slate-800: #d8dee7;
-  --color-slate-900: #eef1f5;
-  --color-slate-950: #e4e9f0;
+  --color-slate-400: #475569;
+  --color-slate-500: #334155;
+  --color-slate-600: #64748b;
+  --color-slate-700: #94a3b8;
+  --color-slate-800: #e2e8f0;
+  --color-slate-900: #ffffff;
+  --color-slate-950: #f1f5f9;
 
   /* Accent text that was pale-on-dark → deeper tones on light surfaces */
   --color-emerald-50: #ecfdf5;
@@ -38,47 +38,156 @@ html[data-theme="light"] {
   --color-amber-50: #fffbeb;
   --color-amber-100: #92400e;
   --color-amber-200: #b45309;
-  --color-amber-300: #d97706;
+  --color-amber-300: #b45309;
+  --color-amber-400: #b45309;
 
   --color-red-50: #fef2f2;
   --color-red-100: #991b1b;
   --color-red-200: #b91c1c;
   --color-red-300: #dc2626;
+  --color-red-400: #b91c1c;
 
   --color-sky-50: #f0f9ff;
   --color-sky-100: #075985;
   --color-sky-200: #0369a1;
-  --color-sky-300: #0284c7;
+  --color-sky-300: #0369a1;
+  --color-sky-400: #075985;
+
+  --color-cyan-50: #ecfeff;
+  --color-cyan-100: #155e75;
+  --color-cyan-200: #0e7490;
+  --color-cyan-300: #0e7490;
+  --color-cyan-400: #0e7490;
+
+  --color-teal-100: #115e59;
+  --color-teal-200: #0f766e;
+  --color-teal-300: #0f766e;
+  --color-teal-400: #0f766e;
+
+  --color-indigo-100: #3730a3;
+  --color-indigo-200: #4338ca;
+  --color-indigo-300: #4338ca;
+  --color-indigo-400: #3730a3;
+
+  --color-blue-100: #1e40af;
+  --color-blue-200: #1d4ed8;
+  --color-blue-300: #1d4ed8;
+  --color-blue-400: #1e40af;
 
   --color-violet-50: #f5f3ff;
   --color-violet-100: #5b21b6;
   --color-violet-200: #6d28d9;
-  --color-violet-300: #7c3aed;
+  --color-violet-300: #6d28d9;
+  --color-violet-400: #5b21b6;
+
+  --color-purple-100: #6b21a8;
+  --color-purple-200: #7e22ce;
+  --color-purple-300: #7e22ce;
+  --color-purple-400: #6b21a8;
+
+  --color-fuchsia-200: #a21caf;
+  --color-fuchsia-300: #a21caf;
+  --color-fuchsia-400: #86198f;
+
+  --color-pink-200: #be185d;
+  --color-pink-300: #be185d;
+  --color-pink-400: #9d174d;
+
+  --color-rose-100: #9f1239;
+  --color-rose-200: #be123c;
+  --color-rose-300: #be123c;
+  --color-rose-400: #9f1239;
+}
+
+/* text-white was designed for dark cards — on light surfaces it vanishes */
+html[data-theme="light"] :is(
+  .text-white,
+  .hover\:text-white:hover,
+  .group-hover\:text-white:is(:where(.group):hover *)
+) {
+  color: #0f172a;
 }
 
 /* Filled accent buttons: keep white label when parent text remaps to dark */
 html[data-theme="light"] :is(
+  .bg-emerald-400,
   .bg-emerald-500,
   .bg-emerald-600,
   .bg-emerald-700,
+  .bg-sky-500,
   .bg-sky-600,
   .bg-sky-700,
+  .bg-cyan-500,
+  .bg-cyan-600,
+  .bg-cyan-700,
+  .bg-teal-500,
+  .bg-teal-600,
+  .bg-violet-500,
   .bg-violet-600,
   .bg-violet-700,
+  .bg-purple-500,
+  .bg-purple-600,
+  .bg-indigo-500,
+  .bg-indigo-600,
+  .bg-amber-400,
   .bg-amber-500,
   .bg-amber-600,
+  .bg-red-500,
+  .bg-red-600,
   .bg-red-700,
-  .bg-red-800
+  .bg-red-800,
+  .bg-rose-500,
+  .bg-rose-600,
+  .bg-pink-500,
+  .bg-pink-600
 ) {
+  color: #fff;
+}
+
+html[data-theme="light"] :is(
+  .bg-emerald-400,
+  .bg-emerald-500,
+  .bg-emerald-600,
+  .bg-emerald-700,
+  .bg-sky-500,
+  .bg-sky-600,
+  .bg-sky-700,
+  .bg-cyan-500,
+  .bg-cyan-600,
+  .bg-cyan-700,
+  .bg-teal-500,
+  .bg-teal-600,
+  .bg-violet-500,
+  .bg-violet-600,
+  .bg-violet-700,
+  .bg-purple-500,
+  .bg-purple-600,
+  .bg-indigo-500,
+  .bg-indigo-600,
+  .bg-amber-400,
+  .bg-amber-500,
+  .bg-amber-600,
+  .bg-red-500,
+  .bg-red-600,
+  .bg-red-700,
+  .bg-red-800,
+  .bg-rose-500,
+  .bg-rose-600,
+  .bg-pink-500,
+  .bg-pink-600
+) :is(.text-white, .hover\:text-white:hover) {
   color: #fff;
 }
 
 html[data-theme="light"] :is(
   .hover\:bg-emerald-500:hover,
   .hover\:bg-emerald-600:hover,
+  .hover\:bg-sky-500:hover,
   .hover\:bg-sky-600:hover,
+  .hover\:bg-cyan-500:hover,
   .hover\:bg-violet-600:hover,
-  .hover\:bg-amber-500:hover
+  .hover\:bg-amber-500:hover,
+  .hover\:bg-rose-500:hover
 ) {
   color: #fff;
 }
@@ -92,6 +201,36 @@ body {
 html[data-theme="light"] body {
   background-image: linear-gradient(180deg, #e8edf3 0%, #eef1f5 40%, #f3f5f8 100%);
   background-attachment: fixed;
+}
+
+/* Pale dark-mode washes become invisible on white — give them a defined tint */
+html[data-theme="light"] [class*="bg-sky-500/10"],
+html[data-theme="light"] [class*="bg-sky-950/20"] {
+  background-color: rgb(7 89 133 / 0.1);
+  border-color: rgb(7 89 133 / 0.28);
+}
+html[data-theme="light"] [class*="bg-cyan-500/10"],
+html[data-theme="light"] [class*="bg-cyan-950/40"] {
+  background-color: rgb(14 116 144 / 0.1);
+}
+html[data-theme="light"] [class*="bg-purple-500/10"] {
+  background-color: rgb(126 34 206 / 0.1);
+}
+html[data-theme="light"] [class*="bg-rose-500/10"] {
+  background-color: rgb(190 18 60 / 0.1);
+}
+html[data-theme="light"] [class*="bg-amber-500/10"] {
+  background-color: rgb(180 83 9 / 0.1);
+}
+html[data-theme="light"] [class*="placeholder\:text-slate-600"]::placeholder,
+html[data-theme="light"] [class*="placeholder\:text-slate-500"]::placeholder {
+  color: #64748b;
+}
+
+/* Cards use slate-800/900 as fills; the same tokens are also used as borders */
+html[data-theme="light"] [class*="border-slate-800"],
+html[data-theme="light"] [class*="border-slate-700"] {
+  border-color: #94a3b8;
 }
 
 /* Rich-text email compose editor */

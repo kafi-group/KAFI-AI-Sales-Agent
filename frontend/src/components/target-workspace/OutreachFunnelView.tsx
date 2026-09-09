@@ -452,10 +452,10 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                 {/* Left Section: Company & Contact details */}
                 <div className="space-y-1.5 flex-1 min-w-0">
                   <div className="flex items-center gap-2.5 flex-wrap">
-                    <h3 className="text-base font-bold text-white tracking-tight">
+                    <h3 className="text-base font-bold text-slate-50 tracking-tight">
                       {lead.company_name}
                     </h3>
-                    <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-800 text-slate-200 border border-slate-600">
                       🌍 {lead.country || "Global"} {lead.city ? `• ${lead.city}` : ""}
                     </span>
                     {lead.product_interest && (
@@ -716,7 +716,7 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                           setInlineReason("Price high");
                           setInlineRemarks("");
                         }}
-                        className="px-2.5 py-1 rounded-lg bg-purple-500/10 text-purple-300 border border-purple-500/30 hover:bg-purple-500/20 text-xs font-medium transition"
+                        className="px-2.5 py-1 rounded-lg bg-purple-500/10 text-purple-200 border border-purple-500/40 hover:bg-purple-500/20 text-xs font-medium transition"
                       >
                         💡 Not Interested
                       </button>
@@ -726,7 +726,7 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                       <button
                         type="button"
                         onClick={() => handleUpdateStage(lead.id, "no_response")}
-                        className="px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/30 hover:bg-rose-500/20 text-xs font-medium transition"
+                        className="px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-200 border border-rose-500/40 hover:bg-rose-500/20 text-xs font-medium transition"
                       >
                         🔕 No Response
                       </button>
