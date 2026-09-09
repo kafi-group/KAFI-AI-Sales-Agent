@@ -1228,7 +1228,8 @@ function DashboardApp() {
     if (tab === "whatsapp-qr") return "WhatsApp Mobile";
     if (tab === "settings") return "Settings";
     for (const item of navItems) {
-      const child = item.children?.find((entry) => entry.id === tab);
+      const children = "children" in item ? item.children : undefined;
+      const child = children?.find((entry) => entry.id === tab);
       if (child) return child.label;
       if (item.id === tab) return item.label;
     }

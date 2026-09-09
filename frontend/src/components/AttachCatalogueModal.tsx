@@ -68,8 +68,21 @@ export function AttachCatalogueModal({
       const added: EmailAttachment[] = [];
 
       if (selectedCats.length > 0) {
-        const catAtts = await client.attachCatalogues(selectedCats);
-        added.push(...catAtts);
+        const attachable = catalogues.filter(
+          (c) => selectedCats.includes(c.id) && c.size > 0 && c.size <= 20 * 1024 * 1024,
+        );
+        const skipped = catalogues.filter(
+          (c) => selectedCats.includes(c.id) && (!c.size || c.size > 20 * 1024 * 1024),
+        );
+        if (attachable.length > 0) {
+          const catAtts = await client.attachCatalogues(attachable.map((c) => c.id));
+          added.push(...catAtts);
+        }
+        if (skipped.length > 0) {
+          onError(
+            `${skipped.map((c) => c.title).join(", ")} ${skipped.length === 1 ? "is" : "are"} too large to attach (mailbox ~25 MB). Share the Catalogue download link instead.`,
+          );
+        }
       }
 
       if (includeHoreka) {

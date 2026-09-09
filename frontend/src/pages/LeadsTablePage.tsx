@@ -66,6 +66,7 @@ import {
 } from "../hooks/useColumnVisibility";
 import { exportLeadsTableCsv } from "../utils/exportCsv";
 import { UNASSIGNED } from "../utils/leadAssignees";
+import { loadResearchPatience, RESEARCH_PATIENCE } from "../lib/researchPatience";
 
 const SORT_FILTER_OPTIONS = [
   { value: "recent", label: "Recently added" },
@@ -690,23 +691,6 @@ const MAX_BULK_ONBOARD = 25;
 const BULK_ONBOARD_DELAY_MS = 1000;
 const BULK_DELETE_CHUNK = 40;
 
-type ResearchPatience = "fast" | "normal" | "patient";
-
-const RESEARCH_PATIENCE: Record<
-  ResearchPatience,
-  { label: string; timeoutMs: number; expectedSec: number }
-> = {
-  fast: { label: "Fast", timeoutMs: 60_000, expectedSec: 45 },
-  normal: { label: "Normal", timeoutMs: 90_000, expectedSec: 70 },
-  patient: { label: "Patient", timeoutMs: 120_000, expectedSec: 95 },
-};
-
-function defaultResearchPatience(batchSize: number): ResearchPatience {
-  if (batchSize <= 5) return "fast";
-  if (batchSize <= 15) return "normal";
-  return "patient";
-}
-
 interface BulkOnboardRowResult {
   id: number;
   company_name: string;
@@ -1148,7 +1132,7 @@ export function LeadsTablePage({
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [bulkOnboarding, setBulkOnboarding] = useState(false);
-  const [researchPatience, setResearchPatience] = useState<ResearchPatience>("normal");
+  const [researchPatience] = useState(() => loadResearchPatience());
   const [actionProgress, setActionProgress] = useState<BulkActionProgress | null>(null);
   const [bulkResults, setBulkResults] = useState<BulkOnboardRowResult[] | null>(null);
   const [showBulkEmail, setShowBulkEmail] = useState(false);
@@ -1413,11 +1397,6 @@ export function LeadsTablePage({
     const timer = window.setTimeout(() => setDebouncedSearch(search), 300);
     return () => window.clearTimeout(timer);
   }, [search]);
-
-  useEffect(() => {
-    if (bulkOnboarding) return;
-    setResearchPatience(defaultResearchPatience(selected.size || 1));
-  }, [selected.size, bulkOnboarding]);
 
   const isAssignedSection = isAssignedLeadsSection(section);
   const assignedSectionUserId = assignedUserIdFromSection(section);
@@ -3348,24 +3327,6 @@ export function LeadsTablePage({
               Remove Interested ({selected.size})
             </ActionButton>
           )}
-          <label
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-300"
-            title="Max wait per lead — larger batches default to longer patience"
-          >
-            <span className="text-slate-500 hidden sm:inline">Patience</span>
-            <select
-              value={researchPatience}
-              disabled={bulkOnboarding}
-              onChange={(e) =>
-                setResearchPatience(e.target.value as ResearchPatience)
-              }
-              className="bg-transparent text-slate-200 outline-none disabled:opacity-50"
-            >
-              <option value="fast">Fast 60s</option>
-              <option value="normal">Normal 90s</option>
-              <option value="patient">Patient 2m</option>
-            </select>
-          </label>
           {isAdmin && section === "all" && (
             <ActionButton
               icon={IconXCircle}

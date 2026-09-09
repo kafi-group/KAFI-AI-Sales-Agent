@@ -14,6 +14,9 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent
 STATIC_CATALOGUES_DIR = _BACKEND_DIR / "static" / "catalogues"
 FALLBACK_CATALOGUES_DIR = Path(r"D:\First AI World\Cursor Projects\sales, social, hr Aug 2026\catalogue")
 
+# Gmail/Outlook hard-fail around 25 MB total. Keep a buffer for message body + MIME.
+EMAIL_ATTACH_MAX_BYTES = 20 * 1024 * 1024
+
 CATALOGUES_DEF = [
     {
         "id": "edible_salt",
@@ -99,11 +102,24 @@ def get_catalogue_by_id(cat_id: str) -> tuple[Path, dict[str, Any]]:
 
 
 def attach_catalogues_as_attachments(cat_ids: list[str]) -> list[dict[str, Any]]:
-    """Convert catalogue files to EmailAttachment objects for mail compose."""
+    """Convert catalogue files to EmailAttachment objects for mail compose.
+
+    Gmail/Outlook reject messages over ~25 MB, so files larger than
+    EMAIL_ATTACH_MAX_BYTES are skipped — callers should send a download link instead.
+    """
     attachments: list[dict[str, Any]] = []
     for cid in cat_ids:
         try:
             path, meta = get_catalogue_by_id(cid)
+            size = path.stat().st_size
+            if size > EMAIL_ATTACH_MAX_BYTES:
+                logger.warning(
+                    "Skipping catalogue %s as email attachment (%.1f MB > %s MB limit)",
+                    cid,
+                    size / (1024 * 1024),
+                    EMAIL_ATTACH_MAX_BYTES // (1024 * 1024),
+                )
+                continue
             registered = register_attachment_from_path(path, filename=meta["filename"], content_type="application/pdf")
             attachments.append(
                 {

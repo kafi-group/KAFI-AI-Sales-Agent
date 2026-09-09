@@ -63,9 +63,11 @@ function aiSalesAgentHeaders(): HeadersInit {
 }
 
 /** External quotation agent (separate app). */
+const _quotationAgentEnv = String(import.meta.env.VITE_QUOTATION_AGENT_URL || "").trim();
 export const QUOTATION_AGENT_URL =
-  import.meta.env.VITE_QUOTATION_AGENT_URL ??
-  "https://bank-recon-demo.vercel.app/cnf";
+  _quotationAgentEnv && !_quotationAgentEnv.includes("bank-recon-demo")
+    ? _quotationAgentEnv
+    : "https://kafiai-agents.vercel.app/cnf";
 
 function authHeaders(extra?: HeadersInit): HeadersInit {
   const token = getStoredToken();

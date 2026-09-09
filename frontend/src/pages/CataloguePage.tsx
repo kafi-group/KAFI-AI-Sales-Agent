@@ -33,6 +33,25 @@ function normalizeWhatsAppPhone(raw: string): string {
   return trimmed;
 }
 
+function formatSize(bytes: number): string {
+  if (!bytes) return "PDF";
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Gmail/Outlook reject ~25 MB messages — keep a buffer for body + MIME. */
+const EMAIL_ATTACH_MAX_BYTES = 20 * 1024 * 1024;
+
+function catalogueIsEmailAttachable(cat: CatalogueItem): boolean {
+  return Boolean(cat.size) && cat.size <= EMAIL_ATTACH_MAX_BYTES;
+}
+
+function cataloguePublicUrl(cat: CatalogueItem): string {
+  if (cat.download_url.startsWith("http")) return cat.download_url;
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return `${origin}${cat.download_url.startsWith("/") ? "" : "/"}${cat.download_url}`;
+}
+
 export function CataloguePage({
   initialCatalogueId,
   onError,
@@ -89,12 +108,6 @@ export function CataloguePage({
     setSelectedCatIds([]);
   }
 
-  function formatSize(bytes: number): string {
-    if (!bytes) return "PDF";
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-
   async function handleOpenEmailComposer(specificCatId?: string) {
     const idsToAttach = specificCatId ? [specificCatId] : selectedCatIds;
     if (idsToAttach.length === 0) {
@@ -103,19 +116,34 @@ export function CataloguePage({
     }
 
     try {
-      const atts = await client.attachCatalogues(idsToAttach);
+      const selected = catalogues.filter((c) => idsToAttach.includes(c.id));
+      const attachable = selected.filter(catalogueIsEmailAttachable);
+      const linkOnly = selected.filter((c) => !catalogueIsEmailAttachable(c));
+
+      const atts =
+        attachable.length > 0
+          ? await client.attachCatalogues(attachable.map((c) => c.id))
+          : [];
       setComposeAttachments(atts);
-      
-      const titles = catalogues
-        .filter((c) => idsToAttach.includes(c.id))
-        .map((c) => c.title)
-        .join(" & ");
+
+      const titles = selected.map((c) => c.title).join(" & ");
+      const linkHtml = linkOnly
+        .map(
+          (c) =>
+            `<li><a href="${cataloguePublicUrl(c)}">${c.title}</a> (${formatSize(c.size)} — download link; too large to attach)</li>`,
+        )
+        .join("");
 
       setComposeSubject(`Product Catalogue & Company Profile — Kafi Commodities (${titles})`);
       setComposeBody(
         `<p>Dear Valued Partner,</p>` +
         `<p>Thank you for your interest in <strong>Kafi Commodities (Pvt.) Ltd. (Brand: ESSENCE)</strong>.</p>` +
-        `<p>Please find attached our latest <strong>${titles}</strong> containing complete product specifications, packaging options, and private labeling details.</p>` +
+        (attachable.length > 0
+          ? `<p>Please find attached our latest <strong>${attachable.map((c) => c.title).join(" & ")}</strong> containing complete product specifications, packaging options, and private labeling details.</p>`
+          : `<p>Please use the download link below for our latest <strong>${titles}</strong> containing complete product specifications, packaging options, and private labeling details.</p>`) +
+        (linkHtml
+          ? `<p>The following catalogue${linkOnly.length === 1 ? " is" : "s are"} too large for email attachment (mailbox limit ~25 MB). Please download:</p><ul>${linkHtml}</ul>`
+          : "") +
         `<p>We would be pleased to provide you with customized FOB/CNF pricing and discuss MOQ requirements for your target market.</p>` +
         `<p>Looking forward to collaborating with your organization.</p>` +
         `<p>Best Regards,<br/><strong>Export Sales Team</strong><br/>Kafi Commodities (Pvt.) Ltd.<br/>Website: <a href="https://www.kafi-group.com">www.kafi-group.com</a></p>`
@@ -132,10 +160,7 @@ export function CataloguePage({
     const titles = selected.map((c) => c.title).join(" & ") || "product catalogue";
     const links = selected
       .map((c) => {
-        const path = c.download_url.startsWith("http")
-          ? c.download_url
-          : `${window.location.origin}${c.download_url.startsWith("/") ? "" : "/"}${c.download_url}`;
-        return `• ${c.title}: ${path}`;
+        return `• ${c.title}: ${cataloguePublicUrl(c)}`;
       })
       .join("\n");
 
@@ -308,6 +333,12 @@ export function CataloguePage({
                         </span>
                       </div>
                     </div>
+
+                    {!catalogueIsEmailAttachable(cat) ? (
+                      <p className="text-[11px] text-amber-200/90 bg-amber-500/10 border border-amber-500/25 rounded-lg px-2.5 py-1.5">
+                        Too large for email attachment (mailbox ~25 MB). Email and WhatsApp send a download link instead of the PDF file.
+                      </p>
+                    ) : null}
 
                     <p className="text-xs text-slate-300 leading-relaxed">
                       {cat.description}
