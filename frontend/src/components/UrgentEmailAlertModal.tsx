@@ -10,6 +10,11 @@ interface UrgentEmailAlertModalProps {
 export function isGenuineNewInquiry(item: UrgentEmailItem): boolean {
   if (!item) return false;
 
+  const folder = (item.folder || "").toLowerCase();
+  if (/(spam|junk|trash|deleted|\bbin\b)/.test(folder)) {
+    return false;
+  }
+
   // 1. "Urgent means 1 single email of inquiry or asking quotation."
   // Continuation of conversation must NOT appear in urgent!
   if (item.message_count != null && item.message_count > 1) {

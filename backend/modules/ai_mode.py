@@ -1435,7 +1435,7 @@ def process_email_auto_replies_for_user(
             "queries": query_scan,
         }
 
-    folders = ["inbox", "junk"]
+    folders = ["inbox"]
     query_candidates: list[tuple[str, dict[str, Any]]] = []
     other_candidates: list[tuple[str, dict[str, Any]]] = []
     errors: list[str] = []

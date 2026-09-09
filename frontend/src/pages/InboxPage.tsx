@@ -71,6 +71,7 @@ interface InboxPageProps {
   /** Open Vercel mailer compose (mailer-pied). */
   onOpenMailerCompose?: () => void;
   initialThreadId?: string | null;
+  initialMailboxUserId?: number | null;
   autoOpenReply?: boolean;
   onThreadOpened?: () => void;
 }
@@ -334,6 +335,7 @@ export function InboxPage({
   onSelectMailSection,
   onOpenMailerCompose,
   initialThreadId,
+  initialMailboxUserId = null,
   autoOpenReply,
   onThreadOpened,
 }: InboxPageProps) {
@@ -400,6 +402,8 @@ export function InboxPage({
   const onUnreadChangeRef = useRef(onUnreadChange);
   const onFolderCountsChangeRef = useRef(onFolderCountsChange);
   const onMailExtrasChangeRef = useRef(onMailExtrasChange);
+  const mailboxUserIdRef = useRef<number | null>(initialMailboxUserId ?? null);
+  mailboxUserIdRef.current = initialMailboxUserId ?? null;
   onErrorRef.current = onError;
   onUnreadChangeRef.current = onUnreadChange;
   onFolderCountsChangeRef.current = onFolderCountsChange;
@@ -708,7 +712,7 @@ export function InboxPage({
       setReplyBcc("");
       setAiAnalysis(null);
       try {
-        const detail = await client.getInboxThread(threadId);
+        const detail = await client.getInboxThread(threadId, mailboxUserIdRef.current);
         setThread(detail);
         setReplySubjectLine(replySubject(detail.subject));
 

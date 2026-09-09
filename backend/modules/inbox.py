@@ -17,6 +17,24 @@ from modules.mailbox_accounts import (
 )
 
 
+_DISCARDED_FOLDER_MARKERS = ("spam", "junk", "trash", "deleted", "bin")
+
+
+def _is_discarded_mail_folder(folder: str | None) -> bool:
+    """True for Spam / Junk / Trash (and INBOX.spam children) — never treat as live inbox."""
+    name = (folder or "").strip().lower().replace("\\", "/")
+    if not name:
+        return False
+    return any(marker in name for marker in _DISCARDED_FOLDER_MARKERS)
+
+
+def _message_is_junk_or_trash(msg: dict[str, Any]) -> bool:
+    if _is_discarded_mail_folder(str(msg.get("folder") or "")):
+        return True
+    flags = " ".join(str(x).lower() for x in (msg.get("flags") or []))
+    return "junk" in flags or "spam" in flags
+
+
 def _mailbox_provider() -> str:
     """Label for UI — oauth Graph path vs standard IMAP/SMTP (e.g. cPanel)."""
     if outlook_client._use_oauth():  # noqa: SLF001
@@ -580,6 +598,11 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
                 continue
 
             latest_msg = messages[0]
+            if _message_is_junk_or_trash(latest_msg):
+                continue
+            latest_folder = str(latest_msg.get("folder") or "INBOX").strip()
+            if latest_folder.upper() != "INBOX":
+                continue
 
             # 2. Must be an inbound email awaiting reply (not sent by us)
             is_outbound = (
@@ -775,6 +798,7 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
                     "user_name": user.username,
                     "user_full_name": user.full_name or user.username,
                     "mailbox_email": account.email,
+                    "folder": latest_folder,
                 }
             )
 

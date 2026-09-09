@@ -28,7 +28,7 @@ from api.schemas import (
     InboxMessageListResponse,
     InboxUnreadCount,
 )
-from db.models import AppUser
+from db.models import AppUser, AppUserRole
 from modules import inbox as inbox_module
 from modules import inbox_assistant as inbox_assistant_module
 from modules import inbox_mail_ai as inbox_mail_ai_module
@@ -129,10 +129,23 @@ def list_inbox_threads(
 
 
 @router.get("/threads/{thread_id}", response_model=InboxThreadDetail)
-def get_inbox_thread(thread_id: str, user: AppUser = Depends(get_current_user_released)):
+def get_inbox_thread(
+    thread_id: str,
+    mailbox_user_id: int | None = Query(default=None),
+    db: SessionLocal = Depends(get_db),
+    user: AppUser = Depends(get_current_user_released),
+):
     _guard_configured(user)
+    target = user
+    if mailbox_user_id and int(mailbox_user_id) != int(user.id):
+        role = user.role.value if isinstance(user.role, AppUserRole) else str(user.role)
+        if role != AppUserRole.admin.value:
+            raise HTTPException(403, "Only admin can open another mailbox")
+        other = db.get(AppUser, int(mailbox_user_id))
+        if other:
+            target = other
     try:
-        thread = inbox_module.get_thread(user, thread_id)
+        thread = inbox_module.get_thread(target, thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Could not read conversation: {exc}") from exc
     if not thread:

@@ -2631,15 +2631,6 @@ export function LeadsTablePage({
     }
   }
 
-  function toggleSort(field: SortField) {
-    if (sortBy === field) {
-      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
-      return;
-    }
-    setSortBy(field);
-    setSortDir(field === "company_name" || field === "country" ? "asc" : "desc");
-  }
-
   function sortSelectValue(): string {
     if (sortBy === "created_at") {
       return sortDir === "asc" ? "oldest" : "recent";

@@ -666,6 +666,7 @@ class OutlookClient:
             "date": as_utc(msg.date),
             "preview": preview[:240],
             "unread": "\\Seen" not in msg.flags,
+            "flags": [str(x) for x in (getattr(msg, "flags", None) or [])],
             "has_attachments": bool(getattr(msg, "attachments", None)),
             "message_id": self._header(msg, "Message-ID", "Message-Id"),
             "in_reply_to": self._header(msg, "In-Reply-To"),
@@ -897,6 +898,14 @@ class OutlookClient:
                     pass
 
         combined = inbox + sent
+        combined = [
+            m
+            for m in combined
+            if not any(
+                marker in str(m.get("folder") or "").lower()
+                for marker in ("spam", "junk", "trash", "deleted")
+            )
+        ]
         filtered = [m for m in combined if message_is_after_cutoff(m.get("date"))]
         # Dedupe by message-id when both copies exist.
         seen_ids: set[str] = set()

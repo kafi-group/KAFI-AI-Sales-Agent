@@ -452,6 +452,7 @@ export interface UrgentEmailItem {
   user_name?: string;
   user_full_name?: string;
   mailbox_email?: string;
+  folder?: string | null;
 }
 
 export interface UrgentEmailsResponse {
@@ -2767,8 +2768,15 @@ export const client = {
     const query = search.toString();
     return request<Record<string, unknown>>(`/guidance/helpful${query ? `?${query}` : ""}`);
   },
-  getInboxThread: (threadId: string) =>
-    request<InboxThreadDetail>(`/inbox/threads/${encodeURIComponent(threadId)}`),
+  getInboxThread: (threadId: string, mailboxUserId?: number | null) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<InboxThreadDetail>(
+      `/inbox/threads/${encodeURIComponent(threadId)}${qs}`,
+    );
+  },
   replyInboxThread: (
     threadId: string,
     payload: {

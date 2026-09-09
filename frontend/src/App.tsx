@@ -212,6 +212,7 @@ function DashboardApp() {
   const [urgentEmails, setUrgentEmails] = useState<UrgentEmailItem[]>([]);
   const [urgentAlertDismissed, setUrgentAlertDismissed] = useState(false);
   const [targetThreadId, setTargetThreadId] = useState<string | null>(null);
+  const [targetMailboxUserId, setTargetMailboxUserId] = useState<number | null>(null);
   const [autoOpenReply, setAutoOpenReply] = useState(false);
   const seenMessageUidsRef = useRef<Set<string> | null>(null);
   const lastInboxUnreadRef = useRef(0);
@@ -433,6 +434,7 @@ function DashboardApp() {
 
   const handleOpenUrgentAndReply = useCallback((item: UrgentEmailItem) => {
     setTargetThreadId(item.thread_id);
+    setTargetMailboxUserId(item.user_id ?? null);
     setAutoOpenReply(true);
     setMailSection("inbox");
     setTab("inbox");
@@ -1550,9 +1552,11 @@ function DashboardApp() {
                 onSelectMailSection={handleSelectMailSection}
                 onOpenMailerCompose={() => void openMailerApp("/compose")}
                 initialThreadId={targetThreadId}
+                initialMailboxUserId={targetMailboxUserId}
                 autoOpenReply={autoOpenReply}
                 onThreadOpened={() => {
                   setTargetThreadId(null);
+                  setTargetMailboxUserId(null);
                   setAutoOpenReply(false);
                   void pollUrgentEmails();
                 }}
