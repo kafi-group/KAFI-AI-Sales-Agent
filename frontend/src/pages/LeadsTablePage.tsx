@@ -845,13 +845,13 @@ function sectionDescription(
     return "Leads specially selected for Mr. Khalid's focused sales outreach. Select any contact from Old clients, Master table, or New search lead and add them here.";
   }
   if (section === "hyperstore_targeted") {
-    return "Hypermarkets and multi-branch retailers (10+ branches) — auto-classified from Old clients by name keywords, or add manually from any table.";
+    return "Standalone hypermarket list. Spreadsheet uploads stay here only — they are not mixed into Old clients, Master Table, or the other target lists.";
   }
   if (section === "targeted_distributor") {
-    return "Distributors and wholesalers — auto-classified from Old clients (distributor, distribution, wholesale, etc.) or add manually from any table.";
+    return "Standalone distributor list. Spreadsheet uploads stay here only — they are not mixed into Old clients, Master Table, or the other target lists.";
   }
   if (section === "targeted_client") {
-    return "Hand-picked priority clients — use Add to Targeted Client on any table row selection. No auto keyword matching.";
+    return "Standalone priority-client list. Spreadsheet uploads stay here only — they are not mixed into Old clients, Master Table, or the other target lists.";
   }
   if (section === "incomplete_archives") {
     return "Partial rows from archives — name only, phone only, product only (e.g. Salt), or mixed columns. Edit manually or use Research to fill gaps. Promote to Old clients when complete (manual only).";
@@ -4808,7 +4808,7 @@ export function LeadsTablePage({
                 ? "Upload CSV or Excel (.xlsx). Columns are mapped to the Old clients table. Import only saves rows as-is — research and score later from the table."
                 : "Upload CSV or Excel (.xlsx). Columns are mapped to your Clients table. Import only saves rows as-is — research and score later from the table."
               : isTargetedPool
-                ? "Upload CSV or Excel (.xlsx). Rows are saved as uploaded data in this targeted list — use the toggle to view them separately from AI / search leads."
+                ? "Upload CSV or Excel (.xlsx). Rows stay in this list only — they will not appear in Old clients or any other table."
                 : "Upload CSV or Excel (.xlsx). Rows are saved into your leads table as-is — research and score them from the table when ready."
           }
         />

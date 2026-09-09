@@ -617,6 +617,16 @@ def _apply_lead_table_scope(
             buyer_query = buyer_query.filter(
                 ~sa_func.lower(sa_func.coalesce(Buyer.source, "")).in_(excluded)
             )
+
+    # Hyperstore / Distributors / Targeted Client / Khalid Focused are standalone
+    # lists — they must not appear in Master, Old clients, Assigned, or Discover.
+    selected = (source or "").strip().lower()
+    if selected not in TARGETED_POOL_SOURCES:
+        buyer_query = buyer_query.filter(
+            ~sa_func.lower(sa_func.coalesce(Buyer.source, "")).in_(
+                sorted(TARGETED_POOL_SOURCES)
+            )
+        )
     return buyer_query
 
 
@@ -1750,21 +1760,24 @@ def _compute_section_counts(
         pool_counts[source_key] += 1
         is_incomplete = source_key == INCOMPLETE_ARCHIVES_SOURCE
         is_old = source_key == "old_clients"
+        is_targeted = source_key in TARGETED_POOL_SOURCES
         if is_incomplete:
             incomplete_archives_ids.add(buyer_id)
         elif is_old:
             old_client_ids.add(buyer_id)
+        elif is_targeted:
+            pass
         else:
             other_ids.add(buyer_id)
 
         if assignee_id is None:
             if is_old:
                 unassigned_old_ids.add(buyer_id)
-            else:
+            elif not is_targeted:
                 unassigned_other_ids.add(buyer_id)
             if is_new_search_lead_source(source):
                 new_search_lead_ids.add(buyer_id)
-        elif pool_for_user_id is None and assigned_by_id is not None:
+        elif pool_for_user_id is None and assigned_by_id is not None and not is_targeted:
             # Admin "Leads Sent To" badges — only admin-sent leads, not self-imports.
             key = str(assignee_id)
             by_assignee[key] = by_assignee.get(key, 0) + 1

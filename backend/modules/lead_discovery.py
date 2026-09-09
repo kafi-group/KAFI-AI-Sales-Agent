@@ -3584,14 +3584,21 @@ def import_candidates(
     existing_names = set(by_name.keys())
     existing_domains = set(by_domain.keys())
 
-    # Cross-section block: leads-table imports must not recreate Old clients.
-    # Clients/old_clients imports always land in that table — do not skip just
-    # because Discover / Leads already has a similar company name.
-    # Sales users only check against their own clients, not admin/other users.
+    # Cross-section block: Discover / generic imports must not recreate Old clients.
+    # Targeted-pool imports (Hyperstore, Distributors, Targeted Client) are standalone
+    # lists — same company name in Old clients is allowed as a separate row.
     other_names: set[str] = set()
     other_domains: set[str] = set()
     batch_source_norm = (batch_source or "").strip().lower()
-    if batch_source_norm not in {"old_clients", "incomplete_archives"}:
+    _standalone_import = {
+        "old_clients",
+        "incomplete_archives",
+        "hyperstore_targeted",
+        "targeted_distributor",
+        "targeted_client",
+        "khalid_focused_sales",
+    }
+    if batch_source_norm not in _standalone_import:
         other_names, other_domains = _existing_buyer_keys(
             db,
             source="old_clients",
@@ -3733,12 +3740,7 @@ def import_candidates(
                 raw["company_name"] = ""
                 name = ""
 
-            if skip_enrichment and batch_source_norm in {
-                "old_clients",
-                "hyperstore_targeted",
-                "targeted_distributor",
-                "targeted_client",
-            }:
+            if skip_enrichment and batch_source_norm == "old_clients":
                 from modules.incomplete_archives import is_fragmentary_import_row
 
                 if is_fragmentary_import_row(raw):
