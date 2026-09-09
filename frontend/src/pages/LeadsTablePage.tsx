@@ -49,6 +49,7 @@ import {
   IconGear,
   IconList,
   IconMail,
+  IconFilter,
   IconPlus,
   IconSearch,
   IconArchive,
@@ -2926,10 +2927,16 @@ export function LeadsTablePage({
     >
       <div className="flex items-start justify-between gap-4 flex-wrap shrink-0">
         <div>
-          <h2 className="text-lg font-medium text-slate-100">
-            {sectionTitle(section, assigneeUsername, isAdmin, masterType, customModules)}
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">
+          <ActionButton
+            icon={IconFilter}
+            variant={filtersExpanded || activeFiltersCount > 0 ? "emerald" : "secondary"}
+            onClick={() => setFiltersExpanded((prev) => !prev)}
+            title={filtersExpanded ? "Hide search and column filters" : "Show search and column filters"}
+          >
+            Filter
+            {activeFiltersCount > 0 ? ` (${activeFiltersCount})` : ""}
+          </ActionButton>
+          <p className="text-sm text-slate-500 mt-2">
             {sectionDescription(section, assigneeUsername, isAdmin, customModules)}
           </p>
           {isTestingModule && (
@@ -3537,56 +3544,8 @@ export function LeadsTablePage({
         </div>
       )}
 
-      {/* Clickable Filter Ribbon */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/90 overflow-hidden shadow-sm shrink-0">
-        <button
-          type="button"
-          onClick={() => setFiltersExpanded((prev) => !prev)}
-          className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-900 hover:bg-slate-800/80 transition-all text-left group cursor-pointer border-b border-transparent data-[open=true]:border-slate-800"
-          data-open={filtersExpanded}
-          aria-expanded={filtersExpanded}
-          title={filtersExpanded ? "Click to collapse filters" : "Click to expand filters"}
-        >
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-bold">
-              🔍
-            </span>
-            <span className="font-bold text-sm text-slate-100 tracking-wide group-hover:text-emerald-300 transition flex items-center gap-2">
-              Filter
-              {activeFiltersCount > 0 && (
-                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-extrabold border border-emerald-500/40">
-                  {activeFiltersCount} active
-                </span>
-              )}
-            </span>
-            <span className="text-xs text-slate-400 hidden sm:inline">
-              {filtersExpanded
-                ? "— Click to collapse filters"
-                : "— Click to expand search & column filters"}
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            {hasActiveFilters && (
-              <span
-                role="button"
-                tabIndex={0}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  clearFilters();
-                }}
-                className="text-xs text-slate-400 hover:text-red-300 underline cursor-pointer font-medium"
-              >
-                Clear all
-              </span>
-            )}
-            <span className="text-xs text-slate-300 font-mono font-bold flex items-center gap-1 group-hover:text-white">
-              {filtersExpanded ? "▲ Hide" : "▼ Show"}
-            </span>
-          </div>
-        </button>
-
-        {filtersExpanded && (
-          <div className="p-4 space-y-3 border-t border-slate-800 bg-slate-950/40 animate-in fade-in duration-150">
+      {filtersExpanded ? (
+        <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-4 space-y-3 shadow-sm shrink-0">
             <div
               className={`grid gap-3 sm:grid-cols-2 ${
                 useClientsFilters ? "lg:grid-cols-4 xl:grid-cols-4" : "lg:grid-cols-4"
@@ -3829,9 +3788,8 @@ export function LeadsTablePage({
             Clear filters
           </button>
         )}
-          </div>
-        )}
       </div>
+      ) : null}
 
       {loading ? (
         <p className="text-slate-400 text-sm">Loading leads table…</p>

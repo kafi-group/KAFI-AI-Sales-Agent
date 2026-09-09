@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { IndexAction } from "./data/indexSections";
 import { sumWhatsAppInboxUnread } from "./utils/whatsappRead";
 import {
@@ -1198,6 +1198,55 @@ function DashboardApp() {
     },
   ];
 
+  const pageHeading = useMemo(() => {
+    if (tab === "table") {
+      if (selectedLeadId != null) return "Lead profile";
+      if (tableSection === "master") return masterTableLabel;
+      if (tableSection === "my_assigned") return "Assigned";
+      if (tableSection === "old_clients") return isAdmin ? "Old clients" : "Clients";
+      const tableChild = clientSectionNavChildren.find((child) => child.id === tableSection);
+      if (tableChild) return tableChild.label;
+      const assignedChild = assigneeNavChildren.find((child) => child.id === tableSection);
+      if (assignedChild) return assignedChild.label;
+      const custom = customModules.find((module) => module.key === tableSection);
+      if (custom) return `${custom.icon ? `${custom.icon} ` : ""}${custom.name}`;
+      return masterTableLabel;
+    }
+    if (tab === "inbox") {
+      if (mailSection === "inbox") return "Inbox";
+      if (mailSection === "sent") return "Sent";
+      if (mailSection === "trash") return "Trash";
+      if (mailSection === "archive") return "Archive";
+      if (mailSection === "drafts") return "Drafts";
+      const labelId = mailLabelIdFromSection(mailSection);
+      if (labelId != null) {
+        return mailLabels.find((label) => label.id === labelId)?.name || "Label";
+      }
+      return "Inbox";
+    }
+    if ((tab === "leads" || tab === "calls") && selectedLeadId != null) return "Lead profile";
+    if (tab === "whatsapp-qr") return "WhatsApp Mobile";
+    if (tab === "settings") return "Settings";
+    for (const item of navItems) {
+      const child = item.children?.find((entry) => entry.id === tab);
+      if (child) return child.label;
+      if (item.id === tab) return item.label;
+    }
+    return APP_BRAND_NAME;
+  }, [
+    tab,
+    tableSection,
+    mailSection,
+    selectedLeadId,
+    masterTableLabel,
+    isAdmin,
+    clientSectionNavChildren,
+    assigneeNavChildren,
+    customModules,
+    mailLabels,
+    navItems,
+  ]);
+
   return (
     <TwilioVoiceProvider>
       <CallQueueProvider>
@@ -1296,12 +1345,9 @@ function DashboardApp() {
                 <path d="M4 7h16M4 12h16M4 17h16" />
               </svg>
             </button>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-slate-100 truncate">{APP_BRAND_NAME}</p>
-              <p className="text-[11px] text-slate-500 truncate capitalize">
-                {displayDashboardUserLabel(user) || "Signed in"}
-              </p>
-            </div>
+            <h1 className="min-w-0 flex-1 text-sm font-semibold text-slate-100 truncate">
+              {pageHeading}
+            </h1>
             <AppTopActions
               compact
               onRefresh={refreshAll}
@@ -1329,6 +1375,9 @@ function DashboardApp() {
                 <path d="M4 7h16M4 12h16M4 17h16" />
               </svg>
             </button>
+            <h1 className="min-w-0 max-w-[min(100%,28rem)] truncate text-sm sm:text-base font-semibold text-slate-100">
+              {pageHeading}
+            </h1>
             {error ? (
               <p className="flex-1 min-w-0 text-xs sm:text-sm text-red-200 truncate px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/30">
                 {error}
