@@ -145,7 +145,8 @@ class VoiceClient:
             return False
         expected_url = self.webhook_url("/api/webhooks/twilio/voice/client-dial")
         try:
-            client = self._client()
+            from twilio.rest import Client
+            client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
             app = client.applications.get(settings.twilio_twiml_app_sid).fetch()
             if app.voice_url != expected_url:
                 client.applications.get(settings.twilio_twiml_app_sid).update(
