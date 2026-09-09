@@ -24,7 +24,7 @@ import {
 import { mailLabelSectionId } from "./lib/mailLabelRules";
 import { displayDashboardUserLabel } from "./utils/displayUserName";
 import { InboxAlertToasts } from "./components/InboxAlertToasts";
-import { UrgentEmailAlertModal } from "./components/UrgentEmailAlertModal";
+import { UrgentEmailAlertModal, isGenuineNewInquiry } from "./components/UrgentEmailAlertModal";
 import { ManageModulesModal } from "./components/ManageModulesModal";
 import type { UrgentEmailItem } from "./api/client";
 import { WhatsAppAlertToasts } from "./components/WhatsAppAlertToasts";
@@ -407,7 +407,7 @@ function DashboardApp() {
     client
       .getUrgentUnrepliedEmails()
       .then((res) => {
-        const list = res.urgent_threads || [];
+        const list = (res.urgent_threads || []).filter(isGenuineNewInquiry);
         setUrgentEmails(list);
         if (list.length === 0) {
           setUrgentAlertDismissed(false);

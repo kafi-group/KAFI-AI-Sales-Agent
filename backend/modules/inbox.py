@@ -574,10 +574,14 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
             if not messages:
                 continue
 
-            messages_sorted = sorted(messages, key=lambda m: date_sort_key(m.get("date")))
-            latest_msg = messages_sorted[-1]
+            # 1. "Urgent means 1 single email of inquiry or asking quotation."
+            # If there was ever a previous reply or thread continuation (thank you, etc.), exclude it!
+            if len(messages) > 1 or t.get("message_count", 1) > 1:
+                continue
 
-            # Must be an inbound email awaiting reply (not sent by us)
+            latest_msg = messages[0]
+
+            # 2. Must be an inbound email awaiting reply (not sent by us)
             is_outbound = (
                 latest_msg.get("direction") == "outbound"
                 or (latest_msg.get("folder") or "").lower() == "sent"
@@ -590,41 +594,74 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
             if is_outbound:
                 continue
 
-            from_name = t.get("latest_from_name") or latest_msg.get("from_name") or ""
-            from_email = t.get("latest_from_email") or latest_msg.get("from_email") or ""
-            text_corpus = f"{subject} {preview}".lower()
-            from_lower = from_email.lower()
+            from_name = str(t.get("latest_from_name") or latest_msg.get("from_name") or "").strip()
+            from_email = str(t.get("latest_from_email") or latest_msg.get("from_email") or "").strip()
+            subj_lower = subject.lower()
+            from_lower = f"{from_name} {from_email}".lower()
+            prev_lower = preview.lower()
+            full_text = f"{subj_lower} {prev_lower}"
 
-            # Exclude banking/system notifications/receipts
-            is_excluded = any(
-                ex in text_corpus or ex in from_lower
-                for ex in (
-                    "mt103",
-                    "mt 103",
-                    "swift transfer",
-                    "bank statement",
-                    "remittance",
-                    "payment confirmation",
-                    "payment receipt",
-                    "receipt of payment",
-                    "no-reply",
-                    "noreply",
-                    "mailer-daemon",
-                    "mail delivery",
-                    "security alert",
-                    "verify your",
-                    "newsletter",
-                    "unsubscribe",
-                    "notification@",
-                    "alert@",
-                )
+            # 3. Exclude all automated bounces, mailer-daemon, delivery failures, auto-replies
+            bounce_terms = (
+                "mailer-daemon",
+                "mail delivery",
+                "postmaster",
+                "delivery status",
+                "delivery failed",
+                "undeliver",
+                "failure notice",
+                "returned message",
+                "returning message to sender",
+                "hostnsurf",
+                "no-reply",
+                "noreply",
+                "auto-reply",
+                "automatic reply",
+                "out of office",
+                "security alert",
+                "verify your",
+                "newsletter",
+                "notification@",
+                "notifications@",
+                "alert@",
             )
-            if is_excluded:
+            if any(bt in from_lower or bt in subj_lower for bt in bounce_terms):
                 continue
 
-            # Filter ONLY for new inquiry emails where a reply is to be made (quotation, order, products)
+            # 4. Exclude job applicants / resumes / HR (e.g. Indeed, CV, application)
+            hr_terms = (
+                "indeed",
+                "job application",
+                "resume",
+                "curriculum vitae",
+                "cv",
+                "applying for",
+                "vacancy",
+                "hiring",
+                "candidate",
+                "interview",
+                "application for",
+            )
+            if any(ht in subj_lower or ht in from_lower for ht in hr_terms):
+                continue
+
+            # 5. Exclude banking / statements / payments / receipts
+            finance_terms = (
+                "mt103",
+                "mt 103",
+                "swift transfer",
+                "bank statement",
+                "remittance",
+                "payment confirmation",
+                "payment receipt",
+                "receipt of payment",
+            )
+            if any(ft in full_text for ft in finance_terms):
+                continue
+
+            # 6. Filter ONLY for new inquiry emails asking for quotation, price, rates, order, or products
             is_quote_inquiry = any(
-                k in text_corpus
+                k in full_text
                 for k in (
                     "quotation",
                     "quote",
@@ -641,7 +678,7 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
                 )
             )
             is_order_inquiry = any(
-                k in text_corpus
+                k in full_text
                 for k in (
                     "order inquiry",
                     "order enquiry",
@@ -657,7 +694,7 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
                 )
             )
             is_product_inquiry = any(
-                k in text_corpus
+                k in full_text
                 for k in (
                     "inquiry",
                     "enquiry",
@@ -667,8 +704,10 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
                     "catalogue request",
                     "catalog request",
                     "can you provide",
+                    "can you supply",
                     "please quote",
                     "interested in purchasing",
+                    "interested to buy",
                 )
             )
 

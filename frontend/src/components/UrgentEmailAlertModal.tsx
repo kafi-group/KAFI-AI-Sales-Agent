@@ -7,6 +7,121 @@ interface UrgentEmailAlertModalProps {
   onDismiss: () => void;
 }
 
+export function isGenuineNewInquiry(item: UrgentEmailItem): boolean {
+  if (!item) return false;
+
+  // 1. "Urgent means 1 single email of inquiry or asking quotation."
+  // Continuation of conversation must NOT appear in urgent!
+  if (item.message_count != null && item.message_count > 1) {
+    return false;
+  }
+
+  const subj = (item.subject || "").toLowerCase().trim();
+  const from = `${item.from_name || ""} ${item.from_email || ""}`.toLowerCase().trim();
+  const prev = (item.preview || "").toLowerCase().trim();
+  const fullText = `${subj} ${prev}`;
+
+  // 2. Exclude all automated bounces, mailer daemons, delivery failures
+  const bounceTerms = [
+    "mailer-daemon",
+    "mail delivery",
+    "delivery failed",
+    "delivery failure",
+    "undeliver",
+    "failure notice",
+    "postmaster",
+    "returned message",
+    "returning message to sender",
+    "hostnsurf",
+    "no-reply",
+    "noreply",
+    "auto-reply",
+    "automatic reply",
+    "out of office",
+    "security alert",
+    "verify your",
+    "newsletter",
+    "notification@",
+    "notifications@",
+    "alert@",
+  ];
+  if (bounceTerms.some((term) => from.includes(term) || subj.includes(term))) {
+    return false;
+  }
+
+  // 3. Exclude HR / job applicants / resumes
+  const hrTerms = [
+    "indeed",
+    "job application",
+    "resume",
+    "curriculum vitae",
+    "cv",
+    "applying for",
+    "vacancy",
+    "hiring",
+    "candidate",
+    "interview",
+    "application for",
+  ];
+  if (hrTerms.some((term) => subj.includes(term) || from.includes(term))) {
+    return false;
+  }
+
+  // 4. Exclude banking / statements / payments / receipts
+  const financeTerms = [
+    "mt103",
+    "mt 103",
+    "swift transfer",
+    "bank statement",
+    "remittance",
+    "payment confirmation",
+    "payment receipt",
+    "receipt of payment",
+  ];
+  if (financeTerms.some((term) => fullText.includes(term))) {
+    return false;
+  }
+
+  // 5. Must explicitly be an inquiry asking for quotation, price, rates, order, or products
+  const inquiryTerms = [
+    "quotation",
+    "quote",
+    "pricing",
+    "price list",
+    "rate list",
+    "rates",
+    "rfq",
+    "price inquiry",
+    "price enquiry",
+    "c&f",
+    "cnf",
+    "fob",
+    "order inquiry",
+    "order enquiry",
+    "purchase order",
+    "place order",
+    "placing order",
+    "confirm order",
+    "order requirement",
+    "buying requirement",
+    "want to buy",
+    "looking to buy",
+    "inquiry",
+    "enquiry",
+    "specification",
+    "sample request",
+    "catalogue request",
+    "catalog request",
+    "can you provide",
+    "can you supply",
+    "please quote",
+    "interested in purchasing",
+    "interested to buy",
+  ];
+
+  return inquiryTerms.some((term) => fullText.includes(term));
+}
+
 export function UrgentEmailAlertModal({
   urgentEmails,
   onOpenAndReply,
@@ -15,10 +130,15 @@ export function UrgentEmailAlertModal({
   const [selectedUserFilter, setSelectedUserFilter] = useState<string>("all");
   const [currentIndex, setCurrentIndex] = useState(0);
 
+  // Filter incoming emails strictly for genuine new single-email inquiries
+  const genuineInquiries = useMemo(() => {
+    return (urgentEmails || []).filter(isGenuineNewInquiry);
+  }, [urgentEmails]);
+
   // Group emails by user / category
   const userCategories = useMemo(() => {
     const map = new Map<string, { label: string; email: string; count: number }>();
-    for (const item of urgentEmails) {
+    for (const item of genuineInquiries) {
       const key = item.user_id ? String(item.user_id) : (item.mailbox_email || "default");
       const label = item.user_full_name || item.user_name || item.mailbox_email || "My Inbox";
       const existing = map.get(key);
@@ -32,23 +152,23 @@ export function UrgentEmailAlertModal({
       key,
       ...data,
     }));
-  }, [urgentEmails]);
+  }, [genuineInquiries]);
 
   // Filtered list based on selected category pill
   const filteredList = useMemo(() => {
-    if (selectedUserFilter === "all") return urgentEmails;
-    return urgentEmails.filter((item) => {
+    if (selectedUserFilter === "all") return genuineInquiries;
+    return genuineInquiries.filter((item) => {
       const key = item.user_id ? String(item.user_id) : (item.mailbox_email || "default");
       return key === selectedUserFilter;
     });
-  }, [urgentEmails, selectedUserFilter]);
+  }, [genuineInquiries, selectedUserFilter]);
 
-  if (!urgentEmails || urgentEmails.length === 0) return null;
+  if (!genuineInquiries || genuineInquiries.length === 0) return null;
 
   const activeIndex = Math.min(currentIndex, Math.max(0, filteredList.length - 1));
-  const currentEmail = filteredList[activeIndex] || filteredList[0] || urgentEmails[0];
+  const currentEmail = filteredList[activeIndex] || filteredList[0] || genuineInquiries[0];
   const totalInFilter = filteredList.length;
-  const globalTotal = urgentEmails.length;
+  const globalTotal = genuineInquiries.length;
 
   return (
     <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/85 backdrop-blur-md p-3 sm:p-5 animate-in fade-in duration-200">
