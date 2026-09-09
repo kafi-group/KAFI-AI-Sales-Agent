@@ -228,26 +228,6 @@ export function WhatsAppPersonalInbox({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-100">Personal inbox</h2>
-          <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-            Chats from {userName}&apos;s scanned WhatsApp
-            {connectedPhone ? ` (${connectedPhone})` : ""}. This is not the Cloud API business number.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            void refreshConversations();
-            if (selected) void loadThread(selected);
-          }}
-          className="rounded-lg border border-slate-700 hover:bg-slate-800 px-3 py-2 text-sm text-slate-300"
-        >
-          Refresh
-        </button>
-      </div>
-
       {!connected ? (
         <p className="text-sm text-amber-200 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
           Phone is not linked. Open{" "}
@@ -256,11 +236,7 @@ export function WhatsAppPersonalInbox({
           </button>{" "}
           and scan QR — then chats and replies will appear here.
         </p>
-      ) : (
-        <p className="text-xs text-emerald-300/90 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2">
-          Sending from {userName}&apos;s linked WhatsApp. Incoming replies show here automatically.
-        </p>
-      )}
+      ) : null}
 
       {notice ? (
         <p className="text-sm text-emerald-300/90 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2">
@@ -276,12 +252,29 @@ export function WhatsAppPersonalInbox({
         >
           <div className="px-3 py-3 border-b border-[#2a3942] sticky top-0 bg-[#202c33] space-y-2 z-[1]">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-[#e9edef]">Chats</h3>
-              <span className="text-xs text-[#8696a0]">
-                {chatSearch.trim()
-                  ? `${filteredConversations.length} / ${conversations.length}`
-                  : conversations.length}
-              </span>
+              <div className="min-w-0">
+                <h3 className="text-sm font-medium text-[#e9edef]">Chats</h3>
+                {connectedPhone ? (
+                  <p className="text-[11px] text-[#8696a0] font-mono truncate">{connectedPhone}</p>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[#8696a0]">
+                  {chatSearch.trim()
+                    ? `${filteredConversations.length} / ${conversations.length}`
+                    : conversations.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void refreshConversations();
+                    if (selected) void loadThread(selected);
+                  }}
+                  className="text-xs text-[#8696a0] hover:text-[#e9edef]"
+                >
+                  Refresh
+                </button>
+              </div>
             </div>
             <label className="relative block">
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none">

@@ -20,7 +20,6 @@ import { AssignedToSelect, type AssigneeOption } from "../components/AssignedToS
 import { FollowUpScheduleControl } from "../components/FollowUpScheduleControl";
 import { CreateLeadForm } from "../components/CreateLeadForm";
 import { LeadsTableCsvImport } from "../components/LeadsTableCsvImport";
-import { TargetedPoolLeadsTable } from "../components/TargetedPoolLeadsTable";
 import { SocialLinksCell } from "../components/SocialLinksCell";
 import { BulkEmailModal } from "../components/BulkEmailModal";
 import { BulkWhatsAppModal } from "../components/BulkWhatsAppModal";
@@ -223,31 +222,6 @@ const LEADS_WIDE_COLUMNS: ColumnDef[] = [
   { id: "call_remarks", label: "Call remarks" },
   { id: "follow_up", label: "Follow-up reminder" },
   { id: "edit", label: "Edit" },
-  { id: "actions", label: "Actions", locked: true },
-];
-
-/** Hyperstore / Targeted Distributors / Targeted Client — matches Kafi spreadsheet layout. */
-const TARGETED_POOL_COLUMNS: ColumnDef[] = [
-  { id: "select", label: "Select", locked: true },
-  { id: "serial", label: "S. No." },
-  { id: "company", label: "Company Name", locked: true },
-  { id: "business_type", label: "Business Type" },
-  { id: "designation", label: "Designation" },
-  { id: "contact_person", label: "Contact Person" },
-  { id: "primary_mobile", label: "Primary Mobile No." },
-  { id: "secondary_mobile", label: "Secondary Mobile No." },
-  { id: "primary_phone", label: "Primary Phone No." },
-  { id: "secondary_phone", label: "Secondary Phone No." },
-  { id: "primary_email", label: "Primary Email" },
-  { id: "secondary_email", label: "Secondary Email" },
-  { id: "country", label: "Country" },
-  { id: "product", label: "Product" },
-  { id: "city", label: "City" },
-  { id: "address", label: "Address" },
-  { id: "grading", label: "Grading" },
-  { id: "remarks", label: "Remarks 02" },
-  { id: "remarks_03", label: "Remarks 03" },
-  { id: "date", label: "Date" },
   { id: "actions", label: "Actions", locked: true },
 ];
 
@@ -1496,23 +1470,20 @@ export function LeadsTablePage({
     isMyAssigned ||
     isIncompleteArchives ||
     isCallOutcomeSection ||
+    isTargetedPool ||
     isCustomModule ||
     isTestingModule;
   const columnDefs = useMemo(() => {
-    const base = isTargetedPool
-      ? TARGETED_POOL_COLUMNS
-      : isWideLayout
-        ? LEADS_WIDE_COLUMNS
-        : LEADS_NARROW_COLUMNS;
+    const base = isWideLayout ? LEADS_WIDE_COLUMNS : LEADS_NARROW_COLUMNS;
     return base.filter((col) => {
       if (col.id === "call_remarks" && !isCallOutcomeSection) return false;
       if (col.id === "follow_up" && !canScheduleFollowUp) return false;
       if (col.id === "edit" && !editMode) return false;
       return true;
     });
-  }, [isWideLayout, isTargetedPool, isCallOutcomeSection, canScheduleFollowUp, editMode]);
+  }, [isWideLayout, isCallOutcomeSection, canScheduleFollowUp, editMode]);
   const columnsUi = useColumnVisibility(
-    isTargetedPool ? "leads.targeted" : isWideLayout ? "leads.wide" : "leads.narrow",
+    isWideLayout ? "leads.wide" : "leads.narrow",
     columnDefs,
     user?.id,
   );
@@ -3876,30 +3847,7 @@ export function LeadsTablePage({
             className="origin-top-left"
           >
           {columnsUi.css ? <style>{columnsUi.css}</style> : null}
-          {isTargetedPool ? (
-            <TargetedPoolLeadsTable
-              rows={displayedRows}
-              drafts={drafts}
-              selected={selected}
-              editMode={editMode}
-              theadStickyClass={theadStickyClass}
-              isFullscreen={isFullscreen}
-              allOnPageSelected={allOnPageSelected}
-              someOnPageSelected={someOnPageSelected}
-              toggleSelectAllOnPage={toggleSelectAllOnPage}
-              toggleSelected={toggleSelected}
-              sortIndicator={sortIndicator}
-              toggleSort={toggleSort}
-              onSelectLead={onSelectLead}
-              onError={onError}
-              deletingId={deletingId}
-              deletingSelected={deletingSelected}
-              deleteRows={deleteRows}
-              updateDraft={updateDraft}
-              commitDraftField={commitDraftField}
-              openWhatsAppCompose={openWhatsAppCompose}
-            />
-          ) : usesOldClientsTable ? (
+          {usesOldClientsTable ? (
             <table
               className={`w-full text-sm border-collapse ${
                 canScheduleFollowUp ? "min-w-[2800px]" : "min-w-[2600px]"

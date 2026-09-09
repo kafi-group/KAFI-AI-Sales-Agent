@@ -470,7 +470,9 @@ class CommsGenerator:
         base = (Interaction.channel == Channel.whatsapp) & (Interaction.contact_id.isnot(None))
         if personal_user_id is not None:
             return base & (Interaction.personal_whatsapp_user_id == int(personal_user_id))
-        return base & Interaction.personal_whatsapp_user_id.is_(None) & (
+        # Do not add personal_whatsapp_user_id IS NULL here — that full-scan hangs
+        # the conversations endpoint and starves the rest of the dashboard.
+        return base & (
             (Interaction.template_name.isnot(None))
             | (Interaction.provider_message_id.like("wamid.%"))
             | (Interaction.provider_message_id.like("meta_%"))

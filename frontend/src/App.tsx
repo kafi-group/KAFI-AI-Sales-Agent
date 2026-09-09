@@ -33,6 +33,7 @@ import { InterestedFollowUpAlertToasts } from "./components/InterestedFollowUpAl
 import { QuotationMeetingAlertToasts } from "./components/QuotationMeetingAlertToasts";
 import { InterestedClientsActivityToasts } from "./components/InterestedClientsActivityToasts";
 import { AppTopActions } from "./components/AppTopActions";
+import { IconWhatsApp } from "./components/icons/AppIcons";
 import { APP_BRAND_NAME } from "./brand";
 import { EmailActivityPage } from "./pages/EmailActivityPage";
 import { EmailTemplatesPage } from "./pages/EmailTemplatesPage";
@@ -1247,6 +1248,7 @@ function DashboardApp() {
     mailLabels,
     navItems,
   ]);
+  const isWhatsAppMobile = tab === "whatsapp-mobile" || tab === "whatsapp-qr";
 
   return (
     <TwilioVoiceProvider>
@@ -1335,7 +1337,8 @@ function DashboardApp() {
         />
 
         <div className="flex-1 min-w-0 flex flex-col overflow-x-hidden transition-[margin] duration-200">
-          <header className="lg:hidden sticky top-0 z-30 flex items-center gap-2 border-b border-slate-800 bg-slate-950/95 backdrop-blur px-3 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))]">
+          <header className="lg:hidden sticky top-0 z-30 border-b border-slate-800 bg-slate-950/95 backdrop-blur pt-[max(0.625rem,env(safe-area-inset-top))]">
+            <div className="flex items-center gap-2 px-3 py-2.5">
             <button
               type="button"
               onClick={() => setMobileNavOpen(true)}
@@ -1346,7 +1349,8 @@ function DashboardApp() {
                 <path d="M4 7h16M4 12h16M4 17h16" />
               </svg>
             </button>
-            <h1 className="min-w-0 flex-1 text-sm font-semibold text-slate-100 truncate">
+            <h1 className="min-w-0 flex-1 text-sm font-semibold text-slate-100 truncate inline-flex items-center gap-2">
+              {isWhatsAppMobile ? <IconWhatsApp className="w-5 h-5 text-emerald-400 shrink-0" /> : null}
               {pageHeading}
             </h1>
             <AppTopActions
@@ -1362,6 +1366,13 @@ function DashboardApp() {
                 handleSelectTab("inbox");
               }}
             />
+            </div>
+            {isWhatsAppMobile ? (
+              <div
+                id="wa-mobile-header-slot-sm"
+                className="flex items-center gap-2 px-3 pb-2 min-h-[2.5rem]"
+              />
+            ) : null}
           </header>
 
           <div className="hidden lg:flex sticky top-0 z-30 items-center gap-2 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur px-4 sm:px-6 lg:px-8 py-2.5">
@@ -1376,16 +1387,30 @@ function DashboardApp() {
                 <path d="M4 7h16M4 12h16M4 17h16" />
               </svg>
             </button>
-            <h1 className="min-w-0 max-w-[min(100%,28rem)] truncate text-sm sm:text-base font-semibold text-slate-100">
+            <h1 className="min-w-0 max-w-[min(100%,16rem)] truncate text-sm sm:text-base font-semibold text-slate-100 inline-flex items-center gap-2">
+              {isWhatsAppMobile ? <IconWhatsApp className="w-5 h-5 text-emerald-400 shrink-0" /> : null}
               {pageHeading}
             </h1>
-            {error ? (
+            {isWhatsAppMobile ? (
+              <div
+                id="wa-mobile-header-slot"
+                className="flex-1 min-w-0 flex items-center gap-3 overflow-hidden"
+              />
+            ) : error ? (
               <p className="flex-1 min-w-0 text-xs sm:text-sm text-red-200 truncate px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/30">
                 {error}
               </p>
             ) : (
               <div className="flex-1" />
             )}
+            {isWhatsAppMobile && error ? (
+              <p
+                className="max-w-[12rem] shrink-0 text-xs text-red-200 truncate px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/30"
+                title={error}
+              >
+                {error}
+              </p>
+            ) : null}
             <AppTopActions
               onRefresh={refreshAll}
               onOpenSettings={isAdmin ? () => setTab("settings") : undefined}

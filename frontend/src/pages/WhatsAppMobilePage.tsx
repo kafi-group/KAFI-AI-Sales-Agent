@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { client } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ActionButton } from "../components/ui/ActionButton";
@@ -33,6 +34,71 @@ function isConnectedStatus(st: Record<string, unknown> | null): boolean {
 function isConnectingStatus(st: Record<string, unknown> | null): boolean {
   const label = String(st?.status ?? "").toLowerCase();
   return label === "connecting";
+}
+
+function WhatsAppMobileHeaderStrip({
+  userName,
+  avatarUrl,
+  connected,
+  connectedPhone,
+  mobileTab,
+  onTab,
+}: {
+  userName: string;
+  avatarUrl: string | null;
+  connected: boolean;
+  connectedPhone?: string | null;
+  mobileTab: "connect" | "inbox";
+  onTab: (tab: "connect" | "inbox") => void;
+}) {
+  const label = connectedPhone || (connected ? "Linked" : "Not linked");
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => onTab("connect")}
+        title={label}
+        className="relative shrink-0 w-9 h-9 rounded-full overflow-hidden border border-emerald-400/70 bg-emerald-500/15"
+      >
+        {avatarUrl ? (
+          <img src={avatarUrl} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+        ) : (
+          <span className="w-full h-full flex items-center justify-center text-emerald-300 text-sm font-bold">
+            {userName.charAt(0).toUpperCase()}
+          </span>
+        )}
+        <span
+          className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-slate-950 ${
+            connected ? "bg-emerald-400" : "bg-slate-500"
+          }`}
+        />
+      </button>
+      <p className="min-w-0 flex-1 text-xs sm:text-sm text-slate-400 truncate leading-snug">
+        Link your personal WhatsApp by scanning QR, then open Conversations to chat from this dashboard.
+        Each login has its own isolated session.
+      </p>
+      <div className="inline-flex shrink-0 rounded-lg border border-slate-700 bg-slate-900/90 p-0.5 text-xs sm:text-sm">
+        <button
+          type="button"
+          onClick={() => onTab("connect")}
+          className={`px-2.5 sm:px-3 py-1.5 rounded-md font-semibold transition ${
+            mobileTab === "connect" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          Scan &amp; connect
+        </button>
+        <button
+          type="button"
+          onClick={() => onTab("inbox")}
+          className={`px-2.5 sm:px-3 py-1.5 rounded-md font-semibold transition ${
+            mobileTab === "inbox" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          Conversations
+        </button>
+      </div>
+    </>
+  );
 }
 
 export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
@@ -80,6 +146,13 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   ) || null;
 
   const displayAvatarUrl = customAvatar || (!imgFailed ? profilePictureUrl : null);
+
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
+  const [headerSlotSm, setHeaderSlotSm] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    setHeaderSlot(document.getElementById("wa-mobile-header-slot"));
+    setHeaderSlotSm(document.getElementById("wa-mobile-header-slot-sm"));
+  }, []);
 
   useEffect(() => {
     setImgFailed(false);
@@ -279,43 +352,33 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   }
 
   return (
-    <div className="space-y-8 w-full max-w-full px-2 md:px-6 py-4">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-6 flex-wrap border-b border-slate-800 pb-6">
-        <div>
-          <div className="flex items-center gap-3">
-            <IconWhatsApp className="w-9 h-9 text-emerald-400" />
-            <h1 className="text-3xl font-extrabold text-slate-100 tracking-tight">WhatsApp Mobile</h1>
-          </div>
-          <p className="text-base text-slate-300 mt-2 max-w-3xl leading-relaxed">
-            Link your personal WhatsApp by scanning QR, then open Conversations to chat from this dashboard. Each login has its own isolated session.
-          </p>
-        </div>
-        <ActionButton icon={IconRefresh} size="md" onClick={() => void refresh()} title="Refresh Status" className="px-5 py-2.5 text-base">
-          Refresh Status
-        </ActionButton>
-      </div>
-
-      <div className="inline-flex rounded-xl border border-slate-700 bg-slate-900/80 p-1 text-sm">
-        <button
-          type="button"
-          onClick={() => setMobileTab("connect")}
-          className={`px-4 py-2 rounded-lg font-semibold transition ${
-            mobileTab === "connect" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          Scan &amp; connect
-        </button>
-        <button
-          type="button"
-          onClick={() => setMobileTab("inbox")}
-          className={`px-4 py-2 rounded-lg font-semibold transition ${
-            mobileTab === "inbox" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          Conversations
-        </button>
-      </div>
+    <div className="space-y-6 w-full max-w-full">
+      {headerSlot
+        ? createPortal(
+            <WhatsAppMobileHeaderStrip
+              userName={userName}
+              avatarUrl={displayAvatarUrl}
+              connected={connected}
+              connectedPhone={customPhone || connectedPhone}
+              mobileTab={mobileTab}
+              onTab={setMobileTab}
+            />,
+            headerSlot,
+          )
+        : null}
+      {headerSlotSm
+        ? createPortal(
+            <WhatsAppMobileHeaderStrip
+              userName={userName}
+              avatarUrl={displayAvatarUrl}
+              connected={connected}
+              connectedPhone={customPhone || connectedPhone}
+              mobileTab={mobileTab}
+              onTab={setMobileTab}
+            />,
+            headerSlotSm,
+          )
+        : null}
 
       {mobileTab === "inbox" ? (
         <WhatsAppPersonalInbox
