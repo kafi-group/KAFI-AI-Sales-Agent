@@ -6,7 +6,6 @@ import {
   type WorkspaceReviewOptionItem,
   type AppUser,
 } from "../../api/client";
-import { ContactReplaceModal } from "./ContactReplaceModal";
 import { WhatsAppProofModal } from "./WhatsAppProofModal";
 
 const DAYS_OF_WEEK = [
@@ -48,7 +47,6 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   // Modal states
-  const [replaceModalLead, setReplaceModalLead] = useState<WorkspaceLeadItem | null>(null);
   const [proofModalLead, setProofModalLead] = useState<WorkspaceLeadItem | null>(null);
 
   // Quick action states for changing reasons inline
@@ -168,20 +166,6 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
     } catch (err: any) {
       alert(err?.message || "Failed to update lead stage.");
     }
-  };
-
-  // Handle Contact Replacement & Shift to Drip
-  const handleReplaceContact = async (data: {
-    buyer_id: number;
-    new_contact_name: string;
-    new_email: string;
-    new_phone?: string;
-    new_designation?: string;
-    product_type?: string;
-    notes?: string;
-  }) => {
-    await client.replaceContactAndShiftToDrip(data);
-    await loadLeads();
   };
 
   // Handle WhatsApp Proof Save
@@ -757,16 +741,6 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                         ↩️ Reset to Fresh
                       </button>
                     )}
-
-                    {/* Replace Contact and Shift to Drip */}
-                    <button
-                      type="button"
-                      onClick={() => setReplaceModalLead(lead)}
-                      className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white text-xs font-semibold shadow-sm transition flex items-center gap-1"
-                      title="Replace Dead Contact with New Person & Enroll Old Email into Drip"
-                    >
-                      🔄 Replace & Drip
-                    </button>
                   </div>
                 </div>
               </div>
@@ -866,13 +840,6 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
       )}
 
       {/* ── Modals ── */}
-      <ContactReplaceModal
-        lead={replaceModalLead}
-        isOpen={Boolean(replaceModalLead)}
-        onClose={() => setReplaceModalLead(null)}
-        onSubmit={handleReplaceContact}
-      />
-
       <WhatsAppProofModal
         lead={proofModalLead}
         isOpen={Boolean(proofModalLead)}

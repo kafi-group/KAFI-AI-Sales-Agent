@@ -78,3 +78,18 @@ export function clearImpersonatorSnapshot(): void {
 export function isAdmin(user: AuthUser | null | undefined): boolean {
   return user?.role === "admin";
 }
+
+/** Asim, Usman, and Sadia work in Target and Workspace — hide outcome-bucket tables. */
+export function isWorkspaceOnlySalesUser(user: AuthUser | null | undefined): boolean {
+  const blob = `${user?.username ?? ""} ${user?.full_name ?? ""}`.toLowerCase();
+  const compact = blob.replace(/[^a-z]/g, "");
+  if (!compact) return false;
+  return compact.includes("asim") || compact.includes("usman") || compact.includes("sadia");
+}
+
+export const WORKSPACE_HIDDEN_TABLE_SECTIONS = [
+  "interested_clients",
+  "sales_interested_clients",
+  "not_interested_clients",
+  "not_received_call_clients",
+] as const;

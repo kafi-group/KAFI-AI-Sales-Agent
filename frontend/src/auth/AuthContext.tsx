@@ -16,6 +16,7 @@ import {
   getStoredToken,
   getStoredUser,
   isAdmin,
+  isWorkspaceOnlySalesUser,
   storeImpersonatorSnapshot,
   storeSession,
   storeUser,
@@ -26,6 +27,7 @@ interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
   isAdmin: boolean;
+  isWorkspaceOnlySalesUser: boolean;
   impersonating: boolean;
   impersonatorLabel: string | null;
   login: (username: string, password: string) => Promise<void>;
@@ -200,6 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       loading,
       isAdmin: isAdmin(user),
+      isWorkspaceOnlySalesUser: isWorkspaceOnlySalesUser(user),
       impersonating: Boolean(impersonator),
       impersonatorLabel: impersonator?.user.full_name || impersonator?.user.username || null,
       login,

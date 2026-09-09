@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { OutreachFunnelView } from "../components/target-workspace/OutreachFunnelView";
 import { InboundDealsView } from "../components/target-workspace/InboundDealsView";
-import { DripCampaignView } from "../components/target-workspace/DripCampaignView";
 import { AdminTargetManagerView } from "../components/target-workspace/AdminTargetManagerView";
 
 interface TargetWorkspacePageProps {
@@ -15,7 +14,7 @@ export const TargetWorkspacePage: React.FC<TargetWorkspacePageProps> = ({
   onOpenEmailComposer,
 }) => {
   const { user, isAdmin } = useAuth();
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<"outreach" | "inbound" | "drip" | "admin">("outreach");
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<"outreach" | "inbound" | "admin">("outreach");
 
   // Determine current day of the week as lowercase (e.g. 'friday')
   const [selectedDay, setSelectedDay] = useState<string>(() => {
@@ -36,7 +35,7 @@ export const TargetWorkspacePage: React.FC<TargetWorkspacePageProps> = ({
               Target and Workspace
             </h1>
             <p className="text-xs text-slate-400">
-              International daily sales workspace, day-wise country target schedules, 4-stage outreach funnel & drip campaigns.
+              International daily sales workspace, day-wise country target schedules, and the 4-stage outreach funnel.
             </p>
           </div>
         </div>
@@ -67,19 +66,6 @@ export const TargetWorkspacePage: React.FC<TargetWorkspacePageProps> = ({
           >
             <span>⚡</span>
             <span>Current Deals (11 Stages)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveWorkspaceTab("drip")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
-              activeWorkspaceTab === "drip"
-                ? "bg-gradient-to-r from-teal-600 to-cyan-600 text-white shadow-md shadow-teal-950"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
-            }`}
-          >
-            <span>💧</span>
-            <span>15-Day Drip Campaign</span>
           </button>
 
           {isAdmin && (
@@ -115,10 +101,6 @@ export const TargetWorkspacePage: React.FC<TargetWorkspacePageProps> = ({
         <InboundDealsView
           onOpenEmailComposer={onOpenEmailComposer}
         />
-      )}
-
-      {activeWorkspaceTab === "drip" && (
-        <DripCampaignView />
       )}
 
       {activeWorkspaceTab === "admin" && (

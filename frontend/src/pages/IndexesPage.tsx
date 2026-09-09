@@ -7,6 +7,7 @@ interface IndexesPageProps {
   isAdmin: boolean;
   quotationAgentUrl: string;
   assignees?: AssigneeIndexInput[];
+  hideOutcomeBuckets?: boolean;
   onNavigate: (action: IndexAction) => void;
 }
 
@@ -98,9 +99,10 @@ export function IndexesPage({
   isAdmin,
   quotationAgentUrl,
   assignees = [],
+  hideOutcomeBuckets = false,
   onNavigate,
 }: IndexesPageProps) {
-  const sections = visibleIndexSections(isAdmin, assignees);
+  const sections = visibleIndexSections(isAdmin, assignees, { hideOutcomeBuckets });
 
   useEffect(() => {
     const raw = sessionStorage.getItem("kafi.indexSection");

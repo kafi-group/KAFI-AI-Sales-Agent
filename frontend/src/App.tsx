@@ -10,6 +10,7 @@ import {
   type LeadTableSectionCountsResponse,
 } from "./api/client";
 import { useAuth } from "./auth/AuthContext";
+import { WORKSPACE_HIDDEN_TABLE_SECTIONS } from "./auth/session";
 import {
   AppSidebar,
   assignedUserIdFromSection,
@@ -140,6 +141,7 @@ function DashboardApp() {
   const {
     user,
     isAdmin,
+    isWorkspaceOnlySalesUser,
     logout,
     impersonating,
     impersonatorLabel,
@@ -233,6 +235,16 @@ function DashboardApp() {
       setTab("inbox");
     }
   }, [isAdmin, tab]);
+
+  useEffect(() => {
+    if (!isWorkspaceOnlySalesUser) return;
+    if (
+      (WORKSPACE_HIDDEN_TABLE_SECTIONS as readonly string[]).includes(tableSection)
+    ) {
+      setTableSection("my_assigned");
+      setTab("target-workspace");
+    }
+  }, [isWorkspaceOnlySalesUser, tableSection]);
 
   useEffect(() => {
     if (tab !== "master-table") return;
@@ -734,6 +746,14 @@ function DashboardApp() {
   }
 
   function handleSelectTableSection(section: LeadsTableSection) {
+    if (
+      isWorkspaceOnlySalesUser &&
+      (WORKSPACE_HIDDEN_TABLE_SECTIONS as readonly string[]).includes(section)
+    ) {
+      setTab("target-workspace");
+      setSelectedLeadId(null);
+      return;
+    }
     setTableSection(section);
     setSelectedLeadId(null);
   }
@@ -815,6 +835,11 @@ function DashboardApp() {
     buyerId: number,
     section: LeadsTableSection = "interested_clients",
   ) {
+    if (isWorkspaceOnlySalesUser) {
+      setTab("target-workspace");
+      setSelectedLeadId(buyerId);
+      return;
+    }
     setTab("table");
     setTableSection(section);
     setSelectedLeadId(buyerId);
@@ -997,26 +1022,30 @@ function DashboardApp() {
           label: "My Assigned Leads",
           count: tableCounts.my_assigned ?? 0,
         },
-        {
-          id: "sales_interested_clients" as const,
-          label: "Interested Clients",
-          count: tableCounts.sales_interested_clients ?? 0,
-        },
-        {
-          id: "interested_clients" as const,
-          label: "Follow up clients",
-          count: tableCounts.interested_clients,
-        },
-        {
-          id: "not_interested_clients" as const,
-          label: "Not interested",
-          count: tableCounts.not_interested_clients,
-        },
-        {
-          id: "not_received_call_clients" as const,
-          label: "Did not receive call",
-          count: tableCounts.not_received_call_clients,
-        },
+        ...(isWorkspaceOnlySalesUser
+          ? []
+          : [
+              {
+                id: "sales_interested_clients" as const,
+                label: "Interested Clients",
+                count: tableCounts.sales_interested_clients ?? 0,
+              },
+              {
+                id: "interested_clients" as const,
+                label: "Follow up clients",
+                count: tableCounts.interested_clients,
+              },
+              {
+                id: "not_interested_clients" as const,
+                label: "Not interested",
+                count: tableCounts.not_interested_clients,
+              },
+              {
+                id: "not_received_call_clients" as const,
+                label: "Did not receive call",
+                count: tableCounts.not_received_call_clients,
+              },
+            ]),
         ...(customModules.length > 0
           ? enabledCustomNavItems.filter((m) => !["sales_interested_clients", "interested_clients", "not_interested_clients", "not_received_call_clients"].includes(m.id))
           : []),
@@ -1334,6 +1363,7 @@ function DashboardApp() {
                 isAdmin={isAdmin}
                 quotationAgentUrl={QUOTATION_AGENT_URL}
                 assignees={indexAssignees}
+                hideOutcomeBuckets={isWorkspaceOnlySalesUser}
                 onNavigate={handleIndexNavigate}
               />
             )}
@@ -1342,6 +1372,7 @@ function DashboardApp() {
                 isAdmin={isAdmin}
                 quotationAgentUrl={QUOTATION_AGENT_URL}
                 assignees={indexAssignees}
+                hideOutcomeBuckets={isWorkspaceOnlySalesUser}
                 onNavigate={handleIndexNavigate}
                 onOpenIndexesSection={handleOpenIndexesSection}
               />

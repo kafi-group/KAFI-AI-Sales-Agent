@@ -107,7 +107,7 @@ export const INDEX_SECTIONS: IndexSection[] = [
       {
         id: "2.1b",
         title: "Target and Workspace",
-        description: "Day-wise country target schedules, 4-stage outreach funnel & 15-day drip campaigns.",
+        description: "Day-wise country target schedules and the 4-stage outreach funnel.",
         icon: "table",
         action: { type: "tab", tab: "target-workspace" },
       },
@@ -446,10 +446,15 @@ function assigneeIndexItems(assignees: AssigneeIndexInput[]): IndexItem[] {
 export function visibleIndexSections(
   isAdmin: boolean,
   assignees: AssigneeIndexInput[] = [],
+  opts: { hideOutcomeBuckets?: boolean } = {},
 ): IndexSection[] {
+  const hiddenOutcomeIds = new Set(["2.5", "2.6", "2.7", "2.8"]);
   return INDEX_SECTIONS.filter((section) => !section.adminOnly || isAdmin).map(
     (section) => {
       let items = section.items.filter((item) => !item.adminOnly || isAdmin);
+      if (opts.hideOutcomeBuckets) {
+        items = items.filter((item) => !hiddenOutcomeIds.has(item.id));
+      }
       if (section.number === 2 && assignees.length > 0) {
         items = [...items, ...assigneeIndexItems(assignees)];
       }

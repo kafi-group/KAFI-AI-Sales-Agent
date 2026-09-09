@@ -11,6 +11,7 @@ interface UserManualPageProps {
   isAdmin: boolean;
   quotationAgentUrl: string;
   assignees?: AssigneeIndexInput[];
+  hideOutcomeBuckets?: boolean;
   onNavigate: (action: IndexAction) => void;
   onOpenIndexesSection: (sectionNumber: number) => void;
 }
@@ -166,10 +167,11 @@ export function UserManualPage({
   isAdmin,
   quotationAgentUrl,
   assignees = [],
+  hideOutcomeBuckets = false,
   onNavigate,
   onOpenIndexesSection,
 }: UserManualPageProps) {
-  const sections = visibleIndexSections(isAdmin, assignees);
+  const sections = visibleIndexSections(isAdmin, assignees, { hideOutcomeBuckets });
 
   return (
     <div className="space-y-8 w-full min-w-0">
