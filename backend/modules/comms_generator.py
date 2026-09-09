@@ -521,6 +521,7 @@ class CommsGenerator:
                 .scalar()
                 or 0
             )
+        latest_sub = latest_q.group_by(Interaction.contact_id).subquery()
 
         rows = (
             db.query(latest_sub)
