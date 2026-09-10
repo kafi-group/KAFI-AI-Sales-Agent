@@ -36,7 +36,9 @@ class WhatsAppClient:
             "Content-Type": "application/json",
         }
 
-    def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post(
+        self, path: str, payload: dict[str, Any], *, expect_message_id: bool = True
+    ) -> dict[str, Any]:
         url = f"{self._base_url()}/{path}"
         try:
             response = httpx.post(url, headers=self._headers(), json=payload, timeout=30.0)
@@ -49,11 +51,30 @@ class WhatsAppClient:
             body = {}
 
         if response.status_code == 200:
+            if not expect_message_id:
+                # mark_read / status updates return {"success": true}, not a wamid
+                if body.get("success") is False:
+                    return {
+                        "status": "error",
+                        "message": "WhatsApp API rejected the status update",
+                        "raw": body,
+                    }
+                return {"status": "ok", "message": "OK", "raw": body}
+
             messages = body.get("messages") or []
             message_id = messages[0].get("id") if messages else None
+            if not message_id:
+                return {
+                    "status": "error",
+                    "message": (
+                        "WhatsApp API returned OK but no message id — message was not accepted. "
+                        "Check WHATSAPP_PHONE_NUMBER_ID and that the template/language are approved."
+                    ),
+                    "raw": body,
+                }
             return {
                 "status": "sent",
-                "message": "Message accepted by WhatsApp Cloud API",
+                "message": "Message accepted by WhatsApp Cloud API (delivery status updates via webhook)",
                 "provider_message_id": message_id,
                 "raw": body,
             }
@@ -61,7 +82,7 @@ class WhatsAppClient:
         detail = ((body.get("error") or {}).get("message")) or response.text
         return {
             "status": "error",
-            "message": f"WhatsApp API {response.status_code}: {detail}",
+            "message": _friendly_whatsapp_api_error(response.status_code, detail, body),
             "raw": body,
         }
 
@@ -223,7 +244,11 @@ class WhatsAppClient:
             "status": "read",
             "message_id": message_id,
         }
-        return self._post(f"{settings.whatsapp_phone_number_id}/messages", payload)
+        return self._post(
+            f"{settings.whatsapp_phone_number_id}/messages",
+            payload,
+            expect_message_id=False,
+        )
 
     def list_templates(self) -> dict[str, Any]:
         """Pull message templates from the WABA (for syncing into whatsapp_templates)."""
@@ -288,6 +313,19 @@ def _friendly_whatsapp_api_error(
 
     if code in {131026, 131051} or "not a valid whatsapp user" in lower or "not on whatsapp" in lower or "undeliverable" in lower or "not registered" in lower:
         return f"Recipient number is not registered on WhatsApp. ({text})"
+    if code in {131047, 131048} or "re-engagement" in lower or "24 hour" in lower or "experimental" in lower:
+        return (
+            "Outside the 24h customer-service window — Meta blocked free-text. "
+            "Send an approved template, or wait until the customer messages you first."
+        )
+    if code == 132000 or "param" in lower and "template" in lower:
+        return f"Template parameter mismatch — check variable count/order. ({text})"
+    if code in {132001, 132005, 132007, 132012, 132015} or "template" in lower and (
+        "does not exist" in lower or "paused" in lower or "disabled" in lower or "not approved" in lower
+    ):
+        return (
+            f"Template rejected by Meta (not approved / paused / wrong language). ({text})"
+        )
     if status_code == 401 or code == 190 or "expired" in lower or "session has expired" in lower:
         return (
             "Your WHATSAPP_ACCESS_TOKEN has expired. In Meta Business Settings → System users, "

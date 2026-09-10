@@ -10,6 +10,7 @@ import { IconBookOpen, IconPaperclip } from "./icons/AppIcons";
 
 interface ComposeMailModalProps {
   fromEmail: string;
+  mailboxUserId?: number | null;
   onClose: () => void;
   onSent: (message: string) => void;
   onError: (message: string) => void;
@@ -24,6 +25,7 @@ function hasDraftContent(to: string, cc: string, subject: string, body: string):
 
 export function ComposeMailModal({
   fromEmail,
+  mailboxUserId = null,
   onClose,
   onSent,
   onError,
@@ -196,13 +198,16 @@ export function ComposeMailModal({
     }
     setSending(true);
     try {
-      const result = await client.composeInboxMail({
-        to: recipient,
-        subject: subject.trim(),
-        body: body.trimEnd(),
-        cc: cc.trim() || undefined,
-        attachments: attachments.length > 0 ? attachments : undefined,
-      });
+      const result = await client.composeInboxMail(
+        {
+          to: recipient,
+          subject: subject.trim(),
+          body: body.trimEnd(),
+          cc: cc.trim() || undefined,
+          attachments: attachments.length > 0 ? attachments : undefined,
+        },
+        mailboxUserId,
+      );
       sentRef.current = true;
       if (draftId != null) {
         try {

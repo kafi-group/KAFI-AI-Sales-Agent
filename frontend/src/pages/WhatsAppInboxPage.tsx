@@ -282,6 +282,8 @@ export function WhatsAppInboxPage({
           setNeedsTemplate(true);
         }
         onError(message);
+        await loadThread(selected);
+        await refreshConversations({ silent: true });
         return;
       }
       setReply("");
@@ -309,20 +311,34 @@ export function WhatsAppInboxPage({
     setSending(true);
     setNotice(null);
     try {
-      await client.replyToWhatsAppConversation(selected.contact_id, {
+      const result = await client.replyToWhatsAppConversation(selected.contact_id, {
         content: reply || selectedTemplate.body_text || selectedTemplate.name,
         send: true,
         template_name: selectedTemplate.name,
         template_language: selectedTemplate.language,
         template_variables: variables,
       });
-      setReply("");
-      setNeedsTemplate(false);
-      setNotice("Template message sent.");
       await loadThread(selected);
       await refreshConversations({ silent: true });
+      if (!result.sent) {
+        onError(
+          result.send_message ||
+            "Template send failed — Meta did not accept the message. Check token, Phone Number ID, and template approval.",
+        );
+        return;
+      }
+      setReply("");
+      setNeedsTemplate(false);
+      setNotice("Template accepted by Meta — wait for delivered/read on the bubble.");
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to send with template");
+      if (selected) {
+        try {
+          await loadThread(selected);
+        } catch {
+          /* ignore */
+        }
+      }
     } finally {
       setSending(false);
     }
@@ -554,6 +570,11 @@ export function WhatsAppInboxPage({
                       }`}
                     >
                       <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                      {failed && msg.wa_send_error ? (
+                        <p className="text-[11px] mt-1 text-red-300/90 whitespace-pre-wrap break-words">
+                          {msg.wa_send_error}
+                        </p>
+                      ) : null}
                       <p
                         className={`text-[10px] mt-1 wa-chat-meta ${
                           failed ? "wa-chat-meta-failed" : ""

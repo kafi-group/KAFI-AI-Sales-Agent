@@ -75,6 +75,17 @@ def public_attachments(items: list | None) -> list[dict]:
     return [public_attachment(item) for item in items if isinstance(item, dict) and item.get("id")]
 
 
+def whatsapp_send_error(items: list | None) -> str | None:
+    """Last Meta Cloud send error stored on the interaction attachments JSON."""
+    for item in items or []:
+        if not isinstance(item, dict) or item.get("type") != "whatsapp_send":
+            continue
+        err = item.get("last_send_error")
+        if err:
+            return str(err)
+    return None
+
+
 def resolve_catalogue_file(identifier: str) -> Path | None:
     if not identifier:
         return None

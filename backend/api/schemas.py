@@ -277,6 +277,7 @@ class InteractionRead(BaseModel):
     contact_phone: Optional[str] = None
     template_name: Optional[str] = None
     wa_status: Optional[str] = None
+    wa_send_error: Optional[str] = None
     attachments: list["EmailAttachmentRead"] = Field(default_factory=list)
 
 

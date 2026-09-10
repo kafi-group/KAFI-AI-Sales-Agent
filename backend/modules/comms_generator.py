@@ -18,6 +18,7 @@ from modules.email_attachments import (
     merge_attachments,
     public_attachments,
     resolve_attachment_list,
+    whatsapp_send_error,
 )
 
 WHATSAPP_SESSION_WINDOW_HOURS = 24
@@ -801,6 +802,7 @@ class CommsGenerator:
         *,
         provider_message_id: str,
         status: str,
+        error_message: str | None = None,
     ) -> Interaction | None:
         interaction = (
             db.query(Interaction)
@@ -810,6 +812,19 @@ class CommsGenerator:
         if not interaction:
             return None
         interaction.wa_status = status
+        if status == "failed" and error_message:
+            atts = [
+                a
+                for a in (interaction.attachments or [])
+                if not (isinstance(a, dict) and a.get("type") == "whatsapp_send")
+            ]
+            atts.append(
+                {
+                    "type": "whatsapp_send",
+                    "last_send_error": error_message,
+                }
+            )
+            interaction.attachments = atts
         db.commit()
         db.refresh(interaction)
         return interaction
@@ -1141,13 +1156,41 @@ class CommsGenerator:
         if contact:
             from integrations.voice_client import normalize_e164
 
-            raw = contact.phone or contact.wa_id
-            phone = normalize_e164(raw) if raw else None
-            if not phone and contact.wa_id:
-                digits = "".join(ch for ch in contact.wa_id if ch.isdigit())
-                phone = f"+{digits}" if digits else None
+            # Prefer Meta wa_id — contact.phone is often a landline / display number
+            # that Graph accepts but never delivers on WhatsApp.
+            raw_candidates = [
+                contact.wa_id,
+                contact.primary_phone,
+                contact.secondary_mobile,
+                contact.phone,
+            ]
+            for raw in raw_candidates:
+                if not raw or not str(raw).strip():
+                    continue
+                phone = normalize_e164(str(raw).strip())
+                if phone:
+                    break
+                digits = "".join(ch for ch in str(raw) if ch.isdigit())
+                if digits:
+                    phone = f"+{digits}"
+                    break
 
         if not contact or not phone:
+            draft.status = InteractionStatus.draft
+            draft.wa_status = "failed"
+            atts = [
+                a
+                for a in (draft.attachments or [])
+                if not (isinstance(a, dict) and a.get("type") == "whatsapp_send")
+            ]
+            atts.append(
+                {
+                    "type": "whatsapp_send",
+                    "last_send_error": "Contact has no phone / WhatsApp number — cannot send.",
+                }
+            )
+            draft.attachments = atts
+            db.commit()
             if record_activity:
                 email_activity.record_event(
                     db,
@@ -1172,6 +1215,19 @@ class CommsGenerator:
 
             components = build_body_component(template_variables)
 
+        # Keep the outbound row visible in Cloud inbox while Meta processes it.
+        # Without wa_status / template_name / wamid, failed "approved" drafts vanish from the thread.
+        draft.template_name = template_name or draft.template_name
+        draft.wa_status = "pending"
+        atts = [
+            a
+            for a in (draft.attachments or [])
+            if not (isinstance(a, dict) and a.get("type") == "whatsapp_send")
+        ]
+        atts.append({"type": "whatsapp_send", "to": phone})
+        draft.attachments = atts
+        db.commit()
+
         send_result = whatsapp_client.send_approved(
             phone=phone,
             message=draft.content,
@@ -1184,8 +1240,27 @@ class CommsGenerator:
         if send_result.get("status") == "sent":
             draft.status = InteractionStatus.sent
             draft.provider_message_id = send_result.get("provider_message_id")
-            draft.template_name = template_name
+            draft.template_name = template_name or draft.template_name
             draft.wa_status = "sent"
+            db.commit()
+            db.refresh(draft)
+        else:
+            # Revert approved → draft so the rep can retry; keep wa_status=failed for inbox visibility.
+            draft.status = InteractionStatus.draft
+            draft.wa_status = "failed"
+            atts = [
+                a
+                for a in (draft.attachments or [])
+                if not (isinstance(a, dict) and a.get("type") == "whatsapp_send")
+            ]
+            atts.append(
+                {
+                    "type": "whatsapp_send",
+                    "to": phone,
+                    "last_send_error": send_result.get("message") or "WhatsApp send failed",
+                }
+            )
+            draft.attachments = atts
             db.commit()
             db.refresh(draft)
 
@@ -1204,7 +1279,11 @@ class CommsGenerator:
                 buyer_id=contact.buyer_id,
                 contact_id=contact.id,
                 interaction_id=draft.id,
-                details={"channel": "whatsapp", "template_name": template_name},
+                details={
+                    "channel": "whatsapp",
+                    "template_name": template_name,
+                    "to": phone,
+                },
             )
         return send_result
 
@@ -1812,6 +1891,7 @@ class CommsGenerator:
             "contact_phone": contact.phone if contact else None,
             "template_name": interaction.template_name,
             "wa_status": interaction.wa_status,
+            "wa_send_error": whatsapp_send_error(interaction.attachments),
             "attachments": public_attachments(interaction.attachments),
         }
 

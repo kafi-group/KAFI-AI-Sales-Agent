@@ -124,28 +124,35 @@ def whatsapp_test_send(
     )
     if contact:
         from db.models import Channel, Direction, HandledBy, Interaction, InteractionStatus
-        sent_status = (
-            InteractionStatus.sent
-            if result.get("status") == "sent"
-            else InteractionStatus.failed
-        )
+        ok = result.get("status") == "sent"
         ix = Interaction(
-            buyer_id=contact.buyer_id,
             contact_id=contact.id,
             channel=Channel.whatsapp,
             direction=Direction.outbound,
-            status=sent_status,
+            status=InteractionStatus.sent if ok else InteractionStatus.draft,
             template_name=payload.template_name,
-            content=f"[WhatsApp Template: {payload.template_name}]" if payload.template_name else (payload.message or ""),
+            content=(
+                f"[WhatsApp Template: {payload.template_name}]"
+                if payload.template_name
+                else (payload.message or "")
+            ),
             handled_by=HandledBy.human,
             provider_message_id=result.get("provider_message_id"),
-            meta_data={
-                "to": to,
-                "template_name": payload.template_name,
-                "template_language": payload.template_language or "en_US",
-                "status": result.get("status"),
-                "actor": user.username,
-            },
+            wa_status="sent" if ok else "failed",
+            attachments=[
+                {
+                    "type": "whatsapp_send",
+                    "to": to,
+                    **(
+                        {}
+                        if ok
+                        else {
+                            "last_send_error": result.get("message")
+                            or "WhatsApp test send failed"
+                        }
+                    ),
+                }
+            ],
         )
         db.add(ix)
         db.commit()
@@ -664,8 +671,26 @@ async def receive_whatsapp_webhook(request: Request, db: Session = Depends(get_d
                 message_id = status_update.get("id")
                 status = status_update.get("status")
                 if message_id and status:
+                    err_text = None
+                    errors = status_update.get("errors") or []
+                    if errors and isinstance(errors, list):
+                        first = errors[0] if isinstance(errors[0], dict) else {}
+                        err_data = first.get("error_data") if isinstance(first, dict) else None
+                        details = (
+                            err_data.get("details")
+                            if isinstance(err_data, dict)
+                            else None
+                        )
+                        err_text = (
+                            (first.get("title") if isinstance(first, dict) else None)
+                            or (first.get("message") if isinstance(first, dict) else None)
+                            or details
+                        )
                     comms.update_whatsapp_message_status(
-                        db, provider_message_id=message_id, status=status
+                        db,
+                        provider_message_id=message_id,
+                        status=status,
+                        error_message=err_text,
                     )
 
     return {"status": "ok"}

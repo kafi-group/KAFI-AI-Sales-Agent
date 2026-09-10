@@ -812,6 +812,7 @@ export interface DraftInteraction {
   contact_phone?: string | null;
   template_name?: string | null;
   wa_status?: string | null;
+  wa_send_error?: string | null;
   attachments?: EmailAttachment[];
 }
 
@@ -2735,38 +2736,87 @@ export const client = {
   deleteManualKpi: (entryId: number) =>
     request<void>(`/kpi/manual/${entryId}`, { method: "DELETE" }),
 
-  getInboxStatus: () => request<InboxStatus>("/inbox/status"),
+  getInboxStatus: (mailboxUserId?: number | null) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<InboxStatus>(`/inbox/status${qs}`);
+  },
+  listInboxSwitchableMailboxes: () =>
+    request<{
+      can_switch: boolean;
+      mailboxes: Array<{
+        user_id: number;
+        email: string;
+        display_name?: string | null;
+        mailbox_enabled?: boolean;
+      }>;
+    }>("/inbox/switchable-mailboxes"),
   getUrgentUnrepliedEmails: () =>
     request<UrgentEmailsResponse>("/inbox/urgent-unreplied"),
-  listInboxFolders: () => request<InboxFoldersResponse>("/inbox/folders"),
-  composeInboxMail: (payload: {
-    to: string;
-    subject?: string;
-    body: string;
-    cc?: string;
-    bcc?: string;
-    attachments?: Array<{ id: string; filename: string; content_type: string; size: number }>;
-  }) =>
-    request<InboxComposeResponse>("/inbox/compose", {
+  listInboxFolders: (mailboxUserId?: number | null) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<InboxFoldersResponse>(`/inbox/folders${qs}`);
+  },
+  composeInboxMail: (
+    payload: {
+      to: string;
+      subject?: string;
+      body: string;
+      cc?: string;
+      bcc?: string;
+      attachments?: Array<{ id: string; filename: string; content_type: string; size: number }>;
+    },
+    mailboxUserId?: number | null,
+  ) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<InboxComposeResponse>(`/inbox/compose${qs}`, {
       method: "POST",
       body: JSON.stringify(payload),
-    }),
-  resetInboxCutoff: () =>
-    request<{ showing_since: string }>("/inbox/reset-cutoff", { method: "POST" }),
-  clearInboxCutoff: () =>
-    request<{ showing_since: string | null }>("/inbox/clear-cutoff", { method: "POST" }),
+    });
+  },
+  resetInboxCutoff: (mailboxUserId?: number | null) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<{ showing_since: string }>(`/inbox/reset-cutoff${qs}`, { method: "POST" });
+  },
+  clearInboxCutoff: (mailboxUserId?: number | null) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<{ showing_since: string | null }>(`/inbox/clear-cutoff${qs}`, {
+      method: "POST",
+    });
+  },
   clearAllInboxCutoffs: () =>
     request<{ status: string; cleared_count: number; showing_since: string | null }>(
       "/inbox/clear-all-cutoffs",
       { method: "POST" },
     ),
-  getInboxUnreadCount: () => request<{ count: number }>("/inbox/unread-count"),
+  getInboxUnreadCount: (mailboxUserId?: number | null) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<{ count: number }>(`/inbox/unread-count${qs}`);
+  },
   listInboxThreads: (params: {
     limit?: number;
     offset?: number;
     unread_only?: boolean;
     q?: string;
     triage_category?: string;
+    mailbox_user_id?: number | null;
   } = {}) => {
     const search = new URLSearchParams();
     if (params.limit) search.set("limit", String(params.limit));
@@ -2774,6 +2824,9 @@ export const client = {
     if (params.unread_only) search.set("unread_only", "true");
     if (params.q) search.set("q", params.q);
     if (params.triage_category) search.set("triage_category", params.triage_category);
+    if (params.mailbox_user_id != null && Number.isFinite(params.mailbox_user_id)) {
+      search.set("mailbox_user_id", String(params.mailbox_user_id));
+    }
     const query = search.toString();
     return request<InboxThreadListResponse>(`/inbox/threads${query ? `?${query}` : ""}`);
   },
@@ -2817,11 +2870,23 @@ export const client = {
       },
     );
   },
-  moveInboxThread: (threadId: string, toFolder: "inbox" | "trash" | "archive") =>
-    request<InboxMoveResponse>(`/inbox/threads/${encodeURIComponent(threadId)}/move`, {
-      method: "POST",
-      body: JSON.stringify({ to_folder: toFolder }),
-    }),
+  moveInboxThread: (
+    threadId: string,
+    toFolder: "inbox" | "trash" | "archive",
+    mailboxUserId?: number | null,
+  ) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<InboxMoveResponse>(
+      `/inbox/threads/${encodeURIComponent(threadId)}/move${qs}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ to_folder: toFolder }),
+      },
+    );
+  },
   analyzeInboxThread: (
     threadId: string,
     payload: { goal?: string } = {},
@@ -2846,6 +2911,7 @@ export const client = {
       unread_only?: boolean;
       folder?: MailFolderKey | string;
       q?: string;
+      mailbox_user_id?: number | null;
     } = {},
   ) => {
     const search = new URLSearchParams();
@@ -2854,24 +2920,43 @@ export const client = {
     if (params.unread_only) search.set("unread_only", "true");
     if (params.folder) search.set("folder", params.folder);
     if (params.q) search.set("q", params.q);
+    if (params.mailbox_user_id != null && Number.isFinite(params.mailbox_user_id)) {
+      search.set("mailbox_user_id", String(params.mailbox_user_id));
+    }
     const query = search.toString();
     return request<InboxMessageListResponse>(`/inbox/messages${query ? `?${query}` : ""}`);
   },
-  searchInboxMail: (payload: {
-    query: string;
-    scope: string;
-    limit?: number;
-    offset?: number;
-  }) =>
-    request<InboxMessageListResponse>("/inbox/search", {
+  searchInboxMail: (
+    payload: {
+      query: string;
+      scope: string;
+      limit?: number;
+      offset?: number;
+    },
+    mailboxUserId?: number | null,
+  ) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<InboxMessageListResponse>(`/inbox/search${qs}`, {
       method: "POST",
       body: JSON.stringify(payload),
-    }),
-  queryInboxMailAi: (payload: { question: string; unread_only?: boolean }) =>
-    request<InboxMailAiQueryResponse>("/inbox/ai-query", {
+    });
+  },
+  queryInboxMailAi: (
+    payload: { question: string; unread_only?: boolean },
+    mailboxUserId?: number | null,
+  ) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<InboxMailAiQueryResponse>(`/inbox/ai-query${qs}`, {
       method: "POST",
       body: JSON.stringify(payload),
-    }),
+    });
+  },
   getWhatsAppPersonalStatus: () =>
     request<Record<string, unknown>>("/whatsapp-personal/status"),
   getWhatsAppPersonalTeamStatus: () =>
@@ -2916,33 +3001,63 @@ export const client = {
         body: JSON.stringify({ content }),
       },
     ),
-  getInboxMessage: (uid: string, folder = "INBOX") =>
-    request<InboxMessageDetail>(
-      `/inbox/messages/${encodeURIComponent(uid)}?folder=${encodeURIComponent(folder)}`,
-    ),
-  markInboxMessageRead: (uid: string, folder = "INBOX") =>
-    request<{ count: number }>(
-      `/inbox/messages/${encodeURIComponent(uid)}/read?folder=${encodeURIComponent(folder)}`,
+  getInboxMessage: (uid: string, folder = "INBOX", mailboxUserId?: number | null) => {
+    const search = new URLSearchParams({ folder });
+    if (mailboxUserId != null && Number.isFinite(mailboxUserId)) {
+      search.set("mailbox_user_id", String(mailboxUserId));
+    }
+    return request<InboxMessageDetail>(
+      `/inbox/messages/${encodeURIComponent(uid)}?${search.toString()}`,
+    );
+  },
+  markInboxMessageRead: (uid: string, folder = "INBOX", mailboxUserId?: number | null) => {
+    const search = new URLSearchParams({ folder });
+    if (mailboxUserId != null && Number.isFinite(mailboxUserId)) {
+      search.set("mailbox_user_id", String(mailboxUserId));
+    }
+    return request<{ count: number }>(
+      `/inbox/messages/${encodeURIComponent(uid)}/read?${search.toString()}`,
       { method: "POST" },
-    ),
+    );
+  },
   moveInboxMessage: (
     uid: string,
     payload: { from_folder: string; to_folder: MailFolderKey | string },
-  ) =>
-    request<InboxMoveResponse>(`/inbox/messages/${encodeURIComponent(uid)}/move`, {
+    mailboxUserId?: number | null,
+  ) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<InboxMoveResponse>(`/inbox/messages/${encodeURIComponent(uid)}/move${qs}`, {
       method: "POST",
       body: JSON.stringify(payload),
-    }),
+    });
+  },
   analyzeInboxMessage: (
     uid: string,
     payload: { goal?: string; folder?: string } = {},
-  ) =>
-    request<InboxAnalyzeResponse>(`/inbox/messages/${encodeURIComponent(uid)}/analyze`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-  emptyInboxTrash: () =>
-    request<InboxEmptyTrashResponse>("/inbox/trash/empty", { method: "POST" }),
+    mailboxUserId?: number | null,
+  ) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<InboxAnalyzeResponse>(
+      `/inbox/messages/${encodeURIComponent(uid)}/analyze${qs}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  },
+  emptyInboxTrash: (mailboxUserId?: number | null) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<InboxEmptyTrashResponse>(`/inbox/trash/empty${qs}`, { method: "POST" });
+  },
   replyInboxMessage: (
     uid: string,
     payload: {
@@ -2954,11 +3069,17 @@ export const client = {
       folder?: string;
       attachments?: Array<{ id: string; filename: string; content_type: string; size: number }>;
     },
-  ) =>
-    request<InboxReplyResponse>(`/inbox/messages/${encodeURIComponent(uid)}/reply`, {
+    mailboxUserId?: number | null,
+  ) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<InboxReplyResponse>(`/inbox/messages/${encodeURIComponent(uid)}/reply${qs}`, {
       method: "POST",
       body: JSON.stringify(payload),
-    }),
+    });
+  },
 
   listMailLabels: () => request<MailLabel[]>("/inbox/labels"),
   createMailLabel: (data: {

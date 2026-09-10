@@ -72,6 +72,14 @@ interface InboxPageProps {
   onOpenMailerCompose?: () => void;
   initialThreadId?: string | null;
   initialMailboxUserId?: number | null;
+  /** Asim shared mailbox switch (marketing/info/essence). Email-only. */
+  activeMailboxUserId?: number | null;
+  switchableMailboxes?: Array<{
+    user_id: number;
+    email: string;
+    display_name?: string | null;
+  }>;
+  onActiveMailboxChange?: (mailboxUserId: number) => void;
   autoOpenReply?: boolean;
   onThreadOpened?: () => void;
 }
@@ -336,6 +344,9 @@ export function InboxPage({
   onOpenMailerCompose,
   initialThreadId,
   initialMailboxUserId = null,
+  activeMailboxUserId = null,
+  switchableMailboxes = [],
+  onActiveMailboxChange,
   autoOpenReply,
   onThreadOpened,
 }: InboxPageProps) {
@@ -408,11 +419,15 @@ export function InboxPage({
   if (initialMailboxUserId != null) {
     stickyMailboxUserIdRef.current = initialMailboxUserId;
     mailboxUserIdRef.current = initialMailboxUserId;
-  } else if (stickyMailboxUserIdRef.current == null) {
-    mailboxUserIdRef.current = null;
-  } else {
+  } else if (stickyMailboxUserIdRef.current != null) {
     mailboxUserIdRef.current = stickyMailboxUserIdRef.current;
+  } else {
+    mailboxUserIdRef.current =
+      activeMailboxUserId != null && Number.isFinite(activeMailboxUserId)
+        ? activeMailboxUserId
+        : null;
   }
+  const effectiveMailboxUserId = mailboxUserIdRef.current;
   onErrorRef.current = onError;
   onUnreadChangeRef.current = onUnreadChange;
   onFolderCountsChangeRef.current = onFolderCountsChange;
@@ -441,7 +456,7 @@ export function InboxPage({
   const refreshFolderCounts = useCallback(async () => {
     if (!onFolderCountsChangeRef.current) return;
     try {
-      const result = await client.listInboxFolders();
+      const result = await client.listInboxFolders(mailboxUserIdRef.current);
       const next = { inbox: 0, sent: 0, trash: 0, archive: 0 };
       for (const folder of result.folders) {
         if (
@@ -457,7 +472,7 @@ export function InboxPage({
     } catch {
       /* optional */
     }
-  }, []);
+  }, [effectiveMailboxUserId]);
 
   const clearSelection = useCallback(() => {
     setSelectedThreadId(null);
@@ -473,8 +488,11 @@ export function InboxPage({
     analyzeGenerationRef.current += 1;
     pendingAutoDraftRef.current = false;
     stickyMailboxUserIdRef.current = null;
-    mailboxUserIdRef.current = null;
-  }, []);
+    mailboxUserIdRef.current =
+      activeMailboxUserId != null && Number.isFinite(activeMailboxUserId)
+        ? activeMailboxUserId
+        : null;
+  }, [activeMailboxUserId]);
 
   const applyAiDraftToReplyForm = useCallback((analysis: InboxAnalyzeResponse) => {
     if (analysis.to?.trim()) setReplyTo(analysis.to.trim());
@@ -519,7 +537,11 @@ export function InboxPage({
     setAiLoading(true);
     setAiAnalysis(null);
     try {
-      const result = await client.analyzeInboxMessage(uid, { folder });
+      const result = await client.analyzeInboxMessage(
+        uid,
+        { folder },
+        mailboxUserIdRef.current,
+      );
       if (generation !== analyzeGenerationRef.current) return;
       setAiAnalysis(result);
     } catch (e) {
@@ -535,11 +557,13 @@ export function InboxPage({
   const loadList = useCallback(
     async (options?: { silent?: boolean }) => {
       const generation = ++loadGenerationRef.current;
+      const mailboxId = mailboxUserIdRef.current;
+      const mailboxKey = mailboxId != null ? String(mailboxId) : "self";
 
       // 1. Instant Cache Render (Stale-While-Revalidate): Show cached mail immediately
       let hadCachedRender = false;
       if (section === "inbox") {
-        const cacheKey = `threads:${threadPage}:${unreadOnly}:${triageFilter || ""}`;
+        const cacheKey = `threads:${mailboxKey}:${threadPage}:${unreadOnly}:${triageFilter || ""}`;
         const cached = _MEM_THREAD_CACHE.get(cacheKey);
         if (cached) {
           setThreads(cached.items);
@@ -550,7 +574,7 @@ export function InboxPage({
           hadCachedRender = true;
         }
       } else if (section === "sent" || section === "trash" || section === "archive") {
-        const cacheKey = `messages:${section}:${messagePage}:${unreadOnly}`;
+        const cacheKey = `messages:${mailboxKey}:${section}:${messagePage}:${unreadOnly}`;
         const cached = _MEM_MESSAGE_CACHE.get(cacheKey);
         if (cached) {
           setMessages(cached.items);
@@ -566,7 +590,7 @@ export function InboxPage({
 
       try {
         // 2. Parallelize status, labels, and list queries concurrently
-        const statusPromise = client.getInboxStatus().catch(() => null);
+        const statusPromise = client.getInboxStatus(mailboxId).catch(() => null);
         const labelsPromise = client.listMailLabels().catch(() => [] as MailLabel[]);
 
         let listPromise: Promise<unknown>;
@@ -577,6 +601,7 @@ export function InboxPage({
             offset,
             unread_only: unreadOnly,
             triage_category: triageFilter || undefined,
+            mailbox_user_id: mailboxId,
           });
         } else if (section === "drafts") {
           listPromise = client.listMailDrafts();
@@ -587,8 +612,16 @@ export function InboxPage({
           } else {
             listPromise = Promise.all([
               client.listMailLabelMessages(id),
-              client.listInboxMessages({ limit: 60, folder: "inbox" }),
-              client.listInboxMessages({ limit: 30, folder: "sent" }),
+              client.listInboxMessages({
+                limit: 60,
+                folder: "inbox",
+                mailbox_user_id: mailboxId,
+              }),
+              client.listInboxMessages({
+                limit: 30,
+                folder: "sent",
+                mailbox_user_id: mailboxId,
+              }),
             ]);
           }
         } else if (
@@ -602,6 +635,7 @@ export function InboxPage({
             offset,
             unread_only: unreadOnly && section !== "sent",
             folder: section,
+            mailbox_user_id: mailboxId,
           });
         } else {
           listPromise = Promise.resolve(null);
@@ -643,7 +677,7 @@ export function InboxPage({
           setThreadHasMore(Boolean(threadList.has_more));
           setMessages([]);
           setDrafts([]);
-          const cacheKey = `threads:${threadPage}:${unreadOnly}:${triageFilter || ""}`;
+          const cacheKey = `threads:${mailboxKey}:${threadPage}:${unreadOnly}:${triageFilter || ""}`;
           _MEM_THREAD_CACHE.set(cacheKey, {
             items: threadList.items || [],
             total: threadList.total || 0,
@@ -670,7 +704,7 @@ export function InboxPage({
           setMessageHasMore(Boolean(msgList.has_more));
           setThreads([]);
           setDrafts([]);
-          const cacheKey = `messages:${section}:${messagePage}:${unreadOnly}`;
+          const cacheKey = `messages:${mailboxKey}:${section}:${messagePage}:${unreadOnly}`;
           _MEM_MESSAGE_CACHE.set(cacheKey, {
             items: msgList.items || [],
             total: msgList.total || 0,
@@ -694,7 +728,15 @@ export function InboxPage({
         }
       }
     },
-    [messagePage, refreshFolderCounts, section, threadPage, triageFilter, unreadOnly],
+    [
+      messagePage,
+      refreshFolderCounts,
+      section,
+      threadPage,
+      triageFilter,
+      unreadOnly,
+      effectiveMailboxUserId,
+    ],
   );
 
   useEffect(() => {
@@ -729,16 +771,21 @@ export function InboxPage({
       const mailboxId =
         opts?.mailboxUserId !== undefined
           ? opts.mailboxUserId
-          : opts?.autoDraft
-            ? stickyMailboxUserIdRef.current
-            : null;
+          : stickyMailboxUserIdRef.current ??
+            (activeMailboxUserId != null && Number.isFinite(activeMailboxUserId)
+              ? activeMailboxUserId
+              : null);
       if (opts?.autoDraft) {
-        if (mailboxId != null) stickyMailboxUserIdRef.current = mailboxId;
+        if (opts.mailboxUserId != null) stickyMailboxUserIdRef.current = opts.mailboxUserId;
       } else if (opts?.mailboxUserId === undefined) {
-        // Normal list click — stay on the logged-in mailbox.
+        // Normal list click — keep Asim switcher mailbox (not sticky urgent override).
         stickyMailboxUserIdRef.current = null;
       }
-      mailboxUserIdRef.current = stickyMailboxUserIdRef.current;
+      mailboxUserIdRef.current =
+        stickyMailboxUserIdRef.current ??
+        (activeMailboxUserId != null && Number.isFinite(activeMailboxUserId)
+          ? activeMailboxUserId
+          : null);
 
       setSelectedThreadId(threadId);
       setSelectedMessageKey(null);
@@ -770,7 +817,7 @@ export function InboxPage({
           prev.map((t) => (t.thread_id === threadId ? { ...t, unread_count: 0 } : t)),
         );
         void client
-          .getInboxStatus()
+          .getInboxStatus(mailboxUserIdRef.current)
           .then((s) => {
             onUnreadChangeRef.current?.(s.unread_count);
             setStatus(s);
@@ -801,8 +848,24 @@ export function InboxPage({
         setDetailLoading(false);
       }
     },
-    [runThreadAnalyze],
+    [runThreadAnalyze, activeMailboxUserId],
   );
+
+  useEffect(() => {
+    // Asim mailbox switch — clear open thread and reload that mailbox only.
+    stickyMailboxUserIdRef.current = null;
+    mailboxUserIdRef.current =
+      activeMailboxUserId != null && Number.isFinite(activeMailboxUserId)
+        ? activeMailboxUserId
+        : null;
+    setSelectedThreadId(null);
+    setSelectedMessageKey(null);
+    setThread(null);
+    setMessageDetail(null);
+    setShowReplyForm(false);
+    setAiAnalysis(null);
+    setNotice(null);
+  }, [activeMailboxUserId]);
 
   useEffect(() => {
     if (!initialThreadId) return;
@@ -829,7 +892,11 @@ export function InboxPage({
       setShowReplyForm(false);
       setAiAnalysis(null);
       try {
-        const detail = await client.getInboxMessage(message.uid, folder);
+        const detail = await client.getInboxMessage(
+          message.uid,
+          folder,
+          mailboxUserIdRef.current,
+        );
         setMessageDetail(detail);
         setReplySubjectLine(replySubject(detail.subject));
         if (detail.direction === "outbound") {
@@ -839,7 +906,11 @@ export function InboxPage({
         }
         if (detail.unread) {
           try {
-            const unread = await client.markInboxMessageRead(message.uid, folder);
+            const unread = await client.markInboxMessageRead(
+              message.uid,
+              folder,
+              mailboxUserIdRef.current,
+            );
             onUnreadChangeRef.current?.(unread.count);
             setMessages((prev) =>
               prev.map((m) =>
@@ -969,15 +1040,19 @@ export function InboxPage({
         setShowReplyForm(false);
         await openThread(selectedThreadId);
       } else if (messageDetail) {
-        const result = await client.replyInboxMessage(messageDetail.uid, {
-          body: replyBody,
-          to: replyTo.trim() || undefined,
-          subject: replySubjectLine.trim() || undefined,
-          cc: replyCc.trim() || undefined,
-          bcc: replyBcc.trim() || undefined,
-          folder: messageDetail.folder || "INBOX",
-          attachments: replyAttachments.length > 0 ? replyAttachments : undefined,
-        });
+        const result = await client.replyInboxMessage(
+          messageDetail.uid,
+          {
+            body: replyBody,
+            to: replyTo.trim() || undefined,
+            subject: replySubjectLine.trim() || undefined,
+            cc: replyCc.trim() || undefined,
+            bcc: replyBcc.trim() || undefined,
+            folder: messageDetail.folder || "INBOX",
+            attachments: replyAttachments.length > 0 ? replyAttachments : undefined,
+          },
+          mailboxUserIdRef.current,
+        );
         const extras = [
           replyCc.trim() ? `Cc: ${replyCc.trim()}` : "",
           replyBcc.trim() ? `Bcc: ${replyBcc.trim()}` : "",
@@ -1007,7 +1082,11 @@ export function InboxPage({
     setMoving(true);
     setNotice(null);
     try {
-      const result = await client.moveInboxThread(selectedThreadId, toFolder);
+      const result = await client.moveInboxThread(
+        selectedThreadId,
+        toFolder,
+        mailboxUserIdRef.current,
+      );
       setNotice(result.message);
       clearSelection();
       await loadList({ silent: true });
@@ -1023,10 +1102,14 @@ export function InboxPage({
     setMoving(true);
     setNotice(null);
     try {
-      const result = await client.moveInboxMessage(messageDetail.uid, {
-        from_folder: messageDetail.folder || "INBOX",
-        to_folder: toFolder,
-      });
+      const result = await client.moveInboxMessage(
+        messageDetail.uid,
+        {
+          from_folder: messageDetail.folder || "INBOX",
+          to_folder: toFolder,
+        },
+        mailboxUserIdRef.current,
+      );
       setNotice(result.message);
       clearSelection();
       await loadList({ silent: true });
@@ -1045,7 +1128,7 @@ export function InboxPage({
     setEmptyingTrash(true);
     setNotice(null);
     try {
-      const result = await client.emptyInboxTrash();
+      const result = await client.emptyInboxTrash(mailboxUserIdRef.current);
       setNotice(result.message);
       clearSelection();
       await loadList();
@@ -1058,25 +1141,13 @@ export function InboxPage({
 
   async function showAllMail() {
     try {
-      await client.clearInboxCutoff();
+      await client.clearInboxCutoff(mailboxUserIdRef.current);
       setNotice("Showing all mailbox conversations.");
       clearSelection();
       setUnreadOnly(false);
       await loadList();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to show all mail");
-    }
-  }
-
-  async function showAllMailAllUsers() {
-    try {
-      await client.clearAllInboxCutoffs();
-      setNotice("Cleared email cutoffs for ALL team accounts. Showing all historic mailbox conversations.");
-      clearSelection();
-      setUnreadOnly(false);
-      await loadList();
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to clear email cutoffs for all users");
     }
   }
 
@@ -1151,12 +1222,15 @@ export function InboxPage({
     if (!q) return;
     setLoading(true);
     try {
-      const result = await client.searchInboxMail({
-        query: q,
-        scope: searchScope,
-        limit: PAGE_SIZE,
-        offset: 0,
-      });
+      const result = await client.searchInboxMail(
+        {
+          query: q,
+          scope: searchScope,
+          limit: PAGE_SIZE,
+          offset: 0,
+        },
+        mailboxUserIdRef.current,
+      );
       setSearchActive(true);
       setThreads([]);
       setMessages(result.items);
@@ -1173,7 +1247,10 @@ export function InboxPage({
     setMailAiLoading(true);
     setMailAiAnswer(null);
     try {
-      const result = await client.queryInboxMailAi({ question, unread_only: unreadOnly });
+      const result = await client.queryInboxMailAi(
+        { question, unread_only: unreadOnly },
+        mailboxUserIdRef.current,
+      );
       setMailAiAnswer(result.answer);
       if (result.suggested_threads?.length && section === "inbox") {
         setThreads(result.suggested_threads);
@@ -1306,36 +1383,82 @@ export function InboxPage({
   return (
     <section className="space-y-4 w-full min-w-0">
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
+        <div className="min-w-0 space-y-2">
+          {switchableMailboxes.length > 1 ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs font-medium text-slate-400 shrink-0">
+                Mailbox
+              </label>
+              <select
+                value={activeMailboxUserId ?? switchableMailboxes[0]?.user_id ?? ""}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  if (!Number.isFinite(next)) return;
+                  onActiveMailboxChange?.(next);
+                }}
+                className="min-w-[16rem] max-w-full rounded-lg border border-emerald-500/50 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                title="Switch between marketing@, info@, and essence@"
+              >
+                {switchableMailboxes.map((box) => (
+                  <option key={box.user_id} value={box.user_id}>
+                    {box.email}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : switchableMailboxes.length === 1 ? (
+            <p className="text-xs text-amber-300/90">
+              Only {switchableMailboxes[0].email} is available to switch. Ask admin to
+              enable info@ and essence@ mailboxes on the Users page.
+            </p>
+          ) : null}
           <p className="text-sm text-slate-500">
-            {sectionDescription(section, status?.email)}
-            {section === "inbox" && status ? (
+            {switchableMailboxes.length > 1 ? (
+              section === "inbox" && status ? (
+                <>
+                  Viewing{" "}
+                  <span className="text-slate-200">{status.email || "mailbox"}</span>
+                  {" · "}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMailAiOpen(true);
+                      if (!mailAiQuestion) {
+                        setMailAiQuestion("What are the most important unread emails?");
+                      }
+                    }}
+                    className="text-emerald-400 hover:text-emerald-300 underline decoration-dotted"
+                    title="Ask AI about unread mail"
+                  >
+                    {status.unread_count} unread — ask AI
+                  </button>
+                </>
+              ) : (
+                sectionDescription(section, status?.email)
+              )
+            ) : (
               <>
-                {" · "}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMailAiOpen(true);
-                    if (!mailAiQuestion) {
-                      setMailAiQuestion("What are the most important unread emails?");
-                    }
-                  }}
-                  className="text-emerald-400 hover:text-emerald-300 underline decoration-dotted"
-                  title="Ask AI about unread mail"
-                >
-                  {status.unread_count} unread — ask AI
-                </button>
-                {" · "}
-                <button
-                  type="button"
-                  onClick={() => void showAllMailAllUsers()}
-                  className="text-sky-400 hover:text-sky-300 underline decoration-dotted font-medium text-xs ml-1"
-                  title="Clear email cutoffs for all user accounts so everyone sees all past emails"
-                >
-                  Show All Past Emails (All Users)
-                </button>
+                {sectionDescription(section, status?.email)}
+                {section === "inbox" && status ? (
+                  <>
+                    {" · "}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMailAiOpen(true);
+                        if (!mailAiQuestion) {
+                          setMailAiQuestion("What are the most important unread emails?");
+                        }
+                      }}
+                      className="text-emerald-400 hover:text-emerald-300 underline decoration-dotted"
+                      title="Ask AI about unread mail"
+                    >
+                      {status.unread_count} unread — ask AI
+                    </button>
+                  </>
+                ) : null}
               </>
-            ) : null}
+            )}
           </p>
           {section === "inbox" && !searchActive && !loading && threads.length > 0 ? (
             <p className="text-xs text-slate-500 mt-1">
@@ -2719,6 +2842,7 @@ export function InboxPage({
       {showCompose && (
         <ComposeMailModal
           fromEmail={status?.email || status?.emails?.[0] || "Your mailbox"}
+          mailboxUserId={mailboxUserIdRef.current}
           initialDraft={composeDraft}
           onClose={() => {
             setShowCompose(false);

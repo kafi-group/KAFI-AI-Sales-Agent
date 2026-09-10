@@ -214,6 +214,74 @@ function DashboardApp() {
   const [urgentAlertDismissed, setUrgentAlertDismissed] = useState(false);
   const [targetThreadId, setTargetThreadId] = useState<string | null>(null);
   const [targetMailboxUserId, setTargetMailboxUserId] = useState<number | null>(null);
+  const isAsimUser =
+    (user?.username || "").trim().toLowerCase() === "asim" ||
+    (user?.username || "").trim().toLowerCase().startsWith("asim") ||
+    (user?.full_name || "").trim().toLowerCase().includes("asim");
+  const [asimMailboxes, setAsimMailboxes] = useState<
+    Array<{ user_id: number; email: string; display_name?: string | null }>
+  >([]);
+  const [asimActiveMailboxUserId, setAsimActiveMailboxUserId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isAsimUser) {
+      setAsimMailboxes([]);
+      setAsimActiveMailboxUserId(null);
+      return;
+    }
+    let cancelled = false;
+    void client
+      .listInboxSwitchableMailboxes()
+      .then((res) => {
+        if (cancelled) return;
+        const rows = res.mailboxes || [];
+        setAsimMailboxes(rows);
+        const stored = Number(sessionStorage.getItem("asim-inbox-mailbox-user-id") || "");
+        const fromStorage = rows.find((r) => r.user_id === stored);
+        const preferred =
+          fromStorage ||
+          rows.find((r) => (r.email || "").toLowerCase() === "marketing@kafi-group.com") ||
+          rows[0] ||
+          null;
+        if (preferred) {
+          setAsimActiveMailboxUserId(preferred.user_id);
+          sessionStorage.setItem("asim-inbox-mailbox-user-id", String(preferred.user_id));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAsimMailboxes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAsimUser]);
+
+  const asimMailboxSwitcher =
+    isAsimUser && tab === "inbox" && asimMailboxes.length > 1 ? (
+      <label className="flex items-center gap-2 min-w-0 flex-1 max-w-md">
+        <span className="text-xs text-slate-400 shrink-0 hidden sm:inline">Mailbox</span>
+        <select
+          value={asimActiveMailboxUserId ?? ""}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            if (!Number.isFinite(next)) return;
+            setAsimActiveMailboxUserId(next);
+            sessionStorage.setItem("asim-inbox-mailbox-user-id", String(next));
+            setTargetThreadId(null);
+            setTargetMailboxUserId(null);
+            setError(null);
+          }}
+          className="w-full min-w-0 rounded-lg border border-emerald-500/40 bg-slate-900 px-3 py-1.5 text-xs sm:text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/60"
+          title="Switch mailbox (Asim only)"
+        >
+          {asimMailboxes.map((box) => (
+            <option key={box.user_id} value={box.user_id}>
+              {box.email}
+            </option>
+          ))}
+        </select>
+      </label>
+    ) : null;
   const [autoOpenReply, setAutoOpenReply] = useState(false);
   const seenMessageUidsRef = useRef<Set<string> | null>(null);
   const lastInboxUnreadRef = useRef(0);
@@ -372,8 +440,10 @@ function DashboardApp() {
   );
 
   const pollInbox = useCallback(() => {
+    const mailboxOverride =
+      isAsimUser && asimActiveMailboxUserId != null ? asimActiveMailboxUserId : null;
     client
-      .getInboxStatus()
+      .getInboxStatus(mailboxOverride)
       .then((status) => {
         if (!status.configured) {
           seenMessageUidsRef.current = null;
@@ -391,7 +461,9 @@ function DashboardApp() {
           return;
         }
 
-        return client.listInboxMessages({ limit: 15 }).then((result) => {
+        return client
+          .listInboxMessages({ limit: 15, mailbox_user_id: mailboxOverride })
+          .then((result) => {
           const messages = result.items;
           const currentUids = new Set(messages.map((m) => m.uid));
           const seen = seenMessageUidsRef.current;
@@ -417,7 +489,7 @@ function DashboardApp() {
       .catch(() => {
         /* mailbox may be unconfigured — ignore */
       });
-  }, []);
+  }, [isAsimUser, asimActiveMailboxUserId]);
 
   const pollUrgentEmails = useCallback(() => {
     client
@@ -1362,13 +1434,14 @@ function DashboardApp() {
               {isWhatsAppMobile ? <IconWhatsApp className="w-5 h-5 text-emerald-400 shrink-0" /> : null}
               {pageHeading}
             </h1>
+            {asimMailboxSwitcher}
             <AppTopActions
               compact
               onRefresh={refreshAll}
               onOpenSettings={isAdmin ? () => setTab("settings") : undefined}
               onLogout={() => void logout()}
               whatsappUnread={whatsappActivityUnread}
-              emailUnread={inboxUnread + emailActivityUnread}
+              emailUnread={inboxUnread}
               onOpenWhatsApp={() => handleSelectWhatsAppSection("whatsapp-inbox")}
               onOpenEmail={() => {
                 setMailSection("inbox");
@@ -1400,7 +1473,9 @@ function DashboardApp() {
               {isWhatsAppMobile ? <IconWhatsApp className="w-5 h-5 text-emerald-400 shrink-0" /> : null}
               {pageHeading}
             </h1>
-            {isWhatsAppMobile ? (
+            {asimMailboxSwitcher ? (
+              asimMailboxSwitcher
+            ) : isWhatsAppMobile ? (
               <div
                 id="wa-mobile-header-slot"
                 className="flex-1 min-w-0 flex items-center gap-3 overflow-hidden"
@@ -1425,7 +1500,7 @@ function DashboardApp() {
               onOpenSettings={isAdmin ? () => setTab("settings") : undefined}
               onLogout={() => void logout()}
               whatsappUnread={whatsappActivityUnread}
-              emailUnread={inboxUnread + emailActivityUnread}
+              emailUnread={inboxUnread}
               onOpenWhatsApp={() => handleSelectWhatsAppSection("whatsapp-inbox")}
               onOpenEmail={() => {
                 setMailSection("inbox");
@@ -1564,6 +1639,18 @@ function DashboardApp() {
                 onOpenMailerCompose={() => void openMailerApp("/compose")}
                 initialThreadId={targetThreadId}
                 initialMailboxUserId={targetMailboxUserId}
+                activeMailboxUserId={isAsimUser ? asimActiveMailboxUserId : null}
+                switchableMailboxes={isAsimUser ? asimMailboxes : []}
+                onActiveMailboxChange={(mailboxUserId) => {
+                  setAsimActiveMailboxUserId(mailboxUserId);
+                  sessionStorage.setItem(
+                    "asim-inbox-mailbox-user-id",
+                    String(mailboxUserId),
+                  );
+                  setTargetThreadId(null);
+                  setTargetMailboxUserId(null);
+                  setError(null);
+                }}
                 autoOpenReply={autoOpenReply}
                 onThreadOpened={() => {
                   setTargetThreadId(null);

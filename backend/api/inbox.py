@@ -38,6 +38,30 @@ router = APIRouter(prefix="/inbox", tags=["inbox"])
 
 _VALID_FOLDERS = {"inbox", "sent", "trash", "archive"}
 
+# Asim-only shared mailboxes (Mr Khalid request). Email-module override only.
+_ASIM_SHARED_MAILBOX_EMAILS = frozenset(
+    {
+        "marketing@kafi-group.com",
+        "info@kafi-group.com",
+        "essence@kafi-group.com",
+    }
+)
+_ASIM_SHARED_MAILBOX_ORDER = (
+    "marketing@kafi-group.com",
+    "info@kafi-group.com",
+    "essence@kafi-group.com",
+)
+
+
+def _norm_mailbox_email(value: str | None) -> str:
+    return (value or "").strip().lower()
+
+
+def _is_asim(user: AppUser) -> bool:
+    uname = _norm_mailbox_email(user.username)
+    fname = _norm_mailbox_email(getattr(user, "full_name", None))
+    return uname == "asim" or uname.startswith("asim") or "asim" in fname
+
 
 def _guard_configured(user: AppUser) -> None:
     if not hosts_enabled():
@@ -56,48 +80,136 @@ def _inbox_error_message(exc: Exception) -> str:
     return f"Could not read inbox: {exc}"
 
 
+def _expunge_mailbox_user(db, other: AppUser) -> AppUser:
+    _ = (
+        other.id,
+        other.username,
+        other.full_name,
+        other.role,
+        other.is_active,
+        other.mailbox_email,
+        other.mailbox_password_encrypted,
+        other.mailbox_display_name,
+        other.mailbox_enabled,
+    )
+    db.expunge(other)
+    return other
+
+
 def _resolve_mailbox_user(acting: AppUser, mailbox_user_id: int | None) -> AppUser:
-    """Admin may draft/send against another user's mailbox. Email-only."""
+    """Admin may open any mailbox. Asim may open marketing@ / info@ / essence@ only."""
     if not mailbox_user_id or int(mailbox_user_id) == int(acting.id):
         return acting
     role = acting.role.value if isinstance(acting.role, AppUserRole) else str(acting.role)
-    if role != AppUserRole.admin.value:
-        raise HTTPException(403, "Only admin can open another mailbox")
     db = SessionLocal()
     try:
         other = db.get(AppUser, int(mailbox_user_id))
         if not other:
             return acting
-        _ = (
-            other.id,
-            other.username,
-            other.full_name,
-            other.role,
-            other.is_active,
-            other.mailbox_email,
-            other.mailbox_password_encrypted,
-            other.mailbox_display_name,
-            other.mailbox_enabled,
-        )
-        db.expunge(other)
-        return other
+        if role == AppUserRole.admin.value:
+            return _expunge_mailbox_user(db, other)
+        if _is_asim(acting):
+            email = _norm_mailbox_email(other.mailbox_email)
+            if email in _ASIM_SHARED_MAILBOX_EMAILS:
+                return _expunge_mailbox_user(db, other)
+            raise HTTPException(
+                403,
+                "You can only switch to marketing@, info@, or essence@ mailboxes",
+            )
+        raise HTTPException(403, "Only admin can open another mailbox")
+    finally:
+        db.close()
+
+
+def _mailbox_target(acting: AppUser, mailbox_user_id: int | None = None) -> AppUser:
+    target = _resolve_mailbox_user(acting, mailbox_user_id)
+    _guard_configured(target)
+    return target
+
+
+@router.get("/switchable-mailboxes")
+def list_switchable_mailboxes(user: AppUser = Depends(get_current_user_released)):
+    """Asim gets marketing/info/essence; everyone else gets only their own mailbox."""
+    db = SessionLocal()
+    try:
+        if _is_asim(user):
+            rows = (
+                db.query(AppUser)
+                .filter(AppUser.mailbox_email.isnot(None))
+                .all()
+            )
+            by_email: dict[str, dict] = {}
+            for row in rows:
+                email = _norm_mailbox_email(row.mailbox_email)
+                if email not in _ASIM_SHARED_MAILBOX_EMAILS:
+                    continue
+                existing = by_email.get(email)
+                # Prefer active + enabled mailbox owners.
+                score = (1 if row.is_active else 0) + (1 if row.mailbox_enabled else 0)
+                prev_score = int((existing or {}).get("_score") or -1)
+                if existing and score < prev_score:
+                    continue
+                by_email[email] = {
+                    "user_id": int(row.id),
+                    "email": (row.mailbox_email or "").strip(),
+                    "display_name": (row.mailbox_display_name or row.full_name or "").strip()
+                    or None,
+                    "mailbox_enabled": bool(row.mailbox_enabled),
+                    "_score": score,
+                }
+            ordered = []
+            for email in _ASIM_SHARED_MAILBOX_ORDER:
+                if email in by_email:
+                    row = dict(by_email[email])
+                    row.pop("_score", None)
+                    ordered.append(row)
+            return {"can_switch": len(ordered) > 0, "mailboxes": ordered}
+        own_email = (user.mailbox_email or "").strip() or None
+        return {
+            "can_switch": False,
+            "mailboxes": (
+                [
+                    {
+                        "user_id": int(user.id),
+                        "email": own_email,
+                        "display_name": (user.mailbox_display_name or user.full_name or "").strip()
+                        or None,
+                        "mailbox_enabled": bool(user.mailbox_enabled),
+                    }
+                ]
+                if own_email
+                else []
+            ),
+        }
     finally:
         db.close()
 
 
 @router.get("/status", response_model=InboxStatus)
-def inbox_status(user: AppUser = Depends(get_current_user_released)):
-    return inbox_module.status(user)
+def inbox_status(
+    mailbox_user_id: int | None = Query(default=None),
+    user: AppUser = Depends(get_current_user_released),
+):
+    target = _resolve_mailbox_user(user, mailbox_user_id)
+    return inbox_module.status(target)
 
 
 @router.get("/folders", response_model=InboxFoldersResponse)
-def inbox_folders(user: AppUser = Depends(get_current_user_released)):
-    return inbox_module.list_folders(user)
+def inbox_folders(
+    mailbox_user_id: int | None = Query(default=None),
+    user: AppUser = Depends(get_current_user_released),
+):
+    target = _resolve_mailbox_user(user, mailbox_user_id)
+    return inbox_module.list_folders(target)
 
 
 @router.get("/unread-count", response_model=InboxUnreadCount)
-def inbox_unread_count(user: AppUser = Depends(get_current_user_released)):
-    return {"count": inbox_module.unread_count(user)}
+def inbox_unread_count(
+    mailbox_user_id: int | None = Query(default=None),
+    user: AppUser = Depends(get_current_user_released),
+):
+    target = _resolve_mailbox_user(user, mailbox_user_id)
+    return {"count": inbox_module.unread_count(target)}
 
 
 @router.get("/urgent-unreplied")
@@ -114,23 +226,31 @@ def get_urgent_unreplied_emails(
 
 
 @router.post("/reset-cutoff")
-def reset_inbox_cutoff(user: AppUser = Depends(get_current_user_released)):
-    _guard_configured(user)
-    return inbox_module.reset_cutoff(user)
+def reset_inbox_cutoff(
+    mailbox_user_id: int | None = Query(default=None),
+    user: AppUser = Depends(get_current_user_released),
+):
+    target = _mailbox_target(user, mailbox_user_id)
+    return inbox_module.reset_cutoff(target)
 
 
 @router.post("/clear-cutoff")
-def clear_inbox_cutoff(user: AppUser = Depends(get_current_user_released)):
+def clear_inbox_cutoff(
+    mailbox_user_id: int | None = Query(default=None),
+    user: AppUser = Depends(get_current_user_released),
+):
     """Show all mailbox mail again (undo 'New mail only')."""
-    _guard_configured(user)
-    return inbox_module.clear_cutoff(user)
+    target = _mailbox_target(user, mailbox_user_id)
+    return inbox_module.clear_cutoff(target)
 
 
 @router.post("/clear-all-cutoffs")
 def clear_all_inbox_cutoffs(user: AppUser = Depends(get_current_user_released)):
-    """Show all historic mailbox mail for ALL team users."""
-    _guard_configured(user)
-    return inbox_module.clear_all_cutoffs()
+    """Disabled — caused team-wide historic mail floods. Use per-mailbox Show all mail."""
+    raise HTTPException(
+        403,
+        "Clearing all users' email cutoffs is disabled. Use Show all mail for your own mailbox only.",
+    )
 
 
 @router.get("/threads", response_model=InboxThreadListResponse)
@@ -140,12 +260,13 @@ def list_inbox_threads(
     unread_only: bool = Query(default=False),
     q: str | None = Query(default=None, max_length=200),
     triage_category: str | None = Query(default=None, max_length=40),
+    mailbox_user_id: int | None = Query(default=None),
     user: AppUser = Depends(get_current_user_released),
 ):
-    _guard_configured(user)
+    target = _mailbox_target(user, mailbox_user_id)
     try:
         result = inbox_module.list_threads(
-            user,
+            target,
             limit=limit,
             offset=offset,
             unread_only=unread_only,
@@ -163,8 +284,7 @@ def get_inbox_thread(
     mailbox_user_id: int | None = Query(default=None),
     user: AppUser = Depends(get_current_user_released),
 ):
-    target = _resolve_mailbox_user(user, mailbox_user_id)
-    _guard_configured(target)
+    target = _mailbox_target(user, mailbox_user_id)
     try:
         thread = inbox_module.get_thread(target, thread_id)
     except Exception as exc:  # noqa: BLE001
@@ -177,15 +297,16 @@ def get_inbox_thread(
 @router.post("/compose", response_model=InboxComposeResponse)
 def compose_inbox_mail(
     payload: InboxComposeRequest,
+    mailbox_user_id: int | None = Query(default=None),
     user: AppUser = Depends(get_current_user_released),
 ):
-    """Compose and send a new email from the logged-in user's mailbox."""
+    """Compose and send a new email from the active (or switched) mailbox."""
     from modules import activity as activity_module
 
-    _guard_configured(user)
+    target = _mailbox_target(user, mailbox_user_id)
     try:
         result = inbox_module.compose(
-            user,
+            target,
             to=payload.to,
             subject=payload.subject,
             body=payload.body,
@@ -214,6 +335,7 @@ def compose_inbox_mail(
                 "subject": subject,
                 "to": to_addr,
                 "from": result.get("from"),
+                "mailbox_user_id": int(target.id),
             },
         )
         db.commit()
@@ -237,8 +359,7 @@ def reply_inbox_thread(
 ):
     from modules import activity as activity_module
 
-    target = _resolve_mailbox_user(user, mailbox_user_id)
-    _guard_configured(target)
+    target = _mailbox_target(user, mailbox_user_id)
     try:
         result = inbox_module.reply_to_thread(
             target,
@@ -267,7 +388,12 @@ def reply_inbox_thread(
             summary=f"Replied to “{subject}”" + (f" → {to_addr}" if to_addr else ""),
             entity_type="inbox_thread",
             entity_id=None,
-            details={"thread_id": thread_id, "subject": subject, "to": to_addr},
+            details={
+                "thread_id": thread_id,
+                "subject": subject,
+                "to": to_addr,
+                "mailbox_user_id": int(target.id),
+            },
         )
         db.commit()
     finally:
@@ -279,14 +405,15 @@ def reply_inbox_thread(
 def move_inbox_thread(
     thread_id: str,
     payload: InboxThreadMoveRequest,
+    mailbox_user_id: int | None = Query(default=None),
     user: AppUser = Depends(get_current_user_released),
 ):
-    _guard_configured(user)
+    target = _mailbox_target(user, mailbox_user_id)
     to_folder = payload.to_folder.strip().lower()
     if to_folder not in ("inbox", "trash", "archive"):
         raise HTTPException(400, "to_folder must be inbox, trash, or archive")
     try:
-        result = inbox_module.move_thread_messages(user, thread_id, to_folder=to_folder)
+        result = inbox_module.move_thread_messages(target, thread_id, to_folder=to_folder)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Could not move conversation: {exc}") from exc
     if result.get("status") != "ok":
@@ -308,8 +435,7 @@ def analyze_inbox_thread(
     user: AppUser = Depends(get_current_user_released),
 ):
     """Summarize a conversation and draft a reply the rep can edit before sending."""
-    target = _resolve_mailbox_user(user, mailbox_user_id)
-    _guard_configured(target)
+    target = _mailbox_target(user, mailbox_user_id)
     try:
         result = inbox_assistant_module.analyze_inbox_thread(
             target, thread_id, goal=payload.goal
@@ -325,14 +451,15 @@ def analyze_inbox_thread(
 def analyze_inbox_message(
     uid: str,
     payload: InboxAnalyzeRequest = InboxAnalyzeRequest(),
+    mailbox_user_id: int | None = Query(default=None),
     user: AppUser = Depends(get_current_user_released),
 ):
     """Summarize a single message and draft a reply."""
-    _guard_configured(user)
+    target = _mailbox_target(user, mailbox_user_id)
     folder = payload.folder or "INBOX"
     try:
         result = inbox_assistant_module.analyze_inbox_message(
-            user, uid, folder=folder, goal=payload.goal
+            target, uid, folder=folder, goal=payload.goal
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Could not analyze message: {exc}") from exc
@@ -348,15 +475,16 @@ def list_inbox_messages(
     unread_only: bool = Query(default=False),
     folder: str = Query(default="inbox", description="Logical folder: inbox|sent|trash|archive"),
     q: str | None = Query(default=None, max_length=200),
+    mailbox_user_id: int | None = Query(default=None),
     user: AppUser = Depends(get_current_user_released),
 ):
-    _guard_configured(user)
+    target = _mailbox_target(user, mailbox_user_id)
     key = folder.strip().lower()
     if key not in _VALID_FOLDERS:
         raise HTTPException(400, f"folder must be one of: {', '.join(sorted(_VALID_FOLDERS))}")
     try:
         items = inbox_module.list_messages(
-            user,
+            target,
             limit=limit,
             offset=offset,
             unread_only=unread_only,
@@ -365,7 +493,7 @@ def list_inbox_messages(
         )
         total = len(items)
         if not q:
-            folders = inbox_module.list_folders(user)
+            folders = inbox_module.list_folders(target)
             for row in folders.get("folders") or []:
                 if row.get("key") == key:
                     total = int(row.get("count") or total)
@@ -386,13 +514,14 @@ def list_inbox_messages(
 @router.post("/search", response_model=InboxMessageListResponse)
 def search_inbox_mail(
     payload: InboxMailSearchRequest,
+    mailbox_user_id: int | None = Query(default=None),
     user: AppUser = Depends(get_current_user_released),
 ):
-    _guard_configured(user)
+    target = _mailbox_target(user, mailbox_user_id)
     scope = (payload.scope or "inbox").strip().lower()
     try:
         return inbox_module.search_mail(
-            user,
+            target,
             query=payload.query,
             scope=scope,
             limit=payload.limit,
@@ -407,12 +536,13 @@ def search_inbox_mail(
 @router.post("/ai-query", response_model=InboxMailAiQueryResponse)
 def inbox_ai_query(
     payload: InboxMailAiQueryRequest,
+    mailbox_user_id: int | None = Query(default=None),
     user: AppUser = Depends(get_current_user_released),
 ):
-    _guard_configured(user)
+    target = _mailbox_target(user, mailbox_user_id)
     try:
         return inbox_mail_ai_module.query_mailbox(
-            user,
+            target,
             question=payload.question,
             unread_only=payload.unread_only,
         )
@@ -424,11 +554,12 @@ def inbox_ai_query(
 def get_inbox_message(
     uid: str,
     folder: str = Query(default="INBOX"),
+    mailbox_user_id: int | None = Query(default=None),
     user: AppUser = Depends(get_current_user_released),
 ):
-    _guard_configured(user)
+    target = _mailbox_target(user, mailbox_user_id)
     try:
-        message = inbox_module.get_message(user, uid, folder=folder)
+        message = inbox_module.get_message(target, uid, folder=folder)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Could not read message: {exc}") from exc
     if not message:
@@ -440,29 +571,31 @@ def get_inbox_message(
 def mark_inbox_message_read(
     uid: str,
     folder: str = Query(default="INBOX"),
+    mailbox_user_id: int | None = Query(default=None),
     user: AppUser = Depends(get_current_user_released),
 ):
-    _guard_configured(user)
+    target = _mailbox_target(user, mailbox_user_id)
     try:
-        inbox_module.mark_read(user, uid, True, folder=folder)
+        inbox_module.mark_read(target, uid, True, folder=folder)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Could not update message: {exc}") from exc
-    return {"count": inbox_module.unread_count(user)}
+    return {"count": inbox_module.unread_count(target)}
 
 
 @router.post("/messages/{uid}/move", response_model=InboxMoveResponse)
 def move_inbox_message(
     uid: str,
     payload: InboxMoveRequest,
+    mailbox_user_id: int | None = Query(default=None),
     user: AppUser = Depends(get_current_user_released),
 ):
-    _guard_configured(user)
+    target = _mailbox_target(user, mailbox_user_id)
     to_folder = payload.to_folder.strip().lower()
     if to_folder not in _VALID_FOLDERS:
         raise HTTPException(400, f"to_folder must be one of: {', '.join(sorted(_VALID_FOLDERS))}")
     try:
         result = inbox_module.move_message(
-            user,
+            target,
             uid,
             from_folder=payload.from_folder,
             to_folder=to_folder,
@@ -482,10 +615,13 @@ def move_inbox_message(
 
 
 @router.post("/trash/empty", response_model=InboxEmptyTrashResponse)
-def empty_inbox_trash(user: AppUser = Depends(get_current_user_released)):
-    _guard_configured(user)
+def empty_inbox_trash(
+    mailbox_user_id: int | None = Query(default=None),
+    user: AppUser = Depends(get_current_user_released),
+):
+    target = _mailbox_target(user, mailbox_user_id)
     try:
-        result = inbox_module.empty_trash(user)
+        result = inbox_module.empty_trash(target)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Could not empty trash: {exc}") from exc
     if result.get("status") != "ok":
@@ -497,14 +633,15 @@ def empty_inbox_trash(user: AppUser = Depends(get_current_user_released)):
 def reply_inbox_message(
     uid: str,
     payload: InboxReplyRequest,
+    mailbox_user_id: int | None = Query(default=None),
     user: AppUser = Depends(get_current_user_released),
 ):
     from modules import activity as activity_module
 
-    _guard_configured(user)
+    target = _mailbox_target(user, mailbox_user_id)
     try:
         result = inbox_module.reply(
-            user,
+            target,
             uid,
             payload.body,
             folder=payload.folder or "INBOX",
@@ -531,7 +668,12 @@ def reply_inbox_message(
             summary=f"Replied to “{subject}”" + (f" → {to_addr}" if to_addr else ""),
             entity_type="inbox_message",
             entity_id=None,
-            details={"uid": uid, "subject": subject, "to": to_addr},
+            details={
+                "uid": uid,
+                "subject": subject,
+                "to": to_addr,
+                "mailbox_user_id": int(target.id),
+            },
         )
         db.commit()
     finally:
