@@ -1515,13 +1515,6 @@ function DashboardApp() {
               onRefresh={refreshAll}
               onOpenSettings={isAdmin ? () => setTab("settings") : undefined}
               onLogout={() => void logout()}
-              whatsappUnread={whatsappActivityUnread}
-              emailUnread={inboxUnread}
-              onOpenWhatsApp={() => handleSelectWhatsAppSection("whatsapp-inbox")}
-              onOpenEmail={() => {
-                setMailSection("inbox");
-                handleSelectTab("inbox");
-              }}
             />
             </div>
             {isWhatsAppMobile ? (
@@ -1575,13 +1568,6 @@ function DashboardApp() {
               onRefresh={refreshAll}
               onOpenSettings={isAdmin ? () => setTab("settings") : undefined}
               onLogout={() => void logout()}
-              whatsappUnread={whatsappActivityUnread}
-              emailUnread={inboxUnread}
-              onOpenWhatsApp={() => handleSelectWhatsAppSection("whatsapp-inbox")}
-              onOpenEmail={() => {
-                setMailSection("inbox");
-                handleSelectTab("inbox");
-              }}
             />
           </div>
 

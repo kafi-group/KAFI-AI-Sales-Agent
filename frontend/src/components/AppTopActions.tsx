@@ -1,9 +1,6 @@
-import { LogoWhatsApp } from "./icons/BrandLogos";
 import {
   IconBell,
-  IconExternal,
   IconGear,
-  IconMail,
   IconSignOut,
   IconUser,
   AdminUserIcon,
@@ -29,10 +26,6 @@ interface AppTopActionsProps {
   onLogout?: () => void;
   /** Compact strip for the mobile header. */
   compact?: boolean;
-  whatsappUnread?: number;
-  emailUnread?: number;
-  onOpenWhatsApp?: () => void;
-  onOpenEmail?: () => void;
   userLabel?: string;
   userRole?: string;
 }
@@ -55,28 +48,11 @@ const MODE_OPTIONS: { value: NotificationMode; label: string; hint: string }[] =
   },
 ];
 
-function formatBadge(count: number): string {
-  if (count <= 0) return "";
-  if (count > 99) return "99+";
-  return String(count);
-}
-
-const WHATSAPP_WEB_URL = "https://web.whatsapp.com";
-
-function openWhatsAppWeb() {
-  unlockNotificationAudio();
-  window.open(WHATSAPP_WEB_URL, "_blank", "noopener,noreferrer");
-}
-
 export function AppTopActions({
   onRefresh: _onRefresh,
   onOpenSettings,
   onLogout,
   compact = false,
-  whatsappUnread = 0,
-  emailUnread = 0,
-  onOpenWhatsApp,
-  onOpenEmail,
   userLabel: propUserLabel,
   userRole: propUserRole,
 }: AppTopActionsProps) {
@@ -160,73 +136,8 @@ export function AppTopActions({
   const iconBtn =
     "relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-slate-100 transition";
 
-  const waBadge = formatBadge(whatsappUnread);
-  const mailBadge = formatBadge(emailUnread);
-
   return (
     <div className="relative flex items-center gap-1.5" ref={panelRef}>
-      <button
-        type="button"
-        className={iconBtn}
-        title="WhatsApp Web — opens in your browser (scan QR there if not linked)"
-        aria-label="Open WhatsApp Web in browser"
-        onClick={openWhatsAppWeb}
-      >
-        <span className="relative inline-flex">
-          <LogoWhatsApp size="sm" />
-          <IconExternal
-            size="xs"
-            className="absolute -bottom-1 -right-1 text-slate-400 bg-slate-900 rounded-sm"
-          />
-        </span>
-      </button>
-
-      <button
-        type="button"
-        className={iconBtn}
-        title={
-          whatsappUnread > 0
-            ? `WhatsApp Business inbox — ${whatsappUnread} unread`
-            : "WhatsApp Business inbox"
-        }
-        aria-label={
-          whatsappUnread > 0
-            ? `WhatsApp Business inbox, ${whatsappUnread} unread`
-            : "WhatsApp Business inbox"
-        }
-        onClick={() => {
-          unlockNotificationAudio();
-          onOpenWhatsApp?.();
-        }}
-      >
-        <LogoWhatsApp size="sm" />
-        {waBadge ? (
-          <span className="absolute -top-1 -right-1 min-w-[1.1rem] h-[1.1rem] px-0.5 rounded-full bg-emerald-500 text-[9px] font-semibold leading-[1.1rem] text-center text-white">
-            {waBadge}
-          </span>
-        ) : null}
-      </button>
-
-      <button
-        type="button"
-        className={iconBtn}
-        title={emailUnread > 0 ? `New emails — ${emailUnread} unread` : "Email inbox"}
-        aria-label={
-          emailUnread > 0 ? `Email inbox, ${emailUnread} unread` : "Email inbox"
-        }
-        onClick={() => {
-          unlockNotificationAudio();
-          onOpenEmail?.();
-        }}
-      >
-        <IconMail size="sm" />
-        {mailBadge ? (
-          <span className="absolute -top-1 -right-1 min-w-[1.1rem] h-[1.1rem] px-0.5 rounded-full bg-sky-500 text-[9px] font-semibold leading-[1.1rem] text-center text-white">
-            {mailBadge}
-          </span>
-        ) : null}
-      </button>
-
       <button
         type="button"
         className={iconBtn}
