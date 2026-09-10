@@ -9,6 +9,7 @@ import { prepareTrackedBody } from "@/lib/prepareTrackedBody";
 import { resolveMergeContext } from "@/lib/resolveMergeContext";
 import { reportMailerActivity } from "@/lib/reportActivity";
 import { sendSmtp, smtpBodyHasContent } from "@/lib/smtp";
+import { fetchSmtpCredentialsFromSalesAgent } from "@/lib/fetchSmtpCredentials";
 import { appendMailerSentCopy } from "@/lib/syncSent";
 
 export const runtime = "nodejs";
@@ -161,6 +162,11 @@ export async function POST(req: NextRequest) {
     const sendBody = tracked.body || personalizedBody;
     const asHtml = tracked.html || body.html !== false;
 
+    const smtpCreds = await fetchSmtpCredentialsFromSalesAgent({
+      authToken: authToken || undefined,
+      handoffToken: handoffToken || undefined,
+    });
+
     const sent = await sendSmtp({
       username,
       mailboxEmail,
@@ -170,6 +176,7 @@ export async function POST(req: NextRequest) {
       subject: personalizedSubject,
       body: sendBody,
       html: asHtml,
+      credsOverride: smtpCreds,
       attachments: Array.isArray(body.attachments) ? body.attachments : undefined,
     });
 

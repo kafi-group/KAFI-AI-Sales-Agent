@@ -54,7 +54,8 @@ export function resolveMailbox(username: string, fallbackEmail?: string): Mailbo
   const map = USER_ENV[username.toLowerCase()];
   if (map) {
     const email = (process.env[map.email] || "").trim();
-    const password = process.env[map.password] || "";
+    // Trim password — trailing newlines in Vercel env cause SMTP 535 failures.
+    const password = (process.env[map.password] || "").trim();
     const displayName = (map.display && process.env[map.display]) || undefined;
     if (email && password) {
       return withPublicSenderName({
@@ -70,7 +71,7 @@ export function resolveMailbox(username: string, fallbackEmail?: string): Mailbo
       const cfg = USER_ENV[key];
       const email = (process.env[cfg.email] || "").trim().toLowerCase();
       if (email && email === fallbackEmail.trim().toLowerCase()) {
-        const password = process.env[cfg.password] || "";
+        const password = (process.env[cfg.password] || "").trim();
         if (password) {
           return withPublicSenderName({
             email,
@@ -131,17 +132,32 @@ export async function sendSmtp(options: {
   subject: string;
   body: string;
   html?: boolean;
+  /** Prefer Sales Agent DB mailbox password over Vercel env (fixes 535 drift). */
+  credsOverride?: {
+    email: string;
+    password: string;
+    displayName?: string | null;
+  } | null;
   attachments?: Array<{
     filename: string;
     content: string;
     contentType?: string;
   }>;
 }): Promise<{ ok: boolean; message: string }> {
-  const creds = resolveMailbox(options.username, options.mailboxEmail);
+  let creds: MailboxCreds | null = null;
+  if (options.credsOverride?.email && options.credsOverride?.password) {
+    creds = withPublicSenderName({
+      email: options.credsOverride.email.trim(),
+      password: options.credsOverride.password.trim(),
+      displayName: options.credsOverride.displayName?.trim() || undefined,
+    });
+  } else {
+    creds = resolveMailbox(options.username, options.mailboxEmail);
+  }
   if (!creds) {
     return {
       ok: false,
-      message: `No SMTP credentials on mailer for user "${options.username}". Set MAILBOX_* env on Vercel.`,
+      message: `No SMTP credentials on mailer for user "${options.username}". Set MAILBOX_* env on Vercel or configure the mailbox on Sales Agent Users page.`,
     };
   }
 
@@ -149,59 +165,78 @@ export async function sendSmtp(options: {
   const port = Number(process.env.MAILBOX_SMTP_PORT || "465");
   const sslHostname = process.env.MAILBOX_SSL_HOSTNAME || "mail.kafi-group.com";
 
-  const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user: creds.email, pass: creds.password },
-    tls: {
-      servername: sslHostname,
-      // Connecting by IP; verify against cert hostname
-      rejectUnauthorized: true,
-    },
-    connectionTimeout: 25_000,
-    greetingTimeout: 25_000,
-    socketTimeout: 40_000,
-  });
-
-  const from = creds.displayName
-    ? `"${creds.displayName}" <${creds.email}>`
-    : creds.email;
-
-  const cc = normalizeAddrList(options.cc);
-  const bcc = normalizeAddrList(options.bcc);
-
-  try {
-    const mailAttachments = (options.attachments || [])
-      .filter((item) => item.filename && item.content)
-      .map((item) => ({
-        filename: item.filename,
-        content: Buffer.from(item.content, "base64"),
-        contentType: item.contentType || undefined,
-      }));
-
-    await transporter.sendMail({
-      from,
-      to: options.to,
-      ...(cc ? { cc } : {}),
-      ...(bcc ? { bcc } : {}),
-      subject: options.subject,
-      text: htmlToPlain(options.body),
-      html: options.html ? toHtmlBody(options.body) : undefined,
-      replyTo: creds.email,
-      ...(mailAttachments.length ? { attachments: mailAttachments } : {}),
+  async function attempt(authUser: string): Promise<{ ok: boolean; message: string }> {
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: { user: authUser, pass: creds!.password },
+      tls: {
+        servername: sslHostname,
+        rejectUnauthorized: true,
+      },
+      connectionTimeout: 25_000,
+      greetingTimeout: 25_000,
+      socketTimeout: 40_000,
     });
-    return { ok: true, message: "sent" };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, message: msg };
-  } finally {
+
+    const from = creds!.displayName
+      ? `"${creds!.displayName}" <${creds!.email}>`
+      : creds!.email;
+
+    const cc = normalizeAddrList(options.cc);
+    const bcc = normalizeAddrList(options.bcc);
+
     try {
-      transporter.close();
-    } catch {
-      /* ignore close errors */
+      const mailAttachments = (options.attachments || [])
+        .filter((item) => item.filename && item.content)
+        .map((item) => ({
+          filename: item.filename,
+          content: Buffer.from(item.content, "base64"),
+          contentType: item.contentType || undefined,
+        }));
+
+      await transporter.sendMail({
+        from,
+        to: options.to,
+        ...(cc ? { cc } : {}),
+        ...(bcc ? { bcc } : {}),
+        subject: options.subject,
+        text: htmlToPlain(options.body),
+        html: options.html ? toHtmlBody(options.body) : undefined,
+        replyTo: creds!.email,
+        ...(mailAttachments.length ? { attachments: mailAttachments } : {}),
+      });
+      return { ok: true, message: "sent" };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, message: msg };
+    } finally {
+      try {
+        transporter.close();
+      } catch {
+        /* ignore close errors */
+      }
     }
   }
+
+  // Prefer full email login; some cPanel hosts accept local-part only.
+  const first = await attempt(creds.email);
+  if (first.ok) return first;
+  const local = creds.email.includes("@") ? creds.email.split("@")[0] : "";
+  if (
+    local &&
+    local.toLowerCase() !== creds.email.toLowerCase() &&
+    /535|authentication|login/i.test(first.message)
+  ) {
+    const second = await attempt(local);
+    if (second.ok) return second;
+    return {
+      ok: false,
+      message: `${first.message} (also tried login as ${local}: ${second.message})`,
+    };
+  }
+  return first;
 }
 
 export function sleep(ms: number) {

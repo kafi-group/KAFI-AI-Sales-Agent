@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Optional
 
 import jwt
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -189,6 +189,41 @@ def _resolve_report_user(
     if handoff_token and handoff_token.strip():
         return _user_from_handoff_token(db, handoff_token.strip())
     raise HTTPException(status_code=401, detail="auth_token or handoff token required")
+
+
+class MailerSmtpCredentialsResponse(BaseModel):
+    email: str
+    password: str
+    display_name: Optional[str] = None
+
+
+@router.get("/smtp-credentials", response_model=MailerSmtpCredentialsResponse)
+def get_mailer_smtp_credentials(
+    token: str | None = Query(default=None),
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Return the caller's Sales Agent mailbox password for Vercel SMTP.
+
+    Inbox IMAP already uses this password; mailer Vercel env can drift and cause
+    535 Incorrect authentication. Prefer DB credentials for outbound SMTP.
+    """
+    user = _resolve_report_user(
+        db,
+        authorization=authorization,
+        handoff_token=token,
+    )
+    account = resolve_user_mailbox(user)
+    if not account:
+        raise HTTPException(
+            status_code=400,
+            detail="Your company mailbox is not configured. Ask an admin (Users page).",
+        )
+    return MailerSmtpCredentialsResponse(
+        email=account.email,
+        password=account.password,
+        display_name=account.display_name,
+    )
 
 
 @router.post("/session", response_model=MailerSessionResponse)

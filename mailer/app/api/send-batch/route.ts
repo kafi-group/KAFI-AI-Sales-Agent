@@ -7,6 +7,7 @@ import {
 } from "@/lib/personalizeEmail";
 import { reportMailerActivity } from "@/lib/reportActivity";
 import { sendSmtp, sleep } from "@/lib/smtp";
+import { fetchSmtpCredentialsFromSalesAgent } from "@/lib/fetchSmtpCredentials";
 import { appendMailerSentCopy } from "@/lib/syncSent";
 
 export const runtime = "nodejs";
@@ -84,6 +85,10 @@ export async function POST(req: NextRequest) {
       Math.round((body.message_delay_seconds ?? 2) * 1000),
     );
 
+    const smtpCreds = await fetchSmtpCredentialsFromSalesAgent({
+      handoffToken: token,
+    });
+
     const isBulk = leads.length > 1;
     if (isBulk) {
       await reportMailerActivity({
@@ -123,6 +128,7 @@ export async function POST(req: NextRequest) {
           subject,
           body: sendBody,
           html: tracked.html !== false,
+          credsOverride: smtpCreds,
         });
         results.push({
           buyer_id: lead.buyer_id,
