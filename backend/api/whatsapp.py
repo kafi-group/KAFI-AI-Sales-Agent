@@ -430,8 +430,16 @@ def list_whatsapp_conversations(
             page=page_val,
             page_size=page_size_val,
         )
-    except Exception:  # noqa: BLE001
-        rows, total = [], 0
+    except Exception as exc:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "WhatsApp Cloud conversations list failed: %s", exc
+        )
+        raise HTTPException(
+            503,
+            "WhatsApp Meta inbox temporarily unavailable. Retry in a moment.",
+        ) from exc
     page_val = max(1, page_val)
     page_size_val = min(max(1, page_size_val), 100)
     total_pages = max(1, (total + page_size_val - 1) // page_size_val)
@@ -452,7 +460,12 @@ def list_whatsapp_conversation_messages(contact_id: str, db: Session = Depends(g
         return []
     try:
         rows = comms.list_whatsapp_messages(db, contact_id=cid)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "WhatsApp Cloud thread messages failed for contact %s: %s", contact_id, exc
+        )
         rows = []
     return [_interaction_read(db, row) for row in rows]
 

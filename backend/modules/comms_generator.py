@@ -417,6 +417,9 @@ class CommsGenerator:
         contact.whatsapp_window_expires_at = datetime.now(timezone.utc) + timedelta(
             hours=WHATSAPP_SESSION_WINDOW_HOURS
         )
+        # Tag Cloud inbound so Meta Verified replies always match the Cloud inbox
+        # filter (even if Meta's message id format changes). Baileys sets personal_user.
+        cloud_inbound = personal_whatsapp_user_id is None
         inbound = Interaction(
             contact_id=contact.id,
             channel=Channel.whatsapp,
@@ -427,6 +430,7 @@ class CommsGenerator:
             status=InteractionStatus.sent,
             provider_message_id=provider_message_id,
             personal_whatsapp_user_id=personal_whatsapp_user_id,
+            wa_status="received" if cloud_inbound else None,
         )
         db.add(inbound)
         db.commit()
@@ -470,17 +474,25 @@ class CommsGenerator:
         base = (Interaction.channel == Channel.whatsapp) & (Interaction.contact_id.isnot(None))
         if personal_user_id is not None:
             return base & (Interaction.personal_whatsapp_user_id == int(personal_user_id))
-        # Do not add personal_whatsapp_user_id IS NULL here — that full-scan hangs
-        # the conversations endpoint and starves the rest of the dashboard.
-        return base & (
+        # Cloud / Meta Verified inbox only.
+        # Do NOT use personal_whatsapp_user_id IS NULL — that full-scan hangs Railway.
+        # Include: template sends, Meta wamid/meta_ ids, delivery wa_status, and any
+        # inbound non-baileys message (customer replies to the Meta number).
+        not_baileys = (Interaction.provider_message_id.is_(None)) | (
+            ~Interaction.provider_message_id.like("baileys%")
+        )
+        cloud_signal = (
             (Interaction.template_name.isnot(None))
             | (Interaction.provider_message_id.like("wamid.%"))
             | (Interaction.provider_message_id.like("meta_%"))
             | (Interaction.wa_status.isnot(None))
-        ) & (
-            (Interaction.provider_message_id.is_(None))
-            | (~Interaction.provider_message_id.like("baileys%"))
+            | (
+                (Interaction.direction == Direction.inbound)
+                & (Interaction.provider_message_id.isnot(None))
+                & (~Interaction.provider_message_id.like("baileys%"))
+            )
         )
+        return base & cloud_signal & not_baileys
 
     def list_whatsapp_conversations(
         self,
