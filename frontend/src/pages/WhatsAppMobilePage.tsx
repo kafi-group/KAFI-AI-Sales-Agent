@@ -4,7 +4,6 @@ import { client } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ActionButton } from "../components/ui/ActionButton";
 import { IconRefresh, IconSend, IconWhatsApp } from "../components/icons/AppIcons";
-import { WhatsAppPersonalInbox } from "./WhatsAppPersonalInbox";
 
 interface WhatsAppMobilePageProps {
   onError: (message: string) => void;
@@ -41,22 +40,16 @@ function WhatsAppMobileHeaderStrip({
   avatarUrl,
   connected,
   connectedPhone,
-  mobileTab,
-  onTab,
 }: {
   userName: string;
   avatarUrl: string | null;
   connected: boolean;
   connectedPhone?: string | null;
-  mobileTab: "connect" | "inbox";
-  onTab: (tab: "connect" | "inbox") => void;
 }) {
   const label = connectedPhone || (connected ? "Linked" : "Not linked");
   return (
     <>
-      <button
-        type="button"
-        onClick={() => onTab("connect")}
+      <div
         title={label}
         className="relative shrink-0 w-9 h-9 rounded-full overflow-hidden border border-emerald-400/70 bg-emerald-500/15"
       >
@@ -72,31 +65,13 @@ function WhatsAppMobileHeaderStrip({
             connected ? "bg-emerald-400" : "bg-slate-500"
           }`}
         />
-      </button>
-      <p className="min-w-0 flex-1 text-xs sm:text-sm text-slate-400 truncate leading-snug">
-        Link your personal WhatsApp by scanning QR, then open Conversations to chat from this dashboard.
-        Each login has its own isolated session.
-      </p>
-      <div className="inline-flex shrink-0 rounded-lg border border-slate-700 bg-slate-900/90 p-0.5 text-xs sm:text-sm">
-        <button
-          type="button"
-          onClick={() => onTab("connect")}
-          className={`px-2.5 sm:px-3 py-1.5 rounded-md font-semibold transition ${
-            mobileTab === "connect" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          Scan &amp; connect
-        </button>
-        <button
-          type="button"
-          onClick={() => onTab("inbox")}
-          className={`px-2.5 sm:px-3 py-1.5 rounded-md font-semibold transition ${
-            mobileTab === "inbox" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          Conversations
-        </button>
       </div>
+      <p className="min-w-0 flex-1 text-xs sm:text-sm text-slate-400 truncate leading-snug">
+        Link your personal WhatsApp by scanning QR. Each login has its own isolated session.
+      </p>
+      <span className="inline-flex shrink-0 rounded-lg border border-emerald-600/80 bg-emerald-600 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-semibold text-white">
+        Scan &amp; connect
+      </span>
     </>
   );
 }
@@ -115,7 +90,6 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [teamStatus, setTeamStatus] = useState<Array<Record<string, unknown>>>([]);
-  const [mobileTab, setMobileTab] = useState<"connect" | "inbox">("connect");
 
   const avatarStorageKey = `whatsapp_avatar_${user?.id || "default"}`;
   const phoneStorageKey = `whatsapp_phone_number_${user?.id || "default"}`;
@@ -292,11 +266,11 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
 
   useEffect(() => {
     const timer = window.setInterval(
-      () => void refresh({ silent: true, skipQr: mobileTab === "inbox", includeTeam: false }),
+      () => void refresh({ silent: true, includeTeam: false }),
       pollMs,
     );
     return () => window.clearInterval(timer);
-  }, [pollMs, refresh, mobileTab]);
+  }, [pollMs, refresh]);
 
   useEffect(() => {
     void refreshTeam();
@@ -370,7 +344,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
     setNotice(null);
     try {
       await client.sendWhatsAppPersonal({ to_phone: toPhone.trim(), message: message.trim() });
-      setNotice("Test message sent. Open the Conversations tab to see the thread.");
+      setNotice("Test message sent from your linked mobile WhatsApp.");
       setMessage("");
     } catch (e) {
       onError(e instanceof Error ? e.message : "Send failed");
@@ -388,8 +362,6 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
               avatarUrl={displayAvatarUrl}
               connected={connected}
               connectedPhone={customPhone || connectedPhone}
-              mobileTab={mobileTab}
-              onTab={setMobileTab}
             />,
             headerSlot,
           )
@@ -401,23 +373,11 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
               avatarUrl={displayAvatarUrl}
               connected={connected}
               connectedPhone={customPhone || connectedPhone}
-              mobileTab={mobileTab}
-              onTab={setMobileTab}
             />,
             headerSlotSm,
           )
         : null}
 
-      {mobileTab === "inbox" ? (
-        <WhatsAppPersonalInbox
-          connected={connected}
-          connectedPhone={customPhone || connectedPhone}
-          userName={userName}
-          onError={onError}
-          onNeedConnect={() => setMobileTab("connect")}
-        />
-      ) : (
-      <>
       {notice ? (
         <div className="text-base text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl px-6 py-4 flex items-center justify-between shadow-lg">
           <span>{notice}</span>
@@ -545,7 +505,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                       Account Session: {userName}
                     </p>
                     <p className="text-sm text-slate-300 leading-relaxed pt-1">
-                      Your mobile WhatsApp is active. Post-call follow-ups and 2-way inbox messages sync directly with this account.
+                      Your mobile WhatsApp is active. Post-call follow-ups and test sends use this linked number.
                     </p>
                   </div>
                 </div>
@@ -890,8 +850,6 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
           })}
         </div>
       </div>
-      </>
-      )}
     </div>
   );
 }
