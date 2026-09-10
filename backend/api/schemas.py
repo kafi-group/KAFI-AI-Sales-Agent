@@ -1143,6 +1143,7 @@ class CallHistoryItem(BaseModel):
     transcript: Optional[str] = None
     transcript_status: Optional[str] = None
     transcript_error: Optional[str] = None
+    ai_training_selected: bool = False
 
 
 class CallHistoryListResponse(BaseModel):

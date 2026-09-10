@@ -322,6 +322,10 @@ class Interaction(Base):
     personal_whatsapp_user_id: Mapped[Optional[int]] = mapped_column(
         Integer, index=True, deferred=True
     )
+    # Opt-in: mark high-quality calls for Sara & Rayan training (not every call).
+    ai_training_selected: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false", index=True
+    )
 
     contact: Mapped["Contact"] = relationship(back_populates="interactions")
 

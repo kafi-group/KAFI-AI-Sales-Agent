@@ -10,6 +10,7 @@ import { useCallQueueOptional } from "../hooks/useCallQueue";
 import { useTwilioVoice } from "../hooks/useTwilioVoice";
 import { type CallOutcome, callOutcomeSectionHint } from "../utils/callOutcomes";
 import { deriveWhatsAppFromEmail } from "../utils/channelSync";
+import { FOLLOWUP_LANGUAGES } from "../utils/followupLanguages";
 import { autocorrectText } from "../utils/spelling";
 import { CallRemarksForm } from "./CallRemarksForm";
 import { EmailAttachmentsField } from "./EmailAttachmentsField";
@@ -53,6 +54,20 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
   const [customPhone, setCustomPhone] = useState("");
   const [whatsappBody, setWhatsappBody] = useState("");
   const [waBodyCustomized, setWaBodyCustomized] = useState(false);
+  const [draftLanguage, setDraftLanguage] = useState("en");
+  const [englishSnapshot, setEnglishSnapshot] = useState<{
+    subject: string;
+    email: string;
+    whatsapp: string;
+  } | null>(null);
+  const [translating, setTranslating] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(false);
+  const [transcriptText, setTranscriptText] = useState("");
+  const [transcriptStatus, setTranscriptStatus] = useState<string | null>(null);
+  const [recordingAvailable, setRecordingAvailable] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [trainSaraRayan, setTrainSaraRayan] = useState(false);
+  const [trainSaving, setTrainSaving] = useState(false);
 
   useEffect(() => {
     if (!pendingFollowUp) return;
@@ -72,6 +87,13 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     setWaTemplateSearch("");
     setWaTemplateVariables([]);
     setNeedsWaTemplate(false);
+    setDraftLanguage("en");
+    setEnglishSnapshot(null);
+    setShowTranscript(false);
+    setTranscriptText("");
+    setTranscriptStatus(null);
+    setRecordingAvailable(false);
+    setTrainSaraRayan(false);
   }, [pendingFollowUp]);
 
   useEffect(() => {
@@ -120,8 +142,20 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     setEmailBody(email);
     const wa = draft.whatsapp_body || deriveWhatsAppFromEmail(email);
     setWhatsappBody(wa);
-    setWaBodyCustomized(Boolean(draft.whatsapp_body && draft.whatsapp_body !== deriveWhatsAppFromEmail(email)));
+    setWaBodyCustomized(
+      Boolean(draft.whatsapp_body && draft.whatsapp_body !== deriveWhatsAppFromEmail(email)),
+    );
     setAttachments([]);
+    setEnglishSnapshot({
+      subject: draft.subject || "",
+      email,
+      whatsapp: wa,
+    });
+    setDraftLanguage("en");
+    setTranscriptText(draft.transcript || draft.transcript_excerpt || "");
+    setTranscriptStatus(draft.transcript_status || null);
+    setRecordingAvailable(Boolean(draft.recording_available));
+    setTrainSaraRayan(Boolean(draft.ai_training_selected));
     if (draft.selected_phone) {
       setSelectedPhone(draft.selected_phone);
     } else if (draft.available_phones && draft.available_phones.length > 0) {
@@ -195,6 +229,102 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     }
   }
 
+  async function applyDraftLanguage(nextLang: string) {
+    if (!draft) return;
+    const prev = draftLanguage;
+    setDraftLanguage(nextLang);
+    if (nextLang === "en") {
+      if (englishSnapshot) {
+        setSubject(englishSnapshot.subject);
+        setEmailBody(englishSnapshot.email);
+        setWhatsappBody(englishSnapshot.whatsapp);
+        setWaBodyCustomized(false);
+      }
+      setDraftNotice("Restored English draft.");
+      return;
+    }
+    setTranslating(true);
+    setDraftNotice(null);
+    try {
+      const source = englishSnapshot || {
+        subject,
+        email: emailBody,
+        whatsapp: whatsappBody,
+      };
+      if (!englishSnapshot) {
+        setEnglishSnapshot(source);
+      }
+      const translated = await client.translatePersonalizedFollowup(draft.id, {
+        language: nextLang,
+        subject: source.subject,
+        email_body: source.email,
+        whatsapp_body: source.whatsapp,
+      });
+      setSubject(translated.subject);
+      setEmailBody(translated.email_body);
+      setWhatsappBody(translated.whatsapp_body);
+      setWaBodyCustomized(false);
+      setDraftNotice(`Translated to ${translated.language_label}. Review before sending.`);
+    } catch (e) {
+      setDraftLanguage(prev);
+      onError(e instanceof Error ? e.message : "Translation failed");
+    } finally {
+      setTranslating(false);
+    }
+  }
+
+  async function refreshTranscript() {
+    if (!draft?.interaction_id) return;
+    try {
+      const call = await client.getCallHistoryItem(draft.interaction_id);
+      setTranscriptText(call.transcript || "");
+      setTranscriptStatus(call.transcript_status || null);
+      setRecordingAvailable(Boolean(call.recording_available));
+      setTrainSaraRayan(Boolean(call.ai_training_selected));
+      if (call.transcript) setShowTranscript(true);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to load transcription");
+    }
+  }
+
+  async function generateTranscript() {
+    if (!draft?.interaction_id) return;
+    setTranscribing(true);
+    try {
+      const call = await client.transcribeCall(draft.interaction_id, true);
+      setTranscriptText(call.transcript || "");
+      setTranscriptStatus(call.transcript_status || null);
+      setRecordingAvailable(Boolean(call.recording_available));
+      if (call.transcript) setShowTranscript(true);
+      else setDraftNotice(call.transcript_error || "Captions are still generating — try again shortly.");
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to generate closed captions");
+    } finally {
+      setTranscribing(false);
+    }
+  }
+
+  async function toggleTrainSaraRayan(next: boolean) {
+    if (!draft?.interaction_id) return;
+    setTrainSaving(true);
+    try {
+      const call = await client.setCallTrainingFlag(draft.interaction_id, next);
+      setTrainSaraRayan(Boolean(call.ai_training_selected));
+      setDraft((prev) =>
+        prev ? { ...prev, ai_training_selected: Boolean(call.ai_training_selected) } : prev,
+      );
+      setDraftNotice(
+        next
+          ? "Marked for Sara & Rayan training (recording + captions will be used)."
+          : "Removed from Sara & Rayan training set.",
+      );
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to update training flag");
+    } finally {
+      setTrainSaving(false);
+    }
+  }
+
   async function sendDraft(channels: "email" | "whatsapp" | "whatsapp_personal" | "all") {
     if (!draft) return;
     const wantsWaMeta = channels === "whatsapp" || channels === "all";
@@ -264,6 +394,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
 
   const availablePhones = draft?.available_phones || [];
   const selectedPhoneObj = availablePhones.find((p) => p.phone === selectedPhone);
+  const busy = Boolean(sendingChannel) || savingDraft || translating || trainSaving;
 
   return createPortal(
     <div
@@ -328,6 +459,90 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                     <span className="text-slate-200">{draft.call_context_label}</span>
                   </p>
                 ) : null}
+
+                <div className="rounded-xl border border-slate-700/80 bg-slate-950/50 p-3 space-y-3">
+                  <label className="block">
+                    <span className="text-xs text-slate-400">Recipient language (email & WhatsApp)</span>
+                    <select
+                      value={draftLanguage}
+                      disabled={busy}
+                      onChange={(e) => void applyDraftLanguage(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-sky-500"
+                    >
+                      {FOLLOWUP_LANGUAGES.map((lang) => (
+                        <option key={lang.code} value={lang.code}>
+                          {lang.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="mt-1 block text-[11px] text-slate-500">
+                      {translating
+                        ? "Translating…"
+                        : "Translate the AI draft into the buyer’s local language before sending."}
+                    </span>
+                  </label>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setShowTranscript((v) => !v);
+                        if (!showTranscript && !transcriptText) void refreshTranscript();
+                      }}
+                      className="rounded-lg border border-slate-600 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-slate-100"
+                    >
+                      {showTranscript ? "Hide transcription" : "View transcription / closed captions"}
+                    </button>
+                    {(recordingAvailable ||
+                      transcriptStatus === "pending" ||
+                      transcriptStatus === "processing") && (
+                      <button
+                        type="button"
+                        disabled={busy || transcribing}
+                        onClick={() => void generateTranscript()}
+                        className="rounded-lg border border-sky-700/60 bg-sky-950/40 hover:bg-sky-900/50 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-sky-200"
+                      >
+                        {transcribing ? "Generating captions…" : "Generate / refresh captions"}
+                      </button>
+                    )}
+                  </div>
+                  {showTranscript ? (
+                    <div className="rounded-lg border border-slate-800 bg-slate-900/80 p-3 max-h-48 overflow-y-auto">
+                      <p className="text-[11px] text-slate-500 mb-1">
+                        Status: {transcriptStatus || "unknown"}
+                      </p>
+                      {transcriptText ? (
+                        <pre className="whitespace-pre-wrap text-xs text-slate-200 font-sans leading-relaxed">
+                          {transcriptText}
+                        </pre>
+                      ) : (
+                        <p className="text-xs text-amber-200/90">
+                          No closed captions yet. Generate captions (needs a call recording), then edit
+                          the email/WhatsApp drafts to match what was said.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+
+                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={trainSaraRayan}
+                      disabled={busy}
+                      onChange={(e) => void toggleTrainSaraRayan(e.target.checked)}
+                      className="mt-0.5 rounded border-slate-600 bg-slate-900 text-violet-500 focus:ring-violet-500"
+                    />
+                    <span className="text-xs text-slate-300 leading-snug">
+                      <span className="font-semibold text-violet-200">Train Sara &amp; Rayan</span>
+                      <span className="block text-slate-500 mt-0.5">
+                        Tick only good calls. Their recording + captions feed curated training (not
+                        every no-answer / bad call).
+                      </span>
+                    </span>
+                  </label>
+                </div>
+
                 <label className="block">
                   <span className="text-xs text-slate-400">Email subject</span>
                   <input
@@ -354,12 +569,11 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                 <EmailAttachmentsField
                   attachments={attachments}
                   onChange={setAttachments}
-                  disabled={Boolean(sendingChannel) || savingDraft}
+                  disabled={busy}
                   label="Email attachments"
                   hint="Optional — PDF, images, Excel, etc. Included when you send email."
                 />
 
-                {/* Target WhatsApp Recipient & Number Selector */}
                 <div className="rounded-xl border border-slate-700/80 bg-slate-950/60 p-3.5 space-y-2.5">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
@@ -415,7 +629,9 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                                   </span>
                                 )}
                               </div>
-                              <p className="text-slate-400 font-mono text-[11px] mt-0.5 truncate">{p.phone}</p>
+                              <p className="text-slate-400 font-mono text-[11px] mt-0.5 truncate">
+                                {p.phone}
+                              </p>
                             </div>
                           </label>
                         );
@@ -425,7 +641,8 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
 
                   {selectedPhoneObj?.is_landline && (
                     <p className="text-xs text-amber-300/90 rounded-lg bg-amber-950/40 border border-amber-800/50 px-2.5 py-1.5">
-                      ⚠️ <strong>Landline selected:</strong> WhatsApp cannot deliver messages to landlines. Please select a mobile number above or enter one below.
+                      ⚠️ <strong>Landline selected:</strong> WhatsApp cannot deliver messages to
+                      landlines. Please select a mobile number above or enter one below.
                     </p>
                   )}
 
@@ -483,9 +700,9 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                   }`}
                 >
                   <p className="text-xs text-slate-300">
-                    <strong className="text-emerald-300">WhatsApp Meta</strong> — searchable
-                    approved templates. Use a template for cold outreach; inside the 24h reply
-                    window free text may work without one.
+                    <strong className="text-emerald-300">WhatsApp Meta</strong> — searchable approved
+                    templates. Use a template for cold outreach; inside the 24h reply window free text
+                    may work without one.
                   </p>
                   <WhatsAppTemplatePicker
                     templates={waTemplates}
@@ -514,7 +731,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    disabled={Boolean(sendingChannel) || savingDraft}
+                    disabled={busy}
                     onClick={() => void saveDraftEdits()}
                     className="rounded-lg border border-slate-600 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 px-3 py-2 text-sm font-medium text-slate-100"
                   >
@@ -522,7 +739,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                   </button>
                   <button
                     type="button"
-                    disabled={Boolean(sendingChannel) || savingDraft}
+                    disabled={busy}
                     onClick={() => void sendDraft("email")}
                     className="rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-50 px-3 py-2 text-sm font-medium"
                   >
@@ -530,7 +747,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                   </button>
                   <button
                     type="button"
-                    disabled={Boolean(sendingChannel) || savingDraft}
+                    disabled={busy}
                     onClick={() => void sendDraft("whatsapp")}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-3 py-2 text-sm font-medium"
                   >
@@ -539,7 +756,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                   </button>
                   <button
                     type="button"
-                    disabled={Boolean(sendingChannel) || savingDraft}
+                    disabled={busy}
                     onClick={() => void sendDraft("whatsapp_personal")}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 px-3 py-2 text-sm font-medium"
                     title="Send post-call follow-up via your mobile WhatsApp number"
@@ -549,7 +766,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                   </button>
                   <button
                     type="button"
-                    disabled={Boolean(sendingChannel) || savingDraft}
+                    disabled={busy}
                     onClick={() => void sendDraft("all")}
                     className="rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-50 px-3 py-2 text-sm font-medium"
                   >

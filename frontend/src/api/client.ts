@@ -881,6 +881,7 @@ export interface CallHistoryItem {
   transcript?: string | null;
   transcript_status?: string | null;
   transcript_error?: string | null;
+  ai_training_selected?: boolean;
 }
 
 export interface CallHistoryListResponse {
@@ -990,6 +991,10 @@ export interface PersonalizedFollowupDraft {
   sent_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+  transcript?: string | null;
+  transcript_status?: string | null;
+  recording_available?: boolean;
+  ai_training_selected?: boolean;
 }
 
 export interface PersonalizedFollowupListResponse {
@@ -3043,6 +3048,25 @@ export const client = {
     request<PersonalizedFollowupDraft>(`/personalized-followups/${id}/regenerate`, {
       method: "POST",
     }),
+  translatePersonalizedFollowup: (
+    id: number,
+    data: {
+      language: string;
+      subject?: string;
+      email_body?: string;
+      whatsapp_body?: string;
+    },
+  ) =>
+    request<{
+      language: string;
+      language_label: string;
+      subject: string;
+      email_body: string;
+      whatsapp_body: string;
+    }>(`/personalized-followups/${id}/translate`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
   sendPersonalizedFollowup: (
     id: number,
     payload: PersonalizedFollowupSendPayload = { channels: "both" },
@@ -3341,6 +3365,11 @@ export const client = {
     request<CallHistoryItem>(`/calls/${interactionId}/notes`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    }),
+  setCallTrainingFlag: (interactionId: number, selected: boolean) =>
+    request<CallHistoryItem>(`/calls/${interactionId}/training-flag`, {
+      method: "PATCH",
+      body: JSON.stringify({ selected }),
     }),
   deleteCallLog: (interactionId: number) =>
     request<void>(`/calls/${interactionId}`, { method: "DELETE" }),

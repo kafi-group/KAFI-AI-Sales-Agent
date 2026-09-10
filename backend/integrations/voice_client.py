@@ -114,6 +114,23 @@ LANGUAGE_CONFIGS: dict[str, dict[str, str]] = {
         "greeting": "您好，请问是 {c_name} 先生/女士吗？",
         "instruction": "Conduct this entire conversation fluently and naturally in Mandarin Chinese (中文).",
     },
+    "ja": {
+        "name": "Japanese",
+        "voice_female": "ja-JP-NanamiNeural",
+        "voice_male": "ja-JP-KeitaNeural",
+        "greeting": "こんにちは、{c_name}様でしょうか？",
+        "instruction": "Conduct this entire conversation fluently, politely, and naturally in Japanese (日本語).",
+    },
+    "fil": {
+        "name": "Filipino",
+        "voice_female": "fil-PH-BlessicaNeural",
+        "voice_male": "fil-PH-AngeloNeural",
+        "greeting": "Hello po, kausap ko ba si {c_name}?",
+        "instruction": (
+            "Conduct this entire conversation fluently, politely, and naturally in Filipino "
+            "(Tagalog), suitable for Philippines B2B callers."
+        ),
+    },
 }
 
 

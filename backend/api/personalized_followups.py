@@ -21,6 +21,13 @@ class PersonalizedFollowupUpdate(BaseModel):
     whatsapp_body: Optional[str] = None
 
 
+class PersonalizedFollowupTranslate(BaseModel):
+    language: str = Field(..., min_length=2, max_length=16)
+    subject: Optional[str] = None
+    email_body: Optional[str] = None
+    whatsapp_body: Optional[str] = None
+
+
 class PersonalizedFollowupSend(BaseModel):
     """Send one or both channels. Use template_* when outside the 24h WA window."""
 
@@ -61,6 +68,15 @@ def list_personalized_followups(
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     return pf_module.list_drafts(db, viewer=user, status=status, limit=limit)
+
+
+@router.get("/languages")
+def list_followup_languages(
+    _user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    from modules.followup_languages import list_followup_languages as _list
+
+    return {"languages": _list()}
 
 
 @router.get("/by-interaction/{interaction_id}")
@@ -119,6 +135,30 @@ def update_personalized_followup(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return pf_module.draft_to_dict(db, draft)
+
+
+@router.post("/{draft_id}/translate")
+def translate_personalized_followup(
+    draft_id: int,
+    payload: PersonalizedFollowupTranslate,
+    db: Session = Depends(get_db),
+    _user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Translate draft subject/bodies into a local language (does not auto-save)."""
+    draft = db.get(PersonalizedFollowupDraft, draft_id)
+    if not draft:
+        raise HTTPException(404, "Personalized draft not found")
+    result = pf_module.translate_draft_content(
+        language=payload.language,
+        subject=payload.subject if payload.subject is not None else (draft.subject or ""),
+        email_body=payload.email_body
+        if payload.email_body is not None
+        else (draft.email_body or ""),
+        whatsapp_body=payload.whatsapp_body
+        if payload.whatsapp_body is not None
+        else (draft.whatsapp_body or ""),
+    )
+    return result
 
 
 @router.post("/{draft_id}/regenerate")

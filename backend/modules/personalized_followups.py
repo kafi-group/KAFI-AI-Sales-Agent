@@ -475,6 +475,8 @@ def get_available_phones_for_draft(db: Session, draft: PersonalizedFollowupDraft
 
 
 def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, Any]:
+    from modules.call_media import get_call_media, public_call_media
+
     buyer = db.get(Buyer, draft.buyer_id)
     contact = db.get(Contact, draft.contact_id) if draft.contact_id else None
     interaction = db.get(Interaction, draft.interaction_id)
@@ -493,6 +495,8 @@ def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, An
         dialed = next((p["phone"] for p in available_phones if p["is_dialed"]), None)
         first_mobile = next((p["phone"] for p in available_phones if not p["is_landline"]), None)
         selected_phone = mobile_dialed or dialed or first_mobile or available_phones[0]["phone"]
+
+    media = public_call_media(get_call_media(interaction), interaction_id=draft.interaction_id) if interaction else {}
 
     return {
         "id": draft.id,
@@ -525,6 +529,12 @@ def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, An
         "sent_at": draft.sent_at.isoformat() if draft.sent_at else None,
         "created_at": draft.created_at.isoformat() if draft.created_at else None,
         "updated_at": draft.updated_at.isoformat() if draft.updated_at else None,
+        "transcript": transcript or media.get("transcript"),
+        "transcript_status": media.get("transcript_status"),
+        "recording_available": bool(media.get("recording_available")),
+        "ai_training_selected": bool(
+            getattr(interaction, "ai_training_selected", False) if interaction else False
+        ),
     }
 
 
@@ -786,6 +796,78 @@ def update_draft(
     db.commit()
     db.refresh(draft)
     return draft
+
+
+def translate_draft_content(
+    *,
+    language: str,
+    subject: str,
+    email_body: str,
+    whatsapp_body: str,
+) -> dict[str, str]:
+    """Translate follow-up subject/bodies into the recipient's local language.
+
+    Returns translated fields only (caller decides whether to persist).
+    """
+    from modules.followup_languages import resolve_followup_language
+    from modules.llm_client import llm_client
+
+    lang = resolve_followup_language(language)
+    code = lang["code"]
+    if code == "en":
+        return {
+            "language": "en",
+            "language_label": lang["label"],
+            "subject": (subject or "").strip(),
+            "email_body": (email_body or "").strip(),
+            "whatsapp_body": (whatsapp_body or "").strip()
+            or derive_whatsapp_from_email((email_body or "").strip()),
+        }
+
+    native = lang["native"]
+    prompt = f"""Translate this B2B sales follow-up into {native} for an importer/buyer.
+
+Rules:
+- Keep the same meaning, tone, and business intent (Kafi Commodities food export follow-up).
+- Keep company names, person names, product names, SKUs, Incoterms, and email addresses unchanged when they are proper nouns / codes.
+- Subject should stay concise.
+- Email and WhatsApp should both be fully in {native} (natural business writing for that language).
+- WhatsApp may be slightly shorter than email but must match the same points.
+- Return JSON only with keys: subject, email_body, whatsapp_body.
+
+Subject:
+{(subject or "").strip()}
+
+Email:
+{(email_body or "").strip()}
+
+WhatsApp:
+{(whatsapp_body or email_body or "").strip()}
+"""
+    try:
+        data = llm_client.generate_json(
+            prompt,
+            system=(
+                f"You are a professional B2B translator. Output valid JSON only. "
+                f"Target language: {native}."
+            ),
+        )
+    except Exception:
+        # Offline / no Gemini — leave English so the rep can still edit/send.
+        data = {}
+
+    out_subject = str(data.get("subject") or subject or "").strip()[:500]
+    out_email = str(data.get("email_body") or email_body or "").strip()
+    out_wa = str(data.get("whatsapp_body") or "").strip()
+    if not out_wa:
+        out_wa = derive_whatsapp_from_email(out_email)
+    return {
+        "language": code,
+        "language_label": lang["label"],
+        "subject": out_subject,
+        "email_body": out_email,
+        "whatsapp_body": out_wa,
+    }
 
 
 def dismiss_draft(db: Session, draft_id: int) -> PersonalizedFollowupDraft:

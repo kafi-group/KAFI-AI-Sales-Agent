@@ -572,6 +572,8 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                 <option value="de">🇩🇪 German (Deutsch)</option>
                 <option value="ru">🇷🇺 Russian (Русский)</option>
                 <option value="zh">🇨🇳 Chinese (中文)</option>
+                <option value="ja">🇯🇵 Japanese (日本語)</option>
+                <option value="fil">🇵🇭 Filipino / Tagalog</option>
               </select>
             </label>
             <label className="text-sm text-slate-400 flex-1 min-w-[160px]">
@@ -677,7 +679,9 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
               </span>
             </h3>
             <p className="text-xs text-slate-400 mt-1">
-              Sara & Rayan analyze past sales call logs, transcripts, and objections to continuously improve their sales techniques.
+              Prefer calls ticked <span className="text-violet-300">Train Sara &amp; Rayan</span> on the
+              post-call draft (recording + captions). If none are marked yet, Auto-Train falls back to
+              recent calls.
             </p>
           </div>
 

@@ -308,6 +308,7 @@ def call_interaction_to_dict(db: Session, interaction: Interaction) -> dict:
         "content": interaction.content,
         "status": interaction.status.value,
         "created_at": interaction.created_at,
+        "ai_training_selected": bool(getattr(interaction, "ai_training_selected", False)),
         **parsed,
         **media,
     }
@@ -862,6 +863,22 @@ def update_call_followup(
             call_outcome=new_outcome,
         )
 
+    return call_interaction_to_dict(db, interaction)
+
+
+def set_ai_training_selected(
+    db: Session,
+    *,
+    interaction_id: int,
+    selected: bool,
+) -> dict:
+    """Flag a call for Sara & Rayan curated training (opt-in)."""
+    interaction = db.get(Interaction, interaction_id)
+    if not interaction or interaction.channel != Channel.phone:
+        raise ValueError("Call not found")
+    interaction.ai_training_selected = bool(selected)
+    db.commit()
+    db.refresh(interaction)
     return call_interaction_to_dict(db, interaction)
 
 

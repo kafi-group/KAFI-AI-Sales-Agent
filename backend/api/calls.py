@@ -19,7 +19,7 @@ from api.schemas import (
     TwilioBalanceRead,
     VoiceTokenRead,
 )
-from db.models import AppUser, AppUserRole, Contact
+from db.models import AppUser, AppUserRole, Contact, Interaction
 from db.session import SessionLocal
 from integrations.voice_client import voice_client
 from modules import calls as calls_module
@@ -480,6 +480,34 @@ def update_call_notes(
         if draft and draft.status in {"awaiting_transcript", "failed", "generating"}:
             background_tasks.add_task(_generate_personalized_followup, draft.id)
 
+    return CallHistoryItem(**result)
+
+
+class CallTrainingFlagRequest(BaseModel):
+    selected: bool = True
+
+
+@router.patch("/calls/{interaction_id}/training-flag", response_model=CallHistoryItem)
+def set_call_training_flag(
+    interaction_id: int,
+    payload: CallTrainingFlagRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """Mark/unmark a call for Sara & Rayan curated training."""
+    interaction = db.get(Interaction, interaction_id)
+    if interaction and interaction.contact_id:
+        contact = db.get(Contact, interaction.contact_id)
+        if contact and contact.buyer_id:
+            _require_lead_access(db, user, contact.buyer_id)
+    try:
+        result = calls_module.set_ai_training_selected(
+            db,
+            interaction_id=interaction_id,
+            selected=bool(payload.selected),
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
     return CallHistoryItem(**result)
 
 
