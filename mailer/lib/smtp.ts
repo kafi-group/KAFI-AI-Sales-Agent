@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { normalizeOutboundTextColor } from "./emailTextColor";
 
 const USER_ENV: Record<string, { email: string; password: string; display?: string }> = {
   admin: {
@@ -113,8 +114,8 @@ function htmlToPlain(body: string): string {
 }
 
 function toHtmlBody(body: string): string {
-  if (looksLikeHtml(body)) return body;
-  return (body || "").replace(/\n/g, "<br/>");
+  const html = looksLikeHtml(body) ? body : (body || "").replace(/\n/g, "<br/>");
+  return normalizeOutboundTextColor(html);
 }
 
 export function smtpBodyHasContent(body: string): boolean {

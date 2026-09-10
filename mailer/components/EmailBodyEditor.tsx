@@ -7,6 +7,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { normalizeEditorTextColor } from "../lib/emailTextColor";
 
 export type EmailBodyEditorProps = {
   value: string;
@@ -24,6 +25,7 @@ const FONT_SIZES = [
 ] as const;
 
 const COLORS = [
+  { label: "White", value: "#ffffff" },
   { label: "Black", value: "#111827" },
   { label: "Gray", value: "#4b5563" },
   { label: "Red", value: "#b91c1c" },
@@ -114,7 +116,7 @@ export function EmailBodyEditor({
   useEffect(() => {
     const el = editorRef.current;
     if (!el) return;
-    const next = plainTextToEditorHtml(value);
+    const next = normalizeEditorTextColor(plainTextToEditorHtml(value));
     if (next === lastHtml.current) return;
     if (el.innerHTML === next) {
       lastHtml.current = next;

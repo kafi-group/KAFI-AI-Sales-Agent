@@ -574,7 +574,7 @@ select.template-select {
   outline: none;
   font-size: 0.9rem;
   line-height: 1.5;
-  color: var(--text);
+  color: #ffffff;
   min-height: 160px;
 }
 
