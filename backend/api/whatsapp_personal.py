@@ -45,6 +45,8 @@ class WhatsAppPersonalInboundRequest(BaseModel):
     message: str
     provider_message_id: str | None = None
     profile_name: str | None = None
+    # True when the linked phone (or dashboard send echo) authored the message.
+    from_me: bool = False
 
 
 class WhatsAppPersonalReplyRequest(BaseModel):
@@ -512,7 +514,7 @@ def whatsapp_personal_inbound(
     request: Request,
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
-    """Inbound webhook received from Baileys WhatsApp Mobile bridge."""
+    """Webhook from Baileys — customer inbound OR phone-sent outbound (from_me)."""
     secret = (settings.whatsapp_bridge_secret or "").strip()
     if secret:
         provided = request.headers.get("x-bridge-secret")
@@ -527,6 +529,36 @@ def whatsapp_personal_inbound(
     if pmid and not pmid.lower().startswith("baileys"):
         pmid = f"baileys_{pmid}"
 
+    personal_uid = _user_id_from_bridge_session(db, body.session_id)
+
+    if body.from_me:
+        # Message sent from the linked phone (or dashboard echo) — store as outbound.
+        if pmid:
+            existing = (
+                db.query(Interaction)
+                .filter(Interaction.provider_message_id == pmid)
+                .first()
+            )
+            if existing:
+                return {"status": "ok", "deduped": "true"}
+        contact = comms._ensure_whatsapp_contact(
+            db, wa_id=wa_id, profile_name=body.profile_name
+        )
+        outbound = Interaction(
+            contact_id=contact.id,
+            channel=Channel.whatsapp,
+            direction=Direction.outbound,
+            content=body.message,
+            status=InteractionStatus.sent,
+            handled_by=HandledBy.human,
+            provider_message_id=pmid or "baileys_mobile",
+            personal_whatsapp_user_id=personal_uid,
+            wa_status="sent",
+        )
+        db.add(outbound)
+        db.commit()
+        return {"status": "ok", "direction": "outbound"}
+
     comms.record_inbound_whatsapp_message(
         db,
         wa_id=wa_id,
@@ -534,7 +566,7 @@ def whatsapp_personal_inbound(
         provider_message_id=pmid,
         profile_name=body.profile_name,
         create_reply_draft=False,
-        personal_whatsapp_user_id=_user_id_from_bridge_session(db, body.session_id),
+        personal_whatsapp_user_id=personal_uid,
     )
-    return {"status": "ok"}
+    return {"status": "ok", "direction": "inbound"}
 

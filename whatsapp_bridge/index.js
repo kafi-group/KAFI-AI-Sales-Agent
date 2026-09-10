@@ -150,7 +150,8 @@ async function forwardInboundToBackend(sessionId, payload) {
       const errText = await res.text();
       console.warn(`[Session ${sessionId}] Webhook response not OK (${res.status}): ${errText}`);
     } else {
-      console.log(`[Session ${sessionId}] Inbound message forwarded to backend successfully`);
+      const kind = payload.from_me ? "Phone/outbound" : "Inbound";
+      console.log(`[Session ${sessionId}] ${kind} message forwarded to backend successfully`);
     }
   } catch (err) {
     console.error(`[Session ${sessionId}] Failed to forward inbound message to backend:`, err.message);
@@ -352,11 +353,18 @@ async function initBaileysSession(sessionId, forceNew = false) {
 
     sock.ev.on("messages.upsert", async (m) => {
       try {
-        if (m.type !== "notify") return;
+        // notify = live events; append = sync/history (needed for phone-sent fromMe echoes)
+        if (m.type !== "notify" && m.type !== "append") return;
         for (const msg of m.messages) {
-          if (msg.key.fromMe) continue;
+          const fromMe = Boolean(msg.key?.fromMe);
+          // append history floods on reconnect — only keep phone-sent (fromMe) echoes
+          if (m.type === "append" && !fromMe) continue;
           const remoteJid = msg.key.remoteJid || "";
           if (!remoteJid || remoteJid.includes("@broadcast") || remoteJid.includes("@g.us")) {
+            continue;
+          }
+          // Status / newsletter JIDs
+          if (remoteJid === "status@broadcast" || remoteJid.includes("@newsletter")) {
             continue;
           }
 
@@ -373,7 +381,8 @@ async function initBaileysSession(sessionId, forceNew = false) {
           const pushName = msg.pushName || "";
 
           console.log(
-            `[Session ${safeSessionId}] Incoming WhatsApp message from ${rawPhone}: "${text.trim().slice(0, 50)}"`
+            `[Session ${safeSessionId}] ${fromMe ? "fromMe" : "Incoming"} WhatsApp message ` +
+              `${fromMe ? "to" : "from"} ${rawPhone}: "${text.trim().slice(0, 50)}"`
           );
 
           await forwardInboundToBackend(safeSessionId, {
@@ -383,6 +392,7 @@ async function initBaileysSession(sessionId, forceNew = false) {
             message: text.trim(),
             provider_message_id: msg.key.id,
             profile_name: pushName,
+            from_me: fromMe,
           });
         }
       } catch (err) {
