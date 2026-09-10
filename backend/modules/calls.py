@@ -295,6 +295,12 @@ def call_interaction_to_dict(db: Session, interaction: Interaction) -> dict:
     contact_nm = (contact.full_name if contact else None) or parsed.get("contact_name")
     contact_ph = (contact.phone if contact else None) or parsed.get("lead_phone")
 
+    training_selected = False
+    try:
+        training_selected = bool(getattr(interaction, "ai_training_selected", False))
+    except Exception:
+        training_selected = False
+
     return {
         "id": interaction.id,
         "contact_id": interaction.contact_id,
@@ -308,7 +314,7 @@ def call_interaction_to_dict(db: Session, interaction: Interaction) -> dict:
         "content": interaction.content,
         "status": interaction.status.value,
         "created_at": interaction.created_at,
-        "ai_training_selected": bool(getattr(interaction, "ai_training_selected", False)),
+        "ai_training_selected": training_selected,
         **parsed,
         **media,
     }
@@ -873,12 +879,30 @@ def set_ai_training_selected(
     selected: bool,
 ) -> dict:
     """Flag a call for Sara & Rayan curated training (opt-in)."""
+    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy.exc import ProgrammingError
+
+    from db.session import engine
+
     interaction = db.get(Interaction, interaction_id)
     if not interaction or interaction.channel != Channel.phone:
         raise ValueError("Call not found")
-    interaction.ai_training_selected = bool(selected)
-    db.commit()
-    db.refresh(interaction)
+
+    cols = {c["name"] for c in sa_inspect(engine).get_columns("interactions")}
+    if "ai_training_selected" not in cols:
+        raise ValueError(
+            "Training flag is not available yet (database migrating). Retry in a minute."
+        )
+
+    try:
+        interaction.ai_training_selected = bool(selected)
+        db.commit()
+        db.refresh(interaction)
+    except ProgrammingError as exc:
+        db.rollback()
+        raise ValueError(
+            "Training flag is not available yet (database migrating). Retry in a minute."
+        ) from exc
     return call_interaction_to_dict(db, interaction)
 
 

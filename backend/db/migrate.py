@@ -270,6 +270,24 @@ def _ensure_target_workspace_tables() -> None:
         db.close()
 
 
+def _ensure_ai_training_selected_column() -> None:
+    """Idempotent: add interactions.ai_training_selected if Alembic lagged behind deploy."""
+    inspector = inspect(engine)
+    if "interactions" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("interactions")}
+    if "ai_training_selected" in existing:
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE interactions "
+                "ADD COLUMN IF NOT EXISTS ai_training_selected BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+    print("Applied missing interactions.ai_training_selected column.", flush=True)
+
+
 def run_migrations() -> None:
     alembic_cfg = _alembic_config()
     script = ScriptDirectory.from_config(alembic_cfg)
@@ -283,6 +301,7 @@ def run_migrations() -> None:
     _stamp_head_if_interested_columns_already_applied(alembic_cfg, script)
     command.upgrade(alembic_cfg, "head")
     _ensure_buyer_social_columns()
+    _ensure_ai_training_selected_column()
     _ensure_horeka_table()
     _ensure_custom_lead_modules_table()
     _ensure_target_workspace_tables()
