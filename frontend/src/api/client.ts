@@ -3553,6 +3553,7 @@ export const client = {
     request<WhatsAppTestSendResult>("/whatsapp/test-send", {
       method: "POST",
       body: JSON.stringify(data),
+      timeoutMs: 60_000,
     }),
   listWhatsAppTemplates: (approvedOnly = false) =>
     request<WhatsAppTemplate[]>(
@@ -3590,6 +3591,8 @@ export const client = {
     template_variables?: string[];
     require_opt_in?: boolean;
     send?: boolean;
+    /** Exact WhatsApp number for single-lead compose sends. */
+    to_phone?: string;
   }) =>
     request<WhatsAppCampaignDraftResponse>("/whatsapp/campaign-drafts", {
       method: "POST",
@@ -3599,7 +3602,9 @@ export const client = {
         template_variables: data.template_variables ?? [],
         require_opt_in: data.require_opt_in ?? true,
         send: data.send ?? true,
+        to_phone: data.to_phone || undefined,
       }),
+      timeoutMs: 90_000,
     }),
   bulkUpdateWhatsAppOptIn: (contactIds: number[], optIn: boolean) =>
     request<{ updated_count: number }>("/whatsapp/contacts/bulk-opt-in", {

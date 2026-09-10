@@ -31,7 +31,7 @@ from api.schemas import (
     WhatsAppTestSendResponse,
 )
 from config import settings
-from db.models import AppUser, AppUserRole, InteractionStatus
+from db.models import AppUser, AppUserRole, Contact, InteractionStatus
 from integrations.voice_client import normalize_e164
 from integrations.whatsapp_client import whatsapp_client
 from modules.audit import log_action
@@ -331,6 +331,7 @@ def create_whatsapp_campaign_drafts(
             # Bulk WhatsApp always sends immediately — no approval queue.
             send=True,
             user_id=user.id,
+            to_phone=payload.to_phone,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

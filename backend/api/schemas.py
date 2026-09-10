@@ -1675,6 +1675,8 @@ class WhatsAppCampaignDraftRequest(BaseModel):
     template_variables: list[str] = Field(default_factory=list)
     require_opt_in: bool = True
     send: bool = True
+    # When sending to one lead from the compose modal, use this exact WhatsApp number.
+    to_phone: Optional[str] = None
 
 
 class WhatsAppCampaignDraftResultItem(BaseModel):

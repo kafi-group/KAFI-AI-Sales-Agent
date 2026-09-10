@@ -194,17 +194,38 @@ class WhatsAppClient:
         }
 
     def verify_api_access(self) -> dict[str, Any]:
-        """Lightweight check that the Meta token and WABA ID are valid."""
-        result = self.list_templates()
-        if result.get("status") == "ok":
-            count = len(result.get("templates") or [])
+        """Lightweight check that the Meta token and phone number id are valid.
+
+        Avoid listing every message template here — that Meta call is slow and can
+        starve Railway workers while a send is in flight (causing gateway 502s).
+        """
+        if not self.is_configured:
             return {
-                "ok": True,
-                "message": f"Connected to Meta ({count} template(s) visible).",
+                "ok": False,
+                "message": "WhatsApp Cloud API is not configured.",
             }
+        url = (
+            f"{self._base_url()}/{settings.whatsapp_phone_number_id}"
+            "?fields=display_phone_number,verified_name,quality_rating"
+        )
+        try:
+            response = httpx.get(url, headers=self._headers(), timeout=12.0)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"Could not reach Meta WhatsApp API: {exc}"}
+        try:
+            body = response.json()
+        except Exception:  # noqa: BLE001
+            body = {}
+        if response.status_code != 200:
+            detail = ((body.get("error") or {}).get("message")) or response.text
+            return {
+                "ok": False,
+                "message": _friendly_whatsapp_api_error(response.status_code, detail, body),
+            }
+        display = body.get("display_phone_number") or body.get("verified_name") or "connected"
         return {
-            "ok": False,
-            "message": result.get("message") or "Could not reach Meta WhatsApp API.",
+            "ok": True,
+            "message": f"Connected to Meta ({display}).",
         }
 
     def send_approved(

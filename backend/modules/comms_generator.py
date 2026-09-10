@@ -839,6 +839,7 @@ class CommsGenerator:
         require_opt_in: bool = False,
         send: bool = True,
         user_id: int | None = None,
+        to_phone: str | None = None,
     ) -> dict:
         import time
 
@@ -945,6 +946,9 @@ class CommsGenerator:
                     "send_message": None,
                 }
                 if send:
+                    force_phone = None
+                    if to_phone and len(buyer_ids) == 1:
+                        force_phone = to_phone.strip() or None
                     _approved, send_result = self.approve_draft(
                         db,
                         draft.id,
@@ -955,6 +959,7 @@ class CommsGenerator:
                         template_language=template.language or "en_US",
                         template_variables=buyer_variables,
                         user_id=user_id,
+                        force_phone=force_phone,
                     )
                     status = (send_result or {}).get("status")
                     item["sent"] = status == "sent"
@@ -1040,6 +1045,7 @@ class CommsGenerator:
         template_variables: list[str] | None = None,
         mailbox_user=None,
         user_id: int | None = None,
+        force_phone: str | None = None,
     ) -> tuple[Interaction, dict | None]:
         draft = db.get(Interaction, interaction_id)
         if not draft:
@@ -1072,6 +1078,7 @@ class CommsGenerator:
                 template_language=template_language,
                 template_variables=template_variables,
                 user_id=user_id,
+                force_phone=force_phone,
             )
 
         return draft, send_result
@@ -1147,13 +1154,22 @@ class CommsGenerator:
         template_language: str,
         template_variables: list[str] | None,
         user_id: int | None = None,
+        force_phone: str | None = None,
     ) -> dict:
         from modules import email_activity
 
         contact = db.get(Contact, draft.contact_id)
         buyer = db.get(Buyer, contact.buyer_id) if contact else None
         phone = None
-        if contact:
+        if force_phone and str(force_phone).strip():
+            from integrations.voice_client import normalize_e164
+
+            phone = normalize_e164(str(force_phone).strip())
+            if not phone:
+                digits = "".join(ch for ch in str(force_phone) if ch.isdigit())
+                if digits:
+                    phone = f"+{digits}"
+        if not phone and contact:
             from integrations.voice_client import normalize_e164
 
             # Prefer Meta wa_id — contact.phone is often a landline / display number

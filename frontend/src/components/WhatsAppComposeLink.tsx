@@ -131,6 +131,20 @@ export function LeadWhatsAppComposeModal({
       onError("Select an approved template first");
       return;
     }
+    const targetPhone = (phone || "").trim();
+    if (!targetPhone) {
+      onError("Contact has no phone number.");
+      return;
+    }
+    if ((selectedTemplate?.variable_count ?? 0) > 0) {
+      const missing = variables.findIndex((v) => !(v || "").trim());
+      if (missing >= 0) {
+        onError(
+          `Fill template variable {{${missing + 1}}} before sending (Meta rejects empty variables).`,
+        );
+        return;
+      }
+    }
     setSending(true);
     try {
       const result: WhatsAppCampaignDraftResponse = await client.createWhatsAppCampaignDrafts({
@@ -138,18 +152,29 @@ export function LeadWhatsAppComposeModal({
         buyer_ids: [row.id],
         template_variables: variables,
         require_opt_in: requireOptIn,
+        to_phone: targetPhone,
       });
       if ((result.sent_count ?? 0) > 0) {
-        onSent(`WhatsApp template sent to ${row.company_name}. Open WhatsApp inbox to see the thread.`);
+        onSent(
+          `WhatsApp template sent to ${row.company_name} (${targetPhone}). Open WhatsApp inbox to see the thread.`,
+        );
+        onClose();
         return;
       }
       const reason =
         result.skipped[0]?.reason ||
         result.created[0]?.send_message ||
-        "Could not send WhatsApp template";
+        "Could not send WhatsApp template — Meta did not accept the message.";
       onError(reason);
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to send WhatsApp template");
+      const raw = e instanceof Error ? e.message : "Failed to send WhatsApp template";
+      if (/502|failed to respond|application error/i.test(raw)) {
+        onError(
+          "Server timed out while talking to Meta (502). Wait a few seconds and try Send again — if it keeps failing, check Railway logs / WhatsApp token.",
+        );
+      } else {
+        onError(raw);
+      }
     } finally {
       setSending(false);
     }
