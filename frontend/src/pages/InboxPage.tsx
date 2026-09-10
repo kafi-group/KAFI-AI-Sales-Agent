@@ -403,7 +403,16 @@ export function InboxPage({
   const onFolderCountsChangeRef = useRef(onFolderCountsChange);
   const onMailExtrasChangeRef = useRef(onMailExtrasChange);
   const mailboxUserIdRef = useRef<number | null>(initialMailboxUserId ?? null);
-  mailboxUserIdRef.current = initialMailboxUserId ?? null;
+  /** Sticky for urgent Open & Reply — parent clears initialMailboxUserId immediately. */
+  const stickyMailboxUserIdRef = useRef<number | null>(null);
+  if (initialMailboxUserId != null) {
+    stickyMailboxUserIdRef.current = initialMailboxUserId;
+    mailboxUserIdRef.current = initialMailboxUserId;
+  } else if (stickyMailboxUserIdRef.current == null) {
+    mailboxUserIdRef.current = null;
+  } else {
+    mailboxUserIdRef.current = stickyMailboxUserIdRef.current;
+  }
   onErrorRef.current = onError;
   onUnreadChangeRef.current = onUnreadChange;
   onFolderCountsChangeRef.current = onFolderCountsChange;
@@ -462,6 +471,9 @@ export function InboxPage({
     setMessageLabels([]);
     setLabelMenuOpen(false);
     analyzeGenerationRef.current += 1;
+    pendingAutoDraftRef.current = false;
+    stickyMailboxUserIdRef.current = null;
+    mailboxUserIdRef.current = null;
   }, []);
 
   const applyAiDraftToReplyForm = useCallback((analysis: InboxAnalyzeResponse) => {
@@ -476,23 +488,18 @@ export function InboxPage({
     setNotice(null);
   }, []);
 
-  const runThreadAnalyze = useCallback(async (threadId: string) => {
+  const runThreadAnalyze = useCallback(async (threadId: string, mailboxUserId?: number | null) => {
     const generation = ++analyzeGenerationRef.current;
+    const mailboxId =
+      mailboxUserId !== undefined ? mailboxUserId : mailboxUserIdRef.current;
     setAiLoading(true);
     setAiAnalysis(null);
     try {
-      const result = await client.analyzeInboxThread(
-        threadId,
-        {},
-        mailboxUserIdRef.current,
-      );
+      const result = await client.analyzeInboxThread(threadId, {}, mailboxId);
       if (generation !== analyzeGenerationRef.current) return;
       setAiAnalysis(result);
-      if (
-        pendingAutoDraftRef.current &&
-        result.draft_reply?.trim() &&
-        !replyBodyRef.current.trim()
-      ) {
+      // Same path as clicking "AI draft" / "Edit & send".
+      if (pendingAutoDraftRef.current && result.draft_reply?.trim()) {
         pendingAutoDraftRef.current = false;
         applyAiDraftToReplyForm(result);
       }
@@ -715,20 +722,37 @@ export function InboxPage({
   }, [status?.configured, loadList]);
 
   const openThread = useCallback(
-    async (threadId: string) => {
+    async (
+      threadId: string,
+      opts?: { mailboxUserId?: number | null; autoDraft?: boolean },
+    ) => {
+      const mailboxId =
+        opts?.mailboxUserId !== undefined
+          ? opts.mailboxUserId
+          : opts?.autoDraft
+            ? stickyMailboxUserIdRef.current
+            : null;
+      if (opts?.autoDraft) {
+        if (mailboxId != null) stickyMailboxUserIdRef.current = mailboxId;
+      } else if (opts?.mailboxUserId === undefined) {
+        // Normal list click — stay on the logged-in mailbox.
+        stickyMailboxUserIdRef.current = null;
+      }
+      mailboxUserIdRef.current = stickyMailboxUserIdRef.current;
+
       setSelectedThreadId(threadId);
       setSelectedMessageKey(null);
       setMessageDetail(null);
       setThread(null);
       setDetailLoading(true);
       setNotice(null);
-      setShowReplyForm(false);
+      setShowReplyForm(Boolean(opts?.autoDraft));
       setReplyBody("");
       setReplyCc("");
       setReplyBcc("");
       setAiAnalysis(null);
       try {
-        const detail = await client.getInboxThread(threadId, mailboxUserIdRef.current);
+        const detail = await client.getInboxThread(threadId, mailboxId);
         setThread(detail);
         setReplySubjectLine(replySubject(detail.subject));
 
@@ -745,7 +769,6 @@ export function InboxPage({
         setThreads((prev) =>
           prev.map((t) => (t.thread_id === threadId ? { ...t, unread_count: 0 } : t)),
         );
-        // Don't block the open conversation on badge refresh / AI analyze.
         void client
           .getInboxStatus()
           .then((s) => {
@@ -755,7 +778,7 @@ export function InboxPage({
           .catch(() => {
             /* ignore */
           });
-        void runThreadAnalyze(threadId);
+        void runThreadAnalyze(threadId, mailboxId);
         const latestForLabels =
           latestInbound || detail.messages[detail.messages.length - 1];
         if (latestForLabels) {
@@ -772,6 +795,7 @@ export function InboxPage({
           setMessageLabels([]);
         }
       } catch (e) {
+        pendingAutoDraftRef.current = false;
         onErrorRef.current(e instanceof Error ? e.message : "Failed to open conversation");
       } finally {
         setDetailLoading(false);
@@ -781,16 +805,16 @@ export function InboxPage({
   );
 
   useEffect(() => {
-    if (initialThreadId) {
-      if (autoOpenReply) pendingAutoDraftRef.current = true;
-      void openThread(initialThreadId).then(() => {
-        if (pendingAutoDraftRef.current) {
-          setShowReplyForm(true);
-        }
-      });
+    if (!initialThreadId) return;
+    const mailboxId = initialMailboxUserId ?? stickyMailboxUserIdRef.current;
+    if (autoOpenReply) pendingAutoDraftRef.current = true;
+    void openThread(initialThreadId, {
+      mailboxUserId: mailboxId,
+      autoDraft: Boolean(autoOpenReply),
+    }).then(() => {
       onThreadOpened?.();
-    }
-  }, [initialThreadId, autoOpenReply, onThreadOpened, openThread]);
+    });
+  }, [initialThreadId, autoOpenReply, initialMailboxUserId, onThreadOpened, openThread]);
 
   const openMessage = useCallback(
     async (message: InboxMessageSummary) => {
@@ -2139,6 +2163,11 @@ export function InboxPage({
                         {notice}
                       </div>
                     )}
+                    {aiLoading && !replyBody.trim() ? (
+                      <div className="p-2.5 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-200 text-sm">
+                        AI draft is reading this email and filling the reply…
+                      </div>
+                    ) : null}
                     <div className="flex items-center gap-2 text-sm">
                       <span className="w-14 shrink-0 text-slate-500">To</span>
                       <input
