@@ -386,14 +386,11 @@ def list_workspace_leads(
             )
         )
 
-    # Scoped by user if not admin
+    # Reps only see THEIR assigned leads (same pool as My Assigned Leads).
+    # Do not include unassigned / other reps' buyers — that leaked extra Sibco etc.
+    # Admin team view passes user_id=None and sees all buyers in target countries.
     if user_id is not None:
-        q = q.filter(
-            or_(
-                Buyer.assigned_to_user_id == user_id,
-                Buyer.assigned_to_user_id.is_(None),
-            )
-        )
+        q = q.filter(Buyer.assigned_to_user_id == user_id)
 
     buyers = q.all()
     buyer_ids = [b.id for b in buyers]
@@ -602,6 +599,11 @@ def update_workspace_lead_stage(
     buyer = db.get(Buyer, buyer_id)
     if not buyer:
         raise ValueError("Lead / Buyer not found")
+
+    # Non-admins may only update leads assigned to them (workspace = assigned pool).
+    role = user.role.value if hasattr(user.role, "value") else str(user.role)
+    if role != "admin" and buyer.assigned_to_user_id != user.id:
+        raise ValueError("This lead is not assigned to you")
 
     lc = _ensure_lead_lifecycle(db, buyer_id, user_id=user.id)
     old_stage = lc.stage

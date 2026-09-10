@@ -115,7 +115,11 @@ def get_workspace_leads(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
-    """Fetch outreach leads filtered by target countries and 4 funnel stages."""
+    """Fetch outreach leads filtered by target countries and 4 funnel stages.
+
+    Sales users always get their own assigned leads only (My Assigned Leads pool).
+    Admins default to team view; pass user_id to preview one rep's assigned pool.
+    """
     target_user = user_id if (user.role == AppUserRole.admin and user_id is not None) else user.id
     if user.role == AppUserRole.admin and user_id is None:
         target_user = None  # Admin team view
