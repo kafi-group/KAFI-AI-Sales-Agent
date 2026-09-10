@@ -16,8 +16,12 @@ from modules.comms_generator import get_comms
 from modules.countries import resolve_country_name
 
 _CALL_SID_RE = re.compile(r"(?:Call SID:|\(SID)\s*(\S+?)(?:\)|\.|$)")
-_LEAD_PHONE_RE = re.compile(r"(?:Outbound call(?:\s+initiated)?\s+to|to)\s+(\+\d+)")
+_LEAD_PHONE_RE = re.compile(
+    r"(?:Manual\s+)?Outbound call(?:\s+initiated)?\s+to\s+(\+\d+)",
+    re.IGNORECASE,
+)
 _DURATION_RE = re.compile(r"duration\s+(\d+)m\s+(\d+)s|duration\s+(\d+)s")
+_DIAL_TARGET_ATTACHMENT = "dial_target"
 _NOTES_MARKER = "\n\nNOTES:"
 _OUTCOME_MARKER = "\n\nOUTCOME:"
 _VALID_CALL_OUTCOMES = frozenset(
@@ -456,6 +460,7 @@ def _prepare_call_interaction(
         handled_by=HandledBy.human,
         status=InteractionStatus.sent,
         approved_by="dashboard",
+        attachments=[{"type": _DIAL_TARGET_ATTACHMENT, "phone": lead_phone}],
     )
     db.add(interaction)
     db.commit()
@@ -482,6 +487,28 @@ def _prepare_call_interaction(
         }
     )
     return payload
+
+
+def get_prepared_dial_phone(db: Session, interaction_id: int) -> str | None:
+    """Phone number prepared for a browser dial — source of truth for TwiML Dial."""
+    interaction = db.get(Interaction, interaction_id)
+    if not interaction:
+        return None
+    for item in interaction.attachments or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type") or "") != _DIAL_TARGET_ATTACHMENT:
+            continue
+        phone = normalize_e164(str(item.get("phone") or ""))
+        if phone:
+            return phone
+    parsed = parse_call_fields(interaction.content)
+    phone = normalize_e164(str(parsed.get("lead_phone") or ""))
+    if phone:
+        return phone
+    if match := _LEAD_PHONE_RE.search(interaction.content or ""):
+        return normalize_e164(match.group(1))
+    return None
 
 
 def _lead_phone_from_contact(contact: Contact, *, preferred: str | None = None) -> str:

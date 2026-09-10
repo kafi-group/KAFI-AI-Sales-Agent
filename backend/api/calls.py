@@ -709,6 +709,10 @@ async def twilio_client_dial(request: Request):
     """
     import logging
 
+    from db.session import SessionLocal
+    from integrations.voice_client import normalize_e164
+    from modules import calls as calls_module
+
     log = logging.getLogger("twilio.webhook")
     try:
         try:
@@ -725,32 +729,60 @@ async def twilio_client_dial(request: Request):
                 )
             raise
 
-        # Voice SDK custom params + common Twilio aliases.
-        lead_phone = (
-            params.get("To")
-            or params.get("to")
-            or params.get("Called")
-            or request.query_params.get("To")
-            or request.query_params.get("to")
-        )
         interaction_id = (
             params.get("interaction_id")
             or params.get("InteractionId")
             or request.query_params.get("interaction_id")
         )
-
-        if not lead_phone:
-            log.warning("client-dial missing To param keys=%s", sorted(params.keys()))
-            return _twiml_response(
-                voice_client.say_twiml("Missing lead number for this call.")
-            )
-
         iid = 0
         if interaction_id:
             try:
                 iid = int(str(interaction_id))
             except ValueError:
                 iid = 0
+
+        def _param_phone(*keys: str) -> str | None:
+            for key in keys:
+                raw = params.get(key) or request.query_params.get(key)
+                if not raw:
+                    continue
+                text = str(raw).strip()
+                # Skip Twilio reserved IDs / client identities mistaken for To.
+                if text.startswith(("AP", "PN", "CA", "MG", "SK", "client:")):
+                    continue
+                normalized = normalize_e164(text)
+                if normalized:
+                    return normalized
+            return None
+
+        # Prefer the phone prepared at dial time (interaction), then SDK params.
+        lead_phone: str | None = None
+        if iid:
+            db = SessionLocal()
+            try:
+                lead_phone = calls_module.get_prepared_dial_phone(db, iid)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("client-dial prepared phone lookup failed: %s", exc)
+            finally:
+                db.close()
+        if not lead_phone:
+            lead_phone = _param_phone(
+                "leadPhone",
+                "lead_phone",
+                "To",
+                "to",
+                "Called",
+            )
+
+        if not lead_phone:
+            log.warning(
+                "client-dial missing dial target iid=%s keys=%s",
+                iid,
+                sorted(params.keys()),
+            )
+            return _twiml_response(
+                voice_client.say_twiml("Missing lead number for this call.")
+            )
 
         xml = voice_client.client_dial_twiml(str(lead_phone), iid)
         log.info(
@@ -796,6 +828,7 @@ async def twilio_call_status(request: Request):
     )
     duration = str(form.get("DialCallDuration") or form.get("CallDuration") or "") or None
     call_sid = str(form.get("CallSid") or "") or None
+    dial_status = str(form.get("DialCallStatus") or "").lower()
 
     db = SessionLocal()
     try:
@@ -806,6 +839,15 @@ async def twilio_call_status(request: Request):
             call_duration=duration,
             call_sid=call_sid,
         )
+        # Helpful spoken error when PSTN dial never connected (trial / geo / invalid).
+        if dial_status == "failed":
+            return _twiml_response(
+                voice_client.say_twiml(
+                    "Could not connect this number. If Twilio is on a trial account, "
+                    "verify the destination number under Verified Caller IDs, or upgrade "
+                    "the account. Also enable the country under Voice Geographic Permissions."
+                )
+            )
         return _twiml_response("<Response><Hangup/></Response>")
     except SATimeoutError:
         logging.getLogger("twilio.webhook").warning(

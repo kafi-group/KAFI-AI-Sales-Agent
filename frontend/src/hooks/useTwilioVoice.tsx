@@ -66,10 +66,22 @@ function friendlyCallError(err: unknown): string {
   if (/13224|invalid phone number/i.test(raw)) {
     return "Invalid phone number format or the destination country is blocked in Twilio Voice Geographic Permissions.";
   }
+  if (/21215|21214|unverified|not.+verified|trial account/i.test(raw)) {
+    return (
+      "Twilio blocked this destination (trial / unverified number). " +
+      "Verify the number under Twilio → Phone Numbers → Verified Caller IDs, or upgrade the Twilio account."
+    );
+  }
+  if (/21408|permission.+geograph|geo.?permission/i.test(raw)) {
+    return (
+      "This country is blocked in Twilio Voice Geographic Permissions. " +
+      "Enable it in Twilio Console → Voice → Settings → Geographic Permissions."
+    );
+  }
   if (/31005|gateway in HANGUP|application error/i.test(raw)) {
     return (
-      "Call ended before connect (Twilio 31005). Usually the number/country is blocked in Twilio Geo Permissions, " +
-      "or the call service is warming up. Please try again."
+      "Call ended before connect (Twilio 31005). Check Voice Geographic Permissions for this country, " +
+      "or if the account is Trial — verify the destination number (or upgrade). Then try again."
     );
   }
   if (/31402|AcquisitionFailed|getting the media failed|microphone|NotAllowedError|PermissionDeniedError/i.test(raw)) {
@@ -258,6 +270,7 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
       const connectPromise = activeDevice.connect({
         params: {
           To: prep.lead_phone!,
+          leadPhone: prep.lead_phone!,
           interaction_id: String(prep.id),
         },
       });
