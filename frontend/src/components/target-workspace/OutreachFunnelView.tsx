@@ -42,7 +42,9 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
   const [reviewOptions, setReviewOptions] = useState<WorkspaceReviewOptionItem[]>([]);
   const [newCountryInput, setNewCountryInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCountryFilter, setSelectedCountryFilter] = useState<string>("all");
+  const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
+  const [countryMenuOpen, setCountryMenuOpen] = useState(false);
+  const countryMenuRef = React.useRef<HTMLDivElement | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -87,7 +89,7 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
       const res = await client.getWorkspaceLeads({
         day: selectedDay,
         stage: selectedStage,
-        country: selectedCountryFilter !== "all" ? selectedCountryFilter : undefined,
+        country: selectedCountries.length > 0 ? selectedCountries.join(",") : undefined,
         search: searchQuery.trim() || undefined,
         user_id: isAdmin ? undefined : currentUser?.id,
         limit: 100,
@@ -106,8 +108,38 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
   }, [selectedDay]);
 
   useEffect(() => {
+    const allowed = new Set(targetCountries.map((t) => t.country));
+    setSelectedCountries((prev) => prev.filter((c) => allowed.has(c)));
+  }, [targetCountries]);
+
+  useEffect(() => {
     loadLeads();
-  }, [selectedDay, selectedStage, selectedCountryFilter, searchQuery]);
+  }, [selectedDay, selectedStage, selectedCountries, searchQuery]);
+
+  useEffect(() => {
+    if (!countryMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!countryMenuRef.current?.contains(event.target as Node)) {
+        setCountryMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [countryMenuOpen]);
+
+  const toggleCountry = (country: string) => {
+    setSelectedCountries((prev) =>
+      prev.includes(country) ? prev.filter((c) => c !== country) : [...prev, country],
+    );
+  };
+
+  const countryFilterLabel = useMemo(() => {
+    if (selectedCountries.length === 0) {
+      return `All Target Countries (${targetCountries.length})`;
+    }
+    if (selectedCountries.length === 1) return selectedCountries[0];
+    return `${selectedCountries.length} countries selected`;
+  }, [selectedCountries, targetCountries.length]);
 
   // Add country target
   const handleAddCountry = async (e: React.FormEvent) => {
@@ -221,7 +253,7 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                   type="button"
                   onClick={() => {
                     onSelectDay(day.id);
-                    setSelectedCountryFilter("all");
+                    setSelectedCountries([]);
                   }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap ${
                     isSelected
@@ -400,20 +432,61 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-3 self-end sm:self-auto text-xs">
+        <div className="flex items-center gap-3 self-end sm:self-auto text-xs relative" ref={countryMenuRef}>
           <span className="text-slate-400 font-medium">Filter Country:</span>
-          <select
-            value={selectedCountryFilter}
-            onChange={(e) => setSelectedCountryFilter(e.target.value)}
-            className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-emerald-500"
+          <button
+            type="button"
+            onClick={() => setCountryMenuOpen((open) => !open)}
+            className="min-w-[12rem] max-w-[18rem] truncate text-left bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 hover:border-emerald-500 focus:outline-none focus:border-emerald-500"
+            title={
+              selectedCountries.length > 0
+                ? selectedCountries.join(", ")
+                : targetCountries.map((t) => t.country).join(", ")
+            }
           >
-            <option value="all">All Target Countries ({targetCountries.map((t) => t.country).join(", ") || "All"})</option>
-            {targetCountries.map((tc) => (
-              <option key={tc.id} value={tc.country}>
-                {tc.country}
-              </option>
-            ))}
-          </select>
+            {countryFilterLabel}
+            <span className="float-right text-slate-500 ml-2">{countryMenuOpen ? "▴" : "▾"}</span>
+          </button>
+          {countryMenuOpen ? (
+            <div className="absolute right-0 top-full mt-1 z-30 w-64 max-h-72 overflow-y-auto rounded-xl border border-slate-700 bg-slate-950 shadow-xl p-2 space-y-1">
+              <label className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-900 cursor-pointer text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={selectedCountries.length === 0}
+                  onChange={() => setSelectedCountries([])}
+                  className="rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                />
+                <span>All Target Countries</span>
+              </label>
+              <div className="border-t border-slate-800 my-1" />
+              {targetCountries.map((tc) => {
+                const checked = selectedCountries.includes(tc.country);
+                return (
+                  <label
+                    key={tc.id}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-900 cursor-pointer text-slate-200"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleCountry(tc.country)}
+                      className="rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                    />
+                    <span>{tc.country}</span>
+                  </label>
+                );
+              })}
+              {selectedCountries.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectedCountries([])}
+                  className="w-full mt-1 text-[11px] text-emerald-300 hover:text-emerald-200 px-2 py-1 text-left"
+                >
+                  Clear selection
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
 

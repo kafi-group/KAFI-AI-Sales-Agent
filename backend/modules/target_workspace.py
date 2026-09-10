@@ -277,9 +277,15 @@ def list_workspace_leads(
     target_country_records = get_day_country_targets(db, day_of_week=day, user_id=user_id)
     assigned_countries = [t["country"] for t in target_country_records if t.get("country")]
 
-    # If specific country selected (and not "all"), filter to it; otherwise use all assigned countries for this day
+    # If specific country/countries selected (and not "all"), filter to them;
+    # otherwise use all assigned countries for this day.
+    # Comma-separated values allow multi-select from the Filter Country UI.
     if country and str(country).strip().lower() not in ["all", ""]:
-        filter_countries = [str(country).strip()]
+        filter_countries = [
+            part.strip()
+            for part in str(country).split(",")
+            if part.strip() and part.strip().lower() != "all"
+        ]
     else:
         filter_countries = assigned_countries
 
