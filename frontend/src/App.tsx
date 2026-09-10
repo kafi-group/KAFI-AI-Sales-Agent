@@ -491,21 +491,40 @@ function DashboardApp() {
       });
   }, [isAsimUser, asimActiveMailboxUserId]);
 
-  const urgentHeaderButton =
-    urgentEmails.length > 0 ? (
-      <button
-        type="button"
-        onClick={() => setUrgentAlertDismissed(false)}
-        className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-red-500/70 bg-red-600/90 px-2.5 py-1 text-[11px] sm:text-xs font-bold uppercase tracking-wide text-white shadow-md shadow-red-950/40 hover:bg-red-500 animate-pulse"
-        title="Open urgent inquiry alerts"
-      >
-        <span aria-hidden>🚨</span>
-        Urgent
+  const openUrgentAlerts = useCallback(() => {
+    setUrgentAlertDismissed(false);
+    client
+      .getUrgentUnrepliedEmails()
+      .then((res) => {
+        const list = (res.urgent_threads || []).filter(isGenuineNewInquiry);
+        setUrgentEmails(list);
+        if (list.length === 0) {
+          setError("No urgent inquiry emails right now.");
+        }
+      })
+      .catch(() => {
+        setError("Could not load urgent emails. Try again in a moment.");
+      });
+  }, [setError]);
+
+  const urgentHeaderButton = (
+    <button
+      type="button"
+      onClick={() => openUrgentAlerts()}
+      className={`shrink-0 inline-flex items-center gap-1.5 rounded-md border border-red-500/70 bg-red-600/90 px-2.5 py-1 text-[11px] sm:text-xs font-bold uppercase tracking-wide text-white shadow-md shadow-red-950/40 hover:bg-red-500 ${
+        urgentEmails.length > 0 ? "animate-pulse" : ""
+      }`}
+      title="Open urgent inquiry alerts"
+    >
+      <span aria-hidden>🚨</span>
+      Urgent
+      {urgentEmails.length > 0 ? (
         <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-black tabular-nums">
           {urgentEmails.length > 99 ? "99+" : urgentEmails.length}
         </span>
-      </button>
-    ) : null;
+      ) : null}
+    </button>
+  );
 
   const pollUrgentEmails = useCallback(() => {
     client
