@@ -130,13 +130,6 @@ async def lifespan(app: FastAPI):
             print(f"WARNING: Database migration failed (starting anyway): {exc}", flush=True)
     else:
         print("Skipping lifespan migrations (already applied by start.sh).", flush=True)
-        # Still ensure the training column exists (idempotent, cheap).
-        try:
-            from db.migrate import _ensure_ai_training_selected_column
-
-            _ensure_ai_training_selected_column()
-        except Exception as exc:
-            print(f"WARNING: ai_training_selected ensure skipped: {exc}", flush=True)
 
     try:
         import twilio  # noqa: F401

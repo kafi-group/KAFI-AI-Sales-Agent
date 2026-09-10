@@ -4,9 +4,7 @@ builder = "nixpacks"
 watchPatterns = ["backend/**", "frontend/**"]
 
 [deploy]
-# Migrate once before uvicorn. Keep workers at 1 until Railway memory is confirmed ample.
-# (Multi-worker Alembic-in-lifespan races caused 502s that browsers report as CORS.)
-startCommand = "python -c \"from db.migrate import run_migrations; run_migrations()\" && KAFI_SKIP_LIFESPAN_MIGRATE=1 uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1"
+# Use start.sh: migrate with 45s cap, then always boot uvicorn (avoids Railway 502).
+startCommand = "sh start.sh"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
-

@@ -322,15 +322,8 @@ class Interaction(Base):
     personal_whatsapp_user_id: Mapped[Optional[int]] = mapped_column(
         Integer, index=True, deferred=True
     )
-    # Opt-in Sara/Rayan training flag. Deferred so inbox/leads/WhatsApp keep working
-    # if this column is not migrated yet (same pattern as personal_whatsapp_user_id).
-    ai_training_selected: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-        server_default="false",
-        deferred=True,
-    )
+    # Train Sara & Rayan flag lives in attachments JSON ({"type":"ai_training"}) —
+    # do not add a boolean column here (ALTER on interactions caused Railway 502s).
 
     contact: Mapped["Contact"] = relationship(back_populates="interactions")
 

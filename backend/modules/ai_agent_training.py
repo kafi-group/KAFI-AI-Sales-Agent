@@ -88,56 +88,28 @@ def _call_training_snippet(interaction: Interaction) -> str | None:
 
 def train_agent_from_history(db: Session = None) -> dict[str, Any]:
     """Learn from curated (Train Sara & Rayan) calls first; otherwise recent calls."""
+    from modules.call_media import get_ai_training_selected
+
     transcripts_sample: list[str] = []
     selected_used = 0
     if db is not None:
         try:
-            selected = (
+            calls = (
                 db.query(Interaction)
-                .filter(
-                    Interaction.channel == Channel.phone,
-                    Interaction.ai_training_selected.is_(True),
-                )
+                .filter(Interaction.channel == Channel.phone)
                 .order_by(Interaction.created_at.desc())
-                .limit(40)
+                .limit(80)
                 .all()
             )
-            for c in selected:
+            curated = [c for c in calls if get_ai_training_selected(c)]
+            pool = curated[:40] if curated else calls[:30]
+            selected_used = len(curated[:40]) if curated else 0
+            for c in pool:
                 snippet = _call_training_snippet(c)
                 if snippet:
                     transcripts_sample.append(snippet)
-                    selected_used += 1
-
-            # If none curated yet, fall back to recent calls (legacy behaviour).
-            if not transcripts_sample:
-                calls = (
-                    db.query(Interaction)
-                    .filter(Interaction.channel == Channel.phone)
-                    .order_by(Interaction.created_at.desc())
-                    .limit(30)
-                    .all()
-                )
-                for c in calls:
-                    snippet = _call_training_snippet(c)
-                    if snippet:
-                        transcripts_sample.append(snippet)
         except Exception as exc:
             print(f"DB query in training failed: {exc}", flush=True)
-            # Column may be deferred / not migrated — fall back without curated filter.
-            try:
-                calls = (
-                    db.query(Interaction)
-                    .filter(Interaction.channel == Channel.phone)
-                    .order_by(Interaction.created_at.desc())
-                    .limit(30)
-                    .all()
-                )
-                for c in calls:
-                    snippet = _call_training_snippet(c)
-                    if snippet:
-                        transcripts_sample.append(snippet)
-            except Exception as exc2:
-                print(f"Training fallback query failed: {exc2}", flush=True)
 
     if not transcripts_sample:
         transcripts_sample = [

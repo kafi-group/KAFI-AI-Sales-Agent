@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
 STORAGE_DIR = _BACKEND_DIR / "storage" / "call_recordings"
 CALL_RECORDING_TYPE = "call_recording"
+AI_TRAINING_TYPE = "ai_training"
 
 
 def _ensure_storage() -> None:
@@ -31,6 +32,31 @@ def get_call_media(interaction: Interaction) -> dict[str, Any] | None:
         if isinstance(item, dict) and item.get("type") == CALL_RECORDING_TYPE:
             return item
     return None
+
+
+def get_ai_training_selected(interaction: Interaction) -> bool:
+    """Opt-in Train Sara & Rayan flag — stored in attachments JSON (no schema lock)."""
+    attachments = interaction.attachments or []
+    if not isinstance(attachments, list):
+        return False
+    for item in attachments:
+        if isinstance(item, dict) and item.get("type") == AI_TRAINING_TYPE:
+            return bool(item.get("selected"))
+    return False
+
+
+def set_ai_training_selected_flag(interaction: Interaction, selected: bool) -> None:
+    attachments = list(interaction.attachments or [])
+    if not isinstance(attachments, list):
+        attachments = []
+    kept = [
+        item
+        for item in attachments
+        if not (isinstance(item, dict) and item.get("type") == AI_TRAINING_TYPE)
+    ]
+    if selected:
+        kept.append({"type": AI_TRAINING_TYPE, "selected": True})
+    interaction.attachments = kept
 
 
 def _set_call_media(interaction: Interaction, media: dict[str, Any]) -> None:

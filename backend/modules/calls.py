@@ -284,7 +284,11 @@ def get_call_history_item(db: Session, *, interaction_id: int) -> dict | None:
 
 
 def call_interaction_to_dict(db: Session, interaction: Interaction) -> dict:
-    from modules.call_media import get_call_media, public_call_media
+    from modules.call_media import (
+        get_ai_training_selected,
+        get_call_media,
+        public_call_media,
+    )
 
     contact = db.get(Contact, interaction.contact_id) if interaction.contact_id else None
     buyer = db.get(Buyer, contact.buyer_id) if contact else None
@@ -294,12 +298,6 @@ def call_interaction_to_dict(db: Session, interaction: Interaction) -> dict:
     company = (buyer.company_name if buyer else None) or parsed.get("company_name") or interaction.subject or "Direct AI Call"
     contact_nm = (contact.full_name if contact else None) or parsed.get("contact_name")
     contact_ph = (contact.phone if contact else None) or parsed.get("lead_phone")
-
-    training_selected = False
-    try:
-        training_selected = bool(getattr(interaction, "ai_training_selected", False))
-    except Exception:
-        training_selected = False
 
     return {
         "id": interaction.id,
@@ -314,7 +312,7 @@ def call_interaction_to_dict(db: Session, interaction: Interaction) -> dict:
         "content": interaction.content,
         "status": interaction.status.value,
         "created_at": interaction.created_at,
-        "ai_training_selected": training_selected,
+        "ai_training_selected": get_ai_training_selected(interaction),
         **parsed,
         **media,
     }
@@ -878,31 +876,15 @@ def set_ai_training_selected(
     interaction_id: int,
     selected: bool,
 ) -> dict:
-    """Flag a call for Sara & Rayan curated training (opt-in)."""
-    from sqlalchemy import inspect as sa_inspect
-    from sqlalchemy.exc import ProgrammingError
-
-    from db.session import engine
+    """Flag a call for Sara & Rayan curated training (attachments JSON — no ALTER)."""
+    from modules.call_media import set_ai_training_selected_flag
 
     interaction = db.get(Interaction, interaction_id)
     if not interaction or interaction.channel != Channel.phone:
         raise ValueError("Call not found")
-
-    cols = {c["name"] for c in sa_inspect(engine).get_columns("interactions")}
-    if "ai_training_selected" not in cols:
-        raise ValueError(
-            "Training flag is not available yet (database migrating). Retry in a minute."
-        )
-
-    try:
-        interaction.ai_training_selected = bool(selected)
-        db.commit()
-        db.refresh(interaction)
-    except ProgrammingError as exc:
-        db.rollback()
-        raise ValueError(
-            "Training flag is not available yet (database migrating). Retry in a minute."
-        ) from exc
+    set_ai_training_selected_flag(interaction, bool(selected))
+    db.commit()
+    db.refresh(interaction)
     return call_interaction_to_dict(db, interaction)
 
 

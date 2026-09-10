@@ -475,7 +475,7 @@ def get_available_phones_for_draft(db: Session, draft: PersonalizedFollowupDraft
 
 
 def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, Any]:
-    from modules.call_media import get_call_media, public_call_media
+    from modules.call_media import get_ai_training_selected, get_call_media, public_call_media
 
     buyer = db.get(Buyer, draft.buyer_id)
     contact = db.get(Contact, draft.contact_id) if draft.contact_id else None
@@ -498,7 +498,7 @@ def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, An
 
     media = public_call_media(get_call_media(interaction), interaction_id=draft.interaction_id) if interaction else {}
 
-    payload = {
+    return {
         "id": draft.id,
         "interaction_id": draft.interaction_id,
         "buyer_id": draft.buyer_id,
@@ -532,15 +532,8 @@ def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, An
         "transcript": transcript or media.get("transcript"),
         "transcript_status": media.get("transcript_status"),
         "recording_available": bool(media.get("recording_available")),
-        "ai_training_selected": False,
+        "ai_training_selected": get_ai_training_selected(interaction) if interaction else False,
     }
-    try:
-        payload["ai_training_selected"] = bool(
-            getattr(interaction, "ai_training_selected", False) if interaction else False
-        )
-    except Exception:
-        payload["ai_training_selected"] = False
-    return payload
 
 
 def ensure_draft_for_call(
