@@ -140,12 +140,17 @@ export function UrgentEmailAlertModal({
     return (urgentEmails || []).filter(isGenuineNewInquiry);
   }, [urgentEmails]);
 
-  // Group emails by user / category
+  // Group emails by mailbox (marketing / info / essence) when available
   const userCategories = useMemo(() => {
     const map = new Map<string, { label: string; email: string; count: number }>();
     for (const item of genuineInquiries) {
-      const key = item.user_id ? String(item.user_id) : (item.mailbox_email || "default");
-      const label = item.user_full_name || item.user_name || item.mailbox_email || "My Inbox";
+      const mailbox = (item.mailbox_email || "").trim().toLowerCase();
+      const key = mailbox || (item.user_id ? String(item.user_id) : "default");
+      const label =
+        item.mailbox_email ||
+        item.user_full_name ||
+        item.user_name ||
+        "My Inbox";
       const existing = map.get(key);
       if (existing) {
         existing.count += 1;
@@ -163,7 +168,8 @@ export function UrgentEmailAlertModal({
   const filteredList = useMemo(() => {
     if (selectedUserFilter === "all") return genuineInquiries;
     return genuineInquiries.filter((item) => {
-      const key = item.user_id ? String(item.user_id) : (item.mailbox_email || "default");
+      const mailbox = (item.mailbox_email || "").trim().toLowerCase();
+      const key = mailbox || (item.user_id ? String(item.user_id) : "default");
       return key === selectedUserFilter;
     });
   }, [genuineInquiries, selectedUserFilter]);

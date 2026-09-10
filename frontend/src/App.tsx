@@ -491,6 +491,22 @@ function DashboardApp() {
       });
   }, [isAsimUser, asimActiveMailboxUserId]);
 
+  const urgentHeaderButton =
+    urgentEmails.length > 0 ? (
+      <button
+        type="button"
+        onClick={() => setUrgentAlertDismissed(false)}
+        className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-red-500/70 bg-red-600/90 px-2.5 py-1 text-[11px] sm:text-xs font-bold uppercase tracking-wide text-white shadow-md shadow-red-950/40 hover:bg-red-500 animate-pulse"
+        title="Open urgent inquiry alerts"
+      >
+        <span aria-hidden>🚨</span>
+        Urgent
+        <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-black tabular-nums">
+          {urgentEmails.length > 99 ? "99+" : urgentEmails.length}
+        </span>
+      </button>
+    ) : null;
+
   const pollUrgentEmails = useCallback(() => {
     client
       .getUrgentUnrepliedEmails()
@@ -1434,6 +1450,7 @@ function DashboardApp() {
               {isWhatsAppMobile ? <IconWhatsApp className="w-5 h-5 text-emerald-400 shrink-0" /> : null}
               {pageHeading}
             </h1>
+            {urgentHeaderButton}
             {asimMailboxSwitcher}
             <AppTopActions
               compact
@@ -1473,8 +1490,9 @@ function DashboardApp() {
               {isWhatsAppMobile ? <IconWhatsApp className="w-5 h-5 text-emerald-400 shrink-0" /> : null}
               {pageHeading}
             </h1>
+            {urgentHeaderButton}
             {asimMailboxSwitcher ? (
-              asimMailboxSwitcher
+              <div className="flex-1 min-w-0 flex items-center">{asimMailboxSwitcher}</div>
             ) : isWhatsAppMobile ? (
               <div
                 id="wa-mobile-header-slot"

@@ -814,26 +814,61 @@ def get_urgent_unreplied_threads(user: AppUser) -> list[dict[str, Any]]:
 def get_all_urgent_unreplied_threads(db: Any, viewer: AppUser) -> list[dict[str, Any]]:
     """Return urgent unreplied threads.
 
-    For regular users, returns only their own mailbox urgent emails.
-    For admins (Mr. Khalid), scans all active users' mailboxes in parallel so admin sees
-    a complete breakdown by rep (Asim, Usman, Sadia, Khalid).
+    - Admin (Khalid): all team mailboxes
+    - Asim: marketing@ + info@ + essence@ only
+    - Everyone else: own mailbox only
     """
     from db.models import AppUser as AppUserModel, AppUserRole
     from concurrent.futures import ThreadPoolExecutor
 
     role = viewer.role.value if isinstance(viewer.role, AppUserRole) else str(viewer.role)
-    if role != AppUserRole.admin.value:
+    uname = (viewer.username or "").strip().lower()
+    fname = (getattr(viewer, "full_name", None) or "").strip().lower()
+    is_asim = uname == "asim" or uname.startswith("asim") or "asim" in fname
+
+    asim_shared_emails = frozenset(
+        {
+            "marketing@kafi-group.com",
+            "info@kafi-group.com",
+            "essence@kafi-group.com",
+        }
+    )
+
+    if role != AppUserRole.admin.value and not is_asim:
         return get_urgent_unreplied_threads(viewer)
 
     users = (
         db.query(AppUserModel)
         .filter(
-            AppUserModel.is_active.is_(True),
             AppUserModel.mailbox_email.isnot(None),
         )
         .all()
     )
-    if not users:
+    if role == AppUserRole.admin.value:
+        targets = [u for u in users if u.is_active]
+    else:
+        # Asim — only the three shared sales mailboxes
+        by_email: dict[str, Any] = {}
+        for u in users:
+            email = (u.mailbox_email or "").strip().lower()
+            if email not in asim_shared_emails:
+                continue
+            prev = by_email.get(email)
+            score = (1 if u.is_active else 0) + (1 if u.mailbox_enabled else 0)
+            prev_score = (
+                (1 if prev.is_active else 0) + (1 if prev.mailbox_enabled else 0)
+                if prev is not None
+                else -1
+            )
+            if prev is None or score >= prev_score:
+                by_email[email] = u
+        targets = [by_email[e] for e in (
+            "marketing@kafi-group.com",
+            "info@kafi-group.com",
+            "essence@kafi-group.com",
+        ) if e in by_email]
+
+    if not targets:
         return get_urgent_unreplied_threads(viewer)
 
     all_urgent: list[dict[str, Any]] = []
@@ -847,8 +882,8 @@ def get_all_urgent_unreplied_threads(db: Any, viewer: AppUser) -> list[dict[str,
         except Exception:
             return []
 
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(users)))) as executor:
-        results = list(executor.map(_fetch_user_urgent, users))
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(targets)))) as executor:
+        results = list(executor.map(_fetch_user_urgent, targets))
         for thread_list in results:
             all_urgent.extend(thread_list)
 
