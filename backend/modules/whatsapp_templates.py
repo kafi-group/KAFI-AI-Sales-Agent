@@ -28,6 +28,8 @@ _STATUS_MAP = {
 _ALLOWED_CATEGORIES = frozenset({"MARKETING", "UTILITY", "AUTHENTICATION"})
 _TEMPLATE_NAME_RE = re.compile(r"^[a-z0-9_]{1,512}$")
 _BODY_VARIABLE_RE = re.compile(r"\{\{\s*(\d+)\s*\}\}")
+_NAMED_VARIABLE_RE = re.compile(r"\{\{\s*([a-z][a-z0-9_]*)\s*\}\}", re.IGNORECASE)
+_MEDIA_HEADER_FORMATS = frozenset({"IMAGE", "VIDEO", "DOCUMENT"})
 
 
 def normalize_template_name(raw: str) -> str:
@@ -37,6 +39,28 @@ def normalize_template_name(raw: str) -> str:
     return (cleaned or "kafi_template")[:512]
 
 
+def _positional_variable_count(text: str | None) -> int:
+    """Meta body params are 1..N by highest index — not occurrence count.
+
+    ``Hi {{1}}, welcome {{1}}`` still needs exactly 1 parameter.
+    """
+    if not text:
+        return 0
+    indexes = [int(match) for match in _BODY_VARIABLE_RE.findall(text)]
+    return max(indexes) if indexes else 0
+
+
+def _named_variables(text: str | None) -> list[str]:
+    if not text:
+        return []
+    seen: list[str] = []
+    for match in _NAMED_VARIABLE_RE.findall(text):
+        name = str(match).strip().lower()
+        if name and name not in seen and not name.isdigit():
+            seen.append(name)
+    return seen
+
+
 def _extract_body_and_variables(components: list[dict[str, Any]]) -> tuple[str | None, int]:
     body_text = None
     variable_count = 0
@@ -44,9 +68,44 @@ def _extract_body_and_variables(components: list[dict[str, Any]]) -> tuple[str |
         if (component.get("type") or "").upper() == "BODY":
             body_text = component.get("text")
             if body_text:
-                variable_count = len(_BODY_VARIABLE_RE.findall(body_text))
+                named = _named_variables(body_text)
+                variable_count = len(named) if named else _positional_variable_count(body_text)
             break
     return body_text, variable_count
+
+
+def _sanitize_template_text(value: str | None, *, fallback: str = "-") -> str:
+    """Meta rejects blank / multiline body params (error 132012 / 132018)."""
+    text = re.sub(r"[\r\n\t]+", " ", str(value or "")).strip()
+    text = re.sub(r"\s{2,}", " ", text)
+    if not text:
+        text = fallback
+    return text[:1024]
+
+
+def _header_example_media_link(component: dict[str, Any]) -> str | None:
+    example = component.get("example") or {}
+    for key in ("header_handle", "header_url", "header_urls"):
+        raw = example.get(key)
+        if isinstance(raw, list) and raw:
+            link = str(raw[0] or "").strip()
+            if link.startswith("http"):
+                return link
+        if isinstance(raw, str) and raw.strip().startswith("http"):
+            return raw.strip()
+    for key in ("link", "url"):
+        link = str(component.get(key) or "").strip()
+        if link.startswith("http"):
+            return link
+    return None
+
+
+def _find_component(components: list[dict[str, Any]] | None, type_name: str) -> dict[str, Any] | None:
+    wanted = type_name.upper()
+    for component in components or []:
+        if (component.get("type") or "").upper() == wanted:
+            return component
+    return None
 
 
 def _validate_body(body: str) -> None:
@@ -523,14 +582,165 @@ def render_variables(body_text: str, variables: list[str]) -> str:
 
 
 def build_body_component(variables: list[str]) -> list[dict[str, Any]]:
-    if not variables:
+    """Legacy helper — prefer :func:`build_template_send_components` for Meta sends."""
+    cleaned = [_sanitize_template_text(value) for value in variables]
+    if not cleaned:
         return []
     return [
         {
             "type": "body",
-            "parameters": [{"type": "text", "text": value} for value in variables],
+            "parameters": [{"type": "text", "text": value} for value in cleaned],
         }
     ]
+
+
+def build_template_send_components(
+    template: WhatsAppTemplate | None,
+    variables: list[str] | None = None,
+    *,
+    header_media_url: str | None = None,
+) -> list[dict[str, Any]]:
+    """Build Meta send-time ``components`` so they match the approved template.
+
+    Fixes common (#132012) failures:
+    - IMAGE/VIDEO/DOCUMENT headers (must send typed media, not omit / send text)
+    - Wrong body param count (duplicate ``{{1}}`` in body text)
+    - Named body parameters
+    - Dynamic URL button suffixes
+    - Empty / multiline text values
+    """
+    variables = list(variables or [])
+    components_out: list[dict[str, Any]] = []
+    stored = list((template.components if template else None) or [])
+    body_text = (template.body_text if template else None) or ""
+    named = _named_variables(body_text)
+    expected_body = (
+        len(named)
+        if named
+        else (
+            int(template.variable_count)
+            if template and template.variable_count
+            else _positional_variable_count(body_text)
+        )
+    )
+
+    header = _find_component(stored, "HEADER")
+    if header:
+        fmt = str(header.get("format") or "TEXT").upper()
+        if fmt in _MEDIA_HEADER_FORMATS:
+            media_type = fmt.lower()  # image | video | document
+            link = (header_media_url or "").strip() or _header_example_media_link(header)
+            if not link:
+                raise ValueError(
+                    f"Template '{getattr(template, 'name', '')}' requires a {fmt} header. "
+                    "Re-sync templates from Meta or provide a public media URL."
+                )
+            components_out.append(
+                {
+                    "type": "header",
+                    "parameters": [
+                        {
+                            "type": media_type,
+                            media_type: {"link": link},
+                        }
+                    ],
+                }
+            )
+        elif fmt == "TEXT":
+            header_text = str(header.get("text") or "")
+            header_named = _named_variables(header_text)
+            header_count = (
+                len(header_named) if header_named else _positional_variable_count(header_text)
+            )
+            if header_count > 0:
+                # Header vars come from the front of the variables list when UI only
+                # collects body slots — fall back to first body value / company.
+                header_values = variables[:header_count]
+                while len(header_values) < header_count:
+                    header_values.append(variables[0] if variables else "Customer")
+                if header_named:
+                    params = [
+                        {
+                            "type": "text",
+                            "parameter_name": header_named[i],
+                            "text": _sanitize_template_text(
+                                header_values[i] if i < len(header_values) else None,
+                                fallback="Customer",
+                            ),
+                        }
+                        for i in range(header_count)
+                    ]
+                else:
+                    params = [
+                        {
+                            "type": "text",
+                            "text": _sanitize_template_text(
+                                header_values[i] if i < len(header_values) else None,
+                                fallback="Customer",
+                            ),
+                        }
+                        for i in range(header_count)
+                    ]
+                components_out.append({"type": "header", "parameters": params})
+
+    if expected_body > 0:
+        body_values = list(variables)
+        # If header consumed leading text vars, body still uses the same UI list
+        # (Compose collects body slots only). Prefer full list for body.
+        while len(body_values) < expected_body:
+            body_values.append(body_values[-1] if body_values else "Customer")
+        body_values = body_values[:expected_body]
+        if named:
+            params = [
+                {
+                    "type": "text",
+                    "parameter_name": named[i],
+                    "text": _sanitize_template_text(
+                        body_values[i] if i < len(body_values) else None,
+                        fallback="Customer",
+                    ),
+                }
+                for i in range(expected_body)
+            ]
+        else:
+            params = [
+                {
+                    "type": "text",
+                    "text": _sanitize_template_text(
+                        body_values[i] if i < len(body_values) else None,
+                        fallback="Customer",
+                    ),
+                }
+                for i in range(expected_body)
+            ]
+        components_out.append({"type": "body", "parameters": params})
+
+    buttons_component = _find_component(stored, "BUTTONS")
+    buttons = list((buttons_component or {}).get("buttons") or [])
+    for index, button in enumerate(buttons):
+        button_type = str(button.get("type") or "").upper()
+        if button_type != "URL":
+            continue
+        url = str(button.get("url") or "")
+        # Dynamic URL buttons end with {{1}} (suffix only at send time).
+        if "{{" not in url:
+            continue
+        suffix = "info"
+        if variables:
+            # Prefer last variable (often a path/id); else company-ish first value.
+            suffix = _sanitize_template_text(variables[-1], fallback="info")
+            # URL suffixes must stay path-safe and short.
+            suffix = re.sub(r"[^a-zA-Z0-9._\-/=]", "", suffix.replace(" ", "-"))[:64] or "info"
+        components_out.append(
+            {
+                "type": "button",
+                "sub_type": "url",
+                "index": str(index),
+                "parameters": [{"type": "text", "text": suffix}],
+            }
+        )
+
+    return components_out
 
 
 def notification_to_dict(row: WhatsAppTemplateStatusEvent) -> dict[str, Any]:

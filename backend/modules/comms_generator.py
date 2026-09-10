@@ -1226,10 +1226,23 @@ class CommsGenerator:
         within_window = bool(expires and expires > datetime.now(timezone.utc))
 
         components = None
-        if template_name and template_variables:
-            from modules.whatsapp_templates import build_body_component
+        send_language = template_language or "en_US"
+        if template_name:
+            from modules import whatsapp_templates as templates_module
+            from db.models import WhatsAppTemplate
 
-            components = build_body_component(template_variables)
+            template_row = (
+                db.query(WhatsAppTemplate)
+                .filter(WhatsAppTemplate.name == template_name)
+                .order_by(WhatsAppTemplate.id.desc())
+                .first()
+            )
+            if template_row and template_row.language:
+                send_language = template_row.language
+            components = templates_module.build_template_send_components(
+                template_row,
+                template_variables or [],
+            ) or None
 
         # Keep the outbound row visible in Cloud inbox while Meta processes it.
         # Without wa_status / template_name / wamid, failed "approved" drafts vanish from the thread.
@@ -1248,7 +1261,7 @@ class CommsGenerator:
             phone=phone,
             message=draft.content,
             template_name=template_name,
-            template_language=template_language,
+            template_language=send_language,
             template_components=components,
             within_session_window=within_window,
         )

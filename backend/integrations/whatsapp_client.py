@@ -339,9 +339,15 @@ def _friendly_whatsapp_api_error(
             "Outside the 24h customer-service window — Meta blocked free-text. "
             "Send an approved template, or wait until the customer messages you first."
         )
-    if code == 132000 or "param" in lower and "template" in lower:
+    if code == 132012 or ("parameter format" in lower) or ("format mismatch" in lower):
+        return (
+            "Template parameter mismatch — Meta expected a different header/body format "
+            "(often an IMAGE header or wrong variable count). Re-sync the template, then "
+            f"retry. ({text})"
+        )
+    if code == 132000 or ("number of parameters" in lower):
         return f"Template parameter mismatch — check variable count/order. ({text})"
-    if code in {132001, 132005, 132007, 132012, 132015} or "template" in lower and (
+    if code in {132001, 132005, 132007, 132015} or "template" in lower and (
         "does not exist" in lower or "paused" in lower or "disabled" in lower or "not approved" in lower
     ):
         return (

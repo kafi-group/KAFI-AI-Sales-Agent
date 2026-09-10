@@ -1055,12 +1055,14 @@ def send_draft(
                 raise ValueError("Recipient has no phone number for WhatsApp")
 
             resolved_variables = list(template_variables or [])
+            template_row = None
             if (template_name or "").strip():
                 from db.models import WhatsAppTemplate
 
                 template_row = (
                     db.query(WhatsAppTemplate)
                     .filter(WhatsAppTemplate.name == template_name.strip())
+                    .order_by(WhatsAppTemplate.id.desc())
                     .first()
                 )
                 if template_row and template_row.variable_count > 0:
@@ -1082,9 +1084,14 @@ def send_draft(
             within_window = bool(expires and expires > datetime.now(timezone.utc))
 
             components = None
-            if template_name and resolved_variables:
-                from modules.whatsapp_templates import build_body_component
-                components = build_body_component(resolved_variables)
+            if (template_name or "").strip():
+                components = (
+                    templates_module.build_template_send_components(
+                        template_row,
+                        resolved_variables,
+                    )
+                    or None
+                )
 
             wa_result = whatsapp_client.send_approved(
                 phone=recipient_wa_phone,
