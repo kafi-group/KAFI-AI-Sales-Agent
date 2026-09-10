@@ -2,13 +2,16 @@
 
 Revision ID: 050_ai_training_selected
 Revises: 049_personal_whatsapp_user
+
+NOTE: Do NOT create an index here — indexing a busy interactions table takes an
+ACCESS EXCLUSIVE-style lock long enough for Railway to 502 (app never boots).
 """
 
 from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 
 revision: str = "050_ai_training_selected"
 down_revision: Union[str, None] = "049_personal_whatsapp_user"
@@ -21,33 +24,19 @@ def upgrade() -> None:
     inspector = inspect(bind)
     cols = {c["name"] for c in inspector.get_columns("interactions")}
     if "ai_training_selected" not in cols:
-        op.add_column(
-            "interactions",
-            sa.Column(
-                "ai_training_selected",
-                sa.Boolean(),
-                nullable=False,
-                server_default=sa.false(),
-            ),
-        )
-    indexes = {i["name"] for i in inspector.get_indexes("interactions")}
-    if "ix_interactions_ai_training_selected" not in indexes:
-        op.create_index(
-            "ix_interactions_ai_training_selected",
-            "interactions",
-            ["ai_training_selected"],
+        # Fast ADD COLUMN … DEFAULT on Postgres 11+ (no full-table rewrite).
+        bind.execute(
+            text(
+                "ALTER TABLE interactions "
+                "ADD COLUMN IF NOT EXISTS ai_training_selected "
+                "BOOLEAN NOT NULL DEFAULT FALSE"
+            )
         )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
     inspector = inspect(bind)
-    indexes = {i["name"] for i in inspector.get_indexes("interactions")}
-    if "ix_interactions_ai_training_selected" in indexes:
-        op.drop_index(
-            "ix_interactions_ai_training_selected",
-            table_name="interactions",
-        )
     cols = {c["name"] for c in inspector.get_columns("interactions")}
     if "ai_training_selected" in cols:
         op.drop_column("interactions", "ai_training_selected")

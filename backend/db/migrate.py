@@ -297,12 +297,19 @@ def run_migrations() -> None:
         f"({len(migration_files)} migration files in {_VERSIONS_DIR})",
         flush=True,
     )
-    _reconcile_unknown_db_revisions(alembic_cfg, script)
-    _stamp_head_if_interested_columns_already_applied(alembic_cfg, script)
-    command.upgrade(alembic_cfg, "head")
-    _ensure_buyer_social_columns()
-    _ensure_ai_training_selected_column()
-    _ensure_horeka_table()
-    _ensure_custom_lead_modules_table()
-    _ensure_target_workspace_tables()
+    try:
+        _reconcile_unknown_db_revisions(alembic_cfg, script)
+        _stamp_head_if_interested_columns_already_applied(alembic_cfg, script)
+        command.upgrade(alembic_cfg, "head")
+    except Exception as exc:
+        # Never block API boot on a stuck/failed migration (Railway 502).
+        print(f"WARNING: Alembic upgrade failed (continuing): {exc}", flush=True)
+    try:
+        _ensure_buyer_social_columns()
+        _ensure_ai_training_selected_column()
+        _ensure_horeka_table()
+        _ensure_custom_lead_modules_table()
+        _ensure_target_workspace_tables()
+    except Exception as exc:
+        print(f"WARNING: post-migrate schema ensure failed (continuing): {exc}", flush=True)
 
