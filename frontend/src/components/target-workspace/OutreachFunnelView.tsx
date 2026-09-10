@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   client,
   type WorkspaceLeadItem,
+  type WorkspaceLeadPhone,
   type DayCountryTarget,
   type WorkspaceReviewOptionItem,
   type AppUser,
@@ -33,6 +34,25 @@ interface OutreachFunnelViewProps {
   onOpenCall?: (phone: string, companyName: string, leadId?: number) => void;
   onOpenEmailComposer?: (email: string, companyName: string, contactName?: string) => void;
   onError?: (message: string) => void;
+}
+
+function workspaceLeadPhones(lead: WorkspaceLeadItem): WorkspaceLeadPhone[] {
+  if (Array.isArray(lead.phones) && lead.phones.length > 0) {
+    return lead.phones;
+  }
+  if (lead.primary_phone?.trim()) {
+    return [
+      {
+        index: 1,
+        select_label: "#1",
+        number: lead.primary_phone.trim(),
+        field_label: "Primary phone",
+        contact_id: lead.contact_id ?? null,
+        contact_name: lead.contact_person,
+      },
+    ];
+  }
+  return [];
 }
 
 function workspaceLeadAsComposeRow(lead: WorkspaceLeadItem): LeadTableRow {
@@ -73,6 +93,8 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
   const [proofModalLead, setProofModalLead] = useState<WorkspaceLeadItem | null>(null);
   const [whatsappTarget, setWhatsappTarget] = useState<WhatsAppComposeTarget | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  /** leadId -> selected phone number for Call / WhatsApp */
+  const [selectedPhoneByLead, setSelectedPhoneByLead] = useState<Record<number, string>>({});
 
   // Quick action states for changing reasons inline
   const [editingLeadId, setEditingLeadId] = useState<number | null>(null);
@@ -577,12 +599,6 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                       <strong className="text-slate-100">{lead.contact_person || "Not specified"}</strong>
                       {lead.designation && <span className="text-slate-400"> ({lead.designation})</span>}
                     </div>
-                    {lead.primary_phone && (
-                      <div>
-                        <span className="text-slate-500">Phone:</span>{" "}
-                        <span className="font-mono text-emerald-400">{lead.primary_phone}</span>
-                      </div>
-                    )}
                     {lead.primary_email && (
                       <div>
                         <span className="text-slate-500">Email:</span>{" "}
@@ -590,6 +606,56 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                       </div>
                     )}
                   </div>
+
+                  {(() => {
+                    const phones = workspaceLeadPhones(lead);
+                    if (phones.length === 0) return null;
+                    const selected =
+                      selectedPhoneByLead[lead.id] || phones[0]?.number || "";
+                    return (
+                      <div className="mt-2 space-y-1.5">
+                        <div className="text-[11px] text-slate-400 font-medium">
+                          Phone numbers — select one, then Call / WhatsApp
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {phones.map((p) => {
+                            const isSelected = selected === p.number;
+                            return (
+                              <label
+                                key={`${lead.id}-${p.index}-${p.number}`}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs cursor-pointer transition ${
+                                  isSelected
+                                    ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-100"
+                                    : "border-slate-700 bg-slate-950/70 text-slate-300 hover:border-slate-500"
+                                }`}
+                                title={p.field_label}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`workspace-phone-${lead.id}`}
+                                  checked={isSelected}
+                                  onChange={() =>
+                                    setSelectedPhoneByLead((prev) => ({
+                                      ...prev,
+                                      [lead.id]: p.number,
+                                    }))
+                                  }
+                                  className="accent-emerald-500"
+                                />
+                                <span className="font-bold text-emerald-300">{p.select_label}</span>
+                                <span className="font-mono">{p.number}</span>
+                                {phones.length > 1 ? (
+                                  <span className="text-[10px] text-slate-500 hidden sm:inline">
+                                    ({p.field_label})
+                                  </span>
+                                ) : null}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* ── Stage-Specific Context Banners & Matrices ── */}
 
@@ -765,45 +831,62 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                 <div className="flex flex-col sm:flex-row lg:flex-col items-end gap-2 shrink-0">
                   {/* Direct Contact — stay on this page (no Master Table hop) */}
                   <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                    {lead.primary_phone ? (
-                      <>
-                        <CallLeadButton
-                          leadId={lead.id}
-                          phone={lead.primary_phone}
-                          contactId={lead.contact_id ?? undefined}
-                          contactName={lead.contact_person || lead.company_name}
-                          assignedToUserId={lead.assigned_to_user_id}
-                          assignedTo={lead.assigned_to_name}
-                          compact
-                          onError={(msg) => {
-                            onError?.(msg);
-                            setError(msg);
-                          }}
-                          onSuccess={() => {
-                            pushNumberToFloatingDialpad({
-                              phone: lead.primary_phone!,
-                              contactName: lead.contact_person || lead.company_name,
-                              countryHint: lead.country,
-                            });
-                            setActionNotice(`Calling ${lead.company_name}…`);
-                            window.setTimeout(() => setActionNotice(null), 4000);
-                          }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setWhatsappTarget({
-                              row: workspaceLeadAsComposeRow(lead),
-                              phone: lead.primary_phone!,
-                            })
-                          }
-                          className="px-3 py-1.5 rounded-xl bg-[#128C7E] hover:bg-[#0e6f64] text-white text-xs font-semibold shadow-md shadow-emerald-950/40 transition flex items-center gap-1"
-                          title="Send WhatsApp without leaving Target Workspace"
-                        >
-                          💬 WhatsApp
-                        </button>
-                      </>
-                    ) : null}
+                    {(() => {
+                      const phones = workspaceLeadPhones(lead);
+                      const selectedPhone =
+                        selectedPhoneByLead[lead.id] || phones[0]?.number || lead.primary_phone || "";
+                      const selectedMeta =
+                        phones.find((p) => p.number === selectedPhone) || phones[0] || null;
+                      if (!selectedPhone) return null;
+                      return (
+                        <>
+                          <CallLeadButton
+                            leadId={lead.id}
+                            phone={selectedPhone}
+                            contactId={selectedMeta?.contact_id ?? lead.contact_id ?? undefined}
+                            contactName={
+                              selectedMeta?.contact_name ||
+                              lead.contact_person ||
+                              lead.company_name
+                            }
+                            assignedToUserId={lead.assigned_to_user_id}
+                            assignedTo={lead.assigned_to_name}
+                            compact
+                            onError={(msg) => {
+                              onError?.(msg);
+                              setError(msg);
+                            }}
+                            onSuccess={() => {
+                              pushNumberToFloatingDialpad({
+                                phone: selectedPhone,
+                                contactName:
+                                  selectedMeta?.contact_name ||
+                                  lead.contact_person ||
+                                  lead.company_name,
+                                countryHint: lead.country,
+                              });
+                              setActionNotice(
+                                `Calling ${selectedMeta?.select_label || "#1"} ${selectedPhone}…`,
+                              );
+                              window.setTimeout(() => setActionNotice(null), 4000);
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setWhatsappTarget({
+                                row: workspaceLeadAsComposeRow(lead),
+                                phone: selectedPhone,
+                              })
+                            }
+                            className="px-3 py-1.5 rounded-xl bg-[#128C7E] hover:bg-[#0e6f64] text-white text-xs font-semibold shadow-md shadow-emerald-950/40 transition flex items-center gap-1"
+                            title="Send WhatsApp to the selected number"
+                          >
+                            💬 WhatsApp
+                          </button>
+                        </>
+                      );
+                    })()}
                     {lead.primary_email ? (
                       <button
                         type="button"

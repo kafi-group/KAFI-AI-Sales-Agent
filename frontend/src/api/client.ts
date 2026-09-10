@@ -3944,6 +3944,15 @@ export interface DayCountryTarget {
   created_at: string | null;
 }
 
+export interface WorkspaceLeadPhone {
+  index: number;
+  select_label: string;
+  number: string;
+  field_label: string;
+  contact_id?: number | null;
+  contact_name?: string | null;
+}
+
 export interface WorkspaceLeadItem {
   id: number;
   company_name: string;
@@ -3952,6 +3961,8 @@ export interface WorkspaceLeadItem {
   designation: string | null;
   primary_phone: string | null;
   primary_email: string | null;
+  /** All distinct phone numbers on the contact list for this buyer. */
+  phones?: WorkspaceLeadPhone[];
   country: string | null;
   city: string | null;
   product_interest: string | null;

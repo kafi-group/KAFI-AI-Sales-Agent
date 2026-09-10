@@ -24,6 +24,74 @@ from modules import activity as activity_module
 
 PK_TZ = ZoneInfo("Asia/Karachi")
 
+
+def _phone_digits(raw: str | None) -> str:
+    return "".join(ch for ch in str(raw or "") if ch.isdigit())
+
+
+def _collect_workspace_phones(
+    *,
+    contacts: list[Any],
+    replacement_phone: str | None = None,
+) -> list[dict[str, Any]]:
+    """All distinct phone numbers on this buyer's contacts (workspace outreach only)."""
+    seen: set[str] = set()
+    phones: list[dict[str, Any]] = []
+
+    def add(
+        raw: str | None,
+        *,
+        field_label: str,
+        contact_id: int | None = None,
+        contact_name: str | None = None,
+    ) -> None:
+        value = (raw or "").strip()
+        if not value:
+            return
+        digits = _phone_digits(value)
+        if len(digits) < 6:
+            return
+        # Dedupe by last 10 digits so +92… and 0… variants collapse.
+        key = digits[-10:] if len(digits) >= 10 else digits
+        if key in seen:
+            return
+        seen.add(key)
+        phones.append(
+            {
+                "number": value,
+                "field_label": field_label,
+                "contact_id": contact_id,
+                "contact_name": contact_name,
+            }
+        )
+
+    for contact in contacts:
+        cid = int(contact.id) if getattr(contact, "id", None) is not None else None
+        cname = (getattr(contact, "full_name", None) or "").strip() or None
+        add(getattr(contact, "primary_phone", None), field_label="Primary phone", contact_id=cid, contact_name=cname)
+        add(getattr(contact, "phone", None), field_label="Phone", contact_id=cid, contact_name=cname)
+        add(
+            getattr(contact, "secondary_mobile", None),
+            field_label="Secondary mobile",
+            contact_id=cid,
+            contact_name=cname,
+        )
+        add(
+            getattr(contact, "secondary_phone", None),
+            field_label="Secondary phone",
+            contact_id=cid,
+            contact_name=cname,
+        )
+        add(getattr(contact, "wa_id", None), field_label="WhatsApp ID", contact_id=cid, contact_name=cname)
+
+    add(replacement_phone, field_label="Replacement phone")
+
+    for idx, row in enumerate(phones, start=1):
+        row["index"] = idx
+        row["select_label"] = f"#{idx}"
+    return phones
+
+
 # 4 Core Outreach Stages
 OUTREACH_STAGES = [
     {"key": "fresh", "label": "Never Contacted / Fresh", "color": "emerald"},
@@ -418,8 +486,16 @@ def list_workspace_leads(
 
             contact_person = (primary_contact.full_name if primary_contact and primary_contact.full_name else None) or getattr(b, "contact_person", None) or None
             email = (primary_contact.email if primary_contact and primary_contact.email else None) or getattr(b, "primary_email", None) or None
-            phone = (primary_contact.primary_phone or primary_contact.phone if primary_contact else None) or getattr(b, "primary_phone", None) or None
             designation = (primary_contact.designation if primary_contact and primary_contact.designation else None) or getattr(b, "designation", None) or None
+            phones = _collect_workspace_phones(
+                contacts=list(contacts),
+                replacement_phone=(lc.replacement_phone if lc else None),
+            )
+            phone = phones[0]["number"] if phones else (
+                (primary_contact.primary_phone or primary_contact.phone if primary_contact else None)
+                or getattr(b, "primary_phone", None)
+                or None
+            )
 
             # Safe assigned to name
             assigned_name = user_name_map.get(b.assigned_to_user_id)
@@ -444,6 +520,7 @@ def list_workspace_leads(
                 "email": email,
                 "primary_phone": phone,
                 "phone": phone,
+                "phones": phones,
                 "assigned_to_user_id": b.assigned_to_user_id,
                 "assigned_to_name": assigned_name,
                 "stage": current_stage,
