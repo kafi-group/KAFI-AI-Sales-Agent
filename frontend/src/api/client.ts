@@ -1031,6 +1031,8 @@ export interface MailLabel {
   match_query?: string | null;
   match_keyword?: string | null;
   count: number;
+  /** Built-in Flagged mailbox — not a user-created routing label. */
+  is_system?: boolean;
 }
 
 export interface MailLabelMessageKey {

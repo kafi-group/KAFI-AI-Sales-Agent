@@ -11,6 +11,38 @@ from sqlalchemy.orm import Session
 
 from db.models import MailLabel, MailLabelAssignment
 
+FLAGGED_LABEL_NAME = "Flagged"
+FLAGGED_LABEL_COLOR = "#f59e0b"
+
+
+def is_flagged_label(label: MailLabel | None) -> bool:
+    if not label:
+        return False
+    return (label.name or "").strip().lower() == FLAGGED_LABEL_NAME.lower()
+
+
+def ensure_flagged_label(db: Session, user_id: int) -> MailLabel:
+    """Per-user Flagged mailbox — no auto-routing rules; manual flag only."""
+    existing = (
+        db.query(MailLabel)
+        .filter(MailLabel.user_id == user_id)
+        .all()
+    )
+    for row in existing:
+        if is_flagged_label(row):
+            return row
+    label = MailLabel(
+        user_id=user_id,
+        name=FLAGGED_LABEL_NAME,
+        color=FLAGGED_LABEL_COLOR,
+        match_query=None,
+        match_keyword=None,
+    )
+    db.add(label)
+    db.commit()
+    db.refresh(label)
+    return label
+
 
 def _norm_subject(subject: str | None) -> str | None:
     if not subject:
@@ -148,12 +180,17 @@ def thread_matches_label_rules(thread: dict[str, Any], labels: list[MailLabel]) 
 
 
 def list_labels(db: Session, user_id: int) -> list[MailLabel]:
-    return (
+    ensure_flagged_label(db, user_id)
+    rows = (
         db.query(MailLabel)
         .filter(MailLabel.user_id == user_id)
         .order_by(MailLabel.name.asc())
         .all()
     )
+    # Keep Flagged first in API order for stable nav/count loading.
+    flagged = [r for r in rows if is_flagged_label(r)]
+    others = [r for r in rows if not is_flagged_label(r)]
+    return flagged + others
 
 
 def create_label(
@@ -168,6 +205,8 @@ def create_label(
     cleaned = (name or "").strip()
     if not cleaned:
         raise ValueError("Label name is required")
+    if cleaned.lower() == FLAGGED_LABEL_NAME.lower():
+        raise ValueError('“Flagged” is a built-in mailbox — use the Flag button on an email')
     if len(cleaned) > 100:
         raise ValueError("Label name is too long")
     domain = normalize_domain(match_query)
@@ -214,6 +253,10 @@ def rename_label(
     label = db.query(MailLabel).filter(MailLabel.id == label_id, MailLabel.user_id == user_id).first()
     if not label:
         raise ValueError("Label not found")
+    if is_flagged_label(label):
+        raise ValueError("The Flagged mailbox cannot be renamed")
+    if cleaned.lower() == FLAGGED_LABEL_NAME.lower():
+        raise ValueError('“Flagged” is reserved — pick another label name')
     existing = (
         db.query(MailLabel)
         .filter(MailLabel.user_id == user_id, MailLabel.name == cleaned, MailLabel.id != label_id)
@@ -234,6 +277,8 @@ def delete_label(db: Session, user_id: int, label_id: int) -> bool:
     label = db.query(MailLabel).filter(MailLabel.id == label_id, MailLabel.user_id == user_id).first()
     if not label:
         return False
+    if is_flagged_label(label):
+        raise ValueError("The Flagged mailbox cannot be deleted")
     db.delete(label)
     db.commit()
     return True
@@ -371,6 +416,7 @@ def labels_for_messages(
                 "color": label.color,
                 "match_query": label.match_query,
                 "match_keyword": label.match_keyword,
+                "is_system": is_flagged_label(label),
             }
         )
     return out

@@ -159,7 +159,7 @@ function DashboardApp() {
   const [horekaCategory, setHorekaCategory] = useState<string>("All");
   const [catalogueId, setCatalogueId] = useState<string>("all_products");
   const [mailLabels, setMailLabels] = useState<
-    Array<{ id: number; name: string; color: string; count: number }>
+    Array<{ id: number; name: string; color: string; count: number; is_system?: boolean }>
   >([]);
   const [tableCounts, setTableCounts] = useState<LeadTableSectionCountsResponse>({
     all: 0,
@@ -876,6 +876,29 @@ function DashboardApp() {
   }
 
   function handleSelectMailSection(section: MailSection) {
+    if (String(section) === "flagged") {
+      const existing = mailLabels.find(
+        (label) => label.is_system || label.name.trim().toLowerCase() === "flagged",
+      );
+      if (existing) {
+        setMailSection(mailLabelSectionId(existing) as MailSection);
+        setSelectedLeadId(null);
+        setTab("inbox");
+        return;
+      }
+      void client.listMailLabels().then((rows) => {
+        setMailLabels(rows);
+        const found = rows.find(
+          (label) => label.is_system || label.name.trim().toLowerCase() === "flagged",
+        );
+        if (found) {
+          setMailSection(mailLabelSectionId(found) as MailSection);
+          setSelectedLeadId(null);
+          setTab("inbox");
+        }
+      });
+      return;
+    }
     setMailSection(section);
     setSelectedLeadId(null);
     if (section === "activity") {
@@ -1175,6 +1198,13 @@ function DashboardApp() {
     username: u.username,
   }));
 
+  const flaggedMailLabel = mailLabels.find(
+    (label) => label.is_system || label.name.trim().toLowerCase() === "flagged",
+  );
+  const customMailLabels = mailLabels.filter(
+    (label) => !(label.is_system || label.name.trim().toLowerCase() === "flagged"),
+  );
+
   const navItems: NavItem[] = [
     // #1 Master Table + dropdowns
     {
@@ -1234,6 +1264,15 @@ function DashboardApp() {
       alert: inboxUnread > 0,
       children: [
         { id: "inbox", label: "Inbox", count: mailCounts.inbox, alert: inboxUnread > 0 },
+        ...(flaggedMailLabel
+          ? [
+              {
+                id: mailLabelSectionId(flaggedMailLabel),
+                label: "Flagged",
+                count: flaggedMailLabel.count,
+              },
+            ]
+          : [{ id: "flagged", label: "Flagged", count: 0 }]),
         {
           id: "mail",
           label: "Bulk Email Sender",
@@ -1254,7 +1293,7 @@ function DashboardApp() {
           label: "Email templates",
           count: emailTemplateCount,
         },
-        ...mailLabels.map((label) => ({
+        ...customMailLabels.map((label) => ({
           id: mailLabelSectionId(label),
           label: label.name,
           count: label.count,

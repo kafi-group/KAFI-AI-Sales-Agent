@@ -239,7 +239,7 @@ function sectionDescription(section: MailSection, email?: string | null): string
   if (section === "trash") return `${mailbox} · Deleted messages`;
   if (section === "archive") return `${mailbox} · Archived messages`;
   if (section === "drafts") return `${mailbox} · Unsent compose drafts`;
-  if (isMailLabelSection(section)) return `${mailbox} · Labeled messages`;
+  if (isMailLabelSection(section)) return `${mailbox} · Labeled / flagged messages`;
   return mailbox;
 }
 
@@ -248,7 +248,7 @@ function emptyListMessage(section: MailSection): string {
   if (section === "trash") return "Trash is empty.";
   if (section === "archive") return "No archived messages.";
   if (section === "drafts") return "No drafts.";
-  if (isMailLabelSection(section)) return "No messages in this label.";
+  if (isMailLabelSection(section)) return "No messages in this label. Flagged emails appear here after you Flag them.";
   return "No conversations.";
 }
 
@@ -431,6 +431,29 @@ export function InboxPage({
   replyBodyRef.current = replyBody;
   const labelId = mailLabelIdFromSection(section);
   const isLabelView = labelId != null;
+  const flaggedLabel = useMemo(
+    () =>
+      labels.find(
+        (label) => label.is_system || label.name.trim().toLowerCase() === "flagged",
+      ) || null,
+    [labels],
+  );
+  const isFlaggedSection = Boolean(
+    flaggedLabel && labelId != null && flaggedLabel.id === labelId,
+  );
+  const customLabels = useMemo(
+    () =>
+      labels.filter(
+        (label) => !(label.is_system || label.name.trim().toLowerCase() === "flagged"),
+      ),
+    [labels],
+  );
+  const currentMessageFlagged = Boolean(
+    flaggedLabel && messageLabels.some((label) => label.id === flaggedLabel.id),
+  );
+  const hasOpenMessage = Boolean(
+    selectedThreadId || selectedMessageKey || messageDetail || thread,
+  );
   const isDraftsView = section === "drafts";
   const isFolderMail =
     section === "inbox" ||
@@ -1372,6 +1395,73 @@ export function InboxPage({
     }
   }
 
+  async function toggleFlagCurrent() {
+    let flag = flaggedLabel;
+    if (!flag) {
+      try {
+        const rows = await client.listMailLabels();
+        setLabels(rows);
+        flag =
+          rows.find(
+            (label) => label.is_system || label.name.trim().toLowerCase() === "flagged",
+          ) || null;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!flag) {
+      onError("Flagged mailbox is not ready yet. Refresh and try again.");
+      return;
+    }
+    const detail = messageDetail;
+    const threadMsg = thread?.messages?.[thread.messages.length - 1];
+    const target = detail || threadMsg;
+    if (!target) {
+      onError("Open a message first to flag it");
+      return;
+    }
+    const folder = (target.folder || section || "inbox").toLowerCase();
+    const uid = String(target.uid);
+    const already = messageLabels.some((label) => label.id === flag!.id);
+    setAssigningLabel(true);
+    try {
+      if (already) {
+        await client.unassignMailLabel({
+          label_id: flag.id,
+          folder,
+          message_uid: uid,
+        });
+        setNotice("Removed from Flagged.");
+        if (isFlaggedSection) {
+          await loadList({ silent: true });
+          setSelectedMessageKey(null);
+          setSelectedThreadId(null);
+          setMessageDetail(null);
+          setThread(null);
+        }
+      } else {
+        await client.assignMailLabel({
+          label_id: flag.id,
+          folder,
+          message_uid: uid,
+          message_id: target.message_id ?? null,
+          thread_id: thread?.thread_id ?? null,
+          from_email: target.from_email,
+          subject: target.subject,
+          apply_similar: false,
+        });
+        setNotice("Added to Flagged.");
+      }
+      const mapped = await client.mapMailLabelsByUids(folder, [uid]);
+      setMessageLabels(mapped[uid] || []);
+      onMailExtrasChangeRef.current?.();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to update flag");
+    } finally {
+      setAssigningLabel(false);
+    }
+  }
+
   return (
     <section className="space-y-4 w-full min-w-0">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -1448,7 +1538,7 @@ export function InboxPage({
               {searchActive || (triageFilter && triageFilter !== "all") ? " · on" : ""}
             </ActionButton>
           ) : null}
-          {isLabelView && labelId != null ? (
+          {isLabelView && labelId != null && !isFlaggedSection ? (
             <>
               <ActionButton
                 icon={IconTag}
@@ -1492,6 +1582,26 @@ export function InboxPage({
           >
             Compose
           </ActionButton>
+          {hasOpenMessage ? (
+            <button
+              type="button"
+              disabled={assigningLabel}
+              onClick={() => void toggleFlagCurrent()}
+              className={`shrink-0 inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold transition disabled:opacity-50 ${
+                currentMessageFlagged
+                  ? "border-amber-500/60 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25"
+                  : "border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700"
+              }`}
+              title={
+                currentMessageFlagged
+                  ? "Remove from Flagged"
+                  : "Flag this email — it will appear under Flagged"
+              }
+            >
+              <span aria-hidden>{currentMessageFlagged ? "⚑" : "⚐"}</span>
+              {currentMessageFlagged ? "Remove flag" : "Flag"}
+            </button>
+          ) : null}
           <ActionButton
             icon={IconTag}
             size="md"
@@ -1540,7 +1650,7 @@ export function InboxPage({
               <option value="archive">Archive</option>
               <option value="trash">Trash</option>
               <option value="all">All mail</option>
-              {labels.map((label) => (
+              {customLabels.map((label) => (
                 <option key={label.id} value={`label:${label.id}`}>
                   Label: {label.name}
                 </option>
@@ -2006,14 +2116,14 @@ export function InboxPage({
                         <button
                           type="button"
                           onClick={() => setLabelMenuOpen((open) => !open)}
-                          disabled={assigningLabel || labels.length === 0}
+                          disabled={assigningLabel || customLabels.length === 0}
                           className="shrink-0 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-sm hover:bg-slate-900 disabled:opacity-50"
                         >
                           Labels
                         </button>
                         {labelMenuOpen && (
                           <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-slate-700 bg-slate-900 shadow-xl py-1">
-                            {labels.map((label) => (
+                            {customLabels.map((label) => (
                               <div key={label.id} className="px-2 py-1">
                                 <button
                                   type="button"
@@ -2034,6 +2144,21 @@ export function InboxPage({
                           </div>
                         )}
                       </div>
+                      <button
+                        type="button"
+                        disabled={assigningLabel}
+                        onClick={() => void toggleFlagCurrent()}
+                        className={`shrink-0 px-3 py-1.5 rounded-lg border text-sm font-medium transition disabled:opacity-50 ${
+                          currentMessageFlagged
+                            ? "border-amber-500/60 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25"
+                            : "border-slate-700 text-slate-300 hover:bg-slate-900"
+                        }`}
+                        title={
+                          currentMessageFlagged ? "Remove from Flagged" : "Flag this email"
+                        }
+                      >
+                        {currentMessageFlagged ? "⚑ Remove flag" : "⚐ Flag"}
+                      </button>
                       <ActionButton
                         icon={IconArchive}
                         onClick={() => void moveThread("archive")}
@@ -2408,14 +2533,14 @@ export function InboxPage({
                       <button
                         type="button"
                         onClick={() => setLabelMenuOpen((open) => !open)}
-                        disabled={assigningLabel || labels.length === 0}
+                        disabled={assigningLabel || customLabels.length === 0}
                         className="shrink-0 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-sm hover:bg-slate-900 disabled:opacity-50"
                       >
                         Labels
                       </button>
                       {labelMenuOpen && (
                         <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-slate-700 bg-slate-900 shadow-xl py-1">
-                          {labels.map((label) => (
+                          {customLabels.map((label) => (
                             <div key={label.id} className="px-2 py-1">
                               <button
                                 type="button"
@@ -2436,6 +2561,21 @@ export function InboxPage({
                         </div>
                       )}
                     </div>
+                    <button
+                      type="button"
+                      disabled={assigningLabel}
+                      onClick={() => void toggleFlagCurrent()}
+                      className={`shrink-0 px-3 py-1.5 rounded-lg border text-sm font-medium transition disabled:opacity-50 ${
+                        currentMessageFlagged
+                          ? "border-amber-500/60 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25"
+                          : "border-slate-700 text-slate-300 hover:bg-slate-900"
+                      }`}
+                      title={
+                        currentMessageFlagged ? "Remove from Flagged" : "Flag this email"
+                      }
+                    >
+                      {currentMessageFlagged ? "⚑ Remove flag" : "⚐ Flag"}
+                    </button>
                     {(section === "trash" || section === "archive") && (
                       <ActionButton
                         icon={IconInbox}

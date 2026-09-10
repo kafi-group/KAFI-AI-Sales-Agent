@@ -24,8 +24,21 @@ class MailLabelRead(BaseModel):
     match_query: Optional[str] = None
     match_keyword: Optional[str] = None
     count: int = 0
+    is_system: bool = False
 
     model_config = {"from_attributes": True}
+
+
+def _mail_label_read(label: Any, *, count: int = 0) -> MailLabelRead:
+    return MailLabelRead(
+        id=label.id,
+        name=label.name,
+        color=label.color,
+        match_query=label.match_query,
+        match_keyword=label.match_keyword,
+        count=count,
+        is_system=labels_module.is_flagged_label(label),
+    )
 
 
 class MailLabelCreate(BaseModel):
@@ -87,14 +100,7 @@ def list_mail_labels(
 ) -> Any:
     counts = labels_module.label_display_counts(db, user)
     return [
-        MailLabelRead(
-            id=label.id,
-            name=label.name,
-            color=label.color,
-            match_query=label.match_query,
-            match_keyword=label.match_keyword,
-            count=counts.get(label.id, 0),
-        )
+        _mail_label_read(label, count=counts.get(label.id, 0))
         for label in labels_module.list_labels(db, user.id)
     ]
 
@@ -116,14 +122,7 @@ def create_mail_label(
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return MailLabelRead(
-        id=label.id,
-        name=label.name,
-        color=label.color,
-        match_query=label.match_query,
-        match_keyword=label.match_keyword,
-        count=0,
-    )
+    return _mail_label_read(label, count=0)
 
 
 class MailLabelUpdateRequest(BaseModel):
@@ -146,15 +145,8 @@ def update_mail_label(
             new_name=body.name,
             new_color=body.color,
         )
-        count = labels_module.count_messages_for_label(db, user.id, label)
-        return MailLabelRead(
-            id=label.id,
-            name=label.name,
-            color=label.color,
-            match_query=label.match_query,
-            match_keyword=label.match_keyword,
-            count=count,
-        )
+        count = labels_module.label_counts(db, user.id).get(label.id, 0)
+        return _mail_label_read(label, count=count)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -165,8 +157,11 @@ def delete_mail_label(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> None:
-    if not labels_module.delete_label(db, user.id, label_id):
-        raise HTTPException(404, "Label not found")
+    try:
+        if not labels_module.delete_label(db, user.id, label_id):
+            raise HTTPException(404, "Label not found")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/labels/assign")
