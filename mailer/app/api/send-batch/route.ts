@@ -93,8 +93,8 @@ export async function POST(req: NextRequest) {
     if (!smtpCreds) {
       return jsonError(
         "Could not load your company mailbox from Sales Agent. " +
-          "Log in as your Sales Agent user (e.g. Asim) — you do not need the email password. " +
-          "If Inbox works for you, retry after the API finishes deploying.",
+          "Every user sends with the mailbox already saved on their Sales Agent login — " +
+          "you do not need the email password. If Inbox works, retry after deploy.",
         502,
       );
     }

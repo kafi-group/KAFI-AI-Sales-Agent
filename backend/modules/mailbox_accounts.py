@@ -115,20 +115,24 @@ def decrypt_mailbox_password(token: str) -> str:
 
 
 # username -> settings attrs for Railway/backend .env fallback (users never type these)
+_ENV_MAILBOX_SLOTS: tuple[tuple[str, str, str], ...] = (
+    ("mailbox_admin_email", "mailbox_admin_password", "mailbox_admin_display_name"),
+    ("mailbox_asim_email", "mailbox_asim_password", "mailbox_asim_display_name"),
+    ("mailbox_usman_email", "mailbox_usman_password", "mailbox_usman_display_name"),
+    ("mailbox_sadia_email", "mailbox_sadia_password", "mailbox_sadia_display_name"),
+)
+
 _ENV_MAILBOX_BY_USERNAME: dict[str, tuple[str, str, str]] = {
-    "admin": ("mailbox_admin_email", "mailbox_admin_password", "mailbox_admin_display_name"),
-    "asim": ("mailbox_asim_email", "mailbox_asim_password", "mailbox_asim_display_name"),
-    "usmankhan": ("mailbox_usman_email", "mailbox_usman_password", "mailbox_usman_display_name"),
-    "sadia": ("mailbox_sadia_email", "mailbox_sadia_password", "mailbox_sadia_display_name"),
+    "admin": _ENV_MAILBOX_SLOTS[0],
+    "asim": _ENV_MAILBOX_SLOTS[1],
+    "usmankhan": _ENV_MAILBOX_SLOTS[2],
+    "usman": _ENV_MAILBOX_SLOTS[2],
+    "usman_khan": _ENV_MAILBOX_SLOTS[2],
+    "sadia": _ENV_MAILBOX_SLOTS[3],
 }
 
 
-def resolve_mailbox_from_env(username: str | None) -> MailboxAccount | None:
-    """Fallback: MAILBOX_*_* on Railway/backend .env (not the user's login password)."""
-    key = (username or "").strip().lower()
-    attrs = _ENV_MAILBOX_BY_USERNAME.get(key)
-    if not attrs:
-        return None
+def _account_from_env_attrs(attrs: tuple[str, str, str]) -> MailboxAccount | None:
     email_attr, password_attr, display_attr = attrs
     email = (getattr(settings, email_attr, None) or "").strip()
     password = (getattr(settings, password_attr, None) or "").strip()
@@ -142,11 +146,39 @@ def resolve_mailbox_from_env(username: str | None) -> MailboxAccount | None:
     )
 
 
+def resolve_mailbox_from_env(
+    username: str | None = None,
+    *,
+    mailbox_email: str | None = None,
+) -> MailboxAccount | None:
+    """Fallback: MAILBOX_*_* on Railway/backend .env (not the user's login password).
+
+    Matches by Sales Agent username aliases, then by mailbox email so any user
+    assigned marketing@ / info@ / etc. still gets the correct SMTP password.
+    """
+    key = (username or "").strip().lower()
+    if key:
+        attrs = _ENV_MAILBOX_BY_USERNAME.get(key)
+        if attrs:
+            account = _account_from_env_attrs(attrs)
+            if account:
+                return account
+
+    want = (mailbox_email or "").strip().lower()
+    if want:
+        for attrs in _ENV_MAILBOX_SLOTS:
+            account = _account_from_env_attrs(attrs)
+            if account and account.email.strip().lower() == want:
+                return account
+    return None
+
+
 def resolve_user_mailbox(user) -> MailboxAccount | None:
     """Build a MailboxAccount from AppUser columns, or None if not set up.
 
-    Reps only log into Sales Agent (username/password). Mailbox password is
-    stored encrypted on their user row (or Railway env) — they never enter it.
+    Works for every Sales Agent user with a mailbox on their row. Reps only log
+    into Sales Agent (username/password). Mailbox password is stored encrypted
+    on their user row (or Railway env) — they never enter it at send time.
     """
     if user is None:
         return None
@@ -164,8 +196,11 @@ def resolve_user_mailbox(user) -> MailboxAccount | None:
             return MailboxAccount(email=email, password=password, display_name=display)
         except ValueError:
             pass
-    # DB missing/corrupt decrypt → Railway env for known usernames (Asim, etc.)
-    return resolve_mailbox_from_env(getattr(user, "username", None))
+    # DB missing/corrupt decrypt → Railway env by username or mailbox address
+    return resolve_mailbox_from_env(
+        getattr(user, "username", None),
+        mailbox_email=email or None,
+    )
 
 
 def user_mailbox_configured(user) -> bool:

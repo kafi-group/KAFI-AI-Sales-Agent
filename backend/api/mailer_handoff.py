@@ -205,8 +205,8 @@ def get_mailer_smtp_credentials(
 ):
     """Return the caller's Sales Agent mailbox password for Vercel SMTP.
 
-    Inbox IMAP already uses this password; mailer Vercel env can drift and cause
-    535 Incorrect authentication. Prefer DB credentials for outbound SMTP.
+    Works for every logged-in user (Asim, Usman, Sadia, admin, Khalid, …).
+    Inbox IMAP already uses this password; mailer must not use stale Vercel env.
     """
     user = _resolve_report_user(
         db,
@@ -219,8 +219,8 @@ def get_mailer_smtp_credentials(
             status_code=400,
             detail=(
                 "Company mailbox is not set up for this Sales Agent login. "
-                "An admin must set MAILBOX_* on Railway (or Users page once) — "
-                "reps only need their Sales Agent username/password."
+                "An admin must configure the mailbox once for this user — "
+                "reps only need their Sales Agent username/password to send."
             ),
         )
     return MailerSmtpCredentialsResponse(

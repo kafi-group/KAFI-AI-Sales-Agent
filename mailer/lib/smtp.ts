@@ -132,7 +132,10 @@ export async function sendSmtp(options: {
   subject: string;
   body: string;
   html?: boolean;
-  /** Prefer Sales Agent DB mailbox password over Vercel env (fixes 535 drift). */
+  /**
+   * Required for real sends: credentials from Sales Agent `/mailer/smtp-credentials`
+   * (same password as Inbox for every user). Do not use stale Vercel MAILBOX_*.
+   */
   credsOverride?: {
     email: string;
     password: string;
@@ -144,22 +147,19 @@ export async function sendSmtp(options: {
     contentType?: string;
   }>;
 }): Promise<{ ok: boolean; message: string }> {
-  let creds: MailboxCreds | null = null;
-  if (options.credsOverride?.email && options.credsOverride?.password) {
-    creds = withPublicSenderName({
-      email: options.credsOverride.email.trim(),
-      password: options.credsOverride.password.trim(),
-      displayName: options.credsOverride.displayName?.trim() || undefined,
-    });
-  } else {
-    creds = resolveMailbox(options.username, options.mailboxEmail);
-  }
-  if (!creds) {
+  if (!options.credsOverride?.email || !options.credsOverride?.password) {
     return {
       ok: false,
-      message: `No SMTP credentials on mailer for user "${options.username}". Set MAILBOX_* env on Vercel or configure the mailbox on Sales Agent Users page.`,
+      message:
+        `No Sales Agent mailbox credentials for "${options.username}". ` +
+        "Outbound SMTP must load from Sales Agent (same as Inbox) for every user.",
     };
   }
+  const creds = withPublicSenderName({
+    email: options.credsOverride.email.trim(),
+    password: options.credsOverride.password.trim(),
+    displayName: options.credsOverride.displayName?.trim() || undefined,
+  });
 
   const host = process.env.MAILBOX_SMTP_HOST || "67.23.252.42";
   const port = Number(process.env.MAILBOX_SMTP_PORT || "465");
