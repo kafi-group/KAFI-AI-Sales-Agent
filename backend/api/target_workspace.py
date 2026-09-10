@@ -25,7 +25,7 @@ class AddTargetRequest(BaseModel):
 
 class UpdateLeadStatusRequest(BaseModel):
     buyer_id: int
-    stage: str  # "fresh", "needs_follow_up", "not_interested", "no_response"
+    stage: str  # "fresh", "needs_follow_up", "not_interested", "no_response", "interested"
     not_interested_reason: Optional[str] = None
     not_interested_remarks: Optional[str] = None
     follow_up_reason: Optional[str] = None

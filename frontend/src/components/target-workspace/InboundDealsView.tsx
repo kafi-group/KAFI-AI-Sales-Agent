@@ -5,17 +5,17 @@ import {
 } from "../../api/client";
 
 const PIPELINE_STAGES = [
-  { key: "new_query", label: "New Lead (Queries)", icon: "📥", color: "from-blue-600 to-indigo-600" },
-  { key: "potential", label: "Potential Clients", icon: "⭐", color: "from-indigo-600 to-violet-600" },
-  { key: "assigned", label: "Assigned", icon: "👤", color: "from-violet-600 to-purple-600" },
-  { key: "calling", label: "Calling", icon: "📞", color: "from-cyan-600 to-blue-600" },
-  { key: "follow_up", label: "Follow-up", icon: "🕒", color: "from-amber-600 to-orange-600" },
-  { key: "interested", label: "Interested", icon: "❤️", color: "from-emerald-600 to-teal-600" },
-  { key: "not_interested", label: "Not Interested", icon: "🚫", color: "from-slate-600 to-zinc-600" },
+  { key: "new_lead", label: "New Lead (Queries)", icon: "📥", color: "from-blue-600 to-indigo-600" },
   { key: "quotation_sent", label: "Quotation Sent", icon: "📄", color: "from-pink-600 to-rose-600" },
   { key: "negotiation", label: "Negotiation", icon: "🤝", color: "from-purple-600 to-indigo-600" },
   { key: "won", label: "Won", icon: "🏆", color: "from-emerald-500 to-green-600" },
   { key: "lost", label: "Lost", icon: "💀", color: "from-rose-700 to-red-800" },
+];
+
+/** Advance dropdown includes Interested/Potential (landing from Outreach Funnel). */
+const STAGE_OPTIONS = [
+  { key: "interested", label: "Interested / Potential", icon: "❤️" },
+  ...PIPELINE_STAGES,
 ];
 
 interface InboundDealsViewProps {
@@ -25,7 +25,7 @@ interface InboundDealsViewProps {
 export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
   onOpenEmailComposer,
 }) => {
-  const [selectedStage, setSelectedStage] = useState<string>("all");
+  const [selectedStage, setSelectedStage] = useState<string>("interested");
   const [searchQuery, setSearchQuery] = useState("");
   const [lifecycleData, setLifecycleData] = useState<AiModeLifecycleListResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -77,11 +77,11 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
             <div className="flex items-center gap-2">
               <span className="text-2xl">⚡</span>
               <h2 className="text-xl font-bold text-white tracking-tight">
-                Current Clients & Inbound Inquiries Pipeline
+                Interested / Potential Pipeline
               </h2>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              Track and advance inbound inquiry emails and active high-intent clients across the complete 11-stage conversion funnel.
+              Leads marked Interested from Outreach Funnel, plus inbound queries and active deal stages.
             </p>
           </div>
 
@@ -94,8 +94,8 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
           </button>
         </div>
 
-        {/* ── 11-Stage Pipeline Summary Cards / Tabs ── */}
-        <div className="mt-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-11 gap-2">
+        {/* ── Deal-stage summary cards (Potential/Assigned/Calling/Follow-up/Interested/Not Interested removed) ── */}
+        <div className="mt-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
           {PIPELINE_STAGES.map((st) => {
             const count = pipeline[st.key] ?? 0;
             const isSelected = selectedStage === st.key;
@@ -103,7 +103,7 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
               <button
                 key={st.key}
                 type="button"
-                onClick={() => setSelectedStage(isSelected ? "all" : st.key)}
+                onClick={() => setSelectedStage(isSelected ? "interested" : st.key)}
                 className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between ${
                   isSelected
                     ? "bg-slate-800 border-emerald-500 ring-2 ring-emerald-500/20 shadow-md shadow-emerald-950"
@@ -152,11 +152,24 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex items-center gap-2 text-xs flex-wrap">
           <span className="text-slate-400">Filtered Stage:</span>
           <span className="font-semibold text-emerald-400">
-            {selectedStage === "all" ? "All Stages (Full Pipeline)" : PIPELINE_STAGES.find((s) => s.key === selectedStage)?.label}
+            {selectedStage === "all"
+              ? "All Stages (Full Pipeline)"
+              : selectedStage === "interested"
+                ? "Interested / Potential"
+                : PIPELINE_STAGES.find((s) => s.key === selectedStage)?.label}
           </span>
+          {selectedStage !== "interested" && (
+            <button
+              type="button"
+              onClick={() => setSelectedStage("interested")}
+              className="text-xs text-emerald-400 underline hover:text-emerald-300 ml-1"
+            >
+              Interested / Potential
+            </button>
+          )}
           {selectedStage !== "all" && (
             <button
               type="button"
@@ -204,7 +217,9 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
             <tbody className="divide-y divide-slate-800/60">
               {rows.map((row, idx) => {
                 const isMoving = movingBuyerId === row.buyer_id;
-                const stageMeta = PIPELINE_STAGES.find((s) => s.key === row.stage);
+                const stageMeta =
+                  STAGE_OPTIONS.find((s) => s.key === row.stage) ||
+                  PIPELINE_STAGES.find((s) => s.key === row.stage);
                 return (
                   <tr key={row.id} className="hover:bg-slate-800/40 transition">
                     <td className="py-3.5 px-4 text-slate-500 font-mono text-[11px]">{idx + 1}</td>
@@ -233,7 +248,7 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
                         onChange={(e) => handleStageChange(row.buyer_id, e.target.value)}
                         className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
                       >
-                        {PIPELINE_STAGES.map((st) => (
+                        {STAGE_OPTIONS.map((st) => (
                           <option key={st.key} value={st.key}>
                             {st.icon} {st.label}
                           </option>

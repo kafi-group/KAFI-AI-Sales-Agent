@@ -10,6 +10,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from db.models import (
+    AiCompanyLifecycle,
     AppUser,
     AppUserRole,
     Buyer,
@@ -92,13 +93,17 @@ def _collect_workspace_phones(
     return phones
 
 
-# 4 Core Outreach Stages
+# 4 Core Outreach Stages (+ interested promotes out into Interested/Potential deals)
+OUTREACH_STAGE_KEYS = frozenset(
+    {"fresh", "needs_follow_up", "not_interested", "no_response"}
+)
 OUTREACH_STAGES = [
     {"key": "fresh", "label": "Never Contacted / Fresh", "color": "emerald"},
     {"key": "needs_follow_up", "label": "Needs Follow Up", "color": "amber"},
     {"key": "not_interested", "label": "Not Interested", "color": "rose"},
     {"key": "no_response", "label": "No Response", "color": "slate"},
 ]
+WORKSPACE_LEAD_STAGES = OUTREACH_STAGE_KEYS | {"interested"}
 
 DEFAULT_DAY_TARGETS: dict[str, list[str]] = {
     "monday": ["United Arab Emirates", "Saudi Arabia", "Oman"],
@@ -431,7 +436,7 @@ def list_workspace_leads(
         try:
             lc = lifecycles_map.get(b.id)
             current_stage = lc.stage if lc else "fresh"
-            
+
             # If no explicit lifecycle stage set yet, check if there's history on buyer
             if not lc:
                 if b.remarks and ("not interested" in str(b.remarks).lower()):
@@ -440,6 +445,10 @@ def list_workspace_leads(
                     current_stage = "needs_follow_up"
                 else:
                     current_stage = "fresh"
+
+            # Promoted to Interested/Potential deals — leave the 4-stage outreach funnel
+            if current_stage not in OUTREACH_STAGE_KEYS:
+                continue
 
             if current_stage in stage_counts:
                 stage_counts[current_stage] += 1
@@ -595,10 +604,20 @@ def update_workspace_lead_stage(
     linkedin_request_sent: bool | None = None,
     linkedin_msg_sent: bool | None = None,
 ) -> dict[str, Any]:
-    """Update outreach stage, objection reasons, follow-up parameters, or audit verification proof."""
+    """Update outreach stage, objection reasons, follow-up parameters, or audit verification proof.
+
+    Stage ``interested`` removes the lead from the 4-stage outreach funnel and places it
+    into the Interested/Potential (AI company lifecycle) deals pipeline.
+    """
     buyer = db.get(Buyer, buyer_id)
     if not buyer:
         raise ValueError("Lead / Buyer not found")
+
+    stage_key = (stage or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if stage_key not in WORKSPACE_LEAD_STAGES:
+        raise ValueError(
+            f"Invalid stage. Use one of: {', '.join(sorted(WORKSPACE_LEAD_STAGES))}"
+        )
 
     # Non-admins may only update leads assigned to them (workspace = assigned pool).
     role = user.role.value if hasattr(user.role, "value") else str(user.role)
@@ -607,7 +626,7 @@ def update_workspace_lead_stage(
 
     lc = _ensure_lead_lifecycle(db, buyer_id, user_id=user.id)
     old_stage = lc.stage
-    lc.stage = stage
+    lc.stage = stage_key
     lc.user_id = user.id
 
     if not_interested_reason is not None:
@@ -633,24 +652,69 @@ def update_workspace_lead_stage(
     if linkedin_msg_sent is not None:
         lc.linkedin_msg_sent = linkedin_msg_sent
 
+    if stage_key == "interested":
+        now = datetime.now(timezone.utc)
+        if buyer.interested_clients_list_at is None:
+            buyer.interested_clients_list_at = now
+        ai_row = (
+            db.query(AiCompanyLifecycle)
+            .filter(AiCompanyLifecycle.buyer_id == buyer_id)
+            .one_or_none()
+        )
+        # Don't pull closed/advanced deals backward; otherwise land on interested.
+        protected = {"quotation_sent", "negotiation", "won", "lost"}
+        if not ai_row:
+            db.add(
+                AiCompanyLifecycle(
+                    buyer_id=buyer_id,
+                    stage="interested",
+                    stage_entered_at=now,
+                    history=[
+                        {
+                            "stage": "interested",
+                            "at": now.isoformat(),
+                            "notes": "Marked interested from Outreach Funnel",
+                            "by_user_id": user.id,
+                        }
+                    ],
+                    updated_by_user_id=user.id,
+                )
+            )
+        elif ai_row.stage not in protected:
+            history = list(ai_row.history or [])
+            if ai_row.stage != "interested":
+                history.append(
+                    {
+                        "stage": "interested",
+                        "at": now.isoformat(),
+                        "notes": "Marked interested from Outreach Funnel",
+                        "by_user_id": user.id,
+                    }
+                )
+                ai_row.stage = "interested"
+                ai_row.stage_entered_at = now
+                ai_row.history = history
+            ai_row.updated_by_user_id = user.id
+            ai_row.updated_at = now
+
     db.commit()
     db.refresh(lc)
 
     # Log KPI / Audit Activity event for Mr. Khalid
-    if old_stage != stage or whatsapp_call_proof or searched_internet_email:
+    if old_stage != stage_key or whatsapp_call_proof or searched_internet_email:
         proof_note = f" (WhatsApp proof: {whatsapp_call_proof})" if whatsapp_call_proof else ""
         activity_module.log_activity(
             db,
             user_id=user.id,
             activity_type=activity_module.TABLE_ROW_EDITED,
             title="Workspace Stage Update",
-            summary=f"Updated {buyer.company_name} to {stage.replace('_', ' ').title()}{proof_note}",
+            summary=f"Updated {buyer.company_name} to {stage_key.replace('_', ' ').title()}{proof_note}",
             entity_type="buyer",
             entity_id=buyer.id,
             details={
                 "buyer_id": buyer.id,
                 "company_name": buyer.company_name,
-                "stage": stage,
+                "stage": stage_key,
                 "whatsapp_call_proof": whatsapp_call_proof,
                 "searched_internet_email": searched_internet_email,
             },

@@ -1677,17 +1677,6 @@ function DashboardApp() {
                 initialThreadId={targetThreadId}
                 initialMailboxUserId={targetMailboxUserId}
                 activeMailboxUserId={isAsimUser ? asimActiveMailboxUserId : null}
-                switchableMailboxes={isAsimUser ? asimMailboxes : []}
-                onActiveMailboxChange={(mailboxUserId) => {
-                  setAsimActiveMailboxUserId(mailboxUserId);
-                  sessionStorage.setItem(
-                    "asim-inbox-mailbox-user-id",
-                    String(mailboxUserId),
-                  );
-                  setTargetThreadId(null);
-                  setTargetMailboxUserId(null);
-                  setError(null);
-                }}
                 autoOpenReply={autoOpenReply}
                 onThreadOpened={() => {
                   setTargetThreadId(null);

@@ -907,6 +907,15 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
 
                   {/* Promote / Demote Stage Change Dropdown or Modal Trigger */}
                   <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateStage(lead.id, "interested")}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/20 text-xs font-medium transition"
+                      title="Move to Interested/Potential deals pipeline"
+                    >
+                      ❤️ Interested
+                    </button>
+
                     {selectedStage !== "needs_follow_up" && (
                       <button
                         type="button"

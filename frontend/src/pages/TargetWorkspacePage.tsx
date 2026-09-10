@@ -67,7 +67,7 @@ export const TargetWorkspacePage: React.FC<TargetWorkspacePageProps> = ({
             }`}
           >
             <span>⚡</span>
-            <span>Current Deals (11 Stages)</span>
+            <span>Interested/Potential</span>
           </button>
 
           {isAdmin && (

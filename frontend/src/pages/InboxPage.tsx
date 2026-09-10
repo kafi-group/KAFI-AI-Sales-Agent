@@ -72,14 +72,8 @@ interface InboxPageProps {
   onOpenMailerCompose?: () => void;
   initialThreadId?: string | null;
   initialMailboxUserId?: number | null;
-  /** Asim shared mailbox switch (marketing/info/essence). Email-only. */
+  /** Asim shared mailbox (marketing/info/essence) — switched from header only. */
   activeMailboxUserId?: number | null;
-  switchableMailboxes?: Array<{
-    user_id: number;
-    email: string;
-    display_name?: string | null;
-  }>;
-  onActiveMailboxChange?: (mailboxUserId: number) => void;
   autoOpenReply?: boolean;
   onThreadOpened?: () => void;
 }
@@ -345,8 +339,6 @@ export function InboxPage({
   initialThreadId,
   initialMailboxUserId = null,
   activeMailboxUserId = null,
-  switchableMailboxes = [],
-  onActiveMailboxChange,
   autoOpenReply,
   onThreadOpened,
 }: InboxPageProps) {
@@ -1384,81 +1376,26 @@ export function InboxPage({
     <section className="space-y-4 w-full min-w-0">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="min-w-0 space-y-2">
-          {switchableMailboxes.length > 1 ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="text-xs font-medium text-slate-400 shrink-0">
-                Mailbox
-              </label>
-              <select
-                value={activeMailboxUserId ?? switchableMailboxes[0]?.user_id ?? ""}
-                onChange={(e) => {
-                  const next = Number(e.target.value);
-                  if (!Number.isFinite(next)) return;
-                  onActiveMailboxChange?.(next);
-                }}
-                className="min-w-[16rem] max-w-full rounded-lg border border-emerald-500/50 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
-                title="Switch between marketing@, info@, and essence@"
-              >
-                {switchableMailboxes.map((box) => (
-                  <option key={box.user_id} value={box.user_id}>
-                    {box.email}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : switchableMailboxes.length === 1 ? (
-            <p className="text-xs text-amber-300/90">
-              Only {switchableMailboxes[0].email} is available to switch. Ask admin to
-              enable info@ and essence@ mailboxes on the Users page.
-            </p>
-          ) : null}
           <p className="text-sm text-slate-500">
-            {switchableMailboxes.length > 1 ? (
-              section === "inbox" && status ? (
-                <>
-                  Viewing{" "}
-                  <span className="text-slate-200">{status.email || "mailbox"}</span>
-                  {" · "}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMailAiOpen(true);
-                      if (!mailAiQuestion) {
-                        setMailAiQuestion("What are the most important unread emails?");
-                      }
-                    }}
-                    className="text-emerald-400 hover:text-emerald-300 underline decoration-dotted"
-                    title="Ask AI about unread mail"
-                  >
-                    {status.unread_count} unread — ask AI
-                  </button>
-                </>
-              ) : (
-                sectionDescription(section, status?.email)
-              )
-            ) : (
+            {sectionDescription(section, status?.email)}
+            {section === "inbox" && status ? (
               <>
-                {sectionDescription(section, status?.email)}
-                {section === "inbox" && status ? (
-                  <>
-                    {" · "}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMailAiOpen(true);
-                        if (!mailAiQuestion) {
-                          setMailAiQuestion("What are the most important unread emails?");
-                        }
-                      }}
-                      className="text-emerald-400 hover:text-emerald-300 underline decoration-dotted"
-                      title="Ask AI about unread mail"
-                    >
-                      {status.unread_count} unread — ask AI
-                    </button>
-                  </>
-                ) : null}
+                {" · "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMailAiOpen(true);
+                    if (!mailAiQuestion) {
+                      setMailAiQuestion("What are the most important unread emails?");
+                    }
+                  }}
+                  className="text-emerald-400 hover:text-emerald-300 underline decoration-dotted"
+                  title="Ask AI about unread mail"
+                >
+                  {status.unread_count} unread — ask AI
+                </button>
               </>
-            )}
+            ) : null}
           </p>
           {section === "inbox" && !searchActive && !loading && threads.length > 0 ? (
             <p className="text-xs text-slate-500 mt-1">
