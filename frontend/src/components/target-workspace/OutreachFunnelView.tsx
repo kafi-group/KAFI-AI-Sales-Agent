@@ -5,8 +5,15 @@ import {
   type DayCountryTarget,
   type WorkspaceReviewOptionItem,
   type AppUser,
+  type LeadTableRow,
 } from "../../api/client";
+import { CallLeadButton } from "../CallLeadButton";
+import {
+  LeadWhatsAppComposeModal,
+  type WhatsAppComposeTarget,
+} from "../WhatsAppComposeLink";
 import { WhatsAppProofModal } from "./WhatsAppProofModal";
+import { pushNumberToFloatingDialpad } from "../../utils/dialpadEvents";
 
 const DAYS_OF_WEEK = [
   { id: "monday", label: "Monday" },
@@ -25,6 +32,19 @@ interface OutreachFunnelViewProps {
   onSelectDay: (day: string) => void;
   onOpenCall?: (phone: string, companyName: string, leadId?: number) => void;
   onOpenEmailComposer?: (email: string, companyName: string, contactName?: string) => void;
+  onError?: (message: string) => void;
+}
+
+function workspaceLeadAsComposeRow(lead: WorkspaceLeadItem): LeadTableRow {
+  return {
+    id: lead.id,
+    company_name: lead.company_name,
+    contact_name: lead.contact_person,
+    contact_id: lead.contact_id ?? null,
+    contact_phone: lead.primary_phone,
+    contact_email: lead.primary_email,
+    country: lead.country,
+  } as LeadTableRow;
 }
 
 export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
@@ -32,8 +52,9 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
   isAdmin,
   selectedDay,
   onSelectDay,
-  onOpenCall,
+  onOpenCall: _onOpenCall,
   onOpenEmailComposer,
+  onError,
 }) => {
   const [selectedStage, setSelectedStage] = useState<string>("fresh");
   const [targetCountries, setTargetCountries] = useState<DayCountryTarget[]>([]);
@@ -50,6 +71,8 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
 
   // Modal states
   const [proofModalLead, setProofModalLead] = useState<WorkspaceLeadItem | null>(null);
+  const [whatsappTarget, setWhatsappTarget] = useState<WhatsAppComposeTarget | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   // Quick action states for changing reasons inline
   const [editingLeadId, setEditingLeadId] = useState<number | null>(null);
@@ -412,6 +435,11 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
       </div>
 
       {/* ── Search and Secondary Filters ── */}
+      {actionNotice ? (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200">
+          {actionNotice}
+        </div>
+      ) : null}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <input
@@ -735,26 +763,55 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
 
                 {/* Right Section: Action Controls */}
                 <div className="flex flex-col sm:flex-row lg:flex-col items-end gap-2 shrink-0">
-                  {/* Direct Contact Action Buttons */}
-                  <div className="flex items-center gap-1.5">
-                    {lead.primary_phone && (
-                      <button
-                        type="button"
-                        onClick={() => onOpenCall?.(lead.primary_phone!, lead.company_name, lead.id)}
-                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md shadow-emerald-950 transition flex items-center gap-1"
-                        title="Direct Dial via Twilio"
-                      >
-                        📞 Call
-                      </button>
-                    )}
-                    {lead.primary_email && (
+                  {/* Direct Contact — stay on this page (no Master Table hop) */}
+                  <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                    {lead.primary_phone ? (
+                      <>
+                        <CallLeadButton
+                          leadId={lead.id}
+                          phone={lead.primary_phone}
+                          contactId={lead.contact_id ?? undefined}
+                          contactName={lead.contact_person || lead.company_name}
+                          assignedToUserId={lead.assigned_to_user_id}
+                          assignedTo={lead.assigned_to_name}
+                          compact
+                          onError={(msg) => {
+                            onError?.(msg);
+                            setError(msg);
+                          }}
+                          onSuccess={() => {
+                            pushNumberToFloatingDialpad({
+                              phone: lead.primary_phone!,
+                              contactName: lead.contact_person || lead.company_name,
+                              countryHint: lead.country,
+                            });
+                            setActionNotice(`Calling ${lead.company_name}…`);
+                            window.setTimeout(() => setActionNotice(null), 4000);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setWhatsappTarget({
+                              row: workspaceLeadAsComposeRow(lead),
+                              phone: lead.primary_phone!,
+                            })
+                          }
+                          className="px-3 py-1.5 rounded-xl bg-[#128C7E] hover:bg-[#0e6f64] text-white text-xs font-semibold shadow-md shadow-emerald-950/40 transition flex items-center gap-1"
+                          title="Send WhatsApp without leaving Target Workspace"
+                        >
+                          💬 WhatsApp
+                        </button>
+                      </>
+                    ) : null}
+                    {lead.primary_email ? (
                       <button
                         type="button"
                         onClick={() =>
                           onOpenEmailComposer?.(
                             lead.primary_email!,
                             lead.company_name,
-                            lead.contact_person || undefined
+                            lead.contact_person || undefined,
                           )
                         }
                         className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow-md shadow-sky-950 transition flex items-center gap-1"
@@ -762,7 +819,7 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                       >
                         ✉️ Email
                       </button>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Promote / Demote Stage Change Dropdown or Modal Trigger */}
@@ -920,6 +977,21 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
         onClose={() => setProofModalLead(null)}
         onSave={handleSaveWhatsAppProof}
       />
+      {whatsappTarget ? (
+        <LeadWhatsAppComposeModal
+          target={whatsappTarget}
+          onClose={() => setWhatsappTarget(null)}
+          onError={(msg) => {
+            onError?.(msg);
+            setError(msg);
+          }}
+          onSent={(message) => {
+            setActionNotice(message);
+            setWhatsappTarget(null);
+            window.setTimeout(() => setActionNotice(null), 5000);
+          }}
+        />
+      ) : null}
     </div>
   );
 };

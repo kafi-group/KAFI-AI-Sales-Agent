@@ -3948,6 +3948,7 @@ export interface WorkspaceLeadItem {
   id: number;
   company_name: string;
   contact_person: string | null;
+  contact_id?: number | null;
   designation: string | null;
   primary_phone: string | null;
   primary_email: string | null;

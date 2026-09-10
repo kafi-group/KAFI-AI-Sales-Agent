@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { IndexAction } from "./data/indexSections";
 import { sumWhatsAppInboxUnread } from "./utils/whatsappRead";
+import { pushNumberToFloatingDialpad } from "./utils/dialpadEvents";
 import {
   client,
   QUOTATION_AGENT_URL,
@@ -1518,14 +1519,18 @@ function DashboardApp() {
             )}
             {tab === "target-workspace" && (
               <TargetWorkspacePage
-                onOpenCall={(_phone, _company, leadId) => {
-                  if (leadId) handleSelectLead(leadId);
+                onOpenCall={(phone, company) => {
+                  pushNumberToFloatingDialpad({
+                    phone,
+                    contactName: company,
+                  });
                 }}
                 onOpenEmailComposer={(email, company, _contact) => {
                   void openMailerApp(
                     `/compose?to=${encodeURIComponent(email)}&subject=${encodeURIComponent(`Inquiry - ${company}`)}`
                   );
                 }}
+                onError={setError}
               />
             )}
             {tab === "table" && selectedLeadId !== null && (

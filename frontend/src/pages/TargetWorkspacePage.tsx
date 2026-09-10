@@ -7,11 +7,13 @@ import { AdminTargetManagerView } from "../components/target-workspace/AdminTarg
 interface TargetWorkspacePageProps {
   onOpenCall?: (phone: string, companyName: string, leadId?: number) => void;
   onOpenEmailComposer?: (email: string, companyName: string, contactName?: string) => void;
+  onError?: (message: string) => void;
 }
 
 export const TargetWorkspacePage: React.FC<TargetWorkspacePageProps> = ({
   onOpenCall,
   onOpenEmailComposer,
+  onError,
 }) => {
   const { user, isAdmin } = useAuth();
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<"outreach" | "inbound" | "admin">("outreach");
@@ -94,6 +96,7 @@ export const TargetWorkspacePage: React.FC<TargetWorkspacePageProps> = ({
           onSelectDay={setSelectedDay}
           onOpenCall={onOpenCall}
           onOpenEmailComposer={onOpenEmailComposer}
+          onError={onError}
         />
       )}
 

@@ -437,6 +437,7 @@ def list_workspace_leads(
                 "website_url": b.website_url or "",
                 "contact_person": contact_person,
                 "contact_name": contact_person,
+                "contact_id": int(primary_contact.id) if primary_contact else None,
                 "designation": designation,
                 "contact_designation": designation,
                 "primary_email": email,
