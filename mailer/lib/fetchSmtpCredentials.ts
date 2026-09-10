@@ -1,4 +1,8 @@
-/** Fetch SMTP login from Sales Agent (same password that powers IMAP inbox). */
+/** Fetch SMTP login from Sales Agent (same password that powers IMAP inbox).
+
+ * Reps never enter the mailbox password — they only log into Sales Agent.
+ * Mailer must use this endpoint; do not rely on stale Vercel MAILBOX_* passwords.
+ */
 
 export type SmtpCreds = {
   email: string;
@@ -21,7 +25,12 @@ export async function fetchSmtpCredentialsFromSalesAgent(opts: {
   handoffToken?: string;
 }): Promise<SmtpCreds | null> {
   const base = apiBase();
-  if (!base) return null;
+  if (!base) {
+    console.error(
+      "[mailer] KAFI_API_BASE_URL missing — cannot load mailbox password from Sales Agent",
+    );
+    return null;
+  }
 
   const authToken = (opts.authToken || "").trim();
   const handoffToken = (opts.handoffToken || "").trim();
@@ -38,7 +47,13 @@ export async function fetchSmtpCredentialsFromSalesAgent(opts: {
       headers,
       cache: "no-store",
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      console.error(
+        `[mailer] smtp-credentials HTTP ${res.status}: ${detail.slice(0, 200)}`,
+      );
+      return null;
+    }
     const data = (await res.json()) as {
       email?: string;
       password?: string;
@@ -46,13 +61,17 @@ export async function fetchSmtpCredentialsFromSalesAgent(opts: {
     };
     const email = (data.email || "").trim();
     const password = (data.password || "").trim();
-    if (!email || !password) return null;
+    if (!email || !password) {
+      console.error("[mailer] smtp-credentials response missing email/password");
+      return null;
+    }
     return {
       email,
       password,
       displayName: data.display_name ?? null,
     };
-  } catch {
+  } catch (err) {
+    console.error("[mailer] smtp-credentials fetch failed", err);
     return null;
   }
 }

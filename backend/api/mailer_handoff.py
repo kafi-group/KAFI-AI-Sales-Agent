@@ -217,7 +217,11 @@ def get_mailer_smtp_credentials(
     if not account:
         raise HTTPException(
             status_code=400,
-            detail="Your company mailbox is not configured. Ask an admin (Users page).",
+            detail=(
+                "Company mailbox is not set up for this Sales Agent login. "
+                "An admin must set MAILBOX_* on Railway (or Users page once) — "
+                "reps only need their Sales Agent username/password."
+            ),
         )
     return MailerSmtpCredentialsResponse(
         email=account.email,
@@ -327,7 +331,11 @@ def create_mailer_handoff(
     if not account:
         raise HTTPException(
             status_code=400,
-            detail="Your company mailbox is not configured. Ask an admin (Users page).",
+            detail=(
+                "Company mailbox is not set up for this Sales Agent login. "
+                "An admin must configure it once on Railway — reps only need "
+                "their Sales Agent username/password."
+            ),
         )
 
     buyer_ids = list(dict.fromkeys(payload.buyer_ids))

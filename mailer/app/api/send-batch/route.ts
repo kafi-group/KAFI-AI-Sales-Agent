@@ -85,9 +85,19 @@ export async function POST(req: NextRequest) {
       Math.round((body.message_delay_seconds ?? 2) * 1000),
     );
 
+    // Always load mailbox password from Sales Agent (same as Inbox).
+    // Never fall back to Vercel MAILBOX_* — those drift and cause SMTP 535.
     const smtpCreds = await fetchSmtpCredentialsFromSalesAgent({
       handoffToken: token,
     });
+    if (!smtpCreds) {
+      return jsonError(
+        "Could not load your company mailbox from Sales Agent. " +
+          "Log in as your Sales Agent user (e.g. Asim) — you do not need the email password. " +
+          "If Inbox works for you, retry after the API finishes deploying.",
+        502,
+      );
+    }
 
     const isBulk = leads.length > 1;
     if (isBulk) {

@@ -114,25 +114,58 @@ def decrypt_mailbox_password(token: str) -> str:
     raise ValueError("Could not decrypt mailbox password") from last_exc
 
 
-def resolve_user_mailbox(user) -> MailboxAccount | None:
-    """Build a MailboxAccount from AppUser columns, or None if not set up."""
-    if user is None:
+# username -> settings attrs for Railway/backend .env fallback (users never type these)
+_ENV_MAILBOX_BY_USERNAME: dict[str, tuple[str, str, str]] = {
+    "admin": ("mailbox_admin_email", "mailbox_admin_password", "mailbox_admin_display_name"),
+    "asim": ("mailbox_asim_email", "mailbox_asim_password", "mailbox_asim_display_name"),
+    "usmankhan": ("mailbox_usman_email", "mailbox_usman_password", "mailbox_usman_display_name"),
+    "sadia": ("mailbox_sadia_email", "mailbox_sadia_password", "mailbox_sadia_display_name"),
+}
+
+
+def resolve_mailbox_from_env(username: str | None) -> MailboxAccount | None:
+    """Fallback: MAILBOX_*_* on Railway/backend .env (not the user's login password)."""
+    key = (username or "").strip().lower()
+    attrs = _ENV_MAILBOX_BY_USERNAME.get(key)
+    if not attrs:
         return None
-    email = (getattr(user, "mailbox_email", None) or "").strip()
-    enc = (getattr(user, "mailbox_password_encrypted", None) or "").strip()
-    if not email or not enc:
+    email_attr, password_attr, display_attr = attrs
+    email = (getattr(settings, email_attr, None) or "").strip()
+    password = (getattr(settings, password_attr, None) or "").strip()
+    if not email or not password:
+        return None
+    display = (getattr(settings, display_attr, None) or "").strip() or None
+    return MailboxAccount(
+        email=email,
+        password=password,
+        display_name=public_sender_display_name(email, display),
+    )
+
+
+def resolve_user_mailbox(user) -> MailboxAccount | None:
+    """Build a MailboxAccount from AppUser columns, or None if not set up.
+
+    Reps only log into Sales Agent (username/password). Mailbox password is
+    stored encrypted on their user row (or Railway env) — they never enter it.
+    """
+    if user is None:
         return None
     if not bool(getattr(user, "mailbox_enabled", True)):
         return None
-    try:
-        password = decrypt_mailbox_password(enc)
-    except ValueError:
-        return None
-    display = (getattr(user, "mailbox_display_name", None) or "").strip() or None
-    if not display:
-        display = (getattr(user, "full_name", None) or "").strip() or None
-    display = public_sender_display_name(email, display)
-    return MailboxAccount(email=email, password=password, display_name=display)
+    email = (getattr(user, "mailbox_email", None) or "").strip()
+    enc = (getattr(user, "mailbox_password_encrypted", None) or "").strip()
+    if email and enc:
+        try:
+            password = decrypt_mailbox_password(enc)
+            display = (getattr(user, "mailbox_display_name", None) or "").strip() or None
+            if not display:
+                display = (getattr(user, "full_name", None) or "").strip() or None
+            display = public_sender_display_name(email, display)
+            return MailboxAccount(email=email, password=password, display_name=display)
+        except ValueError:
+            pass
+    # DB missing/corrupt decrypt → Railway env for known usernames (Asim, etc.)
+    return resolve_mailbox_from_env(getattr(user, "username", None))
 
 
 def user_mailbox_configured(user) -> bool:
