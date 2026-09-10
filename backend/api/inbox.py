@@ -56,6 +56,35 @@ def _inbox_error_message(exc: Exception) -> str:
     return f"Could not read inbox: {exc}"
 
 
+def _resolve_mailbox_user(acting: AppUser, mailbox_user_id: int | None) -> AppUser:
+    """Admin may draft/send against another user's mailbox. Email-only."""
+    if not mailbox_user_id or int(mailbox_user_id) == int(acting.id):
+        return acting
+    role = acting.role.value if isinstance(acting.role, AppUserRole) else str(acting.role)
+    if role != AppUserRole.admin.value:
+        raise HTTPException(403, "Only admin can open another mailbox")
+    db = SessionLocal()
+    try:
+        other = db.get(AppUser, int(mailbox_user_id))
+        if not other:
+            return acting
+        _ = (
+            other.id,
+            other.username,
+            other.full_name,
+            other.role,
+            other.is_active,
+            other.mailbox_email,
+            other.mailbox_password_encrypted,
+            other.mailbox_display_name,
+            other.mailbox_enabled,
+        )
+        db.expunge(other)
+        return other
+    finally:
+        db.close()
+
+
 @router.get("/status", response_model=InboxStatus)
 def inbox_status(user: AppUser = Depends(get_current_user_released)):
     return inbox_module.status(user)
@@ -132,18 +161,10 @@ def list_inbox_threads(
 def get_inbox_thread(
     thread_id: str,
     mailbox_user_id: int | None = Query(default=None),
-    db: SessionLocal = Depends(get_db),
     user: AppUser = Depends(get_current_user_released),
 ):
-    _guard_configured(user)
-    target = user
-    if mailbox_user_id and int(mailbox_user_id) != int(user.id):
-        role = user.role.value if isinstance(user.role, AppUserRole) else str(user.role)
-        if role != AppUserRole.admin.value:
-            raise HTTPException(403, "Only admin can open another mailbox")
-        other = db.get(AppUser, int(mailbox_user_id))
-        if other:
-            target = other
+    target = _resolve_mailbox_user(user, mailbox_user_id)
+    _guard_configured(target)
     try:
         thread = inbox_module.get_thread(target, thread_id)
     except Exception as exc:  # noqa: BLE001
@@ -211,14 +232,16 @@ def compose_inbox_mail(
 def reply_inbox_thread(
     thread_id: str,
     payload: InboxReplyRequest,
+    mailbox_user_id: int | None = Query(default=None),
     user: AppUser = Depends(get_current_user_released),
 ):
     from modules import activity as activity_module
 
-    _guard_configured(user)
+    target = _resolve_mailbox_user(user, mailbox_user_id)
+    _guard_configured(target)
     try:
         result = inbox_module.reply_to_thread(
-            user,
+            target,
             thread_id,
             payload.body,
             to=payload.to,
@@ -281,13 +304,15 @@ def move_inbox_thread(
 def analyze_inbox_thread(
     thread_id: str,
     payload: InboxAnalyzeRequest = InboxAnalyzeRequest(),
+    mailbox_user_id: int | None = Query(default=None),
     user: AppUser = Depends(get_current_user_released),
 ):
     """Summarize a conversation and draft a reply the rep can edit before sending."""
-    _guard_configured(user)
+    target = _resolve_mailbox_user(user, mailbox_user_id)
+    _guard_configured(target)
     try:
         result = inbox_assistant_module.analyze_inbox_thread(
-            user, thread_id, goal=payload.goal
+            target, thread_id, goal=payload.goal
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Could not analyze conversation: {exc}") from exc

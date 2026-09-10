@@ -410,6 +410,9 @@ export function InboxPage({
   onMailExtrasChangeRef.current = onMailExtrasChange;
   const loadGenerationRef = useRef(0);
   const analyzeGenerationRef = useRef(0);
+  const pendingAutoDraftRef = useRef(false);
+  const replyBodyRef = useRef("");
+  replyBodyRef.current = replyBody;
   const labelId = mailLabelIdFromSection(section);
   const isLabelView = labelId != null;
   const isDraftsView = section === "drafts";
@@ -478,10 +481,23 @@ export function InboxPage({
     setAiLoading(true);
     setAiAnalysis(null);
     try {
-      const result = await client.analyzeInboxThread(threadId);
+      const result = await client.analyzeInboxThread(
+        threadId,
+        {},
+        mailboxUserIdRef.current,
+      );
       if (generation !== analyzeGenerationRef.current) return;
       setAiAnalysis(result);
+      if (
+        pendingAutoDraftRef.current &&
+        result.draft_reply?.trim() &&
+        !replyBodyRef.current.trim()
+      ) {
+        pendingAutoDraftRef.current = false;
+        applyAiDraftToReplyForm(result);
+      }
     } catch (e) {
+      pendingAutoDraftRef.current = false;
       if (generation !== analyzeGenerationRef.current) return;
       onErrorRef.current(
         e instanceof Error ? e.message : "AI assistant could not analyze this email",
@@ -489,7 +505,7 @@ export function InboxPage({
     } finally {
       if (generation === analyzeGenerationRef.current) setAiLoading(false);
     }
-  }, []);
+  }, [applyAiDraftToReplyForm]);
 
   const runMessageAnalyze = useCallback(async (uid: string, folder: string) => {
     const generation = ++analyzeGenerationRef.current;
@@ -766,8 +782,9 @@ export function InboxPage({
 
   useEffect(() => {
     if (initialThreadId) {
+      if (autoOpenReply) pendingAutoDraftRef.current = true;
       void openThread(initialThreadId).then(() => {
-        if (autoOpenReply) {
+        if (pendingAutoDraftRef.current) {
           setShowReplyForm(true);
         }
       });
@@ -900,14 +917,18 @@ export function InboxPage({
     setNotice(null);
     try {
       if (selectedThreadId) {
-        const result = await client.replyInboxThread(selectedThreadId, {
-          body: replyBody,
-          to: replyTo.trim() || undefined,
-          subject: replySubjectLine.trim() || undefined,
-          cc: replyCc.trim() || undefined,
-          bcc: replyBcc.trim() || undefined,
-          attachments: replyAttachments.length > 0 ? replyAttachments : undefined,
-        });
+        const result = await client.replyInboxThread(
+          selectedThreadId,
+          {
+            body: replyBody,
+            to: replyTo.trim() || undefined,
+            subject: replySubjectLine.trim() || undefined,
+            cc: replyCc.trim() || undefined,
+            bcc: replyBcc.trim() || undefined,
+            attachments: replyAttachments.length > 0 ? replyAttachments : undefined,
+          },
+          mailboxUserIdRef.current,
+        );
         const extras = [
           replyCc.trim() ? `Cc: ${replyCc.trim()}` : "",
           replyBcc.trim() ? `Bcc: ${replyBcc.trim()}` : "",
@@ -2161,7 +2182,11 @@ export function InboxPage({
                     <EmailBodyEditor
                       value={replyBody}
                       onChange={setReplyBody}
-                      placeholder="Write your reply…"
+                      placeholder={
+                        aiLoading && !replyBody.trim()
+                          ? "Writing suggested reply…"
+                          : "Write your reply…"
+                      }
                       rows={7}
                       onAttachClick={() => replyFileInputRef.current?.click()}
                       attachmentCount={replyAttachments.length}
@@ -2554,7 +2579,11 @@ export function InboxPage({
                   <EmailBodyEditor
                     value={replyBody}
                     onChange={setReplyBody}
-                    placeholder="Write your reply…"
+                    placeholder={
+                      aiLoading && !replyBody.trim()
+                        ? "Writing suggested reply…"
+                        : "Write your reply…"
+                    }
                     rows={7}
                     onAttachClick={() => replyFileInputRef.current?.click()}
                     attachmentCount={replyAttachments.length}

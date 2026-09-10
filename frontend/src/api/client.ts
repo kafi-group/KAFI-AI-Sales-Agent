@@ -2798,21 +2798,42 @@ export const client = {
       bcc?: string;
       attachments?: Array<{ id: string; filename: string; content_type: string; size: number }>;
     },
-  ) =>
-    request<InboxReplyResponse>(`/inbox/threads/${encodeURIComponent(threadId)}/reply`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    mailboxUserId?: number | null,
+  ) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<InboxReplyResponse>(
+      `/inbox/threads/${encodeURIComponent(threadId)}/reply${qs}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  },
   moveInboxThread: (threadId: string, toFolder: "inbox" | "trash" | "archive") =>
     request<InboxMoveResponse>(`/inbox/threads/${encodeURIComponent(threadId)}/move`, {
       method: "POST",
       body: JSON.stringify({ to_folder: toFolder }),
     }),
-  analyzeInboxThread: (threadId: string, payload: { goal?: string } = {}) =>
-    request<InboxAnalyzeResponse>(`/inbox/threads/${encodeURIComponent(threadId)}/analyze`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+  analyzeInboxThread: (
+    threadId: string,
+    payload: { goal?: string } = {},
+    mailboxUserId?: number | null,
+  ) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<InboxAnalyzeResponse>(
+      `/inbox/threads/${encodeURIComponent(threadId)}/analyze${qs}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  },
   listInboxMessages: (
     params: {
       limit?: number;
