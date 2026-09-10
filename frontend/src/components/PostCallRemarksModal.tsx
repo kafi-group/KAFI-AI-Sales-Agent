@@ -89,13 +89,32 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     setNeedsWaTemplate(false);
     setDraftLanguage("en");
     setEnglishSnapshot(null);
-    setShowTranscript(false);
+    setShowTranscript(true);
     setTranscriptText("");
     setTranscriptStatus(null);
     setRecordingAvailable(false);
     setTrainSaraRayan(false);
   }, [pendingFollowUp]);
 
+  useEffect(() => {
+    if (!pendingFollowUp || step !== "remarks") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const call = await client.getCallHistoryItem(pendingFollowUp.interactionId);
+        if (cancelled) return;
+        setTranscriptText(call.transcript || "");
+        setTranscriptStatus(call.transcript_status || null);
+        setRecordingAvailable(Boolean(call.recording_available));
+        setTrainSaraRayan(Boolean(call.ai_training_selected));
+      } catch {
+        /* recording may not be ready yet */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingFollowUp?.interactionId, step]);
   useEffect(() => {
     if (step !== "confirm") return;
     let cancelled = false;
@@ -152,9 +171,6 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
       whatsapp: wa,
     });
     setDraftLanguage("en");
-    setTranscriptText(draft.transcript || draft.transcript_excerpt || "");
-    setTranscriptStatus(draft.transcript_status || null);
-    setRecordingAvailable(Boolean(draft.recording_available));
     setTrainSaraRayan(Boolean(draft.ai_training_selected));
     if (draft.selected_phone) {
       setSelectedPhone(draft.selected_phone);
@@ -188,6 +204,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
   async function saveRemarks() {
     if (!pendingFollowUp) return;
     setSaving(true);
+    setDraftNotice(null);
     try {
       await client.updateCallFollowUp(pendingFollowUp.interactionId, {
         notes: autocorrectText(remarks, "prose"),
@@ -274,9 +291,10 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
   }
 
   async function refreshTranscript() {
-    if (!draft?.interaction_id) return;
+    const interactionId = pendingFollowUp?.interactionId ?? draft?.interaction_id;
+    if (!interactionId) return;
     try {
-      const call = await client.getCallHistoryItem(draft.interaction_id);
+      const call = await client.getCallHistoryItem(interactionId);
       setTranscriptText(call.transcript || "");
       setTranscriptStatus(call.transcript_status || null);
       setRecordingAvailable(Boolean(call.recording_available));
@@ -288,15 +306,19 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
   }
 
   async function generateTranscript() {
-    if (!draft?.interaction_id) return;
+    const interactionId = pendingFollowUp?.interactionId ?? draft?.interaction_id;
+    if (!interactionId) return;
     setTranscribing(true);
     try {
-      const call = await client.transcribeCall(draft.interaction_id, true);
+      const call = await client.transcribeCall(interactionId, true);
       setTranscriptText(call.transcript || "");
       setTranscriptStatus(call.transcript_status || null);
       setRecordingAvailable(Boolean(call.recording_available));
       if (call.transcript) setShowTranscript(true);
-      else setDraftNotice(call.transcript_error || "Captions are still generating — try again shortly.");
+      else
+        setDraftNotice(
+          call.transcript_error || "Captions are still generating — try again shortly.",
+        );
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to generate closed captions");
     } finally {
@@ -420,6 +442,57 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                 disabled={saving}
               />
             ) : null}
+
+            <div className="rounded-xl border border-slate-700/80 bg-slate-950/50 p-3 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={saving || transcribing}
+                  onClick={() => {
+                    setShowTranscript((v) => !v);
+                    if (!showTranscript && !transcriptText) void refreshTranscript();
+                  }}
+                  className="rounded-lg border border-slate-600 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-slate-100"
+                >
+                  {showTranscript ? "Hide transcription" : "View transcription / closed captions"}
+                </button>
+                {(recordingAvailable ||
+                  transcriptStatus === "pending" ||
+                  transcriptStatus === "processing" ||
+                  transcriptStatus === "ready" ||
+                  Boolean(transcriptText)) && (
+                  <button
+                    type="button"
+                    disabled={saving || transcribing}
+                    onClick={() => void generateTranscript()}
+                    className="rounded-lg border border-sky-700/60 bg-sky-950/40 hover:bg-sky-900/50 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-sky-200"
+                  >
+                    {transcribing ? "Generating captions…" : "Generate / refresh captions"}
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Status: {transcriptStatus || (recordingAvailable ? "pending" : "no recording yet")}
+              </p>
+              {showTranscript ? (
+                <div className="rounded-lg border border-slate-800 bg-slate-900/80 p-3 max-h-48 overflow-y-auto">
+                  {transcriptText ? (
+                    <pre className="whitespace-pre-wrap text-xs text-slate-200 font-sans leading-relaxed">
+                      {transcriptText}
+                    </pre>
+                  ) : (
+                    <p className="text-xs text-amber-200/90">
+                      No closed captions yet. Generate captions (needs a call recording), then write
+                      remarks from what was discussed.
+                    </p>
+                  )}
+                </div>
+              ) : null}
+              {draftNotice && step === "remarks" ? (
+                <p className="text-xs text-amber-200/90">{draftNotice}</p>
+              ) : null}
+            </div>
+
             <CallRemarksForm
               remarks={remarks}
               outcome={outcome}
@@ -481,49 +554,6 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                         : "Translate the AI draft into the buyer’s local language before sending."}
                     </span>
                   </label>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => {
-                        setShowTranscript((v) => !v);
-                        if (!showTranscript && !transcriptText) void refreshTranscript();
-                      }}
-                      className="rounded-lg border border-slate-600 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-slate-100"
-                    >
-                      {showTranscript ? "Hide transcription" : "View transcription / closed captions"}
-                    </button>
-                    {(recordingAvailable ||
-                      transcriptStatus === "pending" ||
-                      transcriptStatus === "processing") && (
-                      <button
-                        type="button"
-                        disabled={busy || transcribing}
-                        onClick={() => void generateTranscript()}
-                        className="rounded-lg border border-sky-700/60 bg-sky-950/40 hover:bg-sky-900/50 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-sky-200"
-                      >
-                        {transcribing ? "Generating captions…" : "Generate / refresh captions"}
-                      </button>
-                    )}
-                  </div>
-                  {showTranscript ? (
-                    <div className="rounded-lg border border-slate-800 bg-slate-900/80 p-3 max-h-48 overflow-y-auto">
-                      <p className="text-[11px] text-slate-500 mb-1">
-                        Status: {transcriptStatus || "unknown"}
-                      </p>
-                      {transcriptText ? (
-                        <pre className="whitespace-pre-wrap text-xs text-slate-200 font-sans leading-relaxed">
-                          {transcriptText}
-                        </pre>
-                      ) : (
-                        <p className="text-xs text-amber-200/90">
-                          No closed captions yet. Generate captions (needs a call recording), then edit
-                          the email/WhatsApp drafts to match what was said.
-                        </p>
-                      )}
-                    </div>
-                  ) : null}
 
                   <label className="flex items-start gap-2.5 cursor-pointer select-none">
                     <input
