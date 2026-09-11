@@ -22,7 +22,6 @@ function inlineMediaPublicUrl(attachmentId: string): string {
 /** Shrink large pastes so each upload fits under Vercel's proxy body limit. */
 export async function compressImageBlob(
   source: Blob,
-  *,
   maxEdge = 1400,
   quality = 0.72,
 ): Promise<File> {
