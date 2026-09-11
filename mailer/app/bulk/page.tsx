@@ -16,6 +16,10 @@ import {
   plainTextToEditorHtml,
 } from "@/components/EmailBodyEditor";
 import { ensureDearSalutation, personalizeEmailText } from "@/lib/personalizeEmail";
+import {
+  hostDataUriImagesInBrowser,
+  htmlHasDataUriImages,
+} from "@/lib/hostInlineImagesClient";
 
 type Lead = {
   buyer_id: number;
@@ -154,6 +158,24 @@ function BulkInner() {
       });
     }
 
+    // Host pasted images once for the whole campaign (HTTPS URLs, Gmail-safe).
+    let campaignBody = body;
+    if (htmlHasDataUriImages(body)) {
+      pushLog("Uploading pasted inline images…");
+      campaignBody = await hostDataUriImagesInBrowser(body, {
+        handoffToken: token,
+        authToken: getStoredToken(),
+      });
+      setBody(campaignBody);
+      if (htmlHasDataUriImages(campaignBody)) {
+        pushLog(
+          "WARNING: Some inline images could not be uploaded. Recipients may see broken images.",
+        );
+      } else {
+        pushLog("Inline images uploaded.");
+      }
+    }
+
     for (let b = 0; b < batches.length; b++) {
       const batch = batches[b];
       pushLog(`Batch ${b + 1}/${batches.length} — ${batch.length} message(s)…`);
@@ -169,7 +191,7 @@ function BulkInner() {
           });
           try {
             const personalizedSubject = personalizeEmailText(subject, lead);
-            const personalizedBody = personalizeEmailText(body, lead);
+            const personalizedBody = personalizeEmailText(campaignBody, lead);
             const res = await fetch("/api/send", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -273,20 +295,29 @@ function BulkInner() {
     const apiBase = (
       process.env.NEXT_PUBLIC_KAFI_API_BASE_URL ||
       process.env.KAFI_API_BASE_URL ||
-      "https://kafi-sales-agent.up.railway.app/api"
+      "https://kafi-sales-agent-production.up.railway.app/api"
     )
       .trim()
       .replace(/\/$/, "");
     setScheduling(true);
     setLog([]);
     try {
+      let scheduleBody = body;
+      if (htmlHasDataUriImages(body)) {
+        pushLog("Uploading pasted inline images…");
+        scheduleBody = await hostDataUriImagesInBrowser(body, {
+          handoffToken: token,
+          authToken: getStoredToken(),
+        });
+        setBody(scheduleBody);
+      }
       const res = await fetch(`${apiBase}/mailer/schedule-bulk`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           token,
           subject,
-          body,
+          body: scheduleBody,
           scheduled_at: new Date(scheduledAt).toISOString(),
           batch_size: batchSize,
           message_delay_seconds: messageDelay,

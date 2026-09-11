@@ -76,6 +76,49 @@ export function emailBodyHasContent(html: string): boolean {
   return htmlToPlainText(html).trim().length > 0;
 }
 
+function inlineMediaPublicUrl(attachmentId: string): string {
+  const apiBase = (
+    import.meta.env.VITE_API_BASE_URL ||
+    "https://kafi-sales-agent-production.up.railway.app/api"
+  )
+    .toString()
+    .trim()
+    .replace(/\/$/, "");
+  const origin = /^https?:\/\//i.test(apiBase)
+    ? apiBase.replace(/\/api$/i, "") + "/api"
+    : "https://kafi-sales-agent-production.up.railway.app/api";
+  return `${origin}/mailer/inline-media/${attachmentId}`;
+}
+
+/** Upload every data:image in HTML and rewrite src to public HTTPS URLs. */
+async function hostHtmlDataUriImages(html: string): Promise<string> {
+  const re =
+    /\bsrc\s*=\s*(['"])(data:image\/([a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+))\1/gi;
+  let out = html;
+  const matches = [...html.matchAll(re)];
+  for (const match of matches) {
+    const full = match[0];
+    const quote = match[1];
+    let subtype = (match[3] || "png").toLowerCase().split("+")[0].split(";")[0];
+    if (subtype === "jpg") subtype = "jpeg";
+    const b64 = (match[4] || "").replace(/\s+/g, "");
+    try {
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: `image/${subtype}` });
+      const ext = subtype === "jpeg" ? "jpg" : subtype;
+      const file = new File([blob], `inline.${ext}`, { type: `image/${subtype}` });
+      const meta = await client.uploadEmailAttachment(file);
+      const url = inlineMediaPublicUrl(String(meta.id));
+      out = out.replace(full, `src=${quote}${url}${quote}`);
+    } catch (err) {
+      console.warn("inline image host failed", err);
+    }
+  }
+  return out;
+}
+
 /** Append a template placeholder into plain or HTML email body. */
 export function appendEmailPlaceholder(body: string, token: string): string {
   const t = (token || "").trim();
@@ -187,7 +230,38 @@ export function EmailBodyEditor({
         saveSelection();
         setPendingImage(file);
         setPendingImagePreview(URL.createObjectURL(file));
+        return;
       }
+    }
+
+    // Rich HTML paste (PRODUCT RANGE, etc.) often embeds data:image — host before insert.
+    const htmlClip = e.clipboardData.getData("text/html") || "";
+    if (htmlClip && /data:image\//i.test(htmlClip)) {
+      e.preventDefault();
+      saveSelection();
+      void (async () => {
+        try {
+          const hosted = await hostHtmlDataUriImages(htmlClip);
+          const el = editorRef.current;
+          if (!el) return;
+          el.focus();
+          const sel = window.getSelection();
+          if (savedRangeRef.current && sel) {
+            try {
+              sel.removeAllRanges();
+              sel.addRange(savedRangeRef.current);
+              document.execCommand("insertHTML", false, hosted);
+            } catch {
+              el.innerHTML += hosted;
+            }
+          } else {
+            el.innerHTML += hosted;
+          }
+          emitChange();
+        } catch (err) {
+          console.warn(err);
+        }
+      })();
     }
   }
 
@@ -215,17 +289,7 @@ export function EmailBodyEditor({
     void (async () => {
       try {
         const meta = await client.uploadEmailAttachment(file);
-        const apiBase = (
-          import.meta.env.VITE_API_BASE_URL ||
-          "https://kafi-sales-agent-production.up.railway.app/api"
-        )
-          .toString()
-          .trim()
-          .replace(/\/$/, "");
-        const origin = /^https?:\/\//i.test(apiBase)
-          ? apiBase.replace(/\/api$/i, "") + "/api"
-          : "https://kafi-sales-agent-production.up.railway.app/api";
-        const url = `${origin}/mailer/inline-media/${meta.id}`;
+        const url = inlineMediaPublicUrl(String(meta.id));
         const safeName = file.name.replace(/"/g, "");
         const imgTag = `<p><img src="${url}" alt="${safeName}" style="max-width: 100%; height: auto; border-radius: 6px; margin: 8px 0; display: block;" /></p>`;
         const el = editorRef.current;

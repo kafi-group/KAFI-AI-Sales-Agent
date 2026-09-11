@@ -4,10 +4,17 @@ import {
   useEffect,
   useId,
   useRef,
+  useState,
+  type ClipboardEvent,
   type MouseEvent,
   type ReactNode,
 } from "react";
 import { normalizeEditorTextColor } from "../lib/emailTextColor";
+import {
+  hostDataUriImagesInBrowser,
+  htmlHasDataUriImages,
+  uploadPastedImageFile,
+} from "../lib/hostInlineImagesClient";
 
 export type EmailBodyEditorProps = {
   value: string;
@@ -112,6 +119,7 @@ export function EmailBodyEditor({
   const editorRef = useRef<HTMLDivElement>(null);
   const lastHtml = useRef<string>("");
   const reactId = useId();
+  const [pasteStatus, setPasteStatus] = useState<string | null>(null);
 
   useEffect(() => {
     const el = editorRef.current;
@@ -132,6 +140,67 @@ export function EmailBodyEditor({
     const html = el.innerHTML === "<br>" ? "" : el.innerHTML;
     lastHtml.current = html;
     onChange(html);
+  }
+
+  function insertHtmlAtCursor(html: string) {
+    const el = editorRef.current;
+    if (!el) return;
+    el.focus();
+    try {
+      document.execCommand("insertHTML", false, html);
+    } catch {
+      el.innerHTML += html;
+    }
+    emitChange();
+  }
+
+  async function onPaste(e: ClipboardEvent<HTMLDivElement>) {
+    if (disabled) return;
+    const items = Array.from(e.clipboardData?.items || []);
+    const imageItems = items.filter((item) => item.type.startsWith("image/"));
+
+    // File/bitmap paste (screenshot, copy image).
+    if (imageItems.length) {
+      e.preventDefault();
+      setPasteStatus("Uploading pasted image…");
+      try {
+        for (const item of imageItems) {
+          const file = item.getAsFile();
+          if (!file) continue;
+          const url = await uploadPastedImageFile(file);
+          if (!url) {
+            setPasteStatus("Could not upload image — stay signed in and try again.");
+            return;
+          }
+          const safeName = (file.name || "image").replace(/"/g, "");
+          insertHtmlAtCursor(
+            `<p><img src="${url}" alt="${safeName}" style="max-width:100%;height:auto;border-radius:6px;margin:8px 0;display:block;" /></p>`,
+          );
+        }
+        setPasteStatus(null);
+      } catch (err) {
+        setPasteStatus(err instanceof Error ? err.message : "Image paste failed");
+      }
+      return;
+    }
+
+    // Rich HTML paste (e.g. PRODUCT RANGE section) often embeds data:image base64.
+    const htmlClip = e.clipboardData?.getData("text/html") || "";
+    if (htmlClip && htmlHasDataUriImages(htmlClip)) {
+      e.preventDefault();
+      setPasteStatus("Uploading pasted images…");
+      try {
+        const hosted = await hostDataUriImagesInBrowser(htmlClip);
+        insertHtmlAtCursor(hosted);
+        setPasteStatus(
+          htmlHasDataUriImages(hosted)
+            ? "Some images could not upload — try again or use Attach."
+            : null,
+        );
+      } catch (err) {
+        setPasteStatus(err instanceof Error ? err.message : "Image paste failed");
+      }
+    }
   }
 
   function run(command: string, commandValue?: string) {
@@ -245,6 +314,8 @@ export function EmailBodyEditor({
         </ToolbarButton>
       </div>
 
+      {pasteStatus ? <p className="muted small" style={{ margin: "6px 0 0" }}>{pasteStatus}</p> : null}
+
       <div
         ref={editorRef}
         role="textbox"
@@ -254,6 +325,7 @@ export function EmailBodyEditor({
         data-placeholder={placeholder}
         onInput={emitChange}
         onBlur={emitChange}
+        onPaste={(e) => void onPaste(e)}
         className="rte-editor"
         style={{ minHeight: `${minHeight}rem` }}
       />

@@ -20,6 +20,10 @@ import {
   estimateSendPayloadBytes,
   parseSendApiResponse,
 } from "@/lib/parseSendResponse";
+import {
+  hostDataUriImagesInBrowser,
+  htmlHasDataUriImages,
+} from "@/lib/hostInlineImagesClient";
 
 function defaultComposeBody(contactName: string, companyName: string): string {
   const name = contactName.trim() || "[Contact Name]";
@@ -140,13 +144,21 @@ function ComposeInner() {
     setSending(true);
     setError(null);
     try {
+      // Convert pasted data:image blobs to HTTPS URLs before hitting /api/send
+      // (avoids Vercel body-size limits and Gmail raw-base64 rendering).
+      let sendHtml = body;
+      if (htmlHasDataUriImages(body)) {
+        setNotice("Uploading inline images…");
+        sendHtml = await hostDataUriImagesInBrowser(body, { authToken: auth });
+        setBody(sendHtml);
+      }
       const payload = {
         auth_token: auth,
         to: to.trim(),
         cc: cc.trim() || undefined,
         bcc: bcc.trim() || undefined,
         subject: subject.trim(),
-        body,
+        body: sendHtml,
         html: true,
         buyer_id: buyerId,
         company_name: mergeCompany.trim() || undefined,
