@@ -39,6 +39,7 @@ const FONT_SIZES = [
 ] as const;
 
 const COLORS = [
+  { label: "White", value: "#ffffff" },
   { label: "Black", value: "#111827" },
   { label: "Gray", value: "#4b5563" },
   { label: "Red", value: "#b91c1c" },
@@ -514,10 +515,10 @@ export function EmailBodyEditor({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onPaste={handlePaste}
-        className={`email-body-editor w-full px-3 py-2 text-sm text-slate-100 outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-slate-600 transition-colors ${
+        className={`email-body-editor w-full px-3 py-2 text-sm outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-slate-600 transition-colors ${
           isDraggingOver ? "bg-emerald-950/20 ring-2 ring-emerald-500/50" : ""
         } ${editorClassName}`}
-        style={{ minHeight: `${minHeight}rem` }}
+        style={{ minHeight: `${minHeight}rem`, color: "#ffffff" }}
       />
 
       {pendingImage && (

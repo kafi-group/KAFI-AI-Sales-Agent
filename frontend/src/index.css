@@ -234,6 +234,9 @@ html[data-theme="light"] [class*="border-slate-700"] {
 }
 
 /* Rich-text email compose editor */
+.email-body-editor {
+  color: #ffffff;
+}
 .email-body-editor p {
   margin: 0 0 0.5em;
 }
