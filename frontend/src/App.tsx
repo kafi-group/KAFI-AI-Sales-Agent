@@ -172,6 +172,7 @@ function DashboardApp() {
     hyperstore_targeted: 0,
     targeted_distributor: 0,
     targeted_client: 0,
+    schedule_meeting: 0,
     khalid_focused_sales: 0,
     incomplete_archives: 0,
     my_assigned: 0,
