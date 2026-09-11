@@ -17,10 +17,23 @@ from config import settings
 from integrations.voice_client import normalize_e164
 
 
+_CLOUD_SEND_PAUSED_MESSAGE = (
+    "Meta Cloud WhatsApp sending is PAUSED on Sales Agent "
+    "(WHATSAPP_CLOUD_SENDING_ENABLED=false). "
+    "No template/text is sent to Meta until billing on Essence WABA is fixed "
+    "and sending is re-enabled. WhatsApp Mobile (QR) is unaffected."
+)
+
+
 class WhatsAppClient:
     @property
     def is_configured(self) -> bool:
         return bool(settings.whatsapp_access_token and settings.whatsapp_phone_number_id)
+
+    @property
+    def sending_enabled(self) -> bool:
+        """Outbound Cloud API templates/text — independent of inbound webhooks/sync."""
+        return bool(getattr(settings, "whatsapp_cloud_sending_enabled", False))
 
     @property
     def webhook_configured(self) -> bool:
@@ -36,9 +49,23 @@ class WhatsAppClient:
             "Content-Type": "application/json",
         }
 
+    def _blocked_if_sending_disabled(self) -> dict[str, Any] | None:
+        if self.sending_enabled:
+            return None
+        return {
+            "status": "error",
+            "message": _CLOUD_SEND_PAUSED_MESSAGE,
+            "paused": True,
+        }
+
     def _post(
         self, path: str, payload: dict[str, Any], *, expect_message_id: bool = True
     ) -> dict[str, Any]:
+        # Hard stop: never hit Meta Graph for customer messages while paused.
+        if expect_message_id:
+            blocked = self._blocked_if_sending_disabled()
+            if blocked:
+                return blocked
         url = f"{self._base_url()}/{path}"
         try:
             response = httpx.post(url, headers=self._headers(), json=payload, timeout=30.0)
@@ -88,6 +115,9 @@ class WhatsAppClient:
 
     def send_text(self, *, phone: str, message: str) -> dict[str, Any]:
         """Free-form text — only deliverable within the 24h customer service window."""
+        blocked = self._blocked_if_sending_disabled()
+        if blocked:
+            return blocked
         if not self.is_configured:
             return {
                 "status": "not_configured",
@@ -117,6 +147,9 @@ class WhatsAppClient:
     ) -> dict[str, Any]:
         """Approved template message — required outside the 24h session window, or for any
         business-initiated bulk/marketing send."""
+        blocked = self._blocked_if_sending_disabled()
+        if blocked:
+            return blocked
         if not self.is_configured:
             return {
                 "status": "not_configured",

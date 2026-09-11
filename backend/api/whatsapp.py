@@ -87,6 +87,16 @@ def get_whatsapp_config():
             and settings.whatsapp_app_secret
             and meta_api_ok is not False
         ),
+        cloud_sending_enabled=whatsapp_client.sending_enabled,
+        cloud_sending_paused_message=(
+            None
+            if whatsapp_client.sending_enabled
+            else (
+                "Meta Cloud WhatsApp SENDS are PAUSED. Templates will not go to Meta "
+                "until WHATSAPP_CLOUD_SENDING_ENABLED=true (after Essence WABA billing works). "
+                "WhatsApp Mobile / QR is unaffected."
+            )
+        ),
     )
 
 

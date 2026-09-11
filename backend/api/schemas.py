@@ -1589,6 +1589,8 @@ class WhatsAppConfigRead(BaseModel):
     webhook_callback_url: Optional[str] = None
     webhook_verify_token_set: bool = False
     ready_for_two_way: bool = False
+    cloud_sending_enabled: bool = False
+    cloud_sending_paused_message: Optional[str] = None
 
 
 class WhatsAppTestSendRequest(BaseModel):

@@ -397,6 +397,16 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
         <p className="text-xs text-emerald-400/90">{config.meta_api_message}</p>
       )}
 
+      {config?.configured && config.cloud_sending_enabled === false && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <p className="font-medium">Meta Cloud WhatsApp SENDS are PAUSED</p>
+          <p className="mt-1 text-amber-100/90">
+            {config.cloud_sending_paused_message ||
+              "No templates are sent to Meta until billing is fixed and sending is re-enabled."}
+          </p>
+        </div>
+      )}
+
       {config && !config.configured && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
           <p className="font-medium">WhatsApp Cloud API is not configured yet.</p>

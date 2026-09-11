@@ -1770,6 +1770,8 @@ export interface WhatsAppConfig {
   webhook_callback_url?: string | null;
   webhook_verify_token_set?: boolean;
   ready_for_two_way?: boolean;
+  cloud_sending_enabled?: boolean;
+  cloud_sending_paused_message?: string | null;
 }
 
 export interface WhatsAppTestSendResult {
