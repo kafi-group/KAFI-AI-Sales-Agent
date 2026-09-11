@@ -2976,8 +2976,12 @@ export const client = {
     request<Record<string, unknown>>(`/whatsapp-personal/disconnect-user/${targetUserId}`, {
       method: "POST",
     }),
-  pairWhatsAppPersonal: () =>
-    request<Record<string, unknown>>("/whatsapp-personal/pair", { method: "POST" }),
+  pairWhatsAppPersonal: (opts?: { forceNew?: boolean }) => {
+    const force = opts?.forceNew ? "?force=1" : "";
+    return request<Record<string, unknown>>(`/whatsapp-personal/pair${force}`, {
+      method: "POST",
+    });
+  },
   sendWhatsAppPersonal: (payload: { to_phone: string; message: string }) =>
     request<Record<string, unknown>>("/whatsapp-personal/send", {
       method: "POST",

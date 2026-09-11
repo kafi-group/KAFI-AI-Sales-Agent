@@ -272,14 +272,25 @@ def bridge_qr(user_id: int, username: str | None = None) -> dict[str, Any]:
         return {"session": session, "connected": False, "qr": None}
 
 
-def bridge_pair(user_id: int, username: str | None = None) -> dict[str, Any]:
-    """Force a fresh QR session on the dedicated bridge and wait for the image."""
+def bridge_pair(
+    user_id: int, username: str | None = None, *, force_new: bool = False
+) -> dict[str, Any]:
+    """Start or restore a QR session on this user's dedicated bridge only.
+
+    force_new=True wipes ONLY this user's session folder on their bridge container.
+    Other users on other Railway projects are never touched.
+    """
     session = bridge_session_id(user_id, username=username)
     base_url = _base_url(user_id=user_id, username=username)
     with httpx.Client(timeout=_PAIR_TIMEOUT) as client:
         resp = client.post(
             f"{base_url}/pair",
-            json={"session": session, "sessionId": session},
+            json={
+                "session": session,
+                "sessionId": session,
+                "forceNew": bool(force_new),
+                "force": bool(force_new),
+            },
             headers=_headers(),
         )
         resp.raise_for_status()

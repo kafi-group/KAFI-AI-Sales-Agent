@@ -24,11 +24,19 @@ const BACKEND_WEBHOOK_URL = (
 )
   .trim()
   .replace(/\/+$/, "");
-const SESSIONS_DIR = path.join(__dirname, "sessions");
+// Prefer a Railway volume mount (/data) so QR sessions survive redeploys.
+// Without a volume, container restarts wipe sessions/ and phones show "last active" then need re-scan.
+const SESSIONS_DIR = (() => {
+  const fromEnv = (process.env.WHATSAPP_SESSIONS_DIR || "").trim();
+  if (fromEnv) return fromEnv;
+  if (fs.existsSync("/data")) return path.join("/data", "whatsapp-sessions");
+  return path.join(__dirname, "sessions");
+})();
 
 if (!fs.existsSync(SESSIONS_DIR)) {
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 }
+console.log(`[WhatsApp Bridge] Sessions directory: ${SESSIONS_DIR}`);
 
 const logger = pino({ level: "silent" });
 
@@ -515,7 +523,21 @@ app.get("/qr", async (req, res) => {
 
 app.post("/pair", async (req, res) => {
   const sessionId = req.body?.session || req.body?.sessionId || req.query?.session || "default";
+  // Only wipe creds when explicitly requested (Re-Pair / fresh QR).
+  // Default: restore existing session so Refresh does not kick a live phone link.
+  const forceNew = Boolean(
+    req.body?.forceNew ||
+      req.body?.force ||
+      req.body?.fresh ||
+      req.query?.forceNew === "1" ||
+      req.query?.force === "1"
+  );
   try {
+    if (!forceNew && hasSavedCreds(sessionId)) {
+      let sessionObj = await initBaileysSession(sessionId, false);
+      sessionObj = await waitForQrOrConnected(sessionObj, 10000);
+      return res.json(sessionPayload(sessionId, sessionObj));
+    }
     let sessionObj = await initBaileysSession(sessionId, true);
     sessionObj = await waitForQrOrConnected(sessionObj, 10000);
     return res.json(sessionPayload(sessionId, sessionObj));
@@ -629,6 +651,39 @@ setInterval(() => {
   }
 }, 15_000);
 
+function listSavedSessionIds() {
+  try {
+    return fs
+      .readdirSync(SESSIONS_DIR, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .filter((name) => fs.existsSync(path.join(SESSIONS_DIR, name, "creds.json")));
+  } catch {
+    return [];
+  }
+}
+
+async function restoreSavedSessionsOnBoot() {
+  const ids = listSavedSessionIds();
+  if (!ids.length) {
+    console.log("[WhatsApp Bridge] No saved sessions to restore on boot");
+    return;
+  }
+  console.log(`[WhatsApp Bridge] Restoring ${ids.length} saved session(s) from disk…`);
+  for (const sessionId of ids) {
+    try {
+      await initBaileysSession(sessionId, false);
+      console.log(`[WhatsApp Bridge] Restored session ${sessionId}`);
+    } catch (err) {
+      console.error(`[WhatsApp Bridge] Failed to restore ${sessionId}:`, err?.message || err);
+    }
+  }
+}
+
 app.listen(PORT, () => {
   console.log(`[WhatsApp Bridge] Listening on port ${PORT}`);
+  // Re-link phones after Railway restart without asking users to re-scan (needs volume).
+  restoreSavedSessionsOnBoot().catch((err) => {
+    console.error("[WhatsApp Bridge] Boot restore failed:", err?.message || err);
+  });
 });

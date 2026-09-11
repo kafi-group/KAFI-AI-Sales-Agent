@@ -207,16 +207,26 @@ def reply_personal_conversation(
 
 
 @router.post("/pair")
-def whatsapp_personal_pair(user: AppUser = Depends(get_current_user_released)) -> Any:
-    """Reset session and return a fresh QR code for scanning.
+def whatsapp_personal_pair(
+    request: Request,
+    user: AppUser = Depends(get_current_user_released),
+) -> Any:
+    """Connect or re-pair this user's WhatsApp Mobile session only.
 
-    The dedicated Baileys bridge waits internally for the first QR (up to 10 s).
-    We still retry briefly in case the container is cold-starting.
+    Default: restore saved creds (no wipe) so Refresh does not kick a live link.
+    Pass ``?force=1`` / body ``forceNew: true`` only for an intentional fresh QR
+    (wipes THIS user on THEIR bridge — never touches Asim/Usman/Sadia/Khalid others).
     """
     try:
+        force_new = False
+        q = (request.query_params.get("force") or request.query_params.get("forceNew") or "").strip()
+        if q in {"1", "true", "yes"}:
+            force_new = True
         last_result: dict = {}
         deadline = time.monotonic() + 12.0
-        last_result = bridge.bridge_pair(user.id, username=user.username)
+        last_result = bridge.bridge_pair(
+            user.id, username=user.username, force_new=force_new
+        )
         if last_result.get("qr") or last_result.get("qrDataUrl") or last_result.get("connected"):
             return last_result
         while time.monotonic() < deadline:

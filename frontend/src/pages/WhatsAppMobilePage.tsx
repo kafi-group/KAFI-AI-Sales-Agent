@@ -278,7 +278,14 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
     return () => window.clearInterval(timer);
   }, [refreshTeam]);
 
-  async function handlePair() {
+  async function handlePair(forceNew = false) {
+    if (forceNew) {
+      const ok = window.confirm(
+        `Generate a FRESH QR for ${userName}? This unlinks ONLY ${userName}'s WhatsApp Mobile session. ` +
+          `Asim / Usman / Sadia / other accounts stay connected.`
+      );
+      if (!ok) return;
+    }
     pairingLock.current = true;
     setPairing(true);
     setNotice(null);
@@ -286,7 +293,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
     setQr(null);
     qrRef.current = null;
     try {
-      const qrData = await client.pairWhatsAppPersonal();
+      const qrData = await client.pairWhatsAppPersonal({ forceNew });
       if (isConnectedStatus(qrData)) {
         setStatus(qrData);
         setQr(null);
@@ -297,7 +304,9 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
         qrRef.current = qrData;
         setStatus({ ...(qrData ?? {}), connected: false, status: "qr-pending" });
         setNotice(
-          `Scan this fresh QR code with WhatsApp on ${userName}'s mobile phone. Keep this page open until it says Connected.`
+          forceNew
+            ? `Scan this fresh QR code with WhatsApp on ${userName}'s mobile phone. Keep this page open until it says Connected.`
+            : `Connecting ${userName}'s WhatsApp… If a QR appears, scan it. Existing sessions restore without kicking other users.`
         );
       }
     } catch (e) {
@@ -604,7 +613,7 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                     variant="primary"
                     size="md"
                     disabled={pairing}
-                    onClick={() => void handlePair()}
+                    onClick={() => void handlePair(false)}
                     title="Generate QR code"
                     className="w-full justify-center text-base py-3 font-bold"
                   >
@@ -619,8 +628,8 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                   variant="ghost"
                   size="md"
                   disabled={pairing}
-                  onClick={() => void handlePair()}
-                  title="Refresh QR code"
+                  onClick={() => void handlePair(true)}
+                  title="Refresh QR code (this account only)"
                   className="w-full justify-center text-base py-3"
                 >
                   {pairing ? "Refreshing QR…" : "Refresh QR Code"}
@@ -645,8 +654,8 @@ export function WhatsAppMobilePage({ onError }: WhatsAppMobilePageProps) {
                 variant="primary"
                 size="md"
                 disabled={pairing}
-                onClick={() => void handlePair()}
-                title="Re-pair or refresh QR code for this account"
+                onClick={() => void handlePair(true)}
+                title="Re-pair this account only — other users stay connected"
                 className="w-full justify-center text-base py-3 font-bold bg-emerald-600 hover:bg-emerald-500 text-white"
               >
                 {pairing ? "Generating Fresh QR Code…" : "Re-Pair WhatsApp (Generate Fresh QR Code)"}

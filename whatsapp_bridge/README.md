@@ -1,21 +1,53 @@
 # Kafi WhatsApp Mobile Bridge (Baileys)
 
-Microservice for managing per-user personal WhatsApp Mobile sessions via `@whiskeysockets/baileys`.
+Microservice for **one Sales Agent user's** personal WhatsApp Mobile session via `@whiskeysockets/baileys`.
 
-## Railway Deployment Instructions
+> **Do not confuse** with Railway project **Whatsapp for Costing New** (Finance / PA). That is a separate stack.
 
-1. Create a new service on **Railway** from this repository directory (`whatsapp_bridge/` root directory or root Dockerfile).
-2. Set Environment Variables on Railway:
-   - `PORT`: `3001` (or Railway default)
-   - `WHATSAPP_BRIDGE_SECRET`: `<AGENT_BRIDGE_SECRET>` (matches backend secret)
-   - `BACKEND_WEBHOOK_URL`: `https://kafi-sales-agent.up.railway.app` (URL of backend to sync inbound messages)
-3. Copy the generated Railway Service Domain (e.g. `https://kafi-whatsapp-bridge.up.railway.app`).
-4. Set `WHATSAPP_BRIDGE_URL` on your main Kafi Sales Agent Railway backend service:
-   - `WHATSAPP_BRIDGE_URL`: `https://kafi-whatsapp-bridge.up.railway.app`
-   - `WHATSAPP_BRIDGE_SECRET`: `<AGENT_BRIDGE_SECRET>`
+## Multi-user isolation (Railway Pro)
 
-## Features
-- Multi-account per-user session isolation (`kafi-sales-agent-u1`, `kafi-sales-agent-u2`, etc.).
-- 2-Way messaging sync with Sales Agent database (inbound & outbound).
-- Auto-reconnect and persistent credentials state.
-- Standard REST API endpoints (`/status`, `/qr`, `/disconnect`, `/send`).
+Sales Agent uses **four separate Railway projects** so one disconnect never affects the others:
+
+| User | Railway project | Default bridge URL |
+|------|-----------------|--------------------|
+| Khalid / Admin | Sales Agent WhatsApp - Khalid | `whatsapp-bridge-production-ffd3…` |
+| Asim | Sales Agent WhatsApp - Asim | `whatsapp-bridge-production-8eee…` |
+| Usman | Sales Agent WhatsApp - Usman | `whatsapp-bridge-production-9587…` |
+| Sadia | Sales Agent WhatsApp - Sadia | `whatsapp-bridge-production-8388…` |
+
+Backend maps each login to its own URL (`WHATSAPP_BRIDGE_URL_KHALID` / `_ASIM` / `_USMAN` / `_SADIA`).  
+Session folders are namespaced: `kafi-sales-agent-<username>` — disconnect/delete only that folder.
+
+## Required: persistent volume (keeps QR linked across redeploys)
+
+Without a volume, Railway wipes the container disk on redeploy → phone shows “last active …” and Sales Agent asks for QR again.
+
+On **each** of the four Sales WhatsApp bridge services:
+
+1. Railway → service → **Volumes** → Add volume  
+2. Mount path: `/data`  
+3. Optional env: `WHATSAPP_SESSIONS_DIR=/data/whatsapp-sessions` (auto-used if `/data` exists)
+
+Sessions are restored automatically on boot from saved `creds.json`.
+
+## Env vars (per bridge service)
+
+- `WHATSAPP_BRIDGE_SECRET` — same as Sales Agent backend  
+- `BACKEND_WEBHOOK_URL` — `https://kafi-sales-agent-production.up.railway.app`  
+- `PORT` — Railway default / `3001`
+
+## Sales Agent backend env
+
+```
+WHATSAPP_BRIDGE_SECRET=…
+WHATSAPP_BRIDGE_URL_KHALID=https://whatsapp-bridge-production-ffd3.up.railway.app
+WHATSAPP_BRIDGE_URL_ASIM=https://whatsapp-bridge-production-8eee.up.railway.app
+WHATSAPP_BRIDGE_URL_USMAN=https://whatsapp-bridge-production-9587.up.railway.app
+WHATSAPP_BRIDGE_URL_SADIA=https://whatsapp-bridge-production-8388.up.railway.app
+```
+
+## Behaviour
+
+- Stay connected until **Disconnect** in Sales Agent or unlink on the phone  
+- Soft pair restores session; `forceNew` only for intentional fresh QR  
+- Asim disconnect ≠ Khalid / Usman / Sadia
