@@ -826,11 +826,11 @@ def _hydrate_lead_table_rows(
                     else None
                 ),
                 "producer_tier_reasoning": buyer.producer_tier_reasoning,
-                "meeting_status": buyer.meeting_status,
-                "meeting_at": buyer.meeting_at,
-                "meeting_location": buyer.meeting_location,
-                "meeting_notes": buyer.meeting_notes,
-                "meeting_priority": buyer.meeting_priority,
+                "meeting_status": getattr(buyer, "meeting_status", None),
+                "meeting_at": getattr(buyer, "meeting_at", None),
+                "meeting_location": getattr(buyer, "meeting_location", None),
+                "meeting_notes": getattr(buyer, "meeting_notes", None),
+                "meeting_priority": getattr(buyer, "meeting_priority", None),
             }
         )
     return rows
@@ -2892,6 +2892,47 @@ def remove_from_target_pool(
             entity_type="buyer",
             entity_id=0,
             action="remove_from_target_pool",
+            details={"lead_ids": restored_ids},
+        )
+
+    return {"updated_count": len(restored_ids), "updated_ids": restored_ids}
+
+
+def remove_from_schedule_meeting(
+    db: Session,
+    *,
+    lead_ids: list[int],
+) -> dict[str, object]:
+    """Remove leads from SCHEDULE MEETING list (does not delete the lead)."""
+    from modules.audit import log_action
+
+    restored_ids: list[int] = []
+    for lead_id in lead_ids:
+        buyer = buyers_module.get_buyer(db, lead_id)
+        if not buyer:
+            continue
+        if (buyer.source or "").strip().lower() != "schedule_meeting":
+            continue
+        if (buyer.intake_method or "").strip().lower() == "upload":
+            buyer.source = "old_clients"
+        else:
+            buyer.source = "discovery"
+        buyer.intake_method = None
+        buyer.meeting_status = None
+        buyer.meeting_at = None
+        buyer.meeting_location = None
+        buyer.meeting_notes = None
+        buyer.meeting_priority = None
+        restored_ids.append(lead_id)
+
+    if restored_ids:
+        invalidate_section_counts_cache()
+        db.commit()
+        log_action(
+            db,
+            entity_type="buyer",
+            entity_id=0,
+            action="remove_from_schedule_meeting",
             details={"lead_ids": restored_ids},
         )
 

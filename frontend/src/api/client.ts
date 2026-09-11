@@ -2224,6 +2224,14 @@ export const client = {
         body: JSON.stringify({ lead_ids: leadIds }),
       },
     ),
+  removeFromScheduleMeeting: (leadIds: number[]) =>
+    request<{ updated_count: number; updated_ids: number[] }>(
+      "/leads/table/remove-from-schedule-meeting",
+      {
+        method: "POST",
+        body: JSON.stringify({ lead_ids: leadIds }),
+      },
+    ),
   classifyTargetPoolsFromOldClients: (limitPerPool = 5000) =>
     request<{
       scanned: number;

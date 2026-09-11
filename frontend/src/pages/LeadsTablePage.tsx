@@ -1409,6 +1409,7 @@ export function LeadsTablePage({
   const isMaster = section === "master";
   const isTargetedPool = isTargetedPoolSection(section);
   const isTestingModule = section === "testing";
+  const isScheduleMeeting = section === "schedule_meeting";
   const isCustomModule =
     !isOldClients &&
     !isMyAssigned &&
@@ -2133,6 +2134,37 @@ export function LeadsTablePage({
       window.setTimeout(() => setSaveNotice(null), 5000);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to remove leads from pool");
+    } finally {
+      setRemovingFromPool(false);
+    }
+  }
+
+  async function removeFromScheduleMeeting(leadIds: number[]) {
+    if (!isScheduleMeeting || leadIds.length === 0 || removingFromPool) return;
+    const count = leadIds.length;
+    const confirmed = window.confirm(
+      `Remove ${count} contact${count === 1 ? "" : "s"} from SCHEDULE MEETING? They stay in the CRM — not deleted.`,
+    );
+    if (!confirmed) return;
+
+    setRemovingFromPool(true);
+    setSaveNotice(null);
+    try {
+      const result = await client.removeFromScheduleMeeting(leadIds);
+      const removed = new Set(result.updated_ids);
+      if (removed.size > 0) {
+        setRows((prev) => prev.filter((row) => !removed.has(row.id)));
+        setTotal((prev) => Math.max(0, prev - removed.size));
+        setFilteredCount((prev) => Math.max(0, prev - removed.size));
+        clearSelection();
+      }
+      await loadSectionCounts();
+      setSaveNotice(
+        `Removed ${result.updated_count} contact${result.updated_count === 1 ? "" : "s"} from SCHEDULE MEETING.`,
+      );
+      window.setTimeout(() => setSaveNotice(null), 5000);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to remove from SCHEDULE MEETING");
     } finally {
       setRemovingFromPool(false);
     }
@@ -3341,9 +3373,21 @@ export function LeadsTablePage({
                 if (row) setScheduleMeetingRow(row);
               }}
               disabled={editMode}
-              title="Set date, time, and location — then confirm to sync to PA"
+              title="Set or edit date, time, and address — confirm to sync to PA"
             >
-              Confirm meeting details
+              {rows.find((r) => r.id === [...selected][0])?.meeting_status === "scheduled"
+                ? "Edit meeting"
+                : "Confirm meeting details"}
+            </ActionButton>
+          ) : null}
+          {selected.size > 0 && section === "schedule_meeting" ? (
+            <ActionButton
+              icon={IconXCircle}
+              onClick={() => void removeFromScheduleMeeting([...selected])}
+              disabled={removingFromPool || editMode}
+              title="Remove from SCHEDULE MEETING list (does not delete the contact)"
+            >
+              {removingFromPool ? "Removing…" : `Remove from list (${selected.size})`}
             </ActionButton>
           ) : null}
         </div>
@@ -3915,6 +3959,13 @@ export function LeadsTablePage({
                   <th data-col="added" className={`${TH} min-w-[120px]`}>{renderColHeaderBtn("created_at", "Added")}</th>
                   <th data-col="calling_time" className={`${TH} ${COL_CALLING}`}>{renderColHeaderBtn("calling_time", "Calling time")}</th>
                   <th data-col="remarks" className={`${TH} min-w-[180px]`}>{renderColHeaderBtn("remarks", "Remarks")}</th>
+                  {isScheduleMeeting ? (
+                    <>
+                      <th data-col="meeting_status" className={`${TH} min-w-[120px]`}>Meeting</th>
+                      <th data-col="meeting_at" className={`${TH} min-w-[160px]`}>When</th>
+                      <th data-col="meeting_location" className={`${TH} min-w-[160px]`}>Address</th>
+                    </>
+                  ) : null}
                   <th data-col="assigned_to" className={`${TH} min-w-[150px]`}>{renderColHeaderBtn("assigned_to_user_id", "Assigned To")}</th>
                   <th data-col="socials" className={`${TH} min-w-[120px]`}>Socials</th>
                   {isCallOutcomeSection && (
@@ -3964,7 +4015,13 @@ export function LeadsTablePage({
                       }}
                       className={`border-b border-slate-800/60 ${
                         editMode ? "" : "cursor-pointer hover:bg-slate-900/80"
-                      } ${dirty ? "bg-amber-500/5" : ""} ${selected.has(row.id) ? "bg-slate-900/40" : ""}`}
+                      } ${dirty ? "bg-amber-500/5" : ""} ${selected.has(row.id) ? "bg-slate-900/40" : ""} ${
+                        isScheduleMeeting && row.meeting_status === "scheduled"
+                          ? "border-l-4 border-l-emerald-500 bg-emerald-500/5"
+                          : isScheduleMeeting
+                            ? "border-l-4 border-l-slate-700"
+                            : ""
+                      }`}
                     >
                       <td
                         data-col="select"
@@ -4280,6 +4337,34 @@ export function LeadsTablePage({
                           />
                         )}
                       </td>
+                      {isScheduleMeeting ? (
+                        <>
+                          <td data-col="meeting_status" className={TD_MUTED}>
+                            {row.meeting_status === "scheduled" ? (
+                              <span className="inline-flex items-center rounded-md bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-300 border border-emerald-500/30">
+                                Scheduled
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-200/90 border border-amber-500/20">
+                                Pending
+                              </span>
+                            )}
+                          </td>
+                          <td data-col="meeting_at" className={TD_MUTED}>
+                            {row.meeting_at
+                              ? new Date(row.meeting_at).toLocaleString(undefined, {
+                                  dateStyle: "medium",
+                                  timeStyle: "short",
+                                })
+                              : "—"}
+                          </td>
+                          <td data-col="meeting_location" className={TD_MUTED}>
+                            <span className="block truncate max-w-[180px]" title={row.meeting_location || row.address || ""}>
+                              {row.meeting_location || row.address || "—"}
+                            </span>
+                          </td>
+                        </>
+                      ) : null}
                       <td data-col="assigned_to" className={TD_MUTED} onClick={(e) => e.stopPropagation()}>
                         {renderAssignedToCell(row, draft)}
                       </td>
@@ -4361,7 +4446,28 @@ export function LeadsTablePage({
                         </td>
                       )}
                       <td data-col="actions" className={`${TD} whitespace-nowrap`}>
-                        <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
+                          {isScheduleMeeting ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setScheduleMeetingRow(row)}
+                                className="px-2 py-1 rounded bg-emerald-700/80 hover:bg-emerald-600 border border-emerald-600/50 text-xs text-emerald-50"
+                                title="Edit meeting date, time, address"
+                              >
+                                {row.meeting_status === "scheduled" ? "Edit meeting" : "Schedule"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void removeFromScheduleMeeting([row.id])}
+                                disabled={removingFromPool}
+                                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs text-slate-200 disabled:opacity-50"
+                                title="Remove from SCHEDULE MEETING list"
+                              >
+                                Remove
+                              </button>
+                            </>
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => void deleteRows([row.id])}

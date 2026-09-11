@@ -109,6 +109,53 @@ def _ensure_buyer_social_columns() -> None:
     print("Applied missing buyer social URL columns.")
 
 
+def _ensure_buyer_meeting_columns() -> None:
+    """Idempotent guard for SCHEDULE MEETING columns (avoids Railway 502 if alembic skipped)."""
+    inspector = inspect(engine)
+    if "buyers" not in inspector.get_table_names():
+        return
+
+    existing = {column["name"] for column in inspector.get_columns("buyers")}
+    statements: list[str] = []
+    if "meeting_status" not in existing:
+        statements.append(
+            "ALTER TABLE buyers ADD COLUMN IF NOT EXISTS meeting_status VARCHAR(40)"
+        )
+    if "meeting_at" not in existing:
+        statements.append(
+            "ALTER TABLE buyers ADD COLUMN IF NOT EXISTS meeting_at TIMESTAMPTZ"
+        )
+    if "meeting_location" not in existing:
+        statements.append(
+            "ALTER TABLE buyers ADD COLUMN IF NOT EXISTS meeting_location VARCHAR(512)"
+        )
+    if "meeting_notes" not in existing:
+        statements.append(
+            "ALTER TABLE buyers ADD COLUMN IF NOT EXISTS meeting_notes TEXT"
+        )
+    if "meeting_priority" not in existing:
+        statements.append(
+            "ALTER TABLE buyers ADD COLUMN IF NOT EXISTS meeting_priority INTEGER"
+        )
+
+    if not statements:
+        return
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+        # Indexes are best-effort; ignore if already present.
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_buyers_meeting_status ON buyers (meeting_status)"
+            )
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_buyers_meeting_at ON buyers (meeting_at)")
+        )
+    print("Applied missing buyer meeting schedule columns.", flush=True)
+
+
 def _ensure_horeka_table() -> None:
     """Ensure horeka_line_items table exists."""
     from db.models import Base
@@ -345,6 +392,7 @@ def run_migrations() -> None:
         print(f"WARNING: Alembic upgrade failed (continuing): {exc}", flush=True)
     try:
         _ensure_buyer_social_columns()
+        _ensure_buyer_meeting_columns()
         _ensure_horeka_table()
         _ensure_custom_lead_modules_table()
         _ensure_target_workspace_tables()

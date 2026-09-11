@@ -1002,6 +1002,19 @@ def remove_from_target_pool_rows(
     return LeadTableRemoveFromTargetPoolResponse(**result)
 
 
+@router.post("/table/remove-from-schedule-meeting", response_model=LeadTableRemoveFromTargetPoolResponse)
+def remove_from_schedule_meeting_rows(
+    payload: LeadTableRemoveFromTargetPoolRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """Remove leads from SCHEDULE MEETING (does not delete the lead)."""
+    if not payload.lead_ids:
+        raise HTTPException(400, "Select at least one lead")
+    result = leads_module.remove_from_schedule_meeting(db, lead_ids=payload.lead_ids)
+    return LeadTableRemoveFromTargetPoolResponse(**result)
+
+
 @router.post(
     "/table/promote-incomplete-archives",
     response_model=LeadTablePromoteIncompleteArchivesResponse,
