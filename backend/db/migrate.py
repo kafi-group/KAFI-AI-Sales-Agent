@@ -342,6 +342,28 @@ def _ensure_custom_lead_modules_table() -> None:
                 if row.order_index is None or row.order_index > 10:
                     row.order_index = 9
                 db.commit()
+
+        # Rename Social Media custom list → Emails for Social Media Personnel
+        social_mod = (
+            db.query(CustomLeadModule)
+            .filter(
+                (CustomLeadModule.key.in_(["social.media", "social_media", "social-media"]))
+                | (CustomLeadModule.name == "Social Media")
+            )
+            .first()
+        )
+        if social_mod and social_mod.name != "Emails for Social Media Personnel":
+            social_mod.name = "Emails for Social Media Personnel"
+            if not (social_mod.description or "").strip():
+                social_mod.description = (
+                    "Email contacts for social media personnel outreach"
+                )
+            db.commit()
+            print(
+                f"Renamed custom module {social_mod.key!r} to "
+                "'Emails for Social Media Personnel'.",
+                flush=True,
+            )
     except Exception as exc:
         print(f"Error seeding custom lead modules: {exc}", flush=True)
         db.rollback()
