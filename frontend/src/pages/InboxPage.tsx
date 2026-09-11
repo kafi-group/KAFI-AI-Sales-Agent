@@ -451,9 +451,6 @@ export function InboxPage({
   const currentMessageFlagged = Boolean(
     flaggedLabel && messageLabels.some((label) => label.id === flaggedLabel.id),
   );
-  const hasOpenMessage = Boolean(
-    selectedThreadId || selectedMessageKey || messageDetail || thread,
-  );
   const isDraftsView = section === "drafts";
   const isFolderMail =
     section === "inbox" ||
@@ -1596,26 +1593,6 @@ export function InboxPage({
           >
             Compose
           </ActionButton>
-          {hasOpenMessage ? (
-            <button
-              type="button"
-              disabled={assigningLabel}
-              onClick={() => void toggleFlagCurrent()}
-              className={`shrink-0 inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold transition disabled:opacity-50 ${
-                currentMessageFlagged
-                  ? "border-amber-500/60 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25"
-                  : "border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700"
-              }`}
-              title={
-                currentMessageFlagged
-                  ? "Remove from Flagged"
-                  : "Flag this email — it will appear under Flagged"
-              }
-            >
-              <span aria-hidden>{currentMessageFlagged ? "⚑" : "⚐"}</span>
-              {currentMessageFlagged ? "Remove flag" : "Flag"}
-            </button>
-          ) : null}
           <ActionButton
             icon={IconTag}
             size="md"
