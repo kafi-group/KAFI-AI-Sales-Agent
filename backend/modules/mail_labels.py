@@ -296,34 +296,44 @@ def assign_label(
     from_email: str | None = None,
     subject: str | None = None,
     apply_similar: bool = False,
+    mailbox_user_id: int | None = None,
+    mailbox_user: Any | None = None,
 ) -> dict:
     label = db.query(MailLabel).filter(MailLabel.id == label_id, MailLabel.user_id == user_id).first()
     if not label:
         raise ValueError("Label not found")
+
+    # Flagged is always one exact message — never domain/sender expansion.
+    if is_flagged_label(label):
+        apply_similar = False
 
     folder_key = (folder or "inbox").strip().lower() or "inbox"
     uid = (message_uid or "").strip()
     if not uid:
         raise ValueError("message_uid is required")
 
+    mailbox_id = int(mailbox_user_id) if mailbox_user_id is not None else int(user_id)
     subject_key = _norm_subject(subject)
     from_norm = (from_email or "").strip().lower() or None
 
     def _upsert(
         *,
+        folder: str,
         message_uid: str,
         message_id: str | None,
         thread_id: str | None,
         from_email: str | None,
         subject_key: str | None,
     ) -> bool:
+        folder_norm = (folder or "inbox").strip().lower() or "inbox"
         row = (
             db.query(MailLabelAssignment)
             .filter(
                 MailLabelAssignment.user_id == user_id,
                 MailLabelAssignment.label_id == label_id,
-                MailLabelAssignment.folder == folder_key,
+                MailLabelAssignment.folder == folder_norm,
                 MailLabelAssignment.message_uid == message_uid,
+                MailLabelAssignment.mailbox_user_id == mailbox_id,
             )
             .first()
         )
@@ -333,18 +343,20 @@ def assign_label(
             MailLabelAssignment(
                 label_id=label_id,
                 user_id=user_id,
-                folder=folder_key,
+                folder=folder_norm,
                 message_uid=message_uid,
                 message_id=message_id,
                 thread_id=thread_id,
                 from_email=from_email,
                 subject_key=subject_key,
+                mailbox_user_id=mailbox_id,
             )
         )
         return True
 
     created = 0
     if _upsert(
+        folder=folder_key,
         message_uid=uid,
         message_id=message_id,
         thread_id=thread_id,
@@ -354,8 +366,38 @@ def assign_label(
         created += 1
 
     similar = 0
-    if apply_similar and (subject_key or from_norm):
-        similar = 1 if (subject_key or from_norm) else 0
+    # Optional: label other messages that share sender or subject — as separate
+    # exact UID rows (never for Flagged).
+    if apply_similar and mailbox_user is not None and (subject_key or from_norm):
+        try:
+            from modules import inbox as inbox_module
+
+            candidates = inbox_module.list_messages(
+                mailbox_user, limit=120, folder="inbox"
+            ) + inbox_module.list_messages(mailbox_user, limit=40, folder="sent")
+        except Exception:
+            candidates = []
+        for message in candidates:
+            other_uid = str(message.get("uid") or "").strip()
+            if not other_uid or other_uid == uid:
+                continue
+            other_folder = (message.get("folder") or "inbox").strip().lower() or "inbox"
+            other_from = (message.get("from_email") or "").strip().lower() or None
+            other_subject = _norm_subject(message.get("subject"))
+            same_from = bool(from_norm and other_from and from_norm == other_from)
+            same_subject = bool(subject_key and other_subject and subject_key == other_subject)
+            if not (same_from or same_subject):
+                continue
+            if _upsert(
+                folder=other_folder,
+                message_uid=other_uid,
+                message_id=message.get("message_id"),
+                thread_id=message.get("thread_id"),
+                from_email=other_from,
+                subject_key=other_subject,
+            ):
+                similar += 1
+                created += 1
 
     db.commit()
     return {"assigned": created, "similar_rule": similar, "label_id": label_id}
@@ -368,8 +410,10 @@ def unassign_label(
     label_id: int,
     folder: str,
     message_uid: str,
+    mailbox_user_id: int | None = None,
 ) -> bool:
     folder_key = (folder or "inbox").strip().lower() or "inbox"
+    mailbox_id = int(mailbox_user_id) if mailbox_user_id is not None else int(user_id)
     row = (
         db.query(MailLabelAssignment)
         .filter(
@@ -377,9 +421,22 @@ def unassign_label(
             MailLabelAssignment.label_id == label_id,
             MailLabelAssignment.folder == folder_key,
             MailLabelAssignment.message_uid == message_uid,
+            MailLabelAssignment.mailbox_user_id == mailbox_id,
         )
         .first()
     )
+    if not row:
+        # Fallback: older rows / folder casing drift — still remove exact UID in mailbox.
+        row = (
+            db.query(MailLabelAssignment)
+            .filter(
+                MailLabelAssignment.user_id == user_id,
+                MailLabelAssignment.label_id == label_id,
+                MailLabelAssignment.message_uid == message_uid,
+                MailLabelAssignment.mailbox_user_id == mailbox_id,
+            )
+            .first()
+        )
     if not row:
         return False
     db.delete(row)
@@ -393,10 +450,12 @@ def labels_for_messages(
     *,
     folder: str,
     message_uids: list[str],
+    mailbox_user_id: int | None = None,
 ) -> dict[str, list[dict]]:
     if not message_uids:
         return {}
     folder_key = (folder or "inbox").strip().lower() or "inbox"
+    mailbox_id = int(mailbox_user_id) if mailbox_user_id is not None else int(user_id)
     rows = (
         db.query(MailLabelAssignment, MailLabel)
         .join(MailLabel, MailLabel.id == MailLabelAssignment.label_id)
@@ -404,6 +463,7 @@ def labels_for_messages(
             MailLabelAssignment.user_id == user_id,
             MailLabelAssignment.folder == folder_key,
             MailLabelAssignment.message_uid.in_(message_uids),
+            MailLabelAssignment.mailbox_user_id == mailbox_id,
         )
         .all()
     )
@@ -422,15 +482,23 @@ def labels_for_messages(
     return out
 
 
-def message_keys_for_label(db: Session, user_id: int, label_id: int) -> list[dict]:
+def message_keys_for_label(
+    db: Session,
+    user_id: int,
+    label_id: int,
+    *,
+    mailbox_user_id: int | None = None,
+) -> list[dict]:
     label = db.query(MailLabel).filter(MailLabel.id == label_id, MailLabel.user_id == user_id).first()
     if not label:
         raise ValueError("Label not found")
-    rows = (
-        db.query(MailLabelAssignment)
-        .filter(MailLabelAssignment.user_id == user_id, MailLabelAssignment.label_id == label_id)
-        .all()
+    q = db.query(MailLabelAssignment).filter(
+        MailLabelAssignment.user_id == user_id,
+        MailLabelAssignment.label_id == label_id,
     )
+    if mailbox_user_id is not None:
+        q = q.filter(MailLabelAssignment.mailbox_user_id == int(mailbox_user_id))
+    rows = q.all()
     return [
         {
             "folder": r.folder,
@@ -439,20 +507,26 @@ def message_keys_for_label(db: Session, user_id: int, label_id: int) -> list[dic
             "thread_id": r.thread_id,
             "from_email": r.from_email,
             "subject_key": r.subject_key,
+            "mailbox_user_id": r.mailbox_user_id,
         }
         for r in rows
     ]
 
 
-def label_counts(db: Session, user_id: int) -> dict[int, int]:
+def label_counts(
+    db: Session,
+    user_id: int,
+    *,
+    mailbox_user_id: int | None = None,
+) -> dict[int, int]:
     from sqlalchemy import func as sa_func
 
-    rows = (
-        db.query(MailLabelAssignment.label_id, sa_func.count(MailLabelAssignment.id))
-        .filter(MailLabelAssignment.user_id == user_id)
-        .group_by(MailLabelAssignment.label_id)
-        .all()
+    q = db.query(MailLabelAssignment.label_id, sa_func.count(MailLabelAssignment.id)).filter(
+        MailLabelAssignment.user_id == user_id
     )
+    if mailbox_user_id is not None:
+        q = q.filter(MailLabelAssignment.mailbox_user_id == int(mailbox_user_id))
+    rows = q.group_by(MailLabelAssignment.label_id).all()
     return {int(label_id): int(count) for label_id, count in rows}
 
 
@@ -464,43 +538,52 @@ def _message_key(folder: str | None, message_uid: str | None) -> tuple[str, str]
     return folder_key, uid
 
 
-def _message_matches_assignment_keys(
+def message_matches_assignment_keys(
     *,
     folder: str | None,
     message_uid: str | None,
-    from_email: str | None,
-    subject: str | None,
     keys: list[dict],
 ) -> bool:
+    """Exact folder + UID only — never expand by sender/domain/subject."""
     current = _message_key(folder, message_uid)
     if not current:
         return False
-    subject_key = _norm_subject(subject)
-    from_norm = (from_email or "").strip().lower() or None
     for key in keys:
         key_folder = (key.get("folder") or "inbox").strip().lower()
         key_uid = str(key.get("message_uid") or "").strip()
         if key_uid and key_folder == current[0] and key_uid == current[1]:
             return True
-        if key.get("subject_key") and subject_key and key["subject_key"] == subject_key:
-            return True
-        key_from = (key.get("from_email") or "").strip().lower() or None
-        if key_from and from_norm and key_from == from_norm:
-            return True
     return False
 
 
-def label_display_counts(db: Session, user, *, scan_limit: int = 100) -> dict[int, int]:
-    """Count messages visible in each label (rules + manual assignments)."""
+# Back-compat alias used by older call sites.
+_message_matches_assignment_keys = message_matches_assignment_keys
+
+
+def label_display_counts(
+    db: Session,
+    user,
+    *,
+    scan_limit: int = 100,
+    mailbox_user_id: int | None = None,
+    mailbox_user: Any | None = None,
+) -> dict[int, int]:
+    """Count messages visible in each label (rules + exact manual assignments)."""
     from modules import inbox as inbox_module
 
     labels = list_labels(db, user.id)
     if not labels:
         return {}
 
+    mailbox_id = int(mailbox_user_id) if mailbox_user_id is not None else int(user.id)
+    scan_user = mailbox_user or user
+
     assignment_rows = (
         db.query(MailLabelAssignment)
-        .filter(MailLabelAssignment.user_id == user.id)
+        .filter(
+            MailLabelAssignment.user_id == user.id,
+            MailLabelAssignment.mailbox_user_id == mailbox_id,
+        )
         .all()
     )
     keys_by_label: dict[int, list[dict]] = {}
@@ -509,22 +592,22 @@ def label_display_counts(db: Session, user, *, scan_limit: int = 100) -> dict[in
             {
                 "folder": row.folder,
                 "message_uid": row.message_uid,
-                "from_email": row.from_email,
-                "subject_key": row.subject_key,
             }
         )
 
     try:
-        inbox_messages = inbox_module.list_messages(user, limit=scan_limit, folder="inbox")
-        sent_messages = inbox_module.list_messages(user, limit=min(scan_limit, 40), folder="sent")
+        inbox_messages = inbox_module.list_messages(scan_user, limit=scan_limit, folder="inbox")
+        sent_messages = inbox_module.list_messages(scan_user, limit=min(scan_limit, 40), folder="sent")
         messages = inbox_messages + sent_messages
     except Exception:
-        return label_counts(db, user.id)
+        return label_counts(db, user.id, mailbox_user_id=mailbox_id)
 
     counts: dict[int, int] = {}
     for label in labels:
         matched: set[tuple[str, str]] = set()
         keys = keys_by_label.get(int(label.id), [])
+        # Flagged: manual assignments only (never domain/keyword routing).
+        allow_rules = not is_flagged_label(label)
         for message in messages:
             folder = (message.get("folder") or "inbox").strip().lower() or "inbox"
             uid = str(message.get("uid") or "").strip()
@@ -533,19 +616,21 @@ def label_display_counts(db: Session, user, *, scan_limit: int = 100) -> dict[in
             current = (folder, uid)
             if current in matched:
                 continue
-            if message_matches_label_rules(
-                from_email=message.get("from_email"),
-                to_addrs=message.get("to") or [],
-                from_name=message.get("from_name"),
-                subject=message.get("subject"),
-                preview=message.get("preview"),
-                body_text=message.get("body_text"),
-                label=label,
-            ) or _message_matches_assignment_keys(
+            rules_hit = (
+                allow_rules
+                and message_matches_label_rules(
+                    from_email=message.get("from_email"),
+                    to_addrs=message.get("to") or [],
+                    from_name=message.get("from_name"),
+                    subject=message.get("subject"),
+                    preview=message.get("preview"),
+                    body_text=message.get("body_text"),
+                    label=label,
+                )
+            )
+            if rules_hit or _message_matches_assignment_keys(
                 folder=folder,
                 message_uid=uid,
-                from_email=message.get("from_email"),
-                subject=message.get("subject"),
                 keys=keys,
             ):
                 matched.add(current)

@@ -1042,6 +1042,7 @@ export interface MailLabelMessageKey {
   thread_id: string | null;
   from_email: string | null;
   subject_key: string | null;
+  mailbox_user_id?: number | null;
 }
 
 export interface MailComposeDraft {
@@ -3083,7 +3084,14 @@ export const client = {
     });
   },
 
-  listMailLabels: () => request<MailLabel[]>("/inbox/labels"),
+  listMailLabels: (mailboxUserId?: number | null) => {
+    const search = new URLSearchParams();
+    if (mailboxUserId != null && Number.isFinite(mailboxUserId)) {
+      search.set("mailbox_user_id", String(mailboxUserId));
+    }
+    const q = search.toString();
+    return request<MailLabel[]>(`/inbox/labels${q ? `?${q}` : ""}`);
+  },
   createMailLabel: (data: {
     name: string;
     color?: string;
@@ -3110,22 +3118,39 @@ export const client = {
     from_email?: string | null;
     subject?: string | null;
     apply_similar?: boolean;
+    mailbox_user_id?: number | null;
   }) =>
     request<{ assigned: number; similar_rule: number; label_id: number }>("/inbox/labels/assign", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  unassignMailLabel: (payload: { label_id: number; folder?: string; message_uid: string }) =>
+  unassignMailLabel: (payload: {
+    label_id: number;
+    folder?: string;
+    message_uid: string;
+    mailbox_user_id?: number | null;
+  }) =>
     request<{ removed: boolean }>("/inbox/labels/unassign", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  listMailLabelMessages: (labelId: number) =>
-    request<MailLabelMessageKey[]>(`/inbox/labels/${labelId}/messages`),
-  mapMailLabelsByUids: (folder: string, uids: string[]) => {
+  listMailLabelMessages: (labelId: number, mailboxUserId?: number | null) => {
+    const search = new URLSearchParams();
+    if (mailboxUserId != null && Number.isFinite(mailboxUserId)) {
+      search.set("mailbox_user_id", String(mailboxUserId));
+    }
+    const q = search.toString();
+    return request<MailLabelMessageKey[]>(
+      `/inbox/labels/${labelId}/messages${q ? `?${q}` : ""}`,
+    );
+  },
+  mapMailLabelsByUids: (folder: string, uids: string[], mailboxUserId?: number | null) => {
     const search = new URLSearchParams();
     search.set("folder", folder);
     if (uids.length) search.set("uids", uids.join(","));
+    if (mailboxUserId != null && Number.isFinite(mailboxUserId)) {
+      search.set("mailbox_user_id", String(mailboxUserId));
+    }
     return request<Record<string, MailLabel[]>>(`/inbox/labels/map/by-uids?${search.toString()}`);
   },
   listMailDrafts: () => request<MailComposeDraft[]>("/inbox/drafts"),

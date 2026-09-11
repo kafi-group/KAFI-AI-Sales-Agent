@@ -663,6 +663,8 @@ class MailLabelAssignment(Base):
     thread_id: Mapped[Optional[str]] = mapped_column(String(255))
     from_email: Mapped[Optional[str]] = mapped_column(String(255))
     subject_key: Mapped[Optional[str]] = mapped_column(String(255))
+    # IMAP mailbox owner (Asim switcher: marketing/info/essence user ids).
+    mailbox_user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

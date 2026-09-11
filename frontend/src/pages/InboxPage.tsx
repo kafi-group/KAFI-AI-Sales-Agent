@@ -606,7 +606,7 @@ export function InboxPage({
       try {
         // 2. Parallelize status, labels, and list queries concurrently
         const statusPromise = client.getInboxStatus(mailboxId).catch(() => null);
-        const labelsPromise = client.listMailLabels().catch(() => [] as MailLabel[]);
+        const labelsPromise = client.listMailLabels(mailboxId).catch(() => [] as MailLabel[]);
 
         let listPromise: Promise<unknown>;
         if (section === "inbox") {
@@ -626,7 +626,7 @@ export function InboxPage({
             listPromise = Promise.resolve(null);
           } else {
             listPromise = Promise.all([
-              client.listMailLabelMessages(id),
+              client.listMailLabelMessages(id, mailboxId),
               client.listInboxMessages({
                 limit: 60,
                 folder: "inbox",
@@ -848,6 +848,7 @@ export function InboxPage({
             .mapMailLabelsByUids(
               (latestForLabels.folder || "inbox").toLowerCase(),
               [String(latestForLabels.uid)],
+              mailboxUserIdRef.current,
             )
             .then((mapped) => {
               setMessageLabels(mapped[String(latestForLabels.uid)] || []);
@@ -940,7 +941,11 @@ export function InboxPage({
         }
         void runMessageAnalyze(message.uid, folder);
         void client
-          .mapMailLabelsByUids(folder.toLowerCase(), [String(detail.uid)])
+          .mapMailLabelsByUids(
+            folder.toLowerCase(),
+            [String(detail.uid)],
+            mailboxUserIdRef.current,
+          )
           .then((mapped) => setMessageLabels(mapped[String(detail.uid)] || []))
           .catch(() => setMessageLabels([]));
       } catch (e) {
@@ -1375,6 +1380,7 @@ export function InboxPage({
         from_email: target.from_email,
         subject: target.subject,
         apply_similar: applySimilar,
+        mailbox_user_id: mailboxUserIdRef.current,
       });
       setNotice(
         applySimilar
@@ -1385,6 +1391,7 @@ export function InboxPage({
       const mapped = await client.mapMailLabelsByUids(
         (target.folder || "inbox").toLowerCase(),
         [String(target.uid)],
+        mailboxUserIdRef.current,
       );
       setMessageLabels(mapped[String(target.uid)] || []);
       onMailExtrasChangeRef.current?.();
@@ -1399,7 +1406,7 @@ export function InboxPage({
     let flag = flaggedLabel;
     if (!flag) {
       try {
-        const rows = await client.listMailLabels();
+        const rows = await client.listMailLabels(mailboxUserIdRef.current);
         setLabels(rows);
         flag =
           rows.find(
@@ -1430,6 +1437,7 @@ export function InboxPage({
           label_id: flag.id,
           folder,
           message_uid: uid,
+          mailbox_user_id: mailboxUserIdRef.current,
         });
         setNotice("Removed from Flagged.");
         if (isFlaggedSection) {
@@ -1449,10 +1457,15 @@ export function InboxPage({
           from_email: target.from_email,
           subject: target.subject,
           apply_similar: false,
+          mailbox_user_id: mailboxUserIdRef.current,
         });
         setNotice("Added to Flagged.");
       }
-      const mapped = await client.mapMailLabelsByUids(folder, [uid]);
+      const mapped = await client.mapMailLabelsByUids(
+        folder,
+        [uid],
+        mailboxUserIdRef.current,
+      );
       setMessageLabels(mapped[uid] || []);
       onMailExtrasChangeRef.current?.();
     } catch (e) {
@@ -1501,15 +1514,16 @@ export function InboxPage({
           ) : null}
           {isLabelView && labels.find((l) => l.id === labelId) ? (
             <p className="text-xs text-emerald-400/90 mt-1">
-              Routing:{" "}
-              {(() => {
-                const active = labels.find((l) => l.id === labelId)!;
-                const { domain, keyword } = labelRoutingSummary(active);
-                const parts: string[] = [];
-                if (domain) parts.push(`domain/email ${domain}`);
-                if (keyword) parts.push(`keyword ${keyword}`);
-                return parts.join(" · ") || "manual assignments only";
-              })()}
+              {isFlaggedSection
+                ? "Manual flags only — each flag is one email in this mailbox."
+                : (() => {
+                    const active = labels.find((l) => l.id === labelId)!;
+                    const { domain, keyword } = labelRoutingSummary(active);
+                    const parts: string[] = [];
+                    if (domain) parts.push(`domain/email ${domain}`);
+                    if (keyword) parts.push(`keyword ${keyword}`);
+                    return `Routing: ${parts.join(" · ") || "manual assignments only"}`;
+                  })()}
             </p>
           ) : null}
           {section === "inbox" && status?.showing_since && (

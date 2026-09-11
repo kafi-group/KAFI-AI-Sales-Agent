@@ -68,16 +68,13 @@ export function messageMatchesLabelKeys(
   message: InboxMessageSummary,
   keys: MailLabelMessageKey[],
 ): boolean {
+  // Exact folder + UID only — never expand by sender/domain/subject.
   const uid = String(message.uid);
   const folder = (message.folder || "inbox").toLowerCase();
-  const subjectKey = normSubject(message.subject);
-  const from = (message.from_email || "").trim().toLowerCase();
   for (const key of keys) {
     if (String(key.message_uid) === uid && key.folder.toLowerCase() === folder) {
       return true;
     }
-    if (key.subject_key && subjectKey && key.subject_key === subjectKey) return true;
-    if (key.from_email && from && key.from_email.toLowerCase() === from) return true;
   }
   return false;
 }
@@ -92,6 +89,10 @@ export function messageMatchesLabelRules(
   },
   label: MailLabel,
 ): boolean {
+  // Built-in Flagged mailbox is manual-only (exact UID assignments).
+  if (label.is_system || label.name.trim().toLowerCase() === "flagged") {
+    return false;
+  }
   const { domain, keyword } = labelRoutingSummary(label);
   if (!domain && !keyword) return false;
   if (domain) {

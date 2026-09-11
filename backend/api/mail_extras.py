@@ -5,16 +5,60 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db
-from db.models import AppUser
+from db.models import AppUser, AppUserRole
+from db.session import SessionLocal
 from modules import mail_drafts as drafts_module
 from modules import mail_labels as labels_module
 
 router = APIRouter(prefix="/inbox", tags=["inbox"])
+
+_ASIM_SHARED_MAILBOX_EMAILS = frozenset(
+    {
+        "marketing@kafi-group.com",
+        "info@kafi-group.com",
+        "essence@kafi-group.com",
+    }
+)
+
+
+def _norm_mailbox_email(value: str | None) -> str:
+    return (value or "").strip().lower()
+
+
+def _is_asim(user: AppUser) -> bool:
+    uname = _norm_mailbox_email(user.username)
+    fname = _norm_mailbox_email(getattr(user, "full_name", None))
+    return uname == "asim" or uname.startswith("asim") or "asim" in fname
+
+
+def _resolve_mailbox_user(acting: AppUser, mailbox_user_id: int | None) -> AppUser:
+    """Same switcher rules as inbox API (Asim shared mailboxes / admin)."""
+    if not mailbox_user_id or int(mailbox_user_id) == int(acting.id):
+        return acting
+    role = acting.role.value if isinstance(acting.role, AppUserRole) else str(acting.role)
+    db = SessionLocal()
+    try:
+        other = db.get(AppUser, int(mailbox_user_id))
+        if not other:
+            return acting
+        if role == AppUserRole.admin.value or _is_asim(acting):
+            if role != AppUserRole.admin.value:
+                email = _norm_mailbox_email(other.mailbox_email)
+                if email not in _ASIM_SHARED_MAILBOX_EMAILS:
+                    raise HTTPException(
+                        403,
+                        "You can only switch to marketing@, info@, or essence@ mailboxes",
+                    )
+            db.expunge(other)
+            return other
+        raise HTTPException(403, "Only admin can open another mailbox")
+    finally:
+        db.close()
 
 
 class MailLabelRead(BaseModel):
@@ -65,12 +109,14 @@ class MailLabelAssignRequest(BaseModel):
     from_email: Optional[str] = None
     subject: Optional[str] = None
     apply_similar: bool = False
+    mailbox_user_id: Optional[int] = None
 
 
 class MailLabelUnassignRequest(BaseModel):
     label_id: int
     folder: str = "inbox"
     message_uid: str
+    mailbox_user_id: Optional[int] = None
 
 
 class MailDraftRead(BaseModel):
@@ -95,10 +141,17 @@ class MailDraftUpsert(BaseModel):
 
 @router.get("/labels", response_model=list[MailLabelRead])
 def list_mail_labels(
+    mailbox_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> Any:
-    counts = labels_module.label_display_counts(db, user)
+    mailbox = _resolve_mailbox_user(user, mailbox_user_id)
+    counts = labels_module.label_display_counts(
+        db,
+        user,
+        mailbox_user_id=int(mailbox.id),
+        mailbox_user=mailbox,
+    )
     return [
         _mail_label_read(label, count=counts.get(label.id, 0))
         for label in labels_module.list_labels(db, user.id)
@@ -134,6 +187,7 @@ class MailLabelUpdateRequest(BaseModel):
 def update_mail_label(
     label_id: int,
     body: MailLabelUpdateRequest,
+    mailbox_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> MailLabelRead:
@@ -145,7 +199,10 @@ def update_mail_label(
             new_name=body.name,
             new_color=body.color,
         )
-        count = labels_module.label_counts(db, user.id).get(label.id, 0)
+        mailbox = _resolve_mailbox_user(user, mailbox_user_id)
+        count = labels_module.label_counts(
+            db, user.id, mailbox_user_id=int(mailbox.id)
+        ).get(label.id, 0)
         return _mail_label_read(label, count=count)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -170,6 +227,7 @@ def assign_mail_label(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> Any:
+    mailbox = _resolve_mailbox_user(user, body.mailbox_user_id)
     try:
         return labels_module.assign_label(
             db,
@@ -182,6 +240,8 @@ def assign_mail_label(
             from_email=body.from_email,
             subject=body.subject,
             apply_similar=body.apply_similar,
+            mailbox_user_id=int(mailbox.id),
+            mailbox_user=mailbox,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -193,12 +253,14 @@ def unassign_mail_label(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> Any:
+    mailbox = _resolve_mailbox_user(user, body.mailbox_user_id)
     ok = labels_module.unassign_label(
         db,
         user.id,
         label_id=body.label_id,
         folder=body.folder,
         message_uid=body.message_uid,
+        mailbox_user_id=int(mailbox.id),
     )
     return {"removed": ok}
 
@@ -207,21 +269,36 @@ def unassign_mail_label(
 def map_labels_by_uids(
     folder: str = "inbox",
     uids: str = "",
+    mailbox_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> Any:
     uid_list = [u.strip() for u in (uids or "").split(",") if u.strip()]
-    return labels_module.labels_for_messages(db, user.id, folder=folder, message_uids=uid_list)
+    mailbox = _resolve_mailbox_user(user, mailbox_user_id)
+    return labels_module.labels_for_messages(
+        db,
+        user.id,
+        folder=folder,
+        message_uids=uid_list,
+        mailbox_user_id=int(mailbox.id),
+    )
 
 
 @router.get("/labels/{label_id}/messages")
 def list_label_messages(
     label_id: int,
+    mailbox_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> Any:
+    mailbox = _resolve_mailbox_user(user, mailbox_user_id)
     try:
-        return labels_module.message_keys_for_label(db, user.id, label_id)
+        return labels_module.message_keys_for_label(
+            db,
+            user.id,
+            label_id,
+            mailbox_user_id=int(mailbox.id),
+        )
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
 

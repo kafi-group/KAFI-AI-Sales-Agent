@@ -402,9 +402,10 @@ function DashboardApp() {
 
   const loadMailExtras = useCallback(async () => {
     try {
+      const mailboxId = isAsimUser ? asimActiveMailboxUserId : null;
       const [drafts, labels, personalized] = await Promise.all([
         client.getMailDraftCount(),
-        client.listMailLabels(),
+        client.listMailLabels(mailboxId),
         client.listPersonalizedFollowups({ limit: 1 }).catch(() => null),
       ]);
       setMailDraftCount(drafts.count);
@@ -413,7 +414,7 @@ function DashboardApp() {
     } catch {
       /* optional badges */
     }
-  }, []);
+  }, [asimActiveMailboxUserId, isAsimUser]);
 
   const handleDeleteMailLabel = useCallback(
     async (labelId: number) => {
@@ -718,6 +719,11 @@ function DashboardApp() {
       });
   }, [isAdmin]);
 
+  useEffect(() => {
+    if (!isAsimUser) return;
+    void loadMailExtras();
+  }, [asimActiveMailboxUserId, isAsimUser, loadMailExtras]);
+
   const refreshAll = useCallback(() => {
     setError(null);
     void loadDiscoverLeadsCount();
@@ -886,7 +892,7 @@ function DashboardApp() {
         setTab("inbox");
         return;
       }
-      void client.listMailLabels().then((rows) => {
+      void client.listMailLabels(isAsimUser ? asimActiveMailboxUserId : null).then((rows) => {
         setMailLabels(rows);
         const found = rows.find(
           (label) => label.is_system || label.name.trim().toLowerCase() === "flagged",

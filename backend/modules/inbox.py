@@ -253,17 +253,30 @@ def search_mail(
                 raise ValueError("Label not found")
             inbox_rows = list_messages(user, limit=200, folder="inbox", search_text=text)
             sent_rows = list_messages(user, limit=80, folder="sent", search_text=text)
+            keys = labels_module.message_keys_for_label(
+                db, user.id, label_id, mailbox_user_id=int(user.id)
+            )
             matched = [
                 m
                 for m in inbox_rows + sent_rows
-                if labels_module.message_matches_label_rules(
-                    from_email=m.get("from_email"),
-                    to_addrs=m.get("to") or [],
-                    from_name=m.get("from_name"),
-                    subject=m.get("subject"),
-                    preview=m.get("preview"),
-                    body_text=m.get("body_text"),
-                    label=label,
+                if (
+                    (
+                        not labels_module.is_flagged_label(label)
+                        and labels_module.message_matches_label_rules(
+                            from_email=m.get("from_email"),
+                            to_addrs=m.get("to") or [],
+                            from_name=m.get("from_name"),
+                            subject=m.get("subject"),
+                            preview=m.get("preview"),
+                            body_text=m.get("body_text"),
+                            label=label,
+                        )
+                    )
+                    or labels_module.message_matches_assignment_keys(
+                        folder=m.get("folder"),
+                        message_uid=str(m.get("uid") or ""),
+                        keys=keys,
+                    )
                 )
             ]
             page = matched[offset : offset + limit]
