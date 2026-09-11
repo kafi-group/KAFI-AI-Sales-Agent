@@ -28,6 +28,39 @@ def _is_discarded_mail_folder(folder: str | None) -> bool:
     return any(marker in name for marker in _DISCARDED_FOLDER_MARKERS)
 
 
+def _is_sent_mail_folder(folder: str | None) -> bool:
+    name = (folder or "").strip().lower().replace("\\", "/")
+    if not name:
+        return False
+    if name.startswith("sent") or name.endswith(".sent") or name.endswith("/sent"):
+        return True
+    return "sent" in name.split(".") or "sent" in name.split("/")
+
+
+def _thread_belongs_in_inbox(
+    thread: dict[str, Any],
+    *,
+    mailbox_email: str | None,
+) -> bool:
+    """Inbox list: only conversations with at least one *received* message in INBOX.
+
+    Conversation fetch merges Sent for reply context, which incorrectly promoted
+    outbound-only Sales Agent sends into the Inbox list. Those belong in Sent.
+    """
+    mailbox = (mailbox_email or "").strip().lower()
+    for msg in thread.get("messages") or []:
+        folder = str(msg.get("folder") or "INBOX")
+        if _is_sent_mail_folder(folder) or _is_discarded_mail_folder(folder):
+            continue
+        if msg.get("direction") == "outbound":
+            continue
+        from_email = str(msg.get("from_email") or "").strip().lower()
+        if mailbox and from_email == mailbox:
+            continue
+        return True
+    return False
+
+
 def _message_is_junk_or_trash(msg: dict[str, Any]) -> bool:
     if _is_discarded_mail_folder(str(msg.get("folder") or "")):
         return True
@@ -200,7 +233,20 @@ def list_messages(
                 unread_only=unread_only,
                 search_text=search_text,
             )
-        return [{**message, "provider": _mailbox_provider()} for message in messages]
+        stamped = [{**message, "provider": _mailbox_provider()} for message in messages]
+        if key == "inbox":
+            mailbox = (account.email or "").strip().lower()
+            stamped = [
+                m
+                for m in stamped
+                if m.get("direction") != "outbound"
+                and (
+                    not mailbox
+                    or str(m.get("from_email") or "").strip().lower() != mailbox
+                )
+                and not _is_sent_mail_folder(m.get("folder"))
+            ]
+        return stamped
 
 
 def search_mail(
@@ -474,8 +520,8 @@ def list_threads(
     account = resolve_user_mailbox(user)
     if not account:
         return {"items": [], "total": 0, "offset": offset, "limit": limit, "has_more": False}
-    # Fast window sizing: 40-50 messages for page 1 is plenty for thread grouping
-    window = min(max((offset + limit) * 2, 40), 200)
+    # Need a wider IMAP window — Sent merges inflate the pool before inbox filter.
+    window = min(max((offset + limit) * 3, 60), 300)
     with use_mailbox(account, user_id=user.id):
         raw = outlook_client.list_conversation_messages(
             limit=window,
@@ -485,6 +531,12 @@ def list_threads(
         )
         stamped = [{**m, "provider": _mailbox_provider()} for m in raw]
         threads = group_messages_into_threads(stamped, mailbox_email=account.email)
+        # Drop outbound-only / Sent-only threads from Inbox (they belong under Sent).
+        threads = [
+            t
+            for t in threads
+            if _thread_belongs_in_inbox(t, mailbox_email=account.email)
+        ]
         if unread_only:
             threads = [t for t in threads if t.get("unread_count", 0) > 0]
         from modules import mail_labels as labels_module
