@@ -7,7 +7,11 @@ from typing import Any
 
 from db.models import AppUser
 from integrations.outlook_client import FOLDER_KEYS, outlook_client
-from modules.email_threads import group_messages_into_threads, message_key
+from modules.email_threads import (
+    filter_messages_for_open_conversation,
+    group_messages_into_threads,
+    message_key,
+)
 from modules.inbox_cutoff import get_inbox_since, set_inbox_since_to_now
 from modules.mailbox_accounts import (
     hosts_enabled,
@@ -37,28 +41,63 @@ def _is_sent_mail_folder(folder: str | None) -> bool:
     return "sent" in name.split(".") or "sent" in name.split("/")
 
 
+def _message_is_inbound(msg: dict[str, Any], mailbox_email: str | None) -> bool:
+    """True when this message was received by us (not our Sent / outbound copy)."""
+    folder = str(msg.get("folder") or "INBOX")
+    if _is_sent_mail_folder(folder) or _is_discarded_mail_folder(folder):
+        return False
+    if msg.get("direction") == "outbound":
+        return False
+    mailbox = (mailbox_email or "").strip().lower()
+    from_email = str(msg.get("from_email") or "").strip().lower()
+    if mailbox and from_email == mailbox:
+        return False
+    return True
+
+
 def _thread_belongs_in_inbox(
     thread: dict[str, Any],
     *,
     mailbox_email: str | None,
 ) -> bool:
-    """Inbox list: only conversations with at least one *received* message in INBOX.
+    """Inbox list: only conversations with at least one *received* message."""
+    return any(
+        _message_is_inbound(msg, mailbox_email) for msg in (thread.get("messages") or [])
+    )
 
-    Conversation fetch merges Sent for reply context, which incorrectly promoted
-    outbound-only Sales Agent sends into the Inbox list. Those belong in Sent.
-    """
-    mailbox = (mailbox_email or "").strip().lower()
-    for msg in thread.get("messages") or []:
-        folder = str(msg.get("folder") or "INBOX")
-        if _is_sent_mail_folder(folder) or _is_discarded_mail_folder(folder):
-            continue
-        if msg.get("direction") == "outbound":
-            continue
-        from_email = str(msg.get("from_email") or "").strip().lower()
-        if mailbox and from_email == mailbox:
-            continue
-        return True
-    return False
+
+def _present_thread_for_inbox_list(
+    thread: dict[str, Any],
+    *,
+    mailbox_email: str | None,
+) -> dict[str, Any]:
+    """List row: always show the inbound (to us) subject/from/preview — never our Sent."""
+    import re
+
+    inbound = [
+        m for m in (thread.get("messages") or []) if _message_is_inbound(m, mailbox_email)
+    ]
+    if not inbound:
+        return thread
+    first_in = inbound[0]
+    latest_in = inbound[-1]
+    raw_subject = (first_in.get("subject") or thread.get("subject") or "(no subject)").strip()
+    cleaned = re.sub(
+        r"^(?:(?:re|fw|fwd|aw|sv|antw|resp|rif)\s*:\s*)+",
+        "",
+        raw_subject,
+        flags=re.IGNORECASE,
+    ).strip() or raw_subject
+    out = dict(thread)
+    out["subject"] = cleaned
+    out["latest_date"] = latest_in.get("date")
+    out["latest_preview"] = latest_in.get("preview") or ""
+    out["latest_from_email"] = latest_in.get("from_email")
+    out["latest_from_name"] = latest_in.get("from_name")
+    out["unread_count"] = sum(1 for m in inbound if m.get("unread"))
+    # List identity stays inbound-focused; open-thread still loads full conversation.
+    out["message_count"] = max(int(thread.get("message_count") or 0), len(inbound))
+    return out
 
 
 def _message_is_junk_or_trash(msg: dict[str, Any]) -> bool:
@@ -520,10 +559,12 @@ def list_threads(
     account = resolve_user_mailbox(user)
     if not account:
         return {"items": [], "total": 0, "offset": offset, "limit": limit, "has_more": False}
-    # Need a wider IMAP window — Sent merges inflate the pool before inbox filter.
-    window = min(max((offset + limit) * 3, 60), 300)
+    # Inbox list source = INBOX only. Sent stays in Sent; replies join on open.
+    from modules.inbox_cutoff import date_sort_key
+
+    window = min(max((offset + limit) * 2, 50), 250)
     with use_mailbox(account, user_id=user.id):
-        raw = outlook_client.list_conversation_messages(
+        raw = outlook_client.list_messages(
             limit=window,
             offset=0,
             unread_only=unread_only,
@@ -531,12 +572,15 @@ def list_threads(
         )
         stamped = [{**m, "provider": _mailbox_provider()} for m in raw]
         threads = group_messages_into_threads(stamped, mailbox_email=account.email)
-        # Drop outbound-only / Sent-only threads from Inbox (they belong under Sent).
         threads = [
-            t
+            _present_thread_for_inbox_list(t, mailbox_email=account.email)
             for t in threads
             if _thread_belongs_in_inbox(t, mailbox_email=account.email)
         ]
+        threads.sort(
+            key=lambda t: date_sort_key(t.get("latest_date")),
+            reverse=True,
+        )
         if unread_only:
             threads = [t for t in threads if t.get("unread_count", 0) > 0]
         from modules import mail_labels as labels_module
@@ -592,6 +636,26 @@ def get_thread(
         threads = group_messages_into_threads(stamped, mailbox_email=account.email)
         match = next((t for t in threads if t["thread_id"] == thread_id), None)
         if not match:
+            # Fallback: inbox-only grouping (same as list) when Sent merge shifts ids.
+            inbox_only = outlook_client.list_messages(limit=120, unread_only=False)
+            inbox_threads = group_messages_into_threads(
+                [{**m, "provider": _mailbox_provider()} for m in inbox_only],
+                mailbox_email=account.email,
+            )
+            match = next((t for t in inbox_threads if t["thread_id"] == thread_id), None)
+            if match:
+                # Re-find in conversation merge by shared inbound message id / subject.
+                inbound_keys = {
+                    message_key(m)
+                    for m in (match.get("messages") or [])
+                    if _message_is_inbound(m, account.email)
+                }
+                for t in threads:
+                    keys = set(t.get("message_keys") or [])
+                    if inbound_keys & keys:
+                        match = t
+                        break
+        if not match:
             return None
 
         details = outlook_client.get_messages_by_keys(match["message_keys"])
@@ -599,18 +663,23 @@ def get_thread(
             message_key(m): {**m, "provider": _mailbox_provider()} for m in details
         }
         ordered = [detail_by_key[k] for k in match["message_keys"] if k in detail_by_key]
+        ordered = filter_messages_for_open_conversation(
+            ordered, mailbox_email=account.email
+        )
+        if not ordered:
+            return None
 
         if mark_seen:
             to_mark = [
                 (msg.get("folder") or "INBOX", str(msg["uid"]))
                 for msg in ordered
-                if msg.get("unread") and msg.get("direction") != "outbound"
+                if msg.get("unread") and _message_is_inbound(msg, account.email)
             ]
             if to_mark:
                 try:
                     outlook_client.mark_read_many(to_mark, seen=True)
                     for msg in ordered:
-                        if msg.get("unread") and msg.get("direction") != "outbound":
+                        if msg.get("unread") and _message_is_inbound(msg, account.email):
                             msg["unread"] = False
                 except Exception:  # noqa: BLE001
                     for folder, uid in to_mark:
@@ -622,8 +691,15 @@ def get_thread(
                         except Exception:  # noqa: BLE001
                             pass
 
-        summary = _strip_thread_internals(match)
-        summary["unread_count"] = sum(1 for m in ordered if m.get("unread"))
+        presented = _present_thread_for_inbox_list(
+            {**match, "messages": ordered, "message_count": len(ordered)},
+            mailbox_email=account.email,
+        )
+        summary = _strip_thread_internals(presented)
+        summary["unread_count"] = sum(
+            1 for m in ordered if m.get("unread") and _message_is_inbound(m, account.email)
+        )
+        summary["message_count"] = len(ordered)
         summary["messages"] = ordered
         _thread_cache_set(user, thread_id, summary)
         return summary
