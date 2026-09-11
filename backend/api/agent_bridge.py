@@ -50,6 +50,20 @@ def _mount_bridge_routes(router: APIRouter) -> None:
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(502, f"Could not list calls: {exc}") from exc
 
+    @router.get("/meetings")
+    def agent_bridge_meetings(
+        limit: int = Query(default=100, ge=1, le=500),
+        db: Session = Depends(get_db),
+    ) -> dict:
+        """Confirmed SCHEDULE MEETING rows for PA Travel & Loyalty (scheduled only)."""
+        try:
+            from modules import leads as leads_module
+
+            items = leads_module.list_scheduled_meetings_for_bridge(db, limit=limit)
+            return {"count": len(items), "meetings": items}
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Could not list meetings: {exc}") from exc
+
     @router.get("/performance")
     def agent_bridge_performance(db: Session = Depends(get_db)) -> dict:
         try:

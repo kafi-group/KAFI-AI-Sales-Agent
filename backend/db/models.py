@@ -177,6 +177,13 @@ class Buyer(Base):
     master_type: Mapped[str] = mapped_column(
         String(50), nullable=False, default="fmcg", server_default="'fmcg'"
     )
+    # SCHEDULE MEETING list → PA Travel/meetings bridge
+    # pending = in list, not yet confirmed; scheduled = visible to PA
+    meeting_status: Mapped[Optional[str]] = mapped_column(String(40), index=True)
+    meeting_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    meeting_location: Mapped[Optional[str]] = mapped_column(String(512))
+    meeting_notes: Mapped[Optional[str]] = mapped_column(Text)
+    meeting_priority: Mapped[Optional[int]] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

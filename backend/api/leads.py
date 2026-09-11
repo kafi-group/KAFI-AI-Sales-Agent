@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pathlib import Path
+from datetime import datetime
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -915,6 +916,53 @@ def move_leads_to_target_module(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return LeadTableMoveToModuleResponse(**result)
+
+
+class ScheduleMeetingRequest(BaseModel):
+    meeting_at: datetime | None = None
+    meeting_location: str | None = None
+    meeting_notes: str | None = None
+    meeting_priority: int | None = None
+    confirm: bool = True
+
+
+@router.get("/table/{lead_id}/meeting-suggest")
+def suggest_lead_meeting(
+    lead_id: int,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """Suggest date/location/notes from call closed captions + lead address."""
+    try:
+        return leads_module.suggest_meeting_details(db, lead_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.patch("/table/{lead_id}/meeting-schedule", response_model=LeadTableRowRead)
+def schedule_lead_meeting(
+    lead_id: int,
+    payload: ScheduleMeetingRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """Confirm meetup details for SCHEDULE MEETING → PA only when confirm=true."""
+    try:
+        row = leads_module.schedule_buyer_meeting(
+            db,
+            buyer_id=lead_id,
+            meeting_at=payload.meeting_at,
+            meeting_location=payload.meeting_location,
+            meeting_notes=payload.meeting_notes,
+            meeting_priority=payload.meeting_priority,
+            confirm=payload.confirm,
+            by_user_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not row:
+        raise HTTPException(404, "Lead not found")
+    return LeadTableRowRead(**row)
 
 
 @router.post("/table/populate-target-pool", response_model=LeadTablePopulateTargetPoolResponse)

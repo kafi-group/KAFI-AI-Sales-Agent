@@ -536,6 +536,11 @@ class LeadTableRowRead(BaseModel):
     producer_tier: Optional[str] = None
     producer_conversion_pct: Optional[float] = None
     producer_tier_reasoning: Optional[str] = None
+    meeting_status: Optional[str] = None
+    meeting_at: Optional[datetime] = None
+    meeting_location: Optional[str] = None
+    meeting_notes: Optional[str] = None
+    meeting_priority: Optional[int] = None
 
 
 class LeadTableRowUpdate(BaseModel):

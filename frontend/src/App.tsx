@@ -1135,6 +1135,11 @@ function DashboardApp() {
       count: tableCounts.targeted_client ?? 0,
     },
     {
+      id: "schedule_meeting" as const,
+      label: "SCHEDULE MEETING",
+      count: tableCounts.schedule_meeting ?? 0,
+    },
+    {
       id: "incomplete_archives" as const,
       label: "Incomplete Data from Archives",
       count: tableCounts.incomplete_archives ?? 0,

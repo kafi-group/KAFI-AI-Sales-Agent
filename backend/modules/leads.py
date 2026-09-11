@@ -1,10 +1,21 @@
 import re
 import time
+from datetime import datetime
 
 from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
-from db.models import AppUser, AppUserRole, Buyer, Contact, LeadScore, LeadScoreLabel, MarketRole
+from db.models import (
+    AppUser,
+    AppUserRole,
+    Buyer,
+    Channel,
+    Contact,
+    Interaction,
+    LeadScore,
+    LeadScoreLabel,
+    MarketRole,
+)
 from modules.cache import MISS, cache
 from modules import buyers as buyers_module
 from modules.call_timing import get_call_recommendation
@@ -815,6 +826,11 @@ def _hydrate_lead_table_rows(
                     else None
                 ),
                 "producer_tier_reasoning": buyer.producer_tier_reasoning,
+                "meeting_status": buyer.meeting_status,
+                "meeting_at": buyer.meeting_at,
+                "meeting_location": buyer.meeting_location,
+                "meeting_notes": buyer.meeting_notes,
+                "meeting_priority": buyer.meeting_priority,
             }
         )
     return rows
@@ -1900,6 +1916,11 @@ def get_lead_table_row(db: Session, buyer_id: int) -> dict[str, object] | None:
             else None
         ),
         "producer_tier_reasoning": buyer.producer_tier_reasoning,
+        "meeting_status": buyer.meeting_status,
+        "meeting_at": buyer.meeting_at,
+        "meeting_location": buyer.meeting_location,
+        "meeting_notes": buyer.meeting_notes,
+        "meeting_priority": buyer.meeting_priority,
     }
 
 
@@ -3020,10 +3041,16 @@ def move_leads_to_module(
                 buyer.intake_method = "upload"
                 if not buyer.master_type:
                     buyer.master_type = "fmcg"
+                if module == "schedule_meeting":
+                    # Queue for meeting details — not yet visible to PA until scheduled.
+                    if (buyer.meeting_status or "").strip().lower() != "scheduled":
+                        buyer.meeting_status = "pending"
                 updated_ids.append(lead_id)
         cm = db.query(CustomLeadModule).filter(CustomLeadModule.key == module).first()
         if cm:
             target_label = cm.name
+        elif module == "schedule_meeting":
+            target_label = "SCHEDULE MEETING"
 
     if updated_ids:
         invalidate_section_counts_cache()
@@ -3045,3 +3072,199 @@ def move_leads_to_module(
         "target_module": module,
         "target_label": target_label,
     }
+
+
+def latest_call_caption_for_buyer(db: Session, buyer_id: int) -> dict[str, object]:
+    """Return the newest closed-caption / call notes blob for meeting suggestions."""
+    contact_ids = {
+        c.id
+        for c in buyers_module.list_contacts_for_buyer(db, buyer_id)
+    }
+    if not contact_ids:
+        buyer = buyers_module.get_buyer(db, buyer_id)
+        remarks = (buyer.remarks or "").strip() if buyer else ""
+        return {
+            "interaction_id": None,
+            "transcript": None,
+            "call_notes": remarks or None,
+            "created_at": None,
+        }
+
+    rows = (
+        db.query(Interaction)
+        .filter(
+            Interaction.channel == Channel.phone,
+            Interaction.contact_id.in_(contact_ids),
+        )
+        .order_by(Interaction.id.desc())
+        .limit(40)
+        .all()
+    )
+    for ix in rows:
+        transcript = None
+        for item in ix.attachments or []:
+            if not isinstance(item, dict):
+                continue
+            t = (item.get("transcript") or "").strip()
+            if t:
+                transcript = t
+                break
+        notes = (ix.content or "").strip()
+        if transcript or notes:
+            return {
+                "interaction_id": ix.id,
+                "transcript": transcript,
+                "call_notes": notes or None,
+                "created_at": ix.created_at,
+            }
+    buyer = buyers_module.get_buyer(db, buyer_id)
+    remarks = (buyer.remarks or "").strip() if buyer else ""
+    return {
+        "interaction_id": None,
+        "transcript": None,
+        "call_notes": remarks or None,
+        "created_at": None,
+    }
+
+
+def suggest_meeting_details(db: Session, buyer_id: int) -> dict[str, object]:
+    """Suggest location/notes (and optional datetime hint) from captions/remarks."""
+    import re
+    from datetime import datetime, timezone
+
+    buyer = buyers_module.get_buyer(db, buyer_id)
+    if not buyer:
+        raise ValueError("Lead not found")
+    cap = latest_call_caption_for_buyer(db, buyer_id)
+    blob = "\n".join(
+        p
+        for p in [
+            (cap.get("transcript") or "") if isinstance(cap.get("transcript"), str) else "",
+            (cap.get("call_notes") or "") if isinstance(cap.get("call_notes"), str) else "",
+            buyer.city or "",
+            buyer.address or "",
+        ]
+        if p
+    )
+    suggested_location = (buyer.address or buyer.city or buyer.country or "").strip() or None
+    # Light heuristics for "meet at …" / "office in …"
+    loc_match = re.search(
+        r"(?:meet(?:ing)?|visit|office|factory|warehouse)\s+(?:at|in|near)\s+([^\n.!?]{5,80})",
+        blob,
+        flags=re.IGNORECASE,
+    )
+    if loc_match:
+        suggested_location = loc_match.group(1).strip(" ,;-")
+    return {
+        "buyer_id": buyer_id,
+        "company_name": buyer.company_name,
+        "suggested_location": suggested_location,
+        "suggested_notes": (cap.get("transcript") or cap.get("call_notes") or None),
+        "caption": cap,
+        "current": {
+            "meeting_status": buyer.meeting_status,
+            "meeting_at": buyer.meeting_at.isoformat() if buyer.meeting_at else None,
+            "meeting_location": buyer.meeting_location,
+            "meeting_notes": buyer.meeting_notes,
+            "meeting_priority": buyer.meeting_priority,
+        },
+        "suggested_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def schedule_buyer_meeting(
+    db: Session,
+    *,
+    buyer_id: int,
+    meeting_at: datetime | None,
+    meeting_location: str | None = None,
+    meeting_notes: str | None = None,
+    meeting_priority: int | None = None,
+    confirm: bool = True,
+    by_user_id: int | None = None,
+) -> dict[str, object]:
+    """Confirm or update a meetup for a lead in SCHEDULE MEETING."""
+    from modules.audit import log_action
+
+    buyer = buyers_module.get_buyer(db, buyer_id)
+    if not buyer:
+        raise ValueError("Lead not found")
+    buyer.source = "schedule_meeting"
+    if not buyer.master_type:
+        buyer.master_type = "fmcg"
+    if meeting_at is not None:
+        if meeting_at.tzinfo is None:
+            from datetime import timezone
+
+            meeting_at = meeting_at.replace(tzinfo=timezone.utc)
+        buyer.meeting_at = meeting_at
+    if meeting_location is not None:
+        buyer.meeting_location = meeting_location.strip() or None
+    if meeting_notes is not None:
+        buyer.meeting_notes = meeting_notes.strip() or None
+    if meeting_priority is not None:
+        buyer.meeting_priority = int(meeting_priority)
+    if confirm:
+        if not buyer.meeting_at:
+            raise ValueError("meeting_at (date & time) is required to schedule")
+        buyer.meeting_status = "scheduled"
+    else:
+        buyer.meeting_status = buyer.meeting_status or "pending"
+    invalidate_section_counts_cache()
+    db.commit()
+    db.refresh(buyer)
+    log_action(
+        db,
+        entity_type="buyer",
+        entity_id=buyer.id,
+        action="schedule_meeting",
+        details={
+            "meeting_status": buyer.meeting_status,
+            "meeting_at": buyer.meeting_at.isoformat() if buyer.meeting_at else None,
+            "meeting_location": buyer.meeting_location,
+            "by_user_id": by_user_id,
+        },
+    )
+    return get_lead_table_row(db, buyer.id)  # type: ignore[return-value]
+
+
+def list_scheduled_meetings_for_bridge(
+    db: Session, *, limit: int = 100
+) -> list[dict[str, object]]:
+    """PA export: only confirmed (scheduled) meetups from SCHEDULE MEETING."""
+    q = (
+        db.query(Buyer)
+        .filter(Buyer.meeting_status == "scheduled")
+        .filter(Buyer.meeting_at.isnot(None))
+        .order_by(Buyer.meeting_at.asc(), Buyer.id.asc())
+        .limit(max(1, min(limit, 500)))
+    )
+    out: list[dict[str, object]] = []
+    for buyer in q.all():
+        contacts = buyers_module.list_contacts_for_buyer(db, buyer.id)
+        contact = next((c for c in contacts if c.email or c.phone), contacts[0] if contacts else None)
+        out.append(
+            {
+                "buyer_id": buyer.id,
+                "company_name": buyer.company_name,
+                "country": buyer.country,
+                "city": buyer.city,
+                "address": buyer.address,
+                "contact_name": contact.full_name if contact else None,
+                "contact_email": contact.email if contact else None,
+                "contact_phone": (
+                    (contact.phone or contact.primary_phone or contact.wa_id)
+                    if contact
+                    else None
+                ),
+                "meeting_at": buyer.meeting_at.isoformat() if buyer.meeting_at else None,
+                "meeting_day": buyer.meeting_at.strftime("%A") if buyer.meeting_at else None,
+                "meeting_location": buyer.meeting_location or buyer.address or buyer.city,
+                "meeting_notes": buyer.meeting_notes,
+                "meeting_priority": buyer.meeting_priority,
+                "source": buyer.source,
+                "assigned_to": buyer.assigned_to,
+                "assigned_to_user_id": buyer.assigned_to_user_id,
+            }
+        )
+    return out

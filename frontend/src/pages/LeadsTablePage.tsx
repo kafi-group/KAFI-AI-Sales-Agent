@@ -23,6 +23,7 @@ import { LeadsTableCsvImport } from "../components/LeadsTableCsvImport";
 import { SocialLinksCell } from "../components/SocialLinksCell";
 import { BulkEmailModal } from "../components/BulkEmailModal";
 import { BulkWhatsAppModal } from "../components/BulkWhatsAppModal";
+import { ScheduleMeetingModal } from "../components/ScheduleMeetingModal";
 import {
   LeadWhatsAppComposeModal,
   type WhatsAppComposeTarget,
@@ -111,6 +112,7 @@ const MOVE_MODULE_LABELS: Record<string, string> = {
   hyperstore_targeted: "🏪 Hyperstore Target",
   targeted_distributor: "🚚 Targeted Distributors",
   targeted_client: "🎯 Targeted Client",
+  schedule_meeting: "📅 SCHEDULE MEETING",
   incomplete_archives: "📂 Incomplete Data from Archives",
   old_clients: "🏛️ Old clients",
   master: "📋 Master Table (FMCG)",
@@ -126,6 +128,7 @@ const STANDARD_MOVE_MODULES = [
   "hyperstore_targeted",
   "targeted_distributor",
   "targeted_client",
+  "schedule_meeting",
   "incomplete_archives",
   "old_clients",
   "master",
@@ -790,6 +793,7 @@ function sectionTitle(
   if (section === "hyperstore_targeted") return "Hyperstore Target";
   if (section === "targeted_distributor") return "Targeted Distributors";
   if (section === "targeted_client") return "Targeted Client";
+  if (section === "schedule_meeting") return "SCHEDULE MEETING";
   if (section === "incomplete_archives") return "Incomplete Data from Archives";
   if (section === "testing") return "Testing (Staff Numbers)";
   if (section === "interested_clients") return "Follow up clients";
@@ -1117,6 +1121,7 @@ export function LeadsTablePage({
   const [whatsappComposeTarget, setWhatsappComposeTarget] =
     useState<WhatsAppComposeTarget | null>(null);
   const [bulkWhatsAppNotice, setBulkWhatsAppNotice] = useState<string | null>(null);
+  const [scheduleMeetingRow, setScheduleMeetingRow] = useState<LeadTableRow | null>(null);
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [intakeMethodFilter, setIntakeMethodFilter] = useState<"all" | "upload" | "discover">("all");
   const [movingToPool, setMovingToPool] = useState(false);
@@ -3315,6 +3320,32 @@ export function LeadsTablePage({
           >
             {exporting ? "Exporting…" : "Export"}
           </ActionButton>
+          {selected.size > 0 && section !== "schedule_meeting" ? (
+            <ActionButton
+              icon={IconCheck}
+              variant="emerald"
+              onClick={() => void handleMoveToModule("schedule_meeting")}
+              disabled={movingToModule || bulkOnboarding || editMode}
+              title="Add selected contacts to SCHEDULE MEETING (confirm date/time later)"
+            >
+              {movingToModule ? "Adding…" : "SCHEDULE MEETING"}
+            </ActionButton>
+          ) : null}
+          {selected.size === 1 && section === "schedule_meeting" ? (
+            <ActionButton
+              icon={IconCheck}
+              variant="emerald"
+              onClick={() => {
+                const id = [...selected][0];
+                const row = rows.find((r) => r.id === id);
+                if (row) setScheduleMeetingRow(row);
+              }}
+              disabled={editMode}
+              title="Set date, time, and location — then confirm to sync to PA"
+            >
+              Confirm meeting details
+            </ActionButton>
+          ) : null}
         </div>
       </div>
 
@@ -4784,6 +4815,24 @@ export function LeadsTablePage({
           onSent={(message) => {
             setBulkWhatsAppNotice(message);
             setWhatsappComposeTarget(null);
+          }}
+        />
+      )}
+
+      {scheduleMeetingRow && (
+        <ScheduleMeetingModal
+          row={scheduleMeetingRow}
+          onClose={() => setScheduleMeetingRow(null)}
+          onError={onError}
+          onSaved={(updated) => {
+            setRows((prev) => prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
+            setSaveNotice(
+              updated.meeting_status === "scheduled"
+                ? `Meeting scheduled for ${updated.company_name} — visible to PA.`
+                : `Meeting draft saved for ${updated.company_name}.`,
+            );
+            setScheduleMeetingRow(null);
+            clearSelection();
           }}
         />
       )}

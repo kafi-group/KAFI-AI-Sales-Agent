@@ -225,6 +225,19 @@ def _ensure_custom_lead_modules_table() -> None:
                     order_index=9,
                 ),
                 CustomLeadModule(
+                    key="schedule_meeting",
+                    name="SCHEDULE MEETING",
+                    description=(
+                        "Leads selected for an in-person meetup. Confirm date/time/location "
+                        "here; scheduled meetings sync to PA Travel & Loyalty."
+                    ),
+                    icon="📅",
+                    color="#14b8a6",
+                    is_builtin=True,
+                    is_enabled=True,
+                    order_index=10,
+                ),
+                CustomLeadModule(
                     key="incomplete_archives",
                     name="Incomplete Data from Archives",
                     description="Partial rows from archives needing research",
@@ -232,12 +245,56 @@ def _ensure_custom_lead_modules_table() -> None:
                     color="#d97706",
                     is_builtin=True,
                     is_enabled=True,
-                    order_index=10,
+                    order_index=11,
                 ),
             ]
             db.add_all(defaults)
             db.commit()
             print("Seeded default custom lead modules.", flush=True)
+
+        # Ensure SCHEDULE MEETING exists even when modules were seeded earlier.
+        existing_keys = {m.key for m in db.query(CustomLeadModule.key).all()}
+        if "schedule_meeting" not in existing_keys:
+            # Place directly under Targeted Client (order_index 9).
+            db.add(
+                CustomLeadModule(
+                    key="schedule_meeting",
+                    name="SCHEDULE MEETING",
+                    description=(
+                        "Leads selected for an in-person meetup. Confirm date/time/location "
+                        "here; scheduled meetings sync to PA Travel & Loyalty."
+                    ),
+                    icon="📅",
+                    color="#14b8a6",
+                    is_builtin=True,
+                    is_enabled=True,
+                    order_index=9,
+                )
+            )
+            # Shift Incomplete Archives down if present
+            incomplete = (
+                db.query(CustomLeadModule)
+                .filter(CustomLeadModule.key == "incomplete_archives")
+                .first()
+            )
+            if incomplete and (incomplete.order_index or 0) <= 9:
+                incomplete.order_index = 10
+            db.commit()
+            print("Ensured SCHEDULE MEETING custom lead module.", flush=True)
+        else:
+            # Keep name/icon stable if row already exists
+            row = (
+                db.query(CustomLeadModule)
+                .filter(CustomLeadModule.key == "schedule_meeting")
+                .first()
+            )
+            if row:
+                row.name = "SCHEDULE MEETING"
+                row.icon = row.icon or "📅"
+                row.is_enabled = True
+                if row.order_index is None or row.order_index > 10:
+                    row.order_index = 9
+                db.commit()
     except Exception as exc:
         print(f"Error seeding custom lead modules: {exc}", flush=True)
         db.rollback()

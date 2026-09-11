@@ -1624,6 +1624,11 @@ export interface LeadTableRow {
   producer_tier: string | null;
   producer_conversion_pct: number | null;
   producer_tier_reasoning: string | null;
+  meeting_status?: string | null;
+  meeting_at?: string | null;
+  meeting_location?: string | null;
+  meeting_notes?: string | null;
+  meeting_priority?: number | null;
 }
 
 export interface LeadTableRowUpdate {
@@ -2064,6 +2069,40 @@ export const client = {
     }>("/leads/table/move-to-module", {
       method: "POST",
       body: JSON.stringify({ lead_ids: leadIds, target_module: targetModule }),
+    }),
+  suggestLeadMeeting: (leadId: number) =>
+    request<{
+      buyer_id: number;
+      company_name: string;
+      suggested_location: string | null;
+      suggested_notes: string | null;
+      caption: {
+        interaction_id: number | null;
+        transcript: string | null;
+        call_notes: string | null;
+        created_at: string | null;
+      };
+      current: {
+        meeting_status: string | null;
+        meeting_at: string | null;
+        meeting_location: string | null;
+        meeting_notes: string | null;
+        meeting_priority: number | null;
+      };
+    }>(`/leads/table/${leadId}/meeting-suggest`),
+  scheduleLeadMeeting: (
+    leadId: number,
+    payload: {
+      meeting_at?: string | null;
+      meeting_location?: string | null;
+      meeting_notes?: string | null;
+      meeting_priority?: number | null;
+      confirm?: boolean;
+    },
+  ) =>
+    request<LeadTableRow>(`/leads/table/${leadId}/meeting-schedule`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
     }),
   listLeadsTableIds: (params: Omit<LeadTableQuery, "page" | "page_size"> = {}) => {
     const search = new URLSearchParams();
