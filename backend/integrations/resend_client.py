@@ -83,8 +83,16 @@ def send_via_resend(
 
         att_payload: list[dict[str, str]] = []
         for meta in attachments:
+            content_id = None
+            if isinstance(meta, dict):
+                content_id = (meta.get("content_id") or meta.get("cid") or "").strip() or None
             try:
-                data, filename, content_type = load_bytes(meta)
+                if isinstance(meta, dict) and isinstance(meta.get("bytes"), (bytes, bytearray)):
+                    data = bytes(meta["bytes"])
+                    filename = str(meta.get("filename") or "attachment.bin")
+                    content_type = str(meta.get("content_type") or "application/octet-stream")
+                else:
+                    data, filename, content_type = load_bytes(meta)
             except FileNotFoundError as exc:
                 return {"status": "error", "message": str(exc)}
             item: dict[str, str] = {
@@ -93,6 +101,9 @@ def send_via_resend(
             }
             if content_type:
                 item["content_type"] = content_type
+            # Resend uses content_id for cid: inline images in HTML.
+            if content_id:
+                item["content_id"] = content_id
             att_payload.append(item)
         if att_payload:
             payload["attachments"] = att_payload

@@ -119,6 +119,56 @@ function toHtmlBody(body: string): string {
   return normalizeOutboundTextColor(html);
 }
 
+/**
+ * Gmail (and many clients) strip or show raw text for huge data:image base64
+ * embeds. Convert them to CID inline attachments at send time.
+ */
+function extractDataUriImages(html: string): {
+  html: string;
+  inline: Array<{
+    filename: string;
+    content: Buffer;
+    contentType: string;
+    cid: string;
+  }>;
+} {
+  if (!html || !/data:image\//i.test(html)) {
+    return { html, inline: [] };
+  }
+  const inline: Array<{
+    filename: string;
+    content: Buffer;
+    contentType: string;
+    cid: string;
+  }> = [];
+  let counter = 0;
+  const nextHtml = html.replace(
+    /\bsrc\s*=\s*(['"])(data:image\/([a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+))\1/gi,
+    (_full, quote: string, _dataUri: string, subtypeRaw: string, b64: string) => {
+      let subtype = (subtypeRaw || "png").toLowerCase().split("+")[0].split(";")[0];
+      if (subtype === "jpg") subtype = "jpeg";
+      try {
+        const cleaned = b64.replace(/\s+/g, "");
+        const content = Buffer.from(cleaned, "base64");
+        if (!content.length) return `src=${quote}${_dataUri}${quote}`;
+        counter += 1;
+        const cid = `kafiimg${counter}@kafi-group.com`;
+        const ext = subtype === "jpeg" ? "jpg" : subtype;
+        inline.push({
+          filename: `inline-${counter}.${ext}`,
+          content,
+          contentType: `image/${subtype}`,
+          cid,
+        });
+        return `src=${quote}cid:${cid}${quote}`;
+      } catch {
+        return `src=${quote}${_dataUri}${quote}`;
+      }
+    },
+  );
+  return { html: nextHtml, inline };
+}
+
 export function smtpBodyHasContent(body: string): boolean {
   return htmlToPlain(body || "").trim().length > 0;
 }
@@ -196,6 +246,24 @@ export async function sendSmtp(options: {
           contentType: item.contentType || undefined,
         }));
 
+      const htmlRaw = options.html ? toHtmlBody(options.body) : undefined;
+      const extracted = htmlRaw
+        ? extractDataUriImages(htmlRaw)
+        : { html: undefined as string | undefined, inline: [] as Array<{
+            filename: string;
+            content: Buffer;
+            contentType: string;
+            cid: string;
+          }> };
+
+      const inlineAttachments = extracted.inline.map((img) => ({
+        filename: img.filename,
+        content: img.content,
+        contentType: img.contentType,
+        cid: img.cid,
+        contentDisposition: "inline" as const,
+      }));
+
       await transporter.sendMail({
         from,
         to: options.to,
@@ -203,9 +271,9 @@ export async function sendSmtp(options: {
         ...(bcc ? { bcc } : {}),
         subject: options.subject,
         text: htmlToPlain(options.body),
-        html: options.html ? toHtmlBody(options.body) : undefined,
+        html: extracted.html,
         replyTo: creds!.email,
-        ...(mailAttachments.length ? { attachments: mailAttachments } : {}),
+        attachments: [...mailAttachments, ...inlineAttachments],
       });
       return { ok: true, message: "sent" };
     } catch (err) {

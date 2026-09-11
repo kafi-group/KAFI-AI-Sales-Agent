@@ -159,6 +159,65 @@ def rich_html_to_tracked_html(body: str, *, pixel_url: str | None) -> str:
     return _wrap_email_html(content, pixel_url=pixel_url)
 
 
+_DATA_URI_IMG_RE = None
+
+
+def _data_uri_img_re():
+    global _DATA_URI_IMG_RE
+    if _DATA_URI_IMG_RE is None:
+        import re
+
+        # src='data:image/png;base64,...' or src="data:image/jpeg;base64,..."
+        _DATA_URI_IMG_RE = re.compile(
+            r"""(?is)(\bsrc\s*=\s*)(['"])(data:image/([a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+))\2"""
+        )
+    return _DATA_URI_IMG_RE
+
+
+def extract_data_uri_images(html: str) -> tuple[str, list[dict[str, Any]]]:
+    """Convert inline ``data:image/...;base64,...`` srcs into CID MIME parts.
+
+    Gmail (and many clients) strip or show raw text for huge data-URI images in HTML.
+    Sales Agent's browser preview still works with data URIs; conversion happens at send.
+    """
+    import re
+
+    if not html or "data:image/" not in html.lower():
+        return html, []
+
+    parts: list[dict[str, Any]] = []
+    counter = 0
+
+    def _repl(match: re.Match[str]) -> str:
+        nonlocal counter
+        prefix, quote, _full, subtype_raw, b64 = match.groups()
+        subtype = (subtype_raw or "png").lower().split("+", 1)[0].split(";", 1)[0]
+        if subtype == "jpg":
+            subtype = "jpeg"
+        try:
+            cleaned = re.sub(r"\s+", "", b64)
+            data = base64.b64decode(cleaned, validate=False)
+        except Exception:  # noqa: BLE001
+            return match.group(0)
+        if not data:
+            return match.group(0)
+        counter += 1
+        cid = f"kafiimg{counter}@kafi-group.com"
+        ext = "jpg" if subtype == "jpeg" else subtype
+        parts.append(
+            {
+                "cid": cid,
+                "content_type": f"image/{subtype}",
+                "filename": f"inline-{counter}.{ext}",
+                "data": data,
+            }
+        )
+        return f"{prefix}{quote}cid:{cid}{quote}"
+
+    new_html = _data_uri_img_re().sub(_repl, html)
+    return new_html, parts
+
+
 def build_tracked_bodies(
     body: str,
     *,
@@ -180,6 +239,22 @@ def build_tracked_bodies(
     if pixel:
         return plain, plain_to_tracked_html(plain, pixel_url=pixel)
     return plain, None
+
+
+def build_tracked_bodies_with_inline(
+    body: str,
+    *,
+    interaction_id: int | None,
+    send_mode: str = "individual",
+) -> tuple[str, str | None, list[dict[str, Any]]]:
+    """Like :func:`build_tracked_bodies` plus CID inline image parts for SMTP/Resend."""
+    plain, html_body = build_tracked_bodies(
+        body, interaction_id=interaction_id, send_mode=send_mode
+    )
+    if not html_body:
+        return plain, None, []
+    html_out, inline = extract_data_uri_images(html_body)
+    return plain, html_out, inline
 
 
 def pixel_gif_bytes() -> bytes:

@@ -1117,7 +1117,7 @@ class OutlookClient:
         from email.mime.text import MIMEText
 
         from modules.email_attachments import load_bytes
-        from modules.email_tracking import build_tracked_bodies
+        from modules.email_tracking import build_tracked_bodies_with_inline
 
         if not self._cred_password():
             return {
@@ -1127,7 +1127,7 @@ class OutlookClient:
 
         from_addr = self._cred_email()
         display_name = self._cred_display_name()
-        plain_body, html_body = build_tracked_bodies(
+        plain_body, html_body, inline_images = build_tracked_bodies_with_inline(
             body,
             interaction_id=interaction_id,
             send_mode=send_mode,
@@ -1156,10 +1156,33 @@ class OutlookClient:
         )
 
         if html_body:
-            alt = MIMEMultipart("alternative")
-            alt.attach(MIMEText(plain_body, "plain", "utf-8"))
-            alt.attach(MIMEText(html_body, "html", "utf-8"))
-            message.attach(alt)
+            if inline_images:
+                related = MIMEMultipart("related")
+                alt = MIMEMultipart("alternative")
+                alt.attach(MIMEText(plain_body, "plain", "utf-8"))
+                alt.attach(MIMEText(html_body, "html", "utf-8"))
+                related.attach(alt)
+                for img in inline_images:
+                    ctype = str(img.get("content_type") or "image/png")
+                    maintype, _, subtype = ctype.partition("/")
+                    part = MIMEBase(maintype or "image", subtype or "png")
+                    part.set_payload(img["data"])
+                    encoders.encode_base64(part)
+                    cid = str(img.get("cid") or "").strip()
+                    filename = str(img.get("filename") or "inline.png")
+                    part.add_header("Content-ID", f"<{cid}>")
+                    part.add_header(
+                        "Content-Disposition",
+                        "inline",
+                        filename=filename,
+                    )
+                    related.attach(part)
+                message.attach(related)
+            else:
+                alt = MIMEMultipart("alternative")
+                alt.attach(MIMEText(plain_body, "plain", "utf-8"))
+                alt.attach(MIMEText(html_body, "html", "utf-8"))
+                message.attach(alt)
         else:
             message.attach(MIMEText(plain_body, "plain", "utf-8"))
 
@@ -1265,7 +1288,7 @@ class OutlookClient:
 
         from integrations.resend_client import send_via_resend
         from modules.email_attachments import load_bytes
-        from modules.email_tracking import build_tracked_bodies
+        from modules.email_tracking import build_tracked_bodies_with_inline
 
         from_addr = self._cred_email()
         if not from_addr:
@@ -1277,7 +1300,7 @@ class OutlookClient:
                 ),
             }
         display_name = self._cred_display_name()
-        plain_body, html_body = build_tracked_bodies(
+        plain_body, html_body, inline_images = build_tracked_bodies_with_inline(
             body,
             interaction_id=interaction_id,
             send_mode=send_mode,
@@ -1288,6 +1311,18 @@ class OutlookClient:
         if references:
             headers["References"] = references
 
+        # Resend inline images: pass as attachments with content_id matching cid: in HTML.
+        resend_attachments = list(attachments or [])
+        for img in inline_images:
+            resend_attachments.append(
+                {
+                    "filename": img.get("filename") or "inline.png",
+                    "content_type": img.get("content_type") or "image/png",
+                    "content_id": img.get("cid"),
+                    "bytes": img.get("data"),
+                }
+            )
+
         result = send_via_resend(
             from_email=from_addr,
             from_name=display_name,
@@ -1297,7 +1332,7 @@ class OutlookClient:
             html_body=html_body,
             cc=cc,
             bcc=bcc,
-            attachments=attachments,
+            attachments=resend_attachments,
             headers=headers or None,
         )
         if result.get("status") != "sent":
@@ -1318,10 +1353,33 @@ class OutlookClient:
                 domain=from_addr.split("@")[-1]
             )
             if html_body:
-                alt = MIMEMultipart("alternative")
-                alt.attach(MIMEText(plain_body, "plain", "utf-8"))
-                alt.attach(MIMEText(html_body, "html", "utf-8"))
-                message.attach(alt)
+                if inline_images:
+                    related = MIMEMultipart("related")
+                    alt = MIMEMultipart("alternative")
+                    alt.attach(MIMEText(plain_body, "plain", "utf-8"))
+                    alt.attach(MIMEText(html_body, "html", "utf-8"))
+                    related.attach(alt)
+                    for img in inline_images:
+                        ctype = str(img.get("content_type") or "image/png")
+                        maintype, _, subtype = ctype.partition("/")
+                        part = MIMEBase(maintype or "image", subtype or "png")
+                        part.set_payload(img["data"])
+                        encoders.encode_base64(part)
+                        cid = str(img.get("cid") or "").strip()
+                        filename = str(img.get("filename") or "inline.png")
+                        part.add_header("Content-ID", f"<{cid}>")
+                        part.add_header(
+                            "Content-Disposition",
+                            "inline",
+                            filename=filename,
+                        )
+                        related.attach(part)
+                    message.attach(related)
+                else:
+                    alt = MIMEMultipart("alternative")
+                    alt.attach(MIMEText(plain_body, "plain", "utf-8"))
+                    alt.attach(MIMEText(html_body, "html", "utf-8"))
+                    message.attach(alt)
             else:
                 message.attach(MIMEText(plain_body, "plain", "utf-8"))
             for meta in attachments or []:
