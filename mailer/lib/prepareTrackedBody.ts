@@ -64,7 +64,8 @@ export async function prepareTrackedBody(options: {
       console.warn(
         `[mailer] prepare-tracked-body failed (${res.status}): ${text.slice(0, 200)}`,
       );
-      return { body: options.body, html: true, tracking_enabled: false };
+      const looksHtml = /<\/?[a-z][\s\S]*>/i.test(options.body || "");
+      return { body: options.body, html: looksHtml || true, tracking_enabled: false };
     }
     const data = (await res.json()) as {
       body?: string;

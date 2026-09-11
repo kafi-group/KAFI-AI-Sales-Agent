@@ -193,6 +193,19 @@ def resolve_path(storage_path: str) -> Path:
     return _BACKEND_DIR / "storage" / rel
 
 
+def find_by_id(att_id: str) -> Path | None:
+    """Locate ``{uuid}_filename`` stored under email_attachments."""
+    clean = (att_id or "").strip()
+    if not clean or "/" in clean or "\\" in clean or ".." in clean:
+        return None
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    matches = sorted(STORAGE_DIR.glob(f"{clean}_*"))
+    for path in matches:
+        if path.is_file():
+            return path
+    return None
+
+
 def load_bytes(meta: dict) -> tuple[bytes, str, str]:
     storage_path = str(meta.get("storage_path") or "").strip()
     filename = str(meta.get("filename") or "").strip()

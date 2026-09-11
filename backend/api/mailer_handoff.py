@@ -127,6 +127,22 @@ class MailerPrepareTrackedResponse(BaseModel):
     pixel_url: Optional[str] = None
 
 
+class MailerInlineUploadRequest(BaseModel):
+    """Upload one base64 image so the mailer can replace data:image embeds."""
+
+    token: Optional[str] = None
+    content_base64: str = Field(min_length=8)
+    content_type: str = Field(default="image/png")
+    filename: Optional[str] = None
+
+
+class MailerInlineUploadResponse(BaseModel):
+    id: str
+    url: str
+    content_type: str
+    size: int
+
+
 class MailerActivityReportResponse(BaseModel):
     recorded: bool
     event_id: Optional[int] = None
@@ -456,8 +472,13 @@ def prepare_mailer_tracked_body(
     )
     to_email = (payload.to or "").strip()
     subject = (payload.subject or "").strip()
-    body = payload.body or ""
+    # Host data:image embeds as public HTTPS URLs before anything else — Gmail
+    # cannot reliably render multi-MB base64 images in the HTML body.
+    body = email_tracking.host_data_uri_images_as_public_urls(payload.body or "")
     mode = "bulk" if payload.send_mode == "bulk" else "individual"
+    body_is_html = bool(
+        __import__("re").search(r"</?[a-zA-Z][^>]*>", body or "")
+    )
 
     interaction = email_tracking.ensure_outbound_tracking_interaction(
         db,
@@ -469,6 +490,18 @@ def prepare_mailer_tracked_body(
         approved_by=user.username,
     )
     if not interaction:
+        # Never force html=False for rich bodies — that makes Gmail show raw <img> tags.
+        if body_is_html:
+            _plain, html_body = email_tracking.build_tracked_bodies(
+                body,
+                interaction_id=None,
+                send_mode=mode,
+            )
+            return MailerPrepareTrackedResponse(
+                body=html_body or body,
+                html=True,
+                tracking_enabled=bool(email_tracking.public_api_base()),
+            )
         return MailerPrepareTrackedResponse(
             body=body,
             html=False,
@@ -485,10 +518,96 @@ def prepare_mailer_tracked_body(
     )
     return MailerPrepareTrackedResponse(
         body=html_body or plain or body,
-        html=bool(html_body),
+        html=True if (html_body or body_is_html) else bool(html_body),
         interaction_id=interaction.id,
         tracking_enabled=bool(pixel),
         pixel_url=pixel,
+    )
+
+
+@router.post("/inline-upload", response_model=MailerInlineUploadResponse)
+def upload_mailer_inline_image(
+    payload: MailerInlineUploadRequest,
+    db: Session = Depends(get_db),
+    authorization: str | None = Header(default=None),
+):
+    """Accept one image (base64) and return a public HTTPS URL for Gmail-safe HTML."""
+    import base64
+    import re
+
+    from modules import email_tracking
+    from modules.email_attachments import register_attachment_from_bytes
+
+    _resolve_report_user(
+        db,
+        authorization=authorization,
+        handoff_token=payload.token,
+    )
+    base = email_tracking.public_api_base()
+    if not base:
+        raise HTTPException(
+            status_code=503,
+            detail="PUBLIC_API_BASE_URL is not configured — cannot host inline images.",
+        )
+
+    raw_b64 = (payload.content_base64 or "").strip()
+    if "," in raw_b64 and ";base64" in raw_b64[:80]:
+        raw_b64 = raw_b64.split(",", 1)[1]
+    raw_b64 = re.sub(r"\s+", "", raw_b64)
+    try:
+        data = base64.b64decode(raw_b64, validate=False)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Invalid base64 image: {exc}") from exc
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty image data")
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Inline image exceeds 8 MB")
+
+    ctype = (payload.content_type or "image/png").split(";")[0].strip().lower()
+    if not ctype.startswith("image/"):
+        ctype = "image/png"
+    subtype = ctype.split("/", 1)[-1] or "png"
+    if subtype == "jpg":
+        subtype = "jpeg"
+        ctype = "image/jpeg"
+    ext = "jpg" if subtype == "jpeg" else subtype
+    filename = (payload.filename or f"inline.{ext}").strip() or f"inline.{ext}"
+
+    meta = register_attachment_from_bytes(data, filename=filename, content_type=ctype)
+    return MailerInlineUploadResponse(
+        id=str(meta["id"]),
+        url=f"{base}/api/mailer/inline-media/{meta['id']}",
+        content_type=ctype,
+        size=int(meta["size"]),
+    )
+
+
+@router.get("/inline-media/{media_id}")
+def get_mailer_inline_media(media_id: str):
+    """Public image URL for Gmail/Outlook image proxies (no auth)."""
+    from fastapi.responses import FileResponse
+
+    from modules.email_attachments import find_by_id
+
+    path = find_by_id(media_id)
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="Inline media not found")
+    name = path.name
+    # {uuid}_filename.ext
+    display = name.split("_", 1)[-1] if "_" in name else name
+    suffix = path.suffix.lower()
+    ctype = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+    }.get(suffix, "application/octet-stream")
+    return FileResponse(
+        path,
+        media_type=ctype,
+        filename=display,
+        headers={"Cache-Control": "public, max-age=86400", "Content-Disposition": f'inline; filename="{display}"'},
     )
 
 

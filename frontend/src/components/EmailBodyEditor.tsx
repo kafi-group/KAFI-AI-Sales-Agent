@@ -6,6 +6,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { client } from "../api/client";
 import { IconPaperclip } from "./icons/AppIcons";
 
 export type EmailBodyEditorProps = {
@@ -211,29 +212,60 @@ export function EmailBodyEditor({
   function handleChoosePasteInline() {
     if (!pendingImage) return;
     const file = pendingImage;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result as string;
-      const imgTag = `<p><img src="${base64}" alt="${file.name}" style="max-width: 100%; height: auto; border-radius: 6px; margin: 8px 0; display: block;" /></p>`;
-      const el = editorRef.current;
-      if (!el) return;
-      el.focus();
-      const sel = window.getSelection();
-      if (savedRangeRef.current && sel) {
-        try {
-          sel.removeAllRanges();
-          sel.addRange(savedRangeRef.current);
-          document.execCommand("insertHTML", false, imgTag);
-        } catch {
+    void (async () => {
+      try {
+        const meta = await client.uploadEmailAttachment(file);
+        const apiBase = (
+          import.meta.env.VITE_API_BASE_URL ||
+          "https://kafi-sales-agent-production.up.railway.app/api"
+        )
+          .toString()
+          .trim()
+          .replace(/\/$/, "");
+        const origin = /^https?:\/\//i.test(apiBase)
+          ? apiBase.replace(/\/api$/i, "") + "/api"
+          : "https://kafi-sales-agent-production.up.railway.app/api";
+        const url = `${origin}/mailer/inline-media/${meta.id}`;
+        const safeName = file.name.replace(/"/g, "");
+        const imgTag = `<p><img src="${url}" alt="${safeName}" style="max-width: 100%; height: auto; border-radius: 6px; margin: 8px 0; display: block;" /></p>`;
+        const el = editorRef.current;
+        if (!el) return;
+        el.focus();
+        const sel = window.getSelection();
+        if (savedRangeRef.current && sel) {
+          try {
+            sel.removeAllRanges();
+            sel.addRange(savedRangeRef.current);
+            document.execCommand("insertHTML", false, imgTag);
+          } catch {
+            el.innerHTML += imgTag;
+          }
+        } else {
           el.innerHTML += imgTag;
         }
-      } else {
-        el.innerHTML += imgTag;
+        emitChange();
+        closeImageModal();
+      } catch (err) {
+        // Fallback: data URI (backend/mailer will try to host at send time).
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64 = reader.result as string;
+          const imgTag = `<p><img src="${base64}" alt="${file.name}" style="max-width: 100%; height: auto; border-radius: 6px; margin: 8px 0; display: block;" /></p>`;
+          const el = editorRef.current;
+          if (!el) return;
+          el.focus();
+          try {
+            document.execCommand("insertHTML", false, imgTag);
+          } catch {
+            el.innerHTML += imgTag;
+          }
+          emitChange();
+          closeImageModal();
+        };
+        reader.readAsDataURL(file);
+        console.warn(err);
       }
-      emitChange();
-      closeImageModal();
-    };
-    reader.readAsDataURL(file);
+    })();
   }
 
   // Sync external value → editor (avoid cursor jumps when unchanged).

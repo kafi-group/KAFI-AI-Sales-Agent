@@ -6,6 +6,7 @@ import {
   resolveContactSalutationName,
 } from "@/lib/personalizeEmail";
 import { prepareTrackedBody } from "@/lib/prepareTrackedBody";
+import { hostInlineDataUriImages } from "@/lib/hostInlineImages";
 import { resolveMergeContext } from "@/lib/resolveMergeContext";
 import { reportMailerActivity } from "@/lib/reportActivity";
 import { sendSmtp, smtpBodyHasContent } from "@/lib/smtp";
@@ -146,6 +147,13 @@ export async function POST(req: NextRequest) {
       resolveContactSalutationName(mergeLead),
     );
 
+    // Upload data:image embeds one-by-one so the tracked-body request stays small
+    // and Gmail receives https:// image URLs instead of raw base64.
+    const hostedBody = await hostInlineDataUriImages(personalizedBody, {
+      authToken: authToken || undefined,
+      handoffToken: handoffToken || undefined,
+    });
+
     const cc = (body.cc || "").trim() || undefined;
     const bcc = (body.bcc || "").trim() || undefined;
 
@@ -155,12 +163,12 @@ export async function POST(req: NextRequest) {
       authToken: authToken || undefined,
       to,
       subject: personalizedSubject,
-      body: personalizedBody,
+      body: hostedBody,
       buyer_id: buyerId,
       send_mode: sendMode,
     });
-    const sendBody = tracked.body || personalizedBody;
-    const asHtml = tracked.html || body.html !== false;
+    const sendBody = tracked.body || hostedBody;
+    const asHtml = tracked.html !== false;
 
     // Always load mailbox password from Sales Agent (same as Inbox).
     // Never fall back to Vercel MAILBOX_* — those drift and cause SMTP 535.

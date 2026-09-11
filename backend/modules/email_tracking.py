@@ -218,6 +218,56 @@ def extract_data_uri_images(html: str) -> tuple[str, list[dict[str, Any]]]:
     return new_html, parts
 
 
+def host_data_uri_images_as_public_urls(html: str) -> str:
+    """Replace data-URI images with public HTTPS URLs (Gmail-safe).
+
+    Prefer this over leaving ``data:image`` in the message body. Gmail often
+    blanks those images or, when the MIME part is forced to text/plain, shows
+    the raw ``<img src="data:...">`` source to the recipient.
+    """
+    import re
+
+    from modules.email_attachments import register_attachment_from_bytes
+
+    if not html or "data:image/" not in html.lower():
+        return html
+    base = public_api_base()
+    if not base:
+        logger.warning("Cannot host inline email images — PUBLIC_API_BASE_URL unset")
+        return html
+
+    def _repl(match: re.Match[str]) -> str:
+        prefix, quote, _full, subtype_raw, b64 = match.groups()
+        subtype = (subtype_raw or "png").lower().split("+", 1)[0].split(";", 1)[0]
+        if subtype == "jpg":
+            subtype = "jpeg"
+        try:
+            cleaned = re.sub(r"\s+", "", b64)
+            data = base64.b64decode(cleaned, validate=False)
+        except Exception:  # noqa: BLE001
+            return match.group(0)
+        if not data:
+            return match.group(0)
+        # Cap single inline image at 8 MB decoded.
+        if len(data) > 8 * 1024 * 1024:
+            logger.warning("Skipping oversized inline email image (%s bytes)", len(data))
+            return match.group(0)
+        ext = "jpg" if subtype == "jpeg" else subtype
+        try:
+            meta = register_attachment_from_bytes(
+                data,
+                filename=f"inline.{ext}",
+                content_type=f"image/{subtype}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to store inline email image: %s", exc)
+            return match.group(0)
+        url = f"{base}/api/mailer/inline-media/{meta['id']}"
+        return f"{prefix}{quote}{url}{quote}"
+
+    return _data_uri_img_re().sub(_repl, html)
+
+
 def build_tracked_bodies(
     body: str,
     *,
@@ -226,6 +276,9 @@ def build_tracked_bodies(
 ) -> tuple[str, str | None]:
     """Return (plain_text, html_or_none). HTML includes open pixel when public base URL is set."""
     raw = body or ""
+    # Host data-URI images first so Gmail gets https:// links, not base64 blobs.
+    if "data:image/" in raw.lower():
+        raw = host_data_uri_images_as_public_urls(raw)
     is_html = _looks_like_html(raw)
     plain = _html_to_plain(raw) if is_html else raw
     pixel = (

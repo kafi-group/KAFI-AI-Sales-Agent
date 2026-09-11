@@ -109,6 +109,11 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const { hostInlineDataUriImages } = await import("@/lib/hostInlineImages");
+    const hostedTemplate = await hostInlineDataUriImages(bodyTpl, {
+      handoffToken: token,
+    });
+
     const results: Array<{
       buyer_id: number;
       email: string;
@@ -120,7 +125,7 @@ export async function POST(req: NextRequest) {
       const lead = leads[i];
       try {
         const subject = renderTemplate(subjectTpl, lead);
-        const text = renderTemplate(bodyTpl, lead, true);
+        const text = renderTemplate(hostedTemplate, lead, true);
         const { prepareTrackedBody } = await import("@/lib/prepareTrackedBody");
         const tracked = await prepareTrackedBody({
           token,
