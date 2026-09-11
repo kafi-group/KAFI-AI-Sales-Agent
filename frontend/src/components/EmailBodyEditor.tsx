@@ -127,6 +127,58 @@ function Divider() {
   return <span className="mx-0.5 h-5 w-px bg-slate-700 shrink-0" aria-hidden />;
 }
 
+/** Collect every image file from a paste or drop (Explorer multi-copy, etc.). No max. */
+function collectImageFiles(data: DataTransfer | null | undefined): File[] {
+  if (!data) return [];
+  const seen = new Set<string>();
+  const out: File[] = [];
+  const push = (file: File | null) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const key = `${file.name}:${file.size}:${file.lastModified}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(file);
+  };
+  for (const file of Array.from(data.files || [])) push(file);
+  if (out.length === 0) {
+    for (const item of Array.from(data.items || [])) {
+      if (item.kind === "file" && item.type.startsWith("image/")) {
+        push(item.getAsFile());
+      }
+    }
+  }
+  return out;
+}
+
+function imgHtmlTag(url: string, name: string): string {
+  const safeName = name.replace(/"/g, "");
+  return `<p><img src="${url}" alt="${safeName}" style="max-width: 100%; height: auto; border-radius: 6px; margin: 8px 0; display: block;" /></p>`;
+}
+
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+  onProgress?: (done: number, total: number) => void,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  let done = 0;
+  const total = items.length;
+  async function worker() {
+    while (next < items.length) {
+      const i = next;
+      next += 1;
+      out[i] = await fn(items[i], i);
+      done += 1;
+      onProgress?.(done, total);
+    }
+  }
+  const n = Math.max(1, Math.min(concurrency, items.length || 1));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return out;
+}
+
 export function EmailBodyEditor({
   value,
   onChange,
@@ -143,10 +195,12 @@ export function EmailBodyEditor({
   const editorRef = useRef<HTMLDivElement>(null);
   const lastHtml = useRef<string>("");
   const reactId = useId();
+  const multiImageInputRef = useRef<HTMLInputElement>(null);
 
   const [isDraggingOver, setIsDraggingOver] = useState(false);
-  const [pendingImage, setPendingImage] = useState<File | null>(null);
-  const [pendingImagePreview, setPendingImagePreview] = useState<string | null>(null);
+  const [pendingImages, setPendingImages] = useState<File[]>([]);
+  const [pendingPreviews, setPendingPreviews] = useState<string[]>([]);
+  const [imageBusy, setImageBusy] = useState<{ done: number; total: number } | null>(null);
   const savedRangeRef = useRef<Range | null>(null);
 
   function saveSelection() {
@@ -154,6 +208,15 @@ export function EmailBodyEditor({
     if (sel && sel.rangeCount > 0) {
       savedRangeRef.current = sel.getRangeAt(0).cloneRange();
     }
+  }
+
+  function queueImages(files: File[]) {
+    if (!files.length) return;
+    setPendingPreviews((prev) => {
+      for (const url of prev) URL.revokeObjectURL(url);
+      return files.map((f) => URL.createObjectURL(f));
+    });
+    setPendingImages(files);
   }
 
   function handleDragOver(e: React.DragEvent) {
@@ -171,29 +234,22 @@ export function EmailBodyEditor({
   function handleDrop(e: React.DragEvent) {
     if (disabled) return;
     setIsDraggingOver(false);
-    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
+    const files = collectImageFiles(e.dataTransfer);
     if (files.length > 0) {
       e.preventDefault();
       saveSelection();
-      const file = files[0];
-      setPendingImage(file);
-      setPendingImagePreview(URL.createObjectURL(file));
+      queueImages(files);
     }
   }
 
   function handlePaste(e: React.ClipboardEvent) {
     if (disabled) return;
-    const items = Array.from(e.clipboardData.items);
-    const imgItem = items.find((item) => item.type.startsWith("image/"));
-    if (imgItem) {
-      const file = imgItem.getAsFile();
-      if (file) {
-        e.preventDefault();
-        saveSelection();
-        setPendingImage(file);
-        setPendingImagePreview(URL.createObjectURL(file));
-        return;
-      }
+    const files = collectImageFiles(e.clipboardData);
+    if (files.length > 0) {
+      e.preventDefault();
+      saveSelection();
+      queueImages(files);
+      return;
     }
 
     // Rich HTML paste (PRODUCT RANGE, etc.) often embeds data:image — host before insert.
@@ -204,22 +260,7 @@ export function EmailBodyEditor({
       void (async () => {
         try {
           const hosted = await hostDataUriImagesInHtml(htmlClip);
-          const el = editorRef.current;
-          if (!el) return;
-          el.focus();
-          const sel = window.getSelection();
-          if (savedRangeRef.current && sel) {
-            try {
-              sel.removeAllRanges();
-              sel.addRange(savedRangeRef.current);
-              document.execCommand("insertHTML", false, hosted);
-            } catch {
-              el.innerHTML += hosted;
-            }
-          } else {
-            el.innerHTML += hosted;
-          }
-          emitChange();
+          insertHtmlAtSelection(hosted);
         } catch (err) {
           console.warn(err);
         }
@@ -227,18 +268,36 @@ export function EmailBodyEditor({
     }
   }
 
-  function closeImageModal() {
-    if (pendingImagePreview) {
-      URL.revokeObjectURL(pendingImagePreview);
+  function insertHtmlAtSelection(html: string) {
+    const el = editorRef.current;
+    if (!el) return;
+    el.focus();
+    const sel = window.getSelection();
+    if (savedRangeRef.current && sel) {
+      try {
+        sel.removeAllRanges();
+        sel.addRange(savedRangeRef.current);
+        document.execCommand("insertHTML", false, html);
+      } catch {
+        el.innerHTML += html;
+      }
+    } else {
+      el.innerHTML += html;
     }
-    setPendingImage(null);
-    setPendingImagePreview(null);
+    emitChange();
+  }
+
+  function closeImageModal() {
+    for (const url of pendingPreviews) URL.revokeObjectURL(url);
+    setPendingImages([]);
+    setPendingPreviews([]);
+    setImageBusy(null);
   }
 
   function handleChooseAttach() {
-    if (!pendingImage) return;
+    if (!pendingImages.length) return;
     if (onAttachFiles) {
-      onAttachFiles([pendingImage]);
+      onAttachFiles(pendingImages);
     } else if (onAttachClick) {
       onAttachClick();
     }
@@ -246,54 +305,44 @@ export function EmailBodyEditor({
   }
 
   function handleChoosePasteInline() {
-    if (!pendingImage) return;
-    const file = pendingImage;
+    if (!pendingImages.length || imageBusy) return;
+    const files = [...pendingImages];
     void (async () => {
+      setImageBusy({ done: 0, total: files.length });
       try {
-        const url = await uploadPastedImageFile(file);
-        if (!url) {
-          throw new Error("Could not upload image");
-        }
-        const safeName = file.name.replace(/"/g, "");
-        const imgTag = `<p><img src="${url}" alt="${safeName}" style="max-width: 100%; height: auto; border-radius: 6px; margin: 8px 0; display: block;" /></p>`;
-        const el = editorRef.current;
-        if (!el) return;
-        el.focus();
-        const sel = window.getSelection();
-        if (savedRangeRef.current && sel) {
-          try {
-            sel.removeAllRanges();
-            sel.addRange(savedRangeRef.current);
-            document.execCommand("insertHTML", false, imgTag);
-          } catch {
-            el.innerHTML += imgTag;
-          }
-        } else {
-          el.innerHTML += imgTag;
-        }
-        emitChange();
+        const urls = await mapPool(
+          files,
+          4,
+          async (file) => {
+            const url = await uploadPastedImageFile(file);
+            if (url) return { url, name: file.name, file };
+            // Fallback data URI for this file only
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(String(reader.result || ""));
+              reader.onerror = () => reject(new Error("read failed"));
+              reader.readAsDataURL(file);
+            });
+            return { url: dataUrl, name: file.name, file };
+          },
+          (done, total) => setImageBusy({ done, total }),
+        );
+        const html = urls.map((u) => imgHtmlTag(u.url, u.name)).join("");
+        insertHtmlAtSelection(html);
         closeImageModal();
       } catch (err) {
-        // Fallback: data URI (save/send will try to host again).
-        const reader = new FileReader();
-        reader.onload = () => {
-          const base64 = reader.result as string;
-          const imgTag = `<p><img src="${base64}" alt="${file.name}" style="max-width: 100%; height: auto; border-radius: 6px; margin: 8px 0; display: block;" /></p>`;
-          const el = editorRef.current;
-          if (!el) return;
-          el.focus();
-          try {
-            document.execCommand("insertHTML", false, imgTag);
-          } catch {
-            el.innerHTML += imgTag;
-          }
-          emitChange();
-          closeImageModal();
-        };
-        reader.readAsDataURL(file);
         console.warn(err);
+        setImageBusy(null);
       }
     })();
+  }
+
+  function handleMultiImagePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith("image/"));
+    e.target.value = "";
+    if (!files.length) return;
+    saveSelection();
+    queueImages(files);
   }
 
   // Sync external value → editor (avoid cursor jumps when unchanged).
@@ -476,6 +525,27 @@ export function EmailBodyEditor({
           <span className="text-base leading-none">•</span>
         </ToolbarButton>
 
+        <Divider />
+        <input
+          ref={multiImageInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={handleMultiImagePick}
+        />
+        <ToolbarButton
+          title="Add many images at once (no limit)"
+          disabled={disabled || !!imageBusy}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            saveSelection();
+            multiImageInputRef.current?.click();
+          }}
+        >
+          <span className="text-[11px] font-semibold whitespace-nowrap px-0.5">+ Images</span>
+        </ToolbarButton>
+
         {onAttachClick && (
           <>
             <Divider />
@@ -521,67 +591,96 @@ export function EmailBodyEditor({
         style={{ minHeight: `${minHeight}rem`, color: "#ffffff" }}
       />
 
-      {pendingImage && (
+      {pendingImages.length > 0 && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70"
           onClick={(e) => e.stopPropagation()}
         >
           <div
-            className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-2xl space-y-4"
+            className="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-2xl space-y-4"
             role="dialog"
             aria-labelledby="image-choice-title"
           >
             <div className="flex items-start justify-between gap-2">
               <div>
                 <h4 id="image-choice-title" className="text-sm font-semibold text-white">
-                  Add Image to Email
+                  Add {pendingImages.length} image{pendingImages.length === 1 ? "" : "s"} to email
                 </h4>
-                <p className="text-xs text-slate-400 mt-0.5 truncate max-w-[240px]">
-                  {pendingImage.name} ({(pendingImage.size / 1024).toFixed(0)} KB)
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {pendingImages.length === 1
+                    ? pendingImages[0].name
+                    : `${pendingImages.length} files selected — paste or attach all at once (no limit)`}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={closeImageModal}
-                className="text-slate-400 hover:text-white text-lg leading-none"
+                disabled={!!imageBusy}
+                className="text-slate-400 hover:text-white text-lg leading-none disabled:opacity-40"
                 aria-label="Close"
               >
                 ×
               </button>
             </div>
 
-            {pendingImagePreview && (
-              <div className="max-h-40 overflow-hidden rounded-lg border border-slate-800 bg-slate-950 flex items-center justify-center p-2">
-                <img
-                  src={pendingImagePreview}
-                  alt="Preview"
-                  className="max-h-36 max-w-full object-contain rounded"
-                />
+            {pendingPreviews.length > 0 && (
+              <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950 p-2">
+                <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+                  {pendingPreviews.slice(0, 20).map((src, i) => (
+                    <div
+                      key={`${src}-${i}`}
+                      className="aspect-square rounded-md border border-slate-800 bg-slate-900 flex items-center justify-center overflow-hidden"
+                      title={pendingImages[i]?.name}
+                    >
+                      <img src={src} alt="" className="max-h-full max-w-full object-contain" />
+                    </div>
+                  ))}
+                </div>
+                {pendingPreviews.length > 20 ? (
+                  <p className="text-[11px] text-slate-500 mt-2 text-center">
+                    +{pendingPreviews.length - 20} more not shown in preview
+                  </p>
+                ) : null}
               </div>
             )}
 
-            <p className="text-xs text-slate-300">
-              How would you like to add this image?
-            </p>
+            {imageBusy ? (
+              <p className="text-xs text-emerald-300 font-medium">
+                Uploading {imageBusy.done}/{imageBusy.total}…
+              </p>
+            ) : (
+              <p className="text-xs text-slate-300">
+                How would you like to add{" "}
+                {pendingImages.length === 1 ? "this image" : "these images"}?
+              </p>
+            )}
 
             <div className="grid grid-cols-2 gap-2.5">
               <button
                 type="button"
                 onClick={handleChooseAttach}
-                className="flex flex-col items-center justify-center gap-1.5 p-3 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-slate-700 hover:border-slate-600 text-slate-100 text-xs font-medium transition cursor-pointer"
+                disabled={!!imageBusy || (!onAttachFiles && !onAttachClick)}
+                className="flex flex-col items-center justify-center gap-1.5 p-3 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-slate-700 hover:border-slate-600 text-slate-100 text-xs font-medium transition cursor-pointer disabled:opacity-40"
               >
                 <span className="text-xl">📎</span>
-                <span className="font-semibold">Attach as file</span>
-                <span className="text-[10px] text-slate-400">Add to email attachments</span>
+                <span className="font-semibold">
+                  Attach all as files
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  {pendingImages.length} attachment{pendingImages.length === 1 ? "" : "s"}
+                </span>
               </button>
               <button
                 type="button"
                 onClick={handleChoosePasteInline}
-                className="flex flex-col items-center justify-center gap-1.5 p-3 rounded-lg border border-emerald-500/50 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-200 text-xs font-semibold transition cursor-pointer"
+                disabled={!!imageBusy}
+                className="flex flex-col items-center justify-center gap-1.5 p-3 rounded-lg border border-emerald-500/50 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-200 text-xs font-semibold transition cursor-pointer disabled:opacity-40"
               >
                 <span className="text-xl">🖼️</span>
-                <span className="font-semibold">Paste in body</span>
-                <span className="text-[10px] text-emerald-300/70">Insert inline image</span>
+                <span className="font-semibold">
+                  {imageBusy ? "Inserting…" : "Paste all in body"}
+                </span>
+                <span className="text-[10px] text-emerald-300/70">Insert all inline images</span>
               </button>
             </div>
           </div>
