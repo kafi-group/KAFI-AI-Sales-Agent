@@ -462,6 +462,10 @@ def health():
         "twilio_validate_webhooks": bool(settings.twilio_validate_webhooks),
         "whatsapp_configured": whatsapp_client.is_configured,
         "whatsapp_webhook_configured": whatsapp_client.webhook_configured,
+        "whatsapp_display_number": (settings.whatsapp_display_number or "").strip() or None,
+        "whatsapp_phone_number_id_set": bool(
+            (settings.whatsapp_phone_number_id or "").strip()
+        ),
         "email_tracking": _email_tracking_health(),
     }
 

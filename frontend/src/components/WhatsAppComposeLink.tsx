@@ -156,16 +156,20 @@ export function LeadWhatsAppComposeModal({
       });
       if ((result.sent_count ?? 0) > 0) {
         onSent(
-          `WhatsApp template sent to ${row.company_name} (${targetPhone}). Open WhatsApp inbox to see the thread.`,
+          `WhatsApp template sent to ${row.company_name} (${targetPhone}). Open WhatsApp inbox to confirm delivered/read.`,
         );
         onClose();
         return;
       }
       const reason =
+        result.delivery_error ||
         result.skipped[0]?.reason ||
         result.created[0]?.send_message ||
-        "Could not send WhatsApp template — Meta did not accept the message.";
-      onError(reason);
+        "Could not send WhatsApp template — Meta did not deliver the message.";
+      const paymentHint = /payment|eligibility|131042/i.test(reason)
+        ? " Fix: Meta Business Suite → WhatsApp Account (Essence) → add/assign a payment method, then retry."
+        : "";
+      onError(`${reason}${paymentHint}`);
     } catch (e) {
       const raw = e instanceof Error ? e.message : "Failed to send WhatsApp template";
       if (/502|failed to respond|application error/i.test(raw)) {

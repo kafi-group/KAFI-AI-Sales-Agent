@@ -4807,14 +4807,30 @@ export function LeadsTablePage({
                 : result.skipped_count > 0
                   ? " Usually missing phone, or marketing opt-in was required."
                   : "";
-            setBulkWhatsAppNotice(
-              `Sent ${result.sent_count ?? 0} WhatsApp message(s). ` +
-                ((result.failed_count ?? 0) > 0 ? `${result.failed_count} failed. ` : "") +
-                (result.skipped_count > 0
-                  ? `${result.skipped_count} skipped.${skipHint} `
-                  : "") +
-                "Open WhatsApp inbox to see the thread.",
-            );
+            const deliveryErr =
+              result.delivery_error ||
+              result.created?.find((c) => c.send_message)?.send_message ||
+              "";
+            const sent = result.sent_count ?? 0;
+            const failed = result.failed_count ?? 0;
+            if (sent === 0 && failed > 0) {
+              setBulkWhatsAppNotice(
+                `WhatsApp delivery failed for ${failed} message(s). ` +
+                  (deliveryErr
+                    ? `Meta: ${deliveryErr}. `
+                    : "Check WhatsApp inbox for the error. ") +
+                  "If Meta says payment / eligibility, add a payment method on the Essence WABA in Meta Business Suite, then retry.",
+              );
+            } else {
+              setBulkWhatsAppNotice(
+                `Sent ${sent} WhatsApp message(s). ` +
+                  (failed > 0 ? `${failed} failed${deliveryErr ? ` (${deliveryErr})` : ""}. ` : "") +
+                  (result.skipped_count > 0
+                    ? `${result.skipped_count} skipped.${skipHint} `
+                    : "") +
+                  "Open WhatsApp inbox to confirm delivered/read status.",
+              );
+            }
             clearSelection();
             setShowBulkWhatsApp(false);
             setWhatsappTargetIds(null);

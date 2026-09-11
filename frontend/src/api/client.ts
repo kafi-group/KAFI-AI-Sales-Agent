@@ -1838,6 +1838,7 @@ export interface WhatsAppCampaignDraftResponse {
   skipped_count: number;
   sent_count: number;
   failed_count: number;
+  delivery_error?: string | null;
   created: Array<{
     buyer_id: number;
     company_name: string;

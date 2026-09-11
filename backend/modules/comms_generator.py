@@ -825,9 +825,43 @@ class CommsGenerator:
                 }
             )
             interaction.attachments = atts
+            # Meta often accepts (wamid) then fails delivery (e.g. billing 131042).
+            # Keep the bubble visible as draft so reps can retry after fixing Meta.
+            if interaction.status == InteractionStatus.sent:
+                interaction.status = InteractionStatus.draft
         db.commit()
         db.refresh(interaction)
         return interaction
+
+    def _await_whatsapp_cloud_outcome(
+        self,
+        db: Session,
+        draft: Interaction,
+        *,
+        timeout_seconds: float = 12.0,
+        poll_seconds: float = 1.0,
+    ) -> Interaction:
+        """Wait briefly for Meta delivery webhooks (delivered / read / failed).
+
+        Graph ``accepted`` is not delivery. Billing/eligibility failures often arrive
+        within a few seconds via webhook — without this wait the UI lies with "sent".
+        """
+        import time
+
+        deadline = time.monotonic() + max(0.0, timeout_seconds)
+        current = draft
+        while time.monotonic() < deadline:
+            db.expire(current)
+            fresh = db.get(Interaction, current.id)
+            if fresh is None:
+                return current
+            current = fresh
+            status = (current.wa_status or "").lower()
+            if status in {"delivered", "read", "failed"}:
+                return current
+            time.sleep(max(0.2, poll_seconds))
+        db.expire(current)
+        return db.get(Interaction, current.id) or current
 
     def create_whatsapp_campaign_drafts(
         self,
@@ -991,6 +1025,38 @@ class CommsGenerator:
                         details={"reason": reason, "channel": "whatsapp"},
                     )
 
+        # Reconcile Graph "accepted" rows that Meta later failed via webhook
+        # (common: Business eligibility payment issue / 131042).
+        if send and created:
+            time.sleep(8.0 if is_bulk_batch else 0.0)
+            for item in created:
+                if not item.get("sent"):
+                    continue
+                ix = db.get(Interaction, item.get("interaction_id"))
+                if not ix:
+                    continue
+                db.refresh(ix)
+                if (ix.wa_status or "").lower() != "failed":
+                    continue
+                err = (
+                    whatsapp_send_error(ix.attachments)
+                    or "WhatsApp delivery failed after Meta accepted the message"
+                )
+                item["sent"] = False
+                item["send_status"] = "error"
+                item["send_message"] = err
+                sent_count = max(0, sent_count - 1)
+                failed_count += 1
+
+        delivery_error = next(
+            (
+                (item.get("send_message") or "").strip()
+                for item in created
+                if item.get("send_status") == "error" and (item.get("send_message") or "").strip()
+            ),
+            None,
+        )
+
         if is_bulk_batch:
             if failed_count > 0 and sent_count > 0:
                 event_type = "bulk_partial"
@@ -1008,6 +1074,7 @@ class CommsGenerator:
                 message=(
                     f"{sent_count} sent, {failed_count} failed, {len(skipped)} skipped "
                     f"out of {len(buyer_ids)} selected."
+                    + (f" First error: {delivery_error}" if delivery_error else "")
                 ),
                 user_id=user_id,
                 details={
@@ -1018,6 +1085,7 @@ class CommsGenerator:
                     "template_id": template_id,
                     "channel": "whatsapp",
                     "skipped": skipped[:20],
+                    "delivery_error": delivery_error,
                 },
             )
 
@@ -1028,6 +1096,7 @@ class CommsGenerator:
             "failed_count": failed_count,
             "created": created,
             "skipped": skipped,
+            "delivery_error": delivery_error,
         }
 
     def approve_draft(
@@ -1273,6 +1342,28 @@ class CommsGenerator:
             draft.wa_status = "sent"
             db.commit()
             db.refresh(draft)
+            # Billing / eligibility failures arrive via webhook after Graph "accepted".
+            # Wait briefly so bulk/individual UI does not report false success.
+            draft = self._await_whatsapp_cloud_outcome(
+                db,
+                draft,
+                # Single sends wait longer; bulk relies on end-of-batch reconcile.
+                timeout_seconds=12.0 if record_activity else 2.0,
+            )
+            if (draft.wa_status or "").lower() == "failed":
+                err = (
+                    whatsapp_send_error(draft.attachments)
+                    or "WhatsApp delivery failed after Meta accepted the message"
+                )
+                send_result = {
+                    "status": "error",
+                    "message": err,
+                    "provider_message_id": draft.provider_message_id,
+                }
+                if draft.status == InteractionStatus.sent:
+                    draft.status = InteractionStatus.draft
+                    db.commit()
+                    db.refresh(draft)
         else:
             # Revert approved → draft so the rep can retry; keep wa_status=failed for inbox visibility.
             draft.status = InteractionStatus.draft

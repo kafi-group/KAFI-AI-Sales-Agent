@@ -1700,6 +1700,7 @@ class WhatsAppCampaignDraftResponse(BaseModel):
     skipped_count: int
     sent_count: int = 0
     failed_count: int = 0
+    delivery_error: Optional[str] = None
     created: list[WhatsAppCampaignDraftResultItem]
     skipped: list[WhatsAppCampaignSkippedItem]
 
