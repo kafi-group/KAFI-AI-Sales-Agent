@@ -196,10 +196,10 @@ class Settings(BaseSettings):
     whatsapp_validate_webhooks: bool = True
     # Human-readable business number (E.164), e.g. +923078206633 — not the Phone Number ID.
     whatsapp_display_number: str | None = None
-    # Kill switch for Meta Cloud outbound (templates/text). Default off while Meta billing
-    # blocks delivery — set WHATSAPP_CLOUD_SENDING_ENABLED=true after Essence WABA payment works.
+    # Kill switch for Meta Cloud outbound (templates/text). Leave true so only Meta
+    # billing/eligibility blocks delivery. Set false only for an emergency stop.
     # Does NOT affect Baileys / WhatsApp Mobile (personal QR) sends.
-    whatsapp_cloud_sending_enabled: bool = False
+    whatsapp_cloud_sending_enabled: bool = True
     # Bulk WhatsApp throttling — Meta's messaging tier limits unique conversations/24h.
     bulk_whatsapp_message_delay_seconds: float = 2.0
     bulk_whatsapp_max_per_request: int = 250
