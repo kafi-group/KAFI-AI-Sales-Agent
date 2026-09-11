@@ -3180,6 +3180,8 @@ def schedule_buyer_meeting(
     meeting_location: str | None = None,
     meeting_notes: str | None = None,
     meeting_priority: int | None = None,
+    country: str | None = None,
+    city: str | None = None,
     confirm: bool = True,
     by_user_id: int | None = None,
 ) -> dict[str, object]:
@@ -3200,6 +3202,13 @@ def schedule_buyer_meeting(
         buyer.meeting_at = meeting_at
     if meeting_location is not None:
         buyer.meeting_location = meeting_location.strip() or None
+        # Keep lead address in sync with venue when provided
+        if buyer.meeting_location:
+            buyer.address = buyer.meeting_location
+    if country is not None:
+        buyer.country = country.strip() or None
+    if city is not None:
+        buyer.city = city.strip() or None
     if meeting_notes is not None:
         buyer.meeting_notes = meeting_notes.strip() or None
     if meeting_priority is not None:

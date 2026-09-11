@@ -920,9 +920,11 @@ def move_leads_to_target_module(
 
 class ScheduleMeetingRequest(BaseModel):
     meeting_at: datetime | None = None
-    meeting_location: str | None = None
+    meeting_location: str | None = None  # venue address
     meeting_notes: str | None = None
     meeting_priority: int | None = None
+    country: str | None = None  # country of stay (timezone source)
+    city: str | None = None
     confirm: bool = True
 
 
@@ -955,6 +957,8 @@ def schedule_lead_meeting(
             meeting_location=payload.meeting_location,
             meeting_notes=payload.meeting_notes,
             meeting_priority=payload.meeting_priority,
+            country=payload.country,
+            city=payload.city,
             confirm=payload.confirm,
             by_user_id=user.id,
         )

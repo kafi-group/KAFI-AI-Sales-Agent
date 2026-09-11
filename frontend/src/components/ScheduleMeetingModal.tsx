@@ -1,7 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { client, type LeadTableRow } from "../api/client";
+import { CountrySelect } from "./CountrySelect";
+import { SearchableSelect, stringOptions } from "./SearchableSelect";
 import { ActionButton } from "./ui/ActionButton";
 import { IconCheck, IconXCircle } from "./icons/AppIcons";
+import {
+  formatInTimezone,
+  formatTimezoneShort,
+  PKT_TIMEZONE,
+  timezoneForCountry,
+  toLocalInputValue,
+  wallTimeInZoneToDate,
+} from "../utils/meetingTimezone";
 
 type Props = {
   row: LeadTableRow;
@@ -10,38 +20,79 @@ type Props = {
   onSaved: (row: LeadTableRow) => void;
 };
 
-function toLocalInputValue(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 export function ScheduleMeetingModal({ row, onClose, onError, onSaved }: Props) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [meetingLocal, setMeetingLocal] = useState("");
-  const [location, setLocation] = useState(row.meeting_location || row.address || row.city || "");
+  const [address, setAddress] = useState(row.meeting_location || row.address || "");
+  const [country, setCountry] = useState(row.country || "");
+  const [city, setCity] = useState(row.city || "");
   const [notes, setNotes] = useState(row.meeting_notes || "");
   const [priority, setPriority] = useState(String(row.meeting_priority ?? ""));
   const [captionHint, setCaptionHint] = useState<string | null>(null);
+  const [cityOptions, setCityOptions] = useState<string[]>([]);
+
+  const stayTz = useMemo(() => timezoneForCountry(country), [country]);
+  const stayTzLabel = useMemo(
+    () => formatTimezoneShort(stayTz),
+    [stayTz],
+  );
+
+  const pktPreview = useMemo(() => {
+    if (!meetingLocal.trim()) return null;
+    try {
+      const utc = wallTimeInZoneToDate(meetingLocal, stayTz);
+      return {
+        local: formatInTimezone(utc, stayTz),
+        pkt: formatInTimezone(utc, PKT_TIMEZONE),
+        tzShort: formatTimezoneShort(stayTz, utc),
+        pktShort: formatTimezoneShort(PKT_TIMEZONE, utc),
+      };
+    } catch {
+      return null;
+    }
+  }, [meetingLocal, stayTz]);
+
+  const nowInStay = useMemo(() => {
+    const now = new Date();
+    return {
+      local: formatInTimezone(now, stayTz),
+      pkt: formatInTimezone(now, PKT_TIMEZONE),
+    };
+  }, [stayTz, meetingLocal]); // refresh when country or form changes
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
-        const suggest = await client.suggestLeadMeeting(row.id);
+        const [suggest, filters] = await Promise.all([
+          client.suggestLeadMeeting(row.id),
+          client.listLeadTableFilters(),
+        ]);
         if (cancelled) return;
-        setMeetingLocal(toLocalInputValue(suggest.current.meeting_at));
-        setLocation(
+        setCityOptions(
+          Array.from(
+            new Set(
+              [...(filters.cities ?? []), row.city || ""].map((c) => c.trim()).filter(Boolean),
+            ),
+          ).sort((a, b) => a.localeCompare(b)),
+        );
+        const nextCountry = row.country || "";
+        const tz = timezoneForCountry(nextCountry);
+        if (suggest.current.meeting_at) {
+          setMeetingLocal(toLocalInputValue(new Date(suggest.current.meeting_at), tz));
+        } else {
+          setMeetingLocal(toLocalInputValue(new Date(), tz));
+        }
+        setAddress(
           suggest.current.meeting_location ||
             suggest.suggested_location ||
             row.address ||
-            row.city ||
             "",
         );
+        setCountry(nextCountry);
+        setCity(row.city || "");
         setNotes(
           suggest.current.meeting_notes ||
             suggest.suggested_notes ||
@@ -66,15 +117,26 @@ export function ScheduleMeetingModal({ row, onClose, onError, onSaved }: Props) 
     return () => {
       cancelled = true;
     };
-  }, [row.id, row.address, row.city, onError]);
+  }, [row.id, row.address, row.country, row.city, onError]);
+
+  /** Keep the same wall-clock time when country/timezone changes; PKT preview updates. */
+  function handleCountryChange(next: string) {
+    setCountry(next);
+  }
 
   async function handleSave(confirm: boolean) {
     if (!meetingLocal.trim()) {
       onError("Pick a meeting date and time before scheduling.");
       return;
     }
-    const at = new Date(meetingLocal);
-    if (Number.isNaN(at.getTime())) {
+    if (!country.trim()) {
+      onError("Select the country of stay for the meeting timezone.");
+      return;
+    }
+    let at: Date;
+    try {
+      at = wallTimeInZoneToDate(meetingLocal, stayTz);
+    } catch {
       onError("Invalid date/time.");
       return;
     }
@@ -82,9 +144,11 @@ export function ScheduleMeetingModal({ row, onClose, onError, onSaved }: Props) 
     try {
       const saved = await client.scheduleLeadMeeting(row.id, {
         meeting_at: at.toISOString(),
-        meeting_location: location.trim() || null,
+        meeting_location: address.trim() || null,
         meeting_notes: notes.trim() || null,
         meeting_priority: priority.trim() ? Number(priority) : null,
+        country: country.trim() || null,
+        city: city.trim() || null,
         confirm,
       });
       onSaved(saved);
@@ -137,9 +201,45 @@ export function ScheduleMeetingModal({ row, onClose, onError, onSaved }: Props) 
             </div>
           ) : null}
 
+          <CountrySelect
+            label="Country of stay"
+            labelClassName="text-xs font-semibold text-slate-300 uppercase tracking-wide"
+            value={country}
+            onChange={handleCountryChange}
+            allowEmpty
+            emptyLabel="Select country"
+            placeholder="Search countries…"
+            multiSelect={false}
+          />
+
+          <SearchableSelect
+            label="City"
+            labelClassName="text-xs font-semibold text-slate-300 uppercase tracking-wide"
+            value={city}
+            onChange={setCity}
+            options={stringOptions(cityOptions)}
+            allowEmpty
+            emptyLabel="Select city"
+            placeholder="Search cities…"
+            multiSelect={false}
+          />
+
           <label className="block space-y-1.5">
             <span className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
-              Date &amp; time
+              Address
+            </span>
+            <input
+              type="text"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="Office / street / venue"
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-slate-100"
+            />
+          </label>
+
+          <label className="block space-y-1.5">
+            <span className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
+              Date &amp; time ({country || "local"} · {stayTzLabel})
             </span>
             <input
               type="datetime-local"
@@ -149,18 +249,31 @@ export function ScheduleMeetingModal({ row, onClose, onError, onSaved }: Props) 
             />
           </label>
 
-          <label className="block space-y-1.5">
-            <span className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
-              Location
-            </span>
-            <input
-              type="text"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="Office / city / address"
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-slate-100"
-            />
-          </label>
+          <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2.5 text-xs space-y-1.5">
+            <p className="text-slate-400">
+              Now in {country || "selected country"}:{" "}
+              <span className="text-slate-200 font-medium">{nowInStay.local}</span>
+            </p>
+            {pktPreview ? (
+              <>
+                <p className="text-slate-300">
+                  Meeting local ({pktPreview.tzShort}):{" "}
+                  <span className="text-slate-100 font-medium">{pktPreview.local}</span>
+                </p>
+                <p className="text-emerald-300/90">
+                  Pakistan ({pktPreview.pktShort}):{" "}
+                  <span className="text-emerald-200 font-semibold">{pktPreview.pkt}</span>
+                </p>
+              </>
+            ) : (
+              <p className="text-slate-500">Enter date &amp; time to see Pakistan conversion.</p>
+            )}
+            {country === "Canada" || country === "United States" || country === "Australia" ? (
+              <p className="text-slate-500">
+                Uses primary business timezone for this country (e.g. Canada → Toronto / Eastern).
+              </p>
+            ) : null}
+          </div>
 
           <label className="block space-y-1.5">
             <span className="text-xs font-semibold text-slate-300 uppercase tracking-wide">

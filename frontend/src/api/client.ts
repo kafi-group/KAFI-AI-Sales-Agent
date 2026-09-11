@@ -2098,6 +2098,8 @@ export const client = {
       meeting_location?: string | null;
       meeting_notes?: string | null;
       meeting_priority?: number | null;
+      country?: string | null;
+      city?: string | null;
       confirm?: boolean;
     },
   ) =>
