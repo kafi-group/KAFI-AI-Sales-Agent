@@ -7,6 +7,11 @@ import {
   emailBodyHasContent,
 } from "../components/EmailBodyEditor";
 import {
+  estimateJsonBytes,
+  hostDataUriImagesInHtml,
+  htmlHasDataUriImages,
+} from "../lib/hostInlineImages";
+import {
   emptyTemplateForm,
   PLACEHOLDER_HINTS,
 } from "../utils/emailTemplateDefaults";
@@ -130,11 +135,34 @@ export function EmailTemplatesPage({ onError, onCountChange }: EmailTemplatesPag
     setSaving(true);
     setNotice(null);
     try {
+      let body = templateForm.body;
+      if (htmlHasDataUriImages(body)) {
+        setNotice("Uploading pasted images…");
+        body = await hostDataUriImagesInHtml(body);
+        setTemplateForm((prev) => ({ ...prev, body }));
+        if (htmlHasDataUriImages(body)) {
+          throw new Error(
+            "Some pasted images are still too large to save. Remove them and paste again, or use Attach.",
+          );
+        }
+      }
+      const payload = {
+        name: templateForm.name,
+        subject: templateForm.subject,
+        body,
+        attachments: templateForm.attachments,
+      };
+      const bytes = estimateJsonBytes(payload);
+      if (bytes > 3_500_000) {
+        throw new Error(
+          "Template is still too large to save (pasted images). Remove heavy images and try again.",
+        );
+      }
       if (editingId) {
-        await client.updateEmailTemplate(editingId, templateForm);
+        await client.updateEmailTemplate(editingId, payload);
         setNotice("Template updated.");
       } else {
-        await client.createEmailTemplate(templateForm);
+        await client.createEmailTemplate(payload);
         setNotice("Template created.");
       }
       setShowEditor(false);
