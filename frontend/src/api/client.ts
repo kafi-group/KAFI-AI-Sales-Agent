@@ -1816,6 +1816,9 @@ export interface WhatsAppConfig {
   ready_for_two_way?: boolean;
   cloud_sending_enabled?: boolean;
   cloud_sending_paused_message?: string | null;
+  phone_number_id_mismatch?: string | null;
+  webhook_phone_number_id?: string | null;
+  webhook_display_phone_number?: string | null;
 }
 
 export interface WhatsAppTestSendResult {

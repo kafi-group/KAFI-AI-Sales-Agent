@@ -429,6 +429,25 @@ export function WhatsAppInboxPage({
         </p>
       ) : null}
 
+      {config?.cloud_sending_enabled === false ? (
+        <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-100">
+          <p className="font-medium">Outbound Meta sends are paused</p>
+          <p className="text-xs text-rose-200/90 mt-1">
+            {config.cloud_sending_paused_message ||
+              "Set WHATSAPP_CLOUD_SENDING_ENABLED=true on Railway to allow replies."}
+          </p>
+        </div>
+      ) : null}
+
+      {config?.phone_number_id_mismatch ? (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+          <p className="font-medium">Business number ID mismatch</p>
+          <p className="text-xs text-amber-200/90 mt-1 whitespace-pre-wrap">
+            {config.phone_number_id_mismatch}
+          </p>
+        </div>
+      ) : null}
+
       {notice ? (
         <p className="text-sm text-emerald-300/90 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2">
           {notice}

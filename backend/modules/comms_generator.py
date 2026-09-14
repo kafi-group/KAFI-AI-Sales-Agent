@@ -23,6 +23,74 @@ from modules.email_attachments import (
 
 WHATSAPP_SESSION_WINDOW_HOURS = 24
 
+# Last Meta Cloud phone_number_id seen on inbound webhooks (this process).
+_LAST_WEBHOOK_PHONE_NUMBER_ID: str | None = None
+_LAST_WEBHOOK_DISPLAY_NUMBER: str | None = None
+
+
+def note_whatsapp_webhook_metadata(
+    *,
+    phone_number_id: str | None,
+    display_phone_number: str | None = None,
+) -> None:
+    """Remember which business number Meta delivered the last inbound webhook for."""
+    global _LAST_WEBHOOK_PHONE_NUMBER_ID, _LAST_WEBHOOK_DISPLAY_NUMBER
+    pid = (phone_number_id or "").strip()
+    if pid:
+        _LAST_WEBHOOK_PHONE_NUMBER_ID = pid
+    disp = (display_phone_number or "").strip()
+    if disp:
+        _LAST_WEBHOOK_DISPLAY_NUMBER = disp
+
+
+def whatsapp_phone_number_id_mismatch() -> str | None:
+    """Warn when Railway WHATSAPP_PHONE_NUMBER_ID ≠ the number Meta is webhooking."""
+    from config import settings
+
+    configured = (settings.whatsapp_phone_number_id or "").strip()
+    inbound = (_LAST_WEBHOOK_PHONE_NUMBER_ID or "").strip()
+    if not configured or not inbound:
+        return None
+    if configured == inbound:
+        return None
+    display = _LAST_WEBHOOK_DISPLAY_NUMBER or "unknown"
+    return (
+        f"Meta webhooks arrive for phone_number_id={inbound} ({display}) but "
+        f"WHATSAPP_PHONE_NUMBER_ID on Railway is {configured}. "
+        "Replies then fail with Re-engagement / 24h window errors. "
+        "Set WHATSAPP_PHONE_NUMBER_ID to the inbound id and redeploy."
+    )
+
+
+def contact_within_whatsapp_session_window(
+    db: Session,
+    contact: Contact | None,
+) -> bool:
+    """True if Meta customer-care window should still be open for free-text replies."""
+    if not contact:
+        return False
+    now = datetime.now(timezone.utc)
+    expires = contact.whatsapp_window_expires_at
+    if expires is not None and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if expires and expires > now:
+        return True
+    # Fallback: any recent Cloud inbound (covers missed expires_at writes).
+    cutoff = now - timedelta(hours=WHATSAPP_SESSION_WINDOW_HOURS)
+    recent = (
+        db.query(Interaction.id)
+        .filter(
+            Interaction.contact_id == contact.id,
+            Interaction.channel == Channel.whatsapp,
+            Interaction.direction == Direction.inbound,
+            Interaction.created_at >= cutoff,
+            Interaction.personal_whatsapp_user_id.is_(None),
+        )
+        .limit(1)
+        .first()
+    )
+    return recent is not None
+
 
 def _whatsapp_unread_count(db: Session, contact_id: int) -> int:
     """Inbound messages since the last outbound — awaiting a reply."""
@@ -400,7 +468,13 @@ class CommsGenerator:
             db, wa_id=wa_id, profile_name=profile_name
         )
         digits = "".join(ch for ch in (wa_id or "") if ch.isdigit())
-        contact.wa_id = contact.wa_id or digits or wa_id
+        # Always refresh Meta's canonical WhatsApp id from the inbound webhook.
+        # Keeping a stale wa_id (e.g. from an old manual dial) makes Graph accept
+        # the send then fail delivery with (#131047) Re-engagement message.
+        if digits:
+            contact.wa_id = digits
+        elif wa_id:
+            contact.wa_id = str(wa_id).strip()
         if not contact.phone:
             from integrations.voice_client import normalize_e164
 
@@ -656,9 +730,9 @@ class CommsGenerator:
             expires = contact.whatsapp_window_expires_at
             if expires is not None and expires.tzinfo is None:
                 expires = expires.replace(tzinfo=timezone.utc)
-            within_window = bool(expires and expires > now_utc)
+            within_window = contact_within_whatsapp_session_window(db, contact)
 
-            contact_phone = contact.phone or contact.wa_id
+            contact_phone = contact.wa_id or contact.phone
             contact_name = contact.full_name if _is_clean_name(contact.full_name, contact_phone) else None
             company_name = buyer.company_name if (buyer and _is_clean_name(buyer.company_name, contact_phone)) else None
 
@@ -784,13 +858,13 @@ class CommsGenerator:
         expires = contact.whatsapp_window_expires_at
         if expires is not None and expires.tzinfo is None:
             expires = expires.replace(tzinfo=timezone.utc)
-        within_window = bool(expires and expires > datetime.now(timezone.utc))
+        within_window = contact_within_whatsapp_session_window(db, contact)
 
         return {
             "buyer_id": buyer_id,
             "contact_id": contact.id,
             "contact_name": contact.full_name,
-            "contact_phone": contact.phone or contact.wa_id,
+            "contact_phone": contact.wa_id or contact.phone,
             "within_session_window": within_window,
             "total_messages": total,
             "messages": messages,
@@ -813,6 +887,19 @@ class CommsGenerator:
             return None
         interaction.wa_status = status
         if status == "failed" and error_message:
+            raw_err = (error_message or "").strip()
+            lower = raw_err.lower()
+            if "re-engagement" in lower or "131047" in lower or "24 hour" in lower:
+                mismatch = whatsapp_phone_number_id_mismatch()
+                friendly = (
+                    "Meta blocked delivery (Re-engagement / closed 24h window). "
+                    "Ask the customer to message again, then reply within 24h — "
+                    "or send an approved template. "
+                    "Also confirm WHATSAPP_PHONE_NUMBER_ID matches the number that received their message."
+                )
+                if mismatch:
+                    friendly = f"{friendly} {mismatch}"
+                raw_err = friendly
             atts = [
                 a
                 for a in (interaction.attachments or [])
@@ -821,7 +908,7 @@ class CommsGenerator:
             atts.append(
                 {
                     "type": "whatsapp_send",
-                    "last_send_error": error_message,
+                    "last_send_error": raw_err,
                 }
             )
             interaction.attachments = atts
@@ -1298,7 +1385,7 @@ class CommsGenerator:
         expires = contact.whatsapp_window_expires_at
         if expires is not None and expires.tzinfo is None:
             expires = expires.replace(tzinfo=timezone.utc)
-        within_window = bool(expires and expires > datetime.now(timezone.utc))
+        within_window = contact_within_whatsapp_session_window(db, contact)
 
         components = None
         send_language = template_language or "en_US"

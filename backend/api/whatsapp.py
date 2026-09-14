@@ -69,6 +69,13 @@ def get_whatsapp_config():
     webhook_callback_url = (
         f"{webhook_base}/api/webhooks/whatsapp" if webhook_base else None
     )
+    from modules.comms_generator import (
+        _LAST_WEBHOOK_DISPLAY_NUMBER,
+        _LAST_WEBHOOK_PHONE_NUMBER_ID,
+        whatsapp_phone_number_id_mismatch,
+    )
+
+    mismatch = whatsapp_phone_number_id_mismatch()
     return WhatsAppConfigRead(
         configured=whatsapp_client.is_configured,
         webhook_configured=whatsapp_client.webhook_configured,
@@ -97,6 +104,9 @@ def get_whatsapp_config():
                 "WhatsApp Mobile / QR is unaffected."
             )
         ),
+        phone_number_id_mismatch=mismatch,
+        webhook_phone_number_id=_LAST_WEBHOOK_PHONE_NUMBER_ID,
+        webhook_display_phone_number=_LAST_WEBHOOK_DISPLAY_NUMBER,
     )
 
 
@@ -638,6 +648,19 @@ async def receive_whatsapp_webhook(request: Request, db: Session = Depends(get_d
                 name = ((item.get("profile") or {}).get("name") or "").strip()
                 if wa and name:
                     profiles[wa] = name
+
+            metadata = value.get("metadata") or {}
+            if isinstance(metadata, dict):
+                from modules.comms_generator import note_whatsapp_webhook_metadata
+
+                note_whatsapp_webhook_metadata(
+                    phone_number_id=str(metadata.get("phone_number_id") or "").strip()
+                    or None,
+                    display_phone_number=str(
+                        metadata.get("display_phone_number") or ""
+                    ).strip()
+                    or None,
+                )
 
             for message in value.get("messages", []):
                 wa_id = str(message.get("from") or "").strip()
