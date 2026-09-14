@@ -3858,12 +3858,15 @@ export const client = {
     search?: string;
     limit?: number;
     offset?: number;
+    /** Target Workspace: skip heavy activity feeds (assignments, calls, etc.). */
+    light?: boolean;
   } = {}) => {
     const query = new URLSearchParams();
     if (params.stage) query.set("stage", params.stage);
     if (params.search) query.set("search", params.search);
     if (params.limit) query.set("limit", String(params.limit));
     if (params.offset) query.set("offset", String(params.offset));
+    if (params.light) query.set("light", "true");
     const qs = query.toString();
     return request<AiModeLifecycleListResponse>(
       `/ai-mode/lifecycle${qs ? `?${qs}` : ""}`,

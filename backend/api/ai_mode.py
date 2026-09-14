@@ -188,6 +188,10 @@ def list_lifecycle(
     search: Optional[str] = None,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    light: bool = Query(
+        False,
+        description="Target Workspace / fast refresh: rows + stage counts only (skip activity feeds).",
+    ),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -200,6 +204,13 @@ def list_lifecycle(
         offset=offset,
         assigned_to_user_id=assignee_scope,
     )
+    if light:
+        # Used by Target and Workspace inbound pipeline — must stay fast.
+        result["pipeline"] = ai_mode_module.lifecycle_stage_counts(
+            db, assigned_to_user_id=assignee_scope
+        )
+        return result
+
     result["pipeline"] = ai_mode_module.lifecycle_pipeline_counts(
         db, assigned_to_user_id=assignee_scope, viewer=user
     )

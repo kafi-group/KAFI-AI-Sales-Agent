@@ -557,7 +557,7 @@ function DashboardApp() {
     if (whatsappPollInflightRef.current) return;
     whatsappPollInflightRef.current = true;
     client
-      .listWhatsAppConversations({ page: 1, page_size: 50 })
+      .listWhatsAppConversations({ page: 1, page_size: 20 })
       .then((result) => {
         const rows = result.rows || [];
         const inboxUnreadTotal = sumWhatsAppInboxUnread(rows);

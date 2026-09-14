@@ -397,13 +397,17 @@ def list_workspace_leads(
     if user_id is not None:
         q = q.filter(Buyer.assigned_to_user_id == user_id)
 
-    buyers = q.all()
+    # Cap SQL scan — funnel page paginates in Python; avoid loading the whole DB.
+    buyers = q.order_by(Buyer.id.desc()).limit(2500).all()
     buyer_ids = [b.id for b in buyers]
 
-    # Preload user map for safe assigned_to display
+    # Preload user map only for assignees on this page (not every AppUser).
     try:
-        app_users = db.query(AppUser).all()
-        user_name_map = {u.id: (u.full_name or u.username) for u in app_users}
+        assignee_ids = {b.assigned_to_user_id for b in buyers if b.assigned_to_user_id}
+        user_name_map: dict[int, str] = {}
+        if assignee_ids:
+            app_users = db.query(AppUser).filter(AppUser.id.in_(assignee_ids)).all()
+            user_name_map = {u.id: (u.full_name or u.username) for u in app_users}
     except Exception:
         user_name_map = {}
 

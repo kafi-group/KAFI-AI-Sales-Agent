@@ -1924,12 +1924,12 @@ def update_lifecycle(
     return _lifecycle_to_dict(row, buyer)
 
 
-def lifecycle_pipeline_counts(
+def lifecycle_stage_counts(
     db: Session,
     *,
     assigned_to_user_id: int | None = None,
-    viewer: AppUser | None = None,
 ) -> dict[str, int]:
+    """Fast GROUP BY counts for AiCompanyLifecycle stages only (no activity feeds)."""
     from sqlalchemy import func
 
     stage_q = (
@@ -1942,6 +1942,18 @@ def lifecycle_pipeline_counts(
     for stage, count in rows:
         if stage in counts:
             counts[stage] = int(count)
+    return counts
+
+
+def lifecycle_pipeline_counts(
+    db: Session,
+    *,
+    assigned_to_user_id: int | None = None,
+    viewer: AppUser | None = None,
+) -> dict[str, int]:
+    from sqlalchemy import func
+
+    counts = lifecycle_stage_counts(db, assigned_to_user_id=assigned_to_user_id)
     transfers = list_lead_transfers(
         db, limit=1, assigned_to_user_id=assigned_to_user_id
     )

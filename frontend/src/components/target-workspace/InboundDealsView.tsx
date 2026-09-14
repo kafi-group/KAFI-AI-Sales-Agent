@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   client,
   type AiModeLifecycleListResponse,
+  type AiModeLifecycleRow,
 } from "../../api/client";
 
 const PIPELINE_STAGES = [
@@ -27,39 +28,99 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
 }) => {
   const [selectedStage, setSelectedStage] = useState<string>("interested");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [lifecycleData, setLifecycleData] = useState<AiModeLifecycleListResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [movingBuyerId, setMovingBuyerId] = useState<number | null>(null);
-
-  const loadDeals = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await client.listAiModeLifecycle({
-        stage: selectedStage !== "all" ? selectedStage : undefined,
-        search: searchQuery.trim() || undefined,
-        limit: 100,
-      });
-      setLifecycleData(res);
-    } catch (err: any) {
-      setError(err?.message || "Failed to load deals lifecycle.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const loadSeq = useRef(0);
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
-    loadDeals();
-  }, [selectedStage, searchQuery]);
+    const t = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [searchQuery]);
+
+  const loadDeals = useCallback(
+    async (opts?: { soft?: boolean; stageOverride?: string }) => {
+      const stage = opts?.stageOverride ?? selectedStage;
+      const seq = ++loadSeq.current;
+      const soft = Boolean(opts?.soft) || hasLoadedRef.current;
+      if (soft) setIsRefreshing(true);
+      else setIsLoading(true);
+      setError(null);
+      try {
+        const res = await client.listAiModeLifecycle({
+          stage: stage !== "all" ? stage : undefined,
+          search: debouncedSearch || undefined,
+          limit: 100,
+          light: true,
+        });
+        if (seq !== loadSeq.current) return;
+        setLifecycleData(res);
+        hasLoadedRef.current = true;
+      } catch (err: unknown) {
+        if (seq !== loadSeq.current) return;
+        setError(err instanceof Error ? err.message : "Failed to load deals lifecycle.");
+      } finally {
+        if (seq === loadSeq.current) {
+          setIsLoading(false);
+          setIsRefreshing(false);
+        }
+      }
+    },
+    [selectedStage, debouncedSearch],
+  );
+
+  useEffect(() => {
+    void loadDeals({ soft: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload on stage/search only
+  }, [selectedStage, debouncedSearch]);
 
   const handleStageChange = async (buyerId: number, newStage: string) => {
+    const prev = lifecycleData;
+    const stageLabel =
+      STAGE_OPTIONS.find((s) => s.key === newStage)?.label || newStage;
     setMovingBuyerId(buyerId);
+    // Optimistic: update row / remove if filtered away; bump pipeline counts.
+    if (prev) {
+      const oldRow = prev.rows.find((r) => r.buyer_id === buyerId);
+      const oldStage = oldRow?.stage;
+      let nextRows = prev.rows.map((r) =>
+        r.buyer_id === buyerId
+          ? ({
+              ...r,
+              stage: newStage,
+              stage_label: stageLabel,
+              stage_entered_at: new Date().toISOString(),
+            } as AiModeLifecycleRow)
+          : r,
+      );
+      if (selectedStage !== "all" && selectedStage !== newStage) {
+        nextRows = nextRows.filter((r) => r.buyer_id !== buyerId);
+      }
+      const pipeline = { ...(prev.pipeline || {}) };
+      if (oldStage && oldStage in pipeline) {
+        pipeline[oldStage] = Math.max(0, (pipeline[oldStage] || 0) - 1);
+      }
+      pipeline[newStage] = (pipeline[newStage] || 0) + 1;
+      setLifecycleData({ ...prev, rows: nextRows, pipeline });
+    }
     try {
       await client.updateAiModeLifecycle(buyerId, { stage: newStage });
-      await loadDeals();
-    } catch (err: any) {
-      alert(err?.message || "Failed to update deal stage.");
+      // Follow the contact into New Lead (etc.) so the move feels instant.
+      if (
+        PIPELINE_STAGES.some((s) => s.key === newStage) &&
+        selectedStage !== newStage
+      ) {
+        setSelectedStage(newStage);
+      } else {
+        await loadDeals({ soft: true, stageOverride: selectedStage });
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to update deal stage.");
+      await loadDeals({ soft: true });
     } finally {
       setMovingBuyerId(null);
     }
@@ -67,6 +128,7 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
 
   const pipeline = lifecycleData?.pipeline || {};
   const rows = lifecycleData?.rows || [];
+  const showInitialSpinner = isLoading && !lifecycleData;
 
   return (
     <div className="space-y-6">
@@ -79,6 +141,9 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
               <h2 className="text-xl font-bold text-white tracking-tight">
                 Interested / Potential Pipeline
               </h2>
+              {isRefreshing ? (
+                <span className="text-[10px] text-amber-300/90 font-medium">Updating…</span>
+              ) : null}
             </div>
             <p className="text-xs text-slate-400 mt-1">
               Leads marked Interested from Outreach Funnel, plus inbound queries and active deal stages.
@@ -87,14 +152,14 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
 
           <button
             type="button"
-            onClick={loadDeals}
-            className="self-start sm:self-auto px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition flex items-center gap-1.5"
+            onClick={() => void loadDeals({ soft: true })}
+            disabled={isRefreshing}
+            className="self-start sm:self-auto px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition flex items-center gap-1.5 disabled:opacity-50"
           >
             <span>🔄</span> Refresh Pipeline
           </button>
         </div>
 
-        {/* ── Deal-stage summary cards (Potential/Assigned/Calling/Follow-up/Interested/Not Interested removed) ── */}
         <div className="mt-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
           {PIPELINE_STAGES.map((st) => {
             const count = pipeline[st.key] ?? 0;
@@ -131,7 +196,6 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
         </div>
       </div>
 
-      {/* ── Search Bar & Filter ── */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
         <div className="flex items-center gap-2 w-full sm:w-80">
           <input
@@ -182,13 +246,12 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
         </div>
       </div>
 
-      {/* ── Table Content Area ── */}
-      {isLoading ? (
+      {showInitialSpinner ? (
         <div className="py-20 text-center text-slate-400 flex flex-col items-center gap-2">
           <span className="animate-spin text-2xl">⏳</span>
           <p className="text-xs">Loading inbound deals & client lifecycle...</p>
         </div>
-      ) : error ? (
+      ) : error && !lifecycleData ? (
         <div className="p-4 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-200 text-xs">
           {error}
         </div>
@@ -201,7 +264,12 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl">
+        <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl relative">
+          {isRefreshing ? (
+            <div className="absolute top-2 right-3 z-10 text-[10px] text-amber-200/90 bg-slate-950/80 px-2 py-0.5 rounded">
+              Syncing…
+            </div>
+          ) : null}
           <table className="w-full text-left text-xs text-slate-200">
             <thead className="bg-slate-950/80 text-[11px] uppercase font-bold text-slate-400 border-b border-slate-800">
               <tr>
@@ -225,7 +293,11 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
                     <td className="py-3.5 px-4 text-slate-500 font-mono text-[11px]">{idx + 1}</td>
                     <td className="py-3.5 px-4 font-semibold text-white">
                       <div>{row.company_name || `Buyer #${row.buyer_id}`}</div>
-                      {row.notes && <div className="text-[11px] text-slate-400 font-normal italic mt-0.5">{row.notes}</div>}
+                      {row.notes && (
+                        <div className="text-[11px] text-slate-400 font-normal italic mt-0.5">
+                          {row.notes}
+                        </div>
+                      )}
                     </td>
                     <td className="py-3.5 px-4">
                       <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 text-[11px]">
@@ -239,13 +311,15 @@ export const InboundDealsView: React.FC<InboundDealsViewProps> = ({
                       </span>
                     </td>
                     <td className="py-3.5 px-4 text-slate-400 text-[11px]">
-                      {row.stage_entered_at ? new Date(row.stage_entered_at).toLocaleDateString() : "Recent"}
+                      {row.stage_entered_at
+                        ? new Date(row.stage_entered_at).toLocaleDateString()
+                        : "Recent"}
                     </td>
                     <td className="py-3.5 px-4">
                       <select
                         disabled={isMoving}
                         value={row.stage}
-                        onChange={(e) => handleStageChange(row.buyer_id, e.target.value)}
+                        onChange={(e) => void handleStageChange(row.buyer_id, e.target.value)}
                         className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
                       >
                         {STAGE_OPTIONS.map((st) => (
