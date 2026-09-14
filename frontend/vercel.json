@@ -1,8 +1,12 @@
 {
   "rewrites": [
     {
-      "source": "/api/:path((?!ops(?:/|$)).*)",
-      "destination": "https://kafi-sales-agent-production.up.railway.app/api/:path"
+      "source": "/ops/restart-backend",
+      "destination": "/api/ops/restart-backend"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://kafi-sales-agent-production.up.railway.app/api/:path*"
     },
     {
       "source": "/((?!api/).*)",

@@ -1918,10 +1918,10 @@ export const client = {
 
   /**
    * Admin emergency: restart Railway via Vercel (works even when Railway is 502).
-   * Calls same-origin /api/ops/restart-backend — not the Railway proxy.
+   * Calls same-origin /ops/restart-backend (Vercel function; not the Railway /api proxy).
    */
   restartRailwayBackend: async (pin: string, mode: "restart" | "redeploy" = "restart") => {
-    const res = await fetch("/api/ops/restart-backend", {
+    const res = await fetch("/ops/restart-backend", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pin, mode }),

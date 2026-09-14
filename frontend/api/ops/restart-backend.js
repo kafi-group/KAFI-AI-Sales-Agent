@@ -1,29 +1,16 @@
 /**
- * Vercel serverless — restart/redeploy Kafi-Sales-Agent on Railway.
- * Lives on Vercel so it still works when Railway returns 502.
+ * Vercel Edge Function — restart/redeploy Kafi-Sales-Agent on Railway.
+ * URL: /ops/restart-backend  (rewritten from vercel.json; not proxied to Railway)
  *
- * Required Vercel env (Project → Settings → Environment Variables):
- *   RAILWAY_API_TOKEN        — Railway account token (Account Settings → Tokens)
- *   RAILWAY_SERVICE_ID       — b0ad481a-5a87-4990-8caf-ea2183cd4005
- *   RAILWAY_ENVIRONMENT_ID   — 78591a76-666e-4726-891a-5f4e5596a513
- *   OPS_REDEPLOY_PIN         — secret PIN admins type in the UI (not the voice PIN unless you choose that)
+ * Env (Vercel Production): RAILWAY_API_TOKEN, RAILWAY_SERVICE_ID,
+ * RAILWAY_ENVIRONMENT_ID, OPS_REDEPLOY_PIN
  */
 
 export const config = { runtime: "edge" };
 
 const RAILWAY_GQL = "https://backboard.railway.com/graphql/v2";
 
-type Body = {
-  pin?: string;
-  /** restart = no rebuild (fast); redeploy = rebuild same image */
-  mode?: "restart" | "redeploy";
-};
-
-async function railwayGql(
-  token: string,
-  query: string,
-  variables: Record<string, unknown>,
-): Promise<{ data?: Record<string, unknown>; errors?: Array<{ message: string }> }> {
+async function railwayGql(token, query, variables) {
   const res = await fetch(RAILWAY_GQL, {
     method: "POST",
     headers: {
@@ -32,13 +19,10 @@ async function railwayGql(
     },
     body: JSON.stringify({ query, variables }),
   });
-  return (await res.json()) as {
-    data?: Record<string, unknown>;
-    errors?: Array<{ message: string }>;
-  };
+  return res.json();
 }
 
-export default async function handler(req: Request): Promise<Response> {
+export default async function handler(req) {
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
@@ -76,9 +60,9 @@ export default async function handler(req: Request): Promise<Response> {
     );
   }
 
-  let body: Body = {};
+  let body = {};
   try {
-    body = (await req.json()) as Body;
+    body = await req.json();
   } catch {
     body = {};
   }
@@ -113,7 +97,6 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
-    // Fast path: restart latest deployment (no rebuild) — clears stuck DB pools.
     const list = await railwayGql(
       token,
       `query LatestDeployment($serviceId: String!, $environmentId: String!) {
@@ -132,13 +115,7 @@ export default async function handler(req: Request): Promise<Response> {
         { status: 502 },
       );
     }
-    const edges =
-      (
-        list.data?.deployments as
-          | { edges?: Array<{ node?: { id?: string; status?: string } }> }
-          | undefined
-      )?.edges || [];
-    const deploymentId = edges[0]?.node?.id;
+    const deploymentId = list.data?.deployments?.edges?.[0]?.node?.id;
     if (!deploymentId) {
       return Response.json(
         { ok: false, error: "No Railway deployment found to restart" },
@@ -154,7 +131,6 @@ export default async function handler(req: Request): Promise<Response> {
       { id: deploymentId },
     );
     if (restarted.errors?.length) {
-      // Fallback to full redeploy if restart is not allowed for this status
       const redeploy = await railwayGql(
         token,
         `mutation Redeploy($serviceId: String!, $environmentId: String!) {
