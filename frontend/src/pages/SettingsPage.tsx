@@ -334,6 +334,7 @@ export function SettingsPage({ onError }: SettingsPageProps) {
             variant="secondary"
             onClick={() => void handleRestartRailway("redeploy")}
             disabled={restartingRailway || recovering}
+            icon={IconRefresh}
           >
             Full redeploy
           </ActionButton>
