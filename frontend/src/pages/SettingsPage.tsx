@@ -36,6 +36,8 @@ export function SettingsPage({ onError }: SettingsPageProps) {
   const [voiceSettings, setVoiceSettings] = useState<VoiceEngineSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [recovering, setRecovering] = useState(false);
+  const [recoverNotice, setRecoverNotice] = useState<string | null>(null);
 
   // Lock / Unlock State
   const [isUnlocked, setIsUnlocked] = useState(false);
@@ -94,6 +96,27 @@ export function SettingsPage({ onError }: SettingsPageProps) {
       await loadData();
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function handleReconnectDb() {
+    setRecovering(true);
+    setRecoverNotice(null);
+    try {
+      const result = await client.reconnectDatabase();
+      setRecoverNotice(
+        result.note ||
+          `Database connected again at ${new Date(result.checked_at).toLocaleString()}. Refresh the page.`,
+      );
+      await loadData();
+    } catch (err) {
+      onError(
+        err instanceof Error
+          ? err.message
+          : "Could not reconnect. If you see 502, redeploy Kafi-Sales-Agent on Railway.",
+      );
+    } finally {
+      setRecovering(false);
     }
   }
 
@@ -221,6 +244,31 @@ export function SettingsPage({ onError }: SettingsPageProps) {
           {refreshing ? "Refreshing…" : "Refresh"}
         </ActionButton>
       </div>
+
+      <section className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-base font-medium text-slate-100">Database connection</h3>
+            <p className="mt-1 text-sm text-slate-400">
+              If contacts, WhatsApp, or email suddenly show empty (overnight / weekend), click
+              Reconnect to reset the database pool. Works when the API still responds. A full{" "}
+              <span className="text-slate-300">502 Bad Gateway</span> still needs a Railway redeploy.
+            </p>
+            {recoverNotice ? (
+              <p className="mt-2 text-xs text-emerald-300/90">{recoverNotice}</p>
+            ) : null}
+          </div>
+          <ActionButton
+            type="button"
+            variant="secondary"
+            onClick={() => void handleReconnectDb()}
+            disabled={recovering}
+            icon={IconRefresh}
+          >
+            {recovering ? "Reconnecting…" : "Reconnect database"}
+          </ActionButton>
+        </div>
+      </section>
 
       {/* Twilio Voice Credits Section */}
       <section className="rounded-xl border border-slate-700/80 bg-slate-900/60 p-5 sm:p-6">

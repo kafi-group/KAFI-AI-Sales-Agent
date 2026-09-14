@@ -1906,6 +1906,16 @@ export interface WhatsAppReplyResponse {
 export const client = {
   health: () => request<{ status: string }>("/health"),
 
+  /** Admin: dispose DB pool and verify Postgres (fixes overnight SSL 503s). */
+  reconnectDatabase: () =>
+    request<{
+      ok: boolean;
+      pool_disposed: boolean;
+      database: string;
+      checked_at: string;
+      note?: string;
+    }>("/system/reconnect-db", { method: "POST" }),
+
   /** Fire-and-forget wake for Railway cold starts before session bootstrap. */
   wakeBackend: async (): Promise<boolean> => {
     try {

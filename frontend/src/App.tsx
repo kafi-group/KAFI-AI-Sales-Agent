@@ -191,6 +191,7 @@ function DashboardApp() {
     null,
   );
   const [error, setErrorState] = useState<string | null>(null);
+  const [reconnectingDb, setReconnectingDb] = useState(false);
   useEffect(() => {
     // Keepalive ping every 2 minutes to keep Railway container warm 24/7
     const interval = setInterval(() => {
@@ -765,6 +766,29 @@ function DashboardApp() {
     pollQuotationMeetings,
     pollInterestedClientsActivity,
   ]);
+
+  const handleReconnectDb = useCallback(async () => {
+    if (reconnectingDb) return;
+    setReconnectingDb(true);
+    setError(null);
+    try {
+      const result = await client.reconnectDatabase();
+      setLeadsTableRefreshToken((n) => n + 1);
+      refreshAll();
+      window.alert(
+        result.note ||
+          "Database reconnected. If lists are still empty, hard-refresh the page.",
+      );
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Could not reconnect. If you see 502, redeploy Kafi-Sales-Agent on Railway.",
+      );
+    } finally {
+      setReconnectingDb(false);
+    }
+  }, [reconnectingDb, refreshAll, setError]);
 
   useEffect(() => {
     void Promise.all([
@@ -1526,6 +1550,8 @@ function DashboardApp() {
               compact
               onRefresh={refreshAll}
               onOpenSettings={isAdmin ? () => setTab("settings") : undefined}
+              onReconnectDb={isAdmin ? () => void handleReconnectDb() : undefined}
+              reconnectingDb={reconnectingDb}
               onLogout={() => void logout()}
             />
             </div>
@@ -1579,6 +1605,8 @@ function DashboardApp() {
             <AppTopActions
               onRefresh={refreshAll}
               onOpenSettings={isAdmin ? () => setTab("settings") : undefined}
+              onReconnectDb={isAdmin ? () => void handleReconnectDb() : undefined}
+              reconnectingDb={reconnectingDb}
               onLogout={() => void logout()}
             />
           </div>

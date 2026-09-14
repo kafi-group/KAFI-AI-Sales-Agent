@@ -34,6 +34,7 @@ from api import (
     track,
     whatsapp,
     whatsapp_personal,
+    system,
 )
 from config import settings
 from modules.auth import ensure_default_admin
@@ -92,6 +93,15 @@ def _run_bulk_email_schedule_job():
             print(f"Bulk email schedule job: processed {len(results)} campaign(s).", flush=True)
     except Exception as exc:  # noqa: BLE001
         print(f"Bulk email schedule job failed: {exc}", flush=True)
+        # Overnight Supabase SSL drops leave dead pooled connections; clear them.
+        if "SSL connection" in str(exc) or "OperationalError" in type(exc).__name__:
+            try:
+                from db.session import engine
+
+                engine.dispose()
+                print("Disposed DB pool after bulk email SSL/OperationalError.", flush=True)
+            except Exception as dispose_exc:  # noqa: BLE001
+                print(f"DB pool dispose failed: {dispose_exc}", flush=True)
     finally:
         db.close()
 
@@ -409,6 +419,7 @@ app.include_router(ai_mode.router, prefix="/api")
 app.include_router(catalogues.router, prefix="/api")
 app.include_router(horeka.router, prefix="/api")
 app.include_router(target_workspace.router, prefix="/api")
+app.include_router(system.router, prefix="/api")
 
 
 OLD_CLIENTS_IMPORT_PARSER = "old_clients_v2"

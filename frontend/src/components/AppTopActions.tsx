@@ -1,6 +1,7 @@
 import {
   IconBell,
   IconGear,
+  IconRefresh,
   IconSignOut,
   IconUser,
   AdminUserIcon,
@@ -28,6 +29,8 @@ interface AppTopActionsProps {
   compact?: boolean;
   userLabel?: string;
   userRole?: string;
+  onReconnectDb?: () => void;
+  reconnectingDb?: boolean;
 }
 
 const MODE_OPTIONS: { value: NotificationMode; label: string; hint: string }[] = [
@@ -55,6 +58,8 @@ export function AppTopActions({
   compact = false,
   userLabel: propUserLabel,
   userRole: propUserRole,
+  onReconnectDb,
+  reconnectingDb = false,
 }: AppTopActionsProps) {
   const {
     user,
@@ -153,6 +158,19 @@ export function AppTopActions({
       </button>
 
       <ThemeToggle compact />
+
+      {onReconnectDb && (
+        <button
+          type="button"
+          className={iconBtn}
+          title="Reconnect database (fix empty contacts / WhatsApp / email)"
+          aria-label="Reconnect database"
+          disabled={reconnectingDb}
+          onClick={onReconnectDb}
+        >
+          <IconRefresh size="sm" className={reconnectingDb ? "animate-spin" : undefined} />
+        </button>
+      )}
 
       {onOpenSettings && (
         <button
