@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import uuid
 from pathlib import Path
@@ -9,7 +10,26 @@ from pathlib import Path
 from fastapi import UploadFile
 
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
-STORAGE_DIR = _BACKEND_DIR / "storage" / "email_attachments"
+
+
+def _resolve_storage_dir() -> Path:
+    """Prefer a persistent mount (Railway volume) over ephemeral container disk.
+
+    Set EMAIL_ATTACHMENTS_DIR=/data/email_attachments when a volume is mounted
+    at /data so inline template images survive redeploys.
+    """
+    override = (os.environ.get("EMAIL_ATTACHMENTS_DIR") or "").strip()
+    if override:
+        return Path(override)
+    # Auto-detect common Railway volume mount without requiring env.
+    for candidate in (Path("/data/email_attachments"), Path("/data/storage/email_attachments")):
+        parent = candidate.parent
+        if parent.is_dir() and os.access(parent, os.W_OK):
+            return candidate
+    return _BACKEND_DIR / "storage" / "email_attachments"
+
+
+STORAGE_DIR = _resolve_storage_dir()
 
 MAX_FILE_BYTES = 100 * 1024 * 1024
 MAX_FILES_PER_EMAIL = 8
@@ -174,19 +194,21 @@ def register_attachment_from_bytes(
 
 def resolve_path(storage_path: str) -> Path:
     if not storage_path:
-        return _BACKEND_DIR / "storage" / "nonexistent"
+        return STORAGE_DIR / "nonexistent"
     p = Path(storage_path)
     if p.is_file():
         return p
     rel = storage_path.replace("\\", "/").lstrip("/")
     if rel.startswith("email_attachments/"):
-        target = _BACKEND_DIR / "storage" / rel
-        if target.is_file():
-            return target
-        flat = _BACKEND_DIR / "storage" / rel.split("/", 1)[1]
-        if flat.is_file():
-            return flat
-        return target
+        name = rel.split("/", 1)[1]
+        for candidate in (
+            STORAGE_DIR / name,
+            _BACKEND_DIR / "storage" / rel,
+            _BACKEND_DIR / "storage" / name,
+        ):
+            if candidate.is_file():
+                return candidate
+        return STORAGE_DIR / name
     cand1 = STORAGE_DIR / rel
     if cand1.is_file():
         return cand1
