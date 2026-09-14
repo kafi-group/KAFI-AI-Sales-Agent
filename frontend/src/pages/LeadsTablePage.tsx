@@ -28,6 +28,7 @@ import {
   LeadWhatsAppComposeModal,
   type WhatsAppComposeTarget,
 } from "../components/WhatsAppComposeLink";
+import { SelectedContactQuickActions } from "../components/SelectedContactQuickActions";
 import {
   BulkActionProgressPanel,
   type BulkActionProgress,
@@ -2262,8 +2263,16 @@ export function LeadsTablePage({
     }
   }
 
-  function openWhatsAppCompose(row: LeadTableRow, phone: string) {
-    setWhatsappComposeTarget({ row, phone: phone.trim() });
+  function openWhatsAppCompose(
+    row: LeadTableRow,
+    phone: string,
+    initialTab?: "personal" | "template",
+  ) {
+    setWhatsappComposeTarget({
+      row,
+      phone: phone.trim(),
+      initialTab,
+    });
   }
 
   async function saveFollowUpAt(rowId: number, followUpAt: string | null) {
@@ -3068,6 +3077,27 @@ export function LeadsTablePage({
               Clear
             </ActionButton>
           )}
+
+          {selected.size === 1
+            ? (() => {
+                const id = [...selected][0];
+                const row = rows.find((r) => r.id === id) ?? drafts[id] ?? null;
+                if (!row) return null;
+                return (
+                  <SelectedContactQuickActions
+                    row={row}
+                    disabled={
+                      bulkOnboarding ||
+                      deletingSelected ||
+                      deletingId !== null ||
+                      editMode
+                    }
+                    onError={onError}
+                    onWhatsApp={(phone, mode) => openWhatsAppCompose(row, phone, mode)}
+                  />
+                );
+              })()
+            : null}
 
           <ToolbarDropdown label="Action" icon={IconSend} variant="sky">
             <ToolbarMenuItem
@@ -4921,6 +4951,7 @@ export function LeadsTablePage({
 
       {whatsappComposeTarget && (
         <LeadWhatsAppComposeModal
+          key={`${whatsappComposeTarget.phone}-${whatsappComposeTarget.initialTab ?? "personal"}-${whatsappComposeTarget.row.id}`}
           target={whatsappComposeTarget}
           onClose={() => setWhatsappComposeTarget(null)}
           onError={onError}

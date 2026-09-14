@@ -21,6 +21,8 @@ type ComposeTab = "personal" | "template";
 export interface WhatsAppComposeTarget {
   row: LeadTableRow;
   phone: string;
+  /** Open Personal or Template tab first (toolbar quick actions). */
+  initialTab?: ComposeTab;
 }
 
 interface LeadWhatsAppComposeModalProps {
@@ -45,7 +47,7 @@ export function LeadWhatsAppComposeModal({
   onSent,
 }: LeadWhatsAppComposeModalProps) {
   const { row, phone } = target;
-  const [tab, setTab] = useState<ComposeTab>("personal");
+  const [tab, setTab] = useState<ComposeTab>(target.initialTab ?? "personal");
   const [sending, setSending] = useState(false);
 
   const [message, setMessage] = useState(
