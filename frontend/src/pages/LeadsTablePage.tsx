@@ -170,6 +170,18 @@ type SortField =
   | "remarks"
   | "assigned_to_user_id";
 
+/** Column header field → API query param (backend filter names). */
+const COL_FILTER_API_KEY: Partial<Record<SortField, string>> = {
+  business_type: "industry",
+  excel_file_grading: "company_grading",
+  product: "product_interest",
+};
+
+function encodeColFilterValues(vals: string[]): string {
+  // JSON so values with commas (e.g. "Wholesale trade of food, beverages,") stay intact
+  return JSON.stringify(vals);
+}
+
 interface StoredTableView {
   score: string;
   marketRole: string;
@@ -1627,7 +1639,8 @@ export function LeadsTablePage({
       const colFiltersParams: Record<string, string> = {};
       Object.entries(selectedColValues).forEach(([f, vals]) => {
         if (vals && vals.length > 0) {
-          colFiltersParams[f] = vals.join(",");
+          const apiKey = COL_FILTER_API_KEY[f as SortField] || f;
+          colFiltersParams[apiKey] = encodeColFilterValues(vals);
         }
       });
 
@@ -1645,6 +1658,7 @@ export function LeadsTablePage({
         sort_dir: sortDir,
         master_type: masterType,
         ...sectionTableParams(section, intakeMethodFilter),
+        // Column filters last so they stack and override matching dropdown filters
         ...colFiltersParams,
       };
     },
@@ -1694,6 +1708,9 @@ export function LeadsTablePage({
     setColModalLoading(true);
 
     const paramsExceptField: Record<string, any> = { ...tableQueryParams };
+    const apiKey = COL_FILTER_API_KEY[colFilterModal.field] || colFilterModal.field;
+    delete paramsExceptField[apiKey];
+    // Also drop UI field name if it somehow lingered
     delete paramsExceptField[colFilterModal.field];
 
     client
@@ -5348,10 +5365,13 @@ export function LeadsTablePage({
 
                   return (
                     <>
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
                         <span className="text-sm font-bold text-slate-300">
                           Select options ({pendingColSelections.length} selected)
-                          {colModalColumnData ? ` out of ${totalMatching} total rows` : ""}:
+                          {colModalSearch.trim()
+                            ? ` · ${filteredUniqueVals.length} matching values`
+                            : ` · ${allUniqueVals.length} unique values`}
+                          {colModalColumnData ? ` · ${totalMatching} rows in current filters` : ""}:
                         </span>
                         <div className="flex items-center gap-3 text-sm">
                           {colModalLoading && (
@@ -5362,12 +5382,20 @@ export function LeadsTablePage({
                           <button
                             type="button"
                             onClick={() => {
-                              const allVals = allUniqueVals.map(([v]) => v);
-                              setPendingColSelections(allVals);
+                              // Only the values currently shown (search-filtered), not every unique value
+                              const shownVals = filteredUniqueVals.map(([v]) => v);
+                              setPendingColSelections(shownVals);
                             }}
                             className="text-emerald-400 hover:underline font-semibold"
+                            title={
+                              colModalSearch.trim()
+                                ? `Select all ${filteredUniqueVals.length} values matching your search`
+                                : "Select all unique values in this list"
+                            }
                           >
-                            Select All
+                            {colModalSearch.trim()
+                              ? `Select All Shown (${filteredUniqueVals.length})`
+                              : "Select All"}
                           </button>
                           <span className="text-slate-600">|</span>
                           <button
@@ -5448,10 +5476,12 @@ export function LeadsTablePage({
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedColValues((prev) => ({
-                      ...prev,
-                      [colFilterModal.field]: [],
-                    }));
+                    setSelectedColValues((prev) => {
+                      const next = { ...prev };
+                      delete next[colFilterModal.field];
+                      return next;
+                    });
+                    setPage(1);
                     setColFilterModal(null);
                   }}
                   className="px-5 py-3 rounded-2xl border border-slate-700 text-slate-300 hover:bg-slate-900 hover:text-white font-bold text-sm transition-colors"
@@ -5494,10 +5524,16 @@ export function LeadsTablePage({
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedColValues((prev) => ({
-                      ...prev,
-                      [colFilterModal.field]: pendingColSelections,
-                    }));
+                    setSelectedColValues((prev) => {
+                      const next = { ...prev };
+                      if (pendingColSelections.length === 0) {
+                        delete next[colFilterModal.field];
+                      } else {
+                        next[colFilterModal.field] = pendingColSelections;
+                      }
+                      return next;
+                    });
+                    setPage(1);
                     setColFilterModal(null);
                   }}
                   className="px-7 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-base shadow-xl transition-colors"

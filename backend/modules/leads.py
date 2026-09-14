@@ -848,6 +848,28 @@ def _is_blank_token(token: str | None) -> bool:
     return False
 
 
+def _parse_multi_filter_values(values_str: str | None) -> list[str]:
+    """Parse column multi-select values.
+
+    Prefers JSON arrays (supports commas inside values); falls back to comma-separated.
+    """
+    if not values_str:
+        return []
+    s = values_str.strip()
+    if not s:
+        return []
+    if s.startswith("["):
+        try:
+            import json
+
+            parsed = json.loads(s)
+            if isinstance(parsed, list):
+                return [str(v).strip() for v in parsed if str(v).strip()]
+        except Exception:
+            pass
+    return [v.strip() for v in s.split(",") if v.strip()]
+
+
 def _display_contact_subquery(db: Session):
     """First contact per buyer (lowest id) — matches table designation/person columns."""
     return (
@@ -873,7 +895,7 @@ def _apply_column_field_filter(db: Session, buyer_query, field: str, values_str:
         return buyer_query
     from sqlalchemy import or_
 
-    items = [v.strip() for v in values_str.split(",") if v.strip()]
+    items = _parse_multi_filter_values(values_str)
     if not items:
         return buyer_query
 
