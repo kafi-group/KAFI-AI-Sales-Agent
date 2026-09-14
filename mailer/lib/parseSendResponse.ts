@@ -1,21 +1,15 @@
-/** Vercel serverless POST body limit (~4.5 MB on Hobby). */
-export const MAILER_MAX_SEND_BYTES = 4 * 1024 * 1024;
+import {
+  EMAIL_ATTACHMENT_MAX_BYTES,
+  formatAttachmentSize,
+} from "./hostAttachments";
 
-export function estimateSendPayloadBytes(payload: unknown): number {
-  try {
-    return new TextEncoder().encode(JSON.stringify(payload)).length;
-  } catch {
-    return Number.MAX_SAFE_INTEGER;
-  }
-}
-
+/** Soft check for total hosted attachment size (provider ~25 MB message cap). */
 export function attachmentSizeMessage(totalBytes: number): string | null {
-  if (totalBytes <= MAILER_MAX_SEND_BYTES) return null;
-  const mb = (totalBytes / (1024 * 1024)).toFixed(1);
+  if (totalBytes <= EMAIL_ATTACHMENT_MAX_BYTES) return null;
   return (
-    `This email is too large to send from the mailer (${mb} MB). ` +
-    "Vercel allows about 4 MB per send including attachments. " +
-    "Remove or shrink the PDF, host the file online and paste a link, or send without the attachment."
+    `This email is too large (${formatAttachmentSize(totalBytes)}). ` +
+    `Keep attachments under ${EMAIL_ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB total ` +
+    "(email providers reject messages around 25 MB)."
   );
 }
 
@@ -34,8 +28,8 @@ export async function parseSendApiResponse(res: Response): Promise<{
       return {
         ok: false,
         error:
-          "Attachment too large for Vercel mailer (about 4 MB max per send). " +
-          "Remove the PDF, use a smaller file, or add a download link in the body instead.",
+          "Send payload too large. Attachments should upload to Sales Agent first " +
+          "(hosted by id) so the mailer request stays small. Remove and re-attach the file.",
       };
     }
     return { ok: false, error: text.trim() || res.statusText || "Send failed" };

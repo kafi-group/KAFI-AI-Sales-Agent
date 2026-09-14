@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db
@@ -935,6 +935,13 @@ class UpdateRulesRequest(BaseModel):
     rules: str
 
 
+class TrainFromHistoryRequest(BaseModel):
+    """How to pick training examples for Sara & Rayan."""
+
+    source: Literal["auto", "curated", "history", "ids"] = "auto"
+    interaction_ids: list[int] = Field(default_factory=list)
+
+
 @router.get("/training")
 def get_ai_training_info(db: Session = Depends(get_db), user: AppUser = Depends(get_current_user)):
     _ = user
@@ -942,11 +949,37 @@ def get_ai_training_info(db: Session = Depends(get_db), user: AppUser = Depends(
     return get_training_knowledge(db)
 
 
+@router.get("/training/selected-calls")
+def list_ai_training_selected_calls(
+    limit: int = Query(80, ge=1, le=200),
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """Calls ticked Train Sara & Rayan on post-call drafts."""
+    _ = user
+    from modules.ai_agent_training import list_selected_training_calls
+
+    return list_selected_training_calls(db, limit=limit)
+
+
 @router.post("/train-from-history")
-def train_ai_from_history(db: Session = Depends(get_db), user: AppUser = Depends(get_current_user)):
+def train_ai_from_history(
+    payload: TrainFromHistoryRequest | None = None,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
     _ = user
     from modules.ai_agent_training import train_agent_from_history
-    return train_agent_from_history(db)
+
+    body = payload or TrainFromHistoryRequest()
+    try:
+        return train_agent_from_history(
+            db,
+            source=body.source,
+            interaction_ids=body.interaction_ids or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/update-rules")

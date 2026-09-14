@@ -294,6 +294,7 @@ _PUBLIC_API_PATHS = {
     "/api/mailer/prepare-tracked-body",
     "/api/mailer/schedule-bulk",
     "/api/mailer/inline-upload",
+    "/api/mailer/attachment-upload",
     "/api/mailer/smtp-credentials",
 }
 _PUBLIC_API_PREFIXES = (

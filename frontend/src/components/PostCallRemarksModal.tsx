@@ -52,6 +52,10 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
   const [needsWaTemplate, setNeedsWaTemplate] = useState(false);
   const [selectedPhone, setSelectedPhone] = useState("");
   const [customPhone, setCustomPhone] = useState("");
+  const [selectedEmail, setSelectedEmail] = useState("");
+  const [customEmail, setCustomEmail] = useState("");
+  const [invalidEmails, setInvalidEmails] = useState<string[]>([]);
+  const [addingEmail, setAddingEmail] = useState(false);
   const [whatsappBody, setWhatsappBody] = useState("");
   const [waBodyCustomized, setWaBodyCustomized] = useState(false);
   const [draftLanguage, setDraftLanguage] = useState("en");
@@ -81,6 +85,9 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     setAttachments([]);
     setSelectedPhone("");
     setCustomPhone("");
+    setSelectedEmail("");
+    setCustomEmail("");
+    setInvalidEmails([]);
     setDraftNotice(null);
     setStep("remarks");
     setWaTemplateId("");
@@ -178,6 +185,13 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
       setSelectedPhone(draft.available_phones[0].phone);
     } else if (draft.contact_phone) {
       setSelectedPhone(draft.contact_phone);
+    }
+    if (draft.selected_email) {
+      setSelectedEmail(draft.selected_email);
+    } else if (draft.available_emails && draft.available_emails.length > 0) {
+      setSelectedEmail(draft.available_emails[0].email);
+    } else if (draft.contact_email) {
+      setSelectedEmail(draft.contact_email);
     }
   }, [draft?.id]);
 
@@ -350,8 +364,18 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
   async function sendDraft(channels: "email" | "whatsapp" | "whatsapp_personal" | "all") {
     if (!draft) return;
     const wantsWaMeta = channels === "whatsapp" || channels === "all";
+    const wantsEmail = channels === "email" || channels === "all";
     if (wantsWaMeta && needsWaTemplate && !selectedWaTemplate) {
       onError("Select an approved Meta template for WhatsApp Business send.");
+      return;
+    }
+    const emailTarget = (selectedEmail || customEmail || "").trim();
+    if (wantsEmail && !emailTarget) {
+      onError("Select or add an email address before sending.");
+      return;
+    }
+    if (wantsEmail && isEmailMarkedInvalid(emailTarget)) {
+      onError("That email was marked invalid. Choose another address or add a new one.");
       return;
     }
     const useWaTemplate = wantsWaMeta && Boolean(selectedWaTemplate);
@@ -363,6 +387,7 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
       const result = await client.sendPersonalizedFollowup(draft.id, {
         channels,
         target_phone: selectedPhone.trim() || undefined,
+        target_email: wantsEmail ? emailTarget : undefined,
         subject,
         email_body: emailBody,
         whatsapp_body: whatsappBody,
@@ -376,11 +401,37 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
           : {}),
       });
       setDraft(result.draft);
+      if (result.draft.available_emails?.length) {
+        // Keep picker in sync with server list (e.g. after add).
+      }
+
       const waFailedNeedsTemplate =
         result.needs_whatsapp_template ||
         (!result.whatsapp_sent &&
           channels !== "email" &&
           /template/i.test(result.message || result.draft.whatsapp_send_message || ""));
+
+      if (result.email_invalid && result.failed_email) {
+        const failed = result.failed_email.trim().toLowerCase();
+        setInvalidEmails((prev) => (prev.includes(failed) ? prev : [...prev, failed]));
+        const nextEmails = (result.available_emails || result.draft.available_emails || []).filter(
+          (e) => e.email.trim().toLowerCase() !== failed && !isEmailMarkedInvalid(e.email, [...invalidEmails, failed]),
+        );
+        if (nextEmails.length > 0) {
+          setSelectedEmail(nextEmails[0].email);
+          setCustomEmail("");
+          setDraftNotice(
+            `Email not sent — ${result.failed_email} is no longer valid or does not exist. Try another email below.`,
+          );
+        } else {
+          setSelectedEmail("");
+          setDraftNotice(
+            "All listed emails are invalid or do not exist. Add a new email address below to continue.",
+          );
+        }
+        return;
+      }
+
       if (waFailedNeedsTemplate) {
         setNeedsWaTemplate(true);
         setDraftNotice(
@@ -391,7 +442,12 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
       } else {
         setNeedsWaTemplate(false);
         setDraftNotice(result.message);
-        if (result.email_sent || result.whatsapp_sent) {
+        if (wantsEmail) {
+          if (result.email_sent) {
+            clearLeadDialSession();
+            window.setTimeout(() => clearPendingFollowUp(), 900);
+          }
+        } else if (result.whatsapp_sent) {
           clearLeadDialSession();
           window.setTimeout(() => clearPendingFollowUp(), 1200);
         }
@@ -409,6 +465,72 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
     }
   }
 
+  function normalizeEmailKey(value: string) {
+    return value.trim().toLowerCase();
+  }
+
+  function isEmailMarkedInvalid(value: string, list: string[] = invalidEmails) {
+    const key = normalizeEmailKey(value);
+    return Boolean(key) && list.includes(key);
+  }
+
+  async function addNewEmailToContact() {
+    if (!draft?.contact_id) {
+      onError("No contact on this draft — cannot save a new email.");
+      return;
+    }
+    const next = customEmail.trim();
+    if (!next || !next.includes("@")) {
+      onError("Enter a valid email address.");
+      return;
+    }
+    if (isEmailMarkedInvalid(next)) {
+      onError("That address was already marked invalid.");
+      return;
+    }
+    setAddingEmail(true);
+    setDraftNotice(null);
+    try {
+      const listed = draft.available_emails || [];
+      const hasPrimary = listed.some((e) => e.is_primary) || Boolean(draft.contact_email);
+      const hasSecondary = listed.some((e) => !e.is_primary && e.label.toLowerCase().includes("secondary"));
+      if (!hasPrimary) {
+        await client.updateContact(draft.contact_id, { email: next });
+      } else if (!hasSecondary) {
+        await client.updateContact(draft.contact_id, { secondary_email: next });
+      }
+      // Always allow sending to the new address even if both slots were already filled.
+      setSelectedEmail(next);
+      setCustomEmail("");
+      setDraft((prev) => {
+        if (!prev) return prev;
+        const exists = (prev.available_emails || []).some(
+          (e) => normalizeEmailKey(e.email) === normalizeEmailKey(next),
+        );
+        if (exists) return prev;
+        return {
+          ...prev,
+          available_emails: [
+            ...(prev.available_emails || []),
+            {
+              email: next,
+              label: hasPrimary ? (hasSecondary ? "New Email" : "Secondary Email") : "Primary Email",
+              contact_id: prev.contact_id,
+              is_primary: !hasPrimary,
+            },
+          ],
+          selected_email: next,
+          contact_email: hasPrimary ? prev.contact_email : next,
+        };
+      });
+      setDraftNotice("New email added. Click Send email to try again.");
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to add email");
+    } finally {
+      setAddingEmail(false);
+    }
+  }
+
   function dismiss() {
     clearLeadDialSession();
     clearPendingFollowUp();
@@ -416,7 +538,12 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
 
   const availablePhones = draft?.available_phones || [];
   const selectedPhoneObj = availablePhones.find((p) => p.phone === selectedPhone);
-  const busy = Boolean(sendingChannel) || savingDraft || translating || trainSaving;
+  const availableEmails = draft?.available_emails || [];
+  const allEmailsExhausted =
+    availableEmails.length > 0 &&
+    availableEmails.every((e) => isEmailMarkedInvalid(e.email)) &&
+    (!selectedEmail || isEmailMarkedInvalid(selectedEmail));
+  const busy = Boolean(sendingChannel) || savingDraft || translating || trainSaving || addingEmail;
 
   return createPortal(
     <div
@@ -596,6 +723,122 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                     className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-sky-500"
                   />
                 </label>
+
+                <div className="rounded-xl border border-slate-700/80 bg-slate-950/60 p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-200">Target email</span>
+                    {invalidEmails.length > 0 ? (
+                      <span className="text-[11px] text-rose-300">
+                        {invalidEmails.length} invalid — try another
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {availableEmails.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {availableEmails.map((e) => {
+                        const invalid = isEmailMarkedInvalid(e.email);
+                        const isSelected =
+                          !invalid && normalizeEmailKey(selectedEmail) === normalizeEmailKey(e.email);
+                        return (
+                          <label
+                            key={`${e.email}-${e.label}`}
+                            onClick={() => {
+                              if (invalid) return;
+                              setSelectedEmail(e.email);
+                              setCustomEmail("");
+                            }}
+                            className={`flex items-start gap-2.5 p-2.5 rounded-lg border text-xs transition ${
+                              invalid
+                                ? "border-rose-700/70 bg-rose-950/40 text-rose-200 cursor-not-allowed opacity-90"
+                                : isSelected
+                                  ? "border-sky-500 bg-sky-950/30 text-slate-100 shadow-sm cursor-pointer"
+                                  : "border-slate-800 bg-slate-900/60 text-slate-300 hover:border-slate-700 cursor-pointer"
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="target_email"
+                              disabled={invalid}
+                              checked={isSelected}
+                              onChange={() => {
+                                if (invalid) return;
+                                setSelectedEmail(e.email);
+                                setCustomEmail("");
+                              }}
+                              className="mt-0.5 text-sky-500 focus:ring-0"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 font-medium">
+                                <span className="truncate">{e.label}</span>
+                                {invalid ? (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-900/70 text-rose-200 border border-rose-700/60">
+                                    No longer valid
+                                  </span>
+                                ) : e.is_primary ? (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-900/60 text-sky-300 border border-sky-700/50">
+                                    Primary
+                                  </span>
+                                ) : null}
+                              </div>
+                              <p
+                                className={`font-mono text-[11px] mt-0.5 truncate ${
+                                  invalid ? "text-rose-300 line-through" : "text-slate-400"
+                                }`}
+                              >
+                                {e.email}
+                              </p>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-amber-300/90">
+                      No email on file for this contact. Add one below.
+                    </p>
+                  )}
+
+                  {(allEmailsExhausted || availableEmails.length === 0 || invalidEmails.length > 0) && (
+                    <p className="text-xs text-amber-200/90 rounded-lg bg-amber-950/40 border border-amber-800/50 px-2.5 py-1.5">
+                      {allEmailsExhausted ||
+                      (availableEmails.length > 0 &&
+                        availableEmails.every((e) => isEmailMarkedInvalid(e.email)))
+                        ? "All current emails are invalid or do not exist. Add a new email to continue."
+                        : invalidEmails.length > 0
+                          ? "Select another email above, or add a new one if needed."
+                          : "Enter an email address to send this follow-up."}
+                    </p>
+                  )}
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1 border-t border-slate-800/80">
+                    <input
+                      type="email"
+                      value={customEmail}
+                      onChange={(e) => setCustomEmail(e.target.value)}
+                      placeholder="Add another email…"
+                      className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-sky-500"
+                    />
+                    <button
+                      type="button"
+                      disabled={busy || !customEmail.trim()}
+                      onClick={() => {
+                        const next = customEmail.trim();
+                        if (!next) return;
+                        if (draft?.contact_id) {
+                          void addNewEmailToContact();
+                        } else {
+                          setSelectedEmail(next);
+                          setDraftNotice("Using this email for send. Save it on the contact later if needed.");
+                        }
+                      }}
+                      className="rounded-lg border border-sky-700/60 bg-sky-950/50 hover:bg-sky-900/50 disabled:opacity-50 px-3 py-2 text-sm font-medium text-sky-100 whitespace-nowrap"
+                    >
+                      {addingEmail ? "Adding…" : "Add & use"}
+                    </button>
+                  </div>
+                </div>
+
                 <EmailAttachmentsField
                   attachments={attachments}
                   onChange={setAttachments}
@@ -756,7 +999,15 @@ export function PostCallRemarksModal({ onError, onSaved }: PostCallRemarksModalP
                   />
                 </div>
                 {draftNotice ? (
-                  <p className="text-sm text-emerald-300/90">{draftNotice}</p>
+                  <p
+                    className={`text-sm ${
+                      invalidEmails.length > 0 && !/sent\./i.test(draftNotice)
+                        ? "text-amber-200"
+                        : "text-emerald-300/90"
+                    }`}
+                  >
+                    {draftNotice}
+                  </p>
                 ) : null}
                 <div className="flex flex-wrap gap-2">
                   <button

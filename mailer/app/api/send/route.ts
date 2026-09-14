@@ -12,6 +12,7 @@ import { reportMailerActivity } from "@/lib/reportActivity";
 import { sendSmtp, smtpBodyHasContent } from "@/lib/smtp";
 import { fetchSmtpCredentialsFromSalesAgent } from "@/lib/fetchSmtpCredentials";
 import { appendMailerSentCopy } from "@/lib/syncSent";
+import { resolveAttachmentsForSmtp } from "@/lib/hostAttachments";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -68,8 +69,11 @@ export async function POST(req: NextRequest) {
       record_activity?: boolean;
       attachments?: Array<{
         filename: string;
-        content: string;
+        content?: string;
         contentType?: string;
+        id?: string;
+        url?: string;
+        size?: number;
       }>;
     };
     try {
@@ -188,6 +192,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    let smtpAttachments: Array<{
+      filename: string;
+      content: string;
+      contentType?: string;
+    }> = [];
+    try {
+      smtpAttachments = await resolveAttachmentsForSmtp(
+        Array.isArray(body.attachments) ? body.attachments : undefined,
+      );
+    } catch (attErr) {
+      const msg =
+        attErr instanceof Error ? attErr.message : "Failed to load attachments";
+      return NextResponse.json({ error: msg }, { status: 400 });
+    }
+
     const sent = await sendSmtp({
       username,
       mailboxEmail,
@@ -198,7 +217,7 @@ export async function POST(req: NextRequest) {
       body: sendBody,
       html: asHtml,
       credsOverride: smtpCreds,
-      attachments: Array.isArray(body.attachments) ? body.attachments : undefined,
+      attachments: smtpAttachments.length ? smtpAttachments : undefined,
     });
 
     if (recordActivity) {

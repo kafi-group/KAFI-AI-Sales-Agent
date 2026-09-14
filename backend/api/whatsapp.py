@@ -31,7 +31,7 @@ from api.schemas import (
     WhatsAppTestSendResponse,
 )
 from config import settings
-from db.models import AppUser, AppUserRole, Contact, InteractionStatus
+from db.models import AppUser, Contact, InteractionStatus
 from integrations.voice_client import normalize_e164
 from integrations.whatsapp_client import whatsapp_client
 from modules.audit import log_action
@@ -427,6 +427,13 @@ def list_whatsapp_conversations(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
+    """Company-wide Meta Cloud inbox — same threads for every Sales Agent user.
+
+    Unlike Baileys QR (personal WhatsApp Mobile), there is one WhatsApp Business
+    number. Do not filter by lead assignee or viewer; Khalid, Asim, and all reps
+    must see the identical conversation list and status.
+    """
+    _ = user
     try:
         page_val = int(page) if page is not None else 1
     except (ValueError, TypeError):
@@ -436,15 +443,10 @@ def list_whatsapp_conversations(
     except (ValueError, TypeError):
         page_size_val = 20
 
-    def _is_admin(u: AppUser) -> bool:
-        role = u.role.value if isinstance(u.role, AppUserRole) else str(u.role)
-        return role == AppUserRole.admin.value
-
-    assigned_id = None if _is_admin(user) else user.id
     try:
         rows, total = comms.list_whatsapp_conversations(
             db,
-            assigned_to_user_id=assigned_id,
+            assigned_to_user_id=None,
             page=page_val,
             page_size=page_size_val,
         )

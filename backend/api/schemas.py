@@ -114,6 +114,7 @@ class ContactUpdate(BaseModel):
     full_name: Optional[str] = None
     designation: Optional[str] = None
     email: Optional[str] = None
+    secondary_email: Optional[str] = None
     phone: Optional[str] = None
     preferred_language: Optional[str] = None
     consent_status: Optional[str] = None

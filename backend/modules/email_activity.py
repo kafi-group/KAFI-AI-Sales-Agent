@@ -189,6 +189,51 @@ SEVERITY_BY_TYPE: dict[str, str] = {
 }
 
 
+_INVALID_RECIPIENT_HINTS = (
+    "invalid recipient",
+    "invalid address",
+    "recipient rejected",
+    "recipient address rejected",
+    "address rejected",
+    "user unknown",
+    "unknown user",
+    "mailbox unavailable",
+    "mailbox not found",
+    "does not exist",
+    "no such user",
+    "no such mailbox",
+    "undeliverable",
+    "not found",
+    "no longer",
+    "relay access denied",
+    "550 ",
+    "551 ",
+    "552 ",
+    "553 ",
+    "5.1.1",
+    "5.1.10",
+    "5.2.1",
+    "5.4.1",
+)
+
+
+def is_invalid_recipient_message(message: str | None) -> bool:
+    """True when SMTP/Graph wording indicates the destination address is bad."""
+    text = (message or "").lower()
+    if not text:
+        return False
+    if any(hint in text for hint in _INVALID_RECIPIENT_HINTS):
+        return True
+    # Broad but common: "recipient" + (invalid|reject|fail|unknown)
+    if "recipient" in text and any(
+        w in text for w in ("invalid", "reject", "fail", "unknown", "refus")
+    ):
+        return True
+    if "address" in text and any(w in text for w in ("invalid", "reject", "unknown", "refus")):
+        return True
+    return False
+
+
 def classify_send_result(send_result: dict | None) -> str:
     """Map mail_client/outlook status payloads to a canonical event type."""
     if not send_result:
@@ -199,6 +244,10 @@ def classify_send_result(send_result: dict | None) -> str:
         return "sent"
     if status == "not_configured":
         return "mailbox_not_configured"
+    if send_result.get("error_type") == "invalid_recipient" or is_invalid_recipient_message(
+        message
+    ):
+        return "invalid_recipient"
     if "auth" in message or "login" in message or "credential" in message:
         return "authentication_failed"
     if "timeout" in message or "connection" in message or "network" in message:
@@ -207,8 +256,6 @@ def classify_send_result(send_result: dict | None) -> str:
         return "attachment_rejected"
     if "rate" in message or "limit" in message or "throttle" in message:
         return "rate_limited"
-    if "invalid" in message or "recipient" in message or "address" in message:
-        return "invalid_recipient"
     if "block" in message or "spam" in message or "policy" in message:
         return "blocked"
     return "send_failed"

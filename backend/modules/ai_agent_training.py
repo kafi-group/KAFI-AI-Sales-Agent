@@ -86,32 +86,133 @@ def _call_training_snippet(interaction: Interaction) -> str | None:
     return f"{header}\n  " + "\n  ".join(body_parts)
 
 
-def train_agent_from_history(db: Session = None) -> dict[str, Any]:
-    """Learn from curated (Train Sara & Rayan) calls first; otherwise recent calls."""
+def list_selected_training_calls(db: Session, *, limit: int = 80) -> dict[str, Any]:
+    """Return phone calls flagged Train Sara & Rayan (newest first)."""
+    from modules.call_media import get_ai_training_selected, get_call_media
+    from modules.calls import parse_call_fields
+    from db.models import Buyer, Contact
+
+    rows_out: list[dict[str, Any]] = []
+    if db is None:
+        return {"total": 0, "rows": rows_out}
+
+    calls = (
+        db.query(Interaction)
+        .filter(Interaction.channel == Channel.phone)
+        .order_by(Interaction.created_at.desc())
+        .limit(max(limit * 4, 200))
+        .all()
+    )
+    for interaction in calls:
+        if not get_ai_training_selected(interaction):
+            continue
+        contact = db.get(Contact, interaction.contact_id) if interaction.contact_id else None
+        buyer = db.get(Buyer, contact.buyer_id) if contact else None
+        parsed = parse_call_fields(interaction.content or "")
+        media = get_call_media(interaction) or {}
+        subject = (interaction.subject or "").lower()
+        persona = None
+        if "sara" in subject or "(female)" in subject:
+            persona = "female"
+        elif "rayan" in subject or "(male)" in subject:
+            persona = "male"
+        rows_out.append(
+            {
+                "id": interaction.id,
+                "buyer_id": buyer.id if buyer else None,
+                "company_name": buyer.company_name if buyer else None,
+                "contact_name": contact.full_name if contact else None,
+                "contact_phone": parsed.get("lead_phone")
+                or (contact.phone if contact else None)
+                or (contact.wa_id if contact else None),
+                "subject": interaction.subject,
+                "call_outcome": parsed.get("call_outcome"),
+                "notes": (parsed.get("notes") or "")[:240] or None,
+                "created_at": interaction.created_at.isoformat() if interaction.created_at else None,
+                "recording_available": bool(media.get("recording_available") or media.get("local_path")),
+                "transcript_status": media.get("transcript_status"),
+                "persona": persona,
+                "ai_training_selected": True,
+            }
+        )
+        if len(rows_out) >= limit:
+            break
+
+    return {"total": len(rows_out), "rows": rows_out}
+
+
+def train_agent_from_history(
+    db: Session = None,
+    *,
+    source: str = "auto",
+    interaction_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    """Learn from curated (Train Sara & Rayan) calls first; otherwise recent calls.
+
+    ``source``:
+      - ``auto`` — curated ticks if any, else recent history
+      - ``curated`` — only ticked Train Sara & Rayan calls (error if none)
+      - ``history`` — recent phone calls regardless of ticks
+      - ``ids`` — only the given interaction_ids (must be phone calls)
+    """
     from modules.call_media import get_ai_training_selected
 
     transcripts_sample: list[str] = []
     selected_used = 0
+    source_key = (source or "auto").strip().lower()
     if db is not None:
         try:
-            calls = (
-                db.query(Interaction)
-                .filter(Interaction.channel == Channel.phone)
-                .order_by(Interaction.created_at.desc())
-                .limit(80)
-                .all()
-            )
-            curated = [c for c in calls if get_ai_training_selected(c)]
-            pool = curated[:40] if curated else calls[:30]
-            selected_used = len(curated[:40]) if curated else 0
+            if source_key == "ids" and interaction_ids:
+                id_set = {int(i) for i in interaction_ids if i is not None}
+                calls = (
+                    db.query(Interaction)
+                    .filter(
+                        Interaction.channel == Channel.phone,
+                        Interaction.id.in_(id_set),
+                    )
+                    .order_by(Interaction.created_at.desc())
+                    .all()
+                )
+                pool = calls
+                selected_used = sum(1 for c in pool if get_ai_training_selected(c))
+            else:
+                calls = (
+                    db.query(Interaction)
+                    .filter(Interaction.channel == Channel.phone)
+                    .order_by(Interaction.created_at.desc())
+                    .limit(120)
+                    .all()
+                )
+                curated = [c for c in calls if get_ai_training_selected(c)]
+                if source_key == "curated":
+                    if not curated:
+                        raise ValueError(
+                            "No calls are marked Train Sara & Rayan yet. "
+                            "Tick the box on post-call drafts, then train from ticked calls."
+                        )
+                    pool = curated[:40]
+                    selected_used = len(pool)
+                elif source_key == "history":
+                    pool = calls[:30]
+                    selected_used = 0
+                else:
+                    pool = curated[:40] if curated else calls[:30]
+                    selected_used = len(curated[:40]) if curated else 0
             for c in pool:
                 snippet = _call_training_snippet(c)
                 if snippet:
                     transcripts_sample.append(snippet)
+        except ValueError:
+            raise
         except Exception as exc:
             print(f"DB query in training failed: {exc}", flush=True)
 
     if not transcripts_sample:
+        if source_key in {"curated", "ids"}:
+            raise ValueError(
+                "No usable transcripts/remarks on the selected training calls yet. "
+                "Generate captions on those calls, then try again."
+            )
         transcripts_sample = [
             "- Call Subject: AI Voice Call (Sara) to Mr. Khalid\n  Call Content/Log: Customer asked for 5% Broken White Rice specs and CNF Karachi port pricing for 50 metric tons.",
             "- Call Subject: Manual dial +923142867152\n  Call Content/Log: Customer inquired about Sesame Seeds 99% purity and 30% TT advance payment terms.",
@@ -155,6 +256,7 @@ Format your output cleanly in 4-8 concise bullet points.
     _TRAINING_STORE["last_trained_at"] = datetime.now(timezone.utc).isoformat()
     _TRAINING_STORE["total_calls_analyzed"] = len(transcripts_sample)
     _TRAINING_STORE["selected_calls_used"] = selected_used
+    _TRAINING_STORE["last_train_source"] = source_key
     _save_store()
     return dict(_TRAINING_STORE)
 

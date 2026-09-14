@@ -15,7 +15,7 @@ STATIC_CATALOGUES_DIR = _BACKEND_DIR / "static" / "catalogues"
 FALLBACK_CATALOGUES_DIR = Path(r"D:\First AI World\Cursor Projects\sales, social, hr Aug 2026\catalogue")
 
 # Gmail/Outlook hard-fail around 25 MB total. Keep a buffer for message body + MIME.
-EMAIL_ATTACH_MAX_BYTES = 20 * 1024 * 1024
+EMAIL_ATTACH_MAX_BYTES = 24 * 1024 * 1024
 
 CATALOGUES_DEF = [
     {

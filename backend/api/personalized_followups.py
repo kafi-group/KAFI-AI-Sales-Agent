@@ -39,6 +39,10 @@ class PersonalizedFollowupSend(BaseModel):
         default=None,
         description="Specific recipient phone number for WhatsApp (Meta / Mobile). Defaults to dialed or primary contact phone.",
     )
+    target_email: Optional[str] = Field(
+        default=None,
+        description="Specific recipient email. Defaults to primary/secondary emails on the contact.",
+    )
     subject: Optional[str] = None
     email_body: Optional[str] = None
     whatsapp_body: Optional[str] = None
@@ -189,6 +193,7 @@ def send_personalized_followup(
             user=user,
             channels=body.channels,
             target_phone=body.target_phone,
+            target_email=body.target_email,
             subject=body.subject,
             email_body=body.email_body,
             whatsapp_body=body.whatsapp_body,

@@ -1115,6 +1115,7 @@ class CommsGenerator:
         mailbox_user=None,
         user_id: int | None = None,
         force_phone: str | None = None,
+        force_email: str | None = None,
     ) -> tuple[Interaction, dict | None]:
         draft = db.get(Interaction, interaction_id)
         if not draft:
@@ -1137,6 +1138,7 @@ class CommsGenerator:
                 record_activity=record_activity,
                 send_mode=send_mode,
                 mailbox_user=mailbox_user,
+                force_email=force_email,
             )
         elif send and draft.channel == Channel.whatsapp:
             send_result = self._send_whatsapp_draft(
@@ -1160,9 +1162,13 @@ class CommsGenerator:
         record_activity: bool,
         send_mode: str = "individual",
         mailbox_user=None,
+        force_email: str | None = None,
     ) -> dict:
         contact = db.get(Contact, draft.contact_id)
-        if not contact or not contact.email:
+        to_email = (force_email or "").strip() or (
+            (contact.email or "").strip() if contact else ""
+        )
+        if not to_email:
             if record_activity:
                 from modules import email_activity
 
@@ -1182,7 +1188,7 @@ class CommsGenerator:
 
         mode = "bulk" if send_mode == "bulk" else "individual"
         send_result = mail_client.send_approved(
-            to=contact.email,
+            to=to_email,
             subject=draft.subject or "Kafi Commodities",
             body=draft.content,
             attachments=draft.attachments or [],
@@ -1198,14 +1204,14 @@ class CommsGenerator:
         if record_activity:
             from modules import email_activity
 
-            buyer = db.get(Buyer, contact.buyer_id)
+            buyer = db.get(Buyer, contact.buyer_id) if contact else None
             email_activity.record_send_result(
                 db,
                 send_result=send_result,
                 company_name=buyer.company_name if buyer else "Unknown",
-                to_email=contact.email,
-                buyer_id=contact.buyer_id,
-                contact_id=contact.id,
+                to_email=to_email,
+                buyer_id=contact.buyer_id if contact else None,
+                contact_id=contact.id if contact else None,
                 interaction_id=draft.id,
                 subject=draft.subject,
                 send_mode=mode,

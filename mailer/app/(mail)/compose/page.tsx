@@ -17,9 +17,13 @@ import {
 import { ensureDearSalutation } from "@/lib/personalizeEmail";
 import {
   attachmentSizeMessage,
-  estimateSendPayloadBytes,
   parseSendApiResponse,
 } from "@/lib/parseSendResponse";
+import {
+  formatAttachmentSize,
+  uploadAttachmentToSalesAgent,
+  type HostedAttachment,
+} from "@/lib/hostAttachments";
 import {
   hostDataUriImagesInBrowser,
   htmlHasDataUriImages,
@@ -55,9 +59,8 @@ function ComposeInner() {
   const [writeMode, setWriteMode] = useState<ComposeWriteMode>("free");
   const [sending, setSending] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [attachments, setAttachments] = useState<
-    Array<{ filename: string; content: string; contentType: string }>
-  >([]);
+  const [attachments, setAttachments] = useState<HostedAttachment[]>([]);
+  const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const draftId = params.get("draft_id");
@@ -77,32 +80,36 @@ function ComposeInner() {
     .filter(Boolean)
     .join(". ");
 
+  const attachmentBytes = attachments.reduce((sum, file) => sum + (file.size || 0), 0);
   const attachmentWarning =
-    attachments.length > 0
-      ? attachmentSizeMessage(estimateSendPayloadBytes({ attachments }))
-      : null;
+    attachments.length > 0 ? attachmentSizeMessage(attachmentBytes) : null;
 
   async function addAttachments(files: FileList | null) {
     if (!files?.length) return;
-    const next: Array<{ filename: string; content: string; contentType: string }> = [];
-    for (const file of Array.from(files)) {
-      const content = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = String(reader.result || "");
-          const base64 = result.includes(",") ? result.split(",")[1] : result;
-          resolve(base64);
-        };
-        reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
-        reader.readAsDataURL(file);
-      });
-      next.push({
-        filename: file.name,
-        content,
-        contentType: file.type || "application/octet-stream",
-      });
+    const auth = token || getStoredToken();
+    if (!auth) {
+      setError("Not signed in — cannot upload attachments");
+      return;
     }
-    setAttachments((prev) => [...prev, ...next]);
+    setUploadingAttachments(true);
+    setError(null);
+    setNotice("Uploading attachment(s) to Sales Agent…");
+    try {
+      const next: HostedAttachment[] = [];
+      for (const file of Array.from(files)) {
+        next.push(await uploadAttachmentToSalesAgent(file, { authToken: auth }));
+      }
+      setAttachments((prev) => [...prev, ...next]);
+      setNotice(
+        next.length === 1
+          ? `Attached ${next[0].filename} (${formatAttachmentSize(next[0].size)})`
+          : `Attached ${next.length} files`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Attachment upload failed");
+    } finally {
+      setUploadingAttachments(false);
+    }
   }
 
   function removeAttachment(index: number) {
@@ -152,6 +159,10 @@ function ComposeInner() {
         sendHtml = await hostDataUriImagesInBrowser(body, { authToken: auth });
         setBody(sendHtml);
       }
+      if (attachmentWarning) {
+        setError(attachmentWarning);
+        return;
+      }
       const payload = {
         auth_token: auth,
         to: to.trim(),
@@ -164,14 +175,19 @@ function ComposeInner() {
         company_name: mergeCompany.trim() || undefined,
         contact_name: mergeContact.trim() || undefined,
         designation: mergeDesignation.trim() || undefined,
-        attachments: attachments.length ? attachments : undefined,
+        // Hosted refs only — never base64 PDFs through Vercel (4.5 MB body limit).
+        attachments: attachments.length
+          ? attachments.map((file) => ({
+              id: file.id,
+              url: file.url,
+              filename: file.filename,
+              contentType: file.contentType,
+              size: file.size,
+            }))
+          : undefined,
       };
-      const tooLarge = attachmentSizeMessage(estimateSendPayloadBytes(payload));
-      if (tooLarge) {
-        setError(tooLarge);
-        return;
-      }
 
+      setNotice(attachments.length ? "Sending with attachment(s)…" : null);
       const res = await fetch("/api/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -295,17 +311,23 @@ function ComposeInner() {
       <input
         type="file"
         multiple
+        disabled={uploadingAttachments || sending}
         onChange={(e) => {
           void addAttachments(e.target.files);
           e.target.value = "";
         }}
       />
+      <p className="muted small">
+        PDFs and files upload to Sales Agent first (up to ~24 MB each), then send via SMTP —
+        not limited by Vercel&apos;s 4 MB request size.
+      </p>
+      {uploadingAttachments && <p className="muted small">Uploading…</p>}
       {attachments.length > 0 && (
         <>
           <ul className="small muted">
             {attachments.map((file, index) => (
-              <li key={`${file.filename}-${index}`}>
-                {file.filename}{" "}
+              <li key={`${file.id}-${index}`}>
+                {file.filename} ({formatAttachmentSize(file.size)}){" "}
                 <button type="button" className="linkish" onClick={() => removeAttachment(index)}>
                   Remove
                 </button>
@@ -318,7 +340,12 @@ function ComposeInner() {
       <label>Body</label>
       <EmailBodyEditor value={body} onChange={setBody} rows={14} />
       <div className="detail-actions">
-        <button type="button" className="btn" disabled={sending} onClick={() => void send()}>
+        <button
+          type="button"
+          className="btn"
+          disabled={sending || uploadingAttachments || Boolean(attachmentWarning)}
+          onClick={() => void send()}
+        >
           {sending ? "Sending…" : "Send"}
         </button>
         <button type="button" className="btn ghost" disabled={saving} onClick={() => void saveDraft()}>

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Optional
 
 import jwt
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -139,6 +139,18 @@ class MailerInlineUploadRequest(BaseModel):
 class MailerInlineUploadResponse(BaseModel):
     id: str
     url: str
+    content_type: str
+    size: int
+
+
+# Provider-safe ceiling for outbound email (Gmail/Outlook ~25 MB total message).
+MAILER_ATTACHMENT_MAX_BYTES = 24 * 1024 * 1024
+
+
+class MailerAttachmentUploadResponse(BaseModel):
+    id: str
+    url: str
+    filename: str
     content_type: str
     size: int
 
@@ -609,6 +621,55 @@ def upload_mailer_inline_image(
     )
 
 
+@router.post("/attachment-upload", response_model=MailerAttachmentUploadResponse)
+async def upload_mailer_file_attachment(
+    file: UploadFile = File(...),
+    token: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+    authorization: str | None = Header(default=None),
+):
+    """Store a compose attachment on Railway so Vercel /api/send stays under ~4 MB.
+
+    Browser uploads the PDF (etc.) here, then passes only ``id`` / ``url`` to the
+    mailer send route, which fetches bytes server-side before SMTP.
+    """
+    from modules import email_tracking
+    from modules.email_attachments import register_attachment_from_bytes
+
+    _resolve_report_user(db, authorization=authorization, handoff_token=token)
+    base = email_tracking.public_api_base()
+    if not base:
+        raise HTTPException(
+            status_code=503,
+            detail="PUBLIC_API_BASE_URL is not configured — cannot host attachments.",
+        )
+
+    filename = (file.filename or "attachment").strip() or "attachment"
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty attachment")
+    if len(data) > MAILER_ATTACHMENT_MAX_BYTES:
+        mb = len(data) / (1024 * 1024)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Attachment is too large ({mb:.1f} MB). "
+                f"Keep each file under {MAILER_ATTACHMENT_MAX_BYTES // (1024 * 1024)} MB "
+                "(email providers reject ~25 MB total messages)."
+            ),
+        )
+
+    ctype = (file.content_type or "application/octet-stream").split(";")[0].strip() or "application/octet-stream"
+    meta = register_attachment_from_bytes(data, filename=filename, content_type=ctype)
+    return MailerAttachmentUploadResponse(
+        id=str(meta["id"]),
+        url=f"{base}/api/mailer/inline-media/{meta['id']}",
+        filename=str(meta["filename"]),
+        content_type=str(meta["content_type"]),
+        size=int(meta["size"]),
+    )
+
+
 @router.get("/inline-media/{media_id}")
 def get_mailer_inline_media(media_id: str):
     """Public image URL for Gmail/Outlook image proxies (no auth)."""
@@ -629,12 +690,23 @@ def get_mailer_inline_media(media_id: str):
         ".png": "image/png",
         ".gif": "image/gif",
         ".webp": "image/webp",
+        ".pdf": "application/pdf",
+        ".doc": "application/msword",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xls": "application/vnd.ms-excel",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".txt": "text/plain",
+        ".csv": "text/csv",
     }.get(suffix, "application/octet-stream")
+    disposition = "inline" if ctype.startswith("image/") else "attachment"
     return FileResponse(
         path,
         media_type=ctype,
         filename=display,
-        headers={"Cache-Control": "public, max-age=86400", "Content-Disposition": f'inline; filename="{display}"'},
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "Content-Disposition": f'{disposition}; filename="{display}"',
+        },
     )
 
 

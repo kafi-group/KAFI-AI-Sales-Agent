@@ -1235,12 +1235,38 @@ class OutlookClient:
                 server.ehlo()
             try:
                 server.login(self._cred_email(), self._cred_password())
-                server.sendmail(from_addr, recipients, message.as_string())
+                refused = server.sendmail(from_addr, recipients, message.as_string())
             finally:
                 try:
                     server.quit()
                 except Exception:  # noqa: BLE001
                     pass
+            if refused:
+                detail = "; ".join(
+                    f"{addr}: {err}" for addr, err in refused.items()
+                ) or str(refused)
+                return {
+                    "status": "error",
+                    "error_type": "invalid_recipient",
+                    "message": (
+                        f"Email not sent — recipient rejected or no longer exists. {detail}"
+                    ),
+                    "to": to,
+                    "subject": subject,
+                }
+        except smtplib.SMTPRecipientsRefused as exc:
+            detail = "; ".join(
+                f"{addr}: {err}" for addr, err in (exc.recipients or {}).items()
+            ) or str(exc)
+            return {
+                "status": "error",
+                "error_type": "invalid_recipient",
+                "message": (
+                    f"Email not sent — address is invalid or no longer exists. {detail}"
+                ),
+                "to": to,
+                "subject": subject,
+            }
         except Exception as exc:  # noqa: BLE001
             err = str(exc)
             lower = err.lower()
@@ -1254,6 +1280,20 @@ class OutlookClient:
                         "through the Vercel mailer, or set RESEND_API_KEY, or upgrade "
                         f"Railway to Pro. Detail: {err}"
                     ),
+                }
+            # Some SMTP servers raise generic SMTPResponseException (550 user unknown).
+            if isinstance(exc, smtplib.SMTPResponseException) and int(getattr(exc, "smtp_code", 0) or 0) in {
+                550,
+                551,
+                552,
+                553,
+            }:
+                return {
+                    "status": "error",
+                    "error_type": "invalid_recipient",
+                    "message": f"Email not sent — recipient rejected ({exc.smtp_code}): {err}",
+                    "to": to,
+                    "subject": subject,
                 }
             return {"status": "error", "message": f"SMTP send failed: {err}"}
 

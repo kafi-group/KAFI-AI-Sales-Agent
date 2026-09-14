@@ -148,8 +148,31 @@ export interface VoiceEngineSettings {
 export interface AiTrainingData {
   last_trained_at: string | null;
   total_calls_analyzed: number;
+  selected_calls_used?: number;
+  last_train_source?: string | null;
   learned_insights: string;
   custom_rules: string;
+}
+
+export interface AiTrainingSelectedCall {
+  id: number;
+  buyer_id?: number | null;
+  company_name?: string | null;
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  subject?: string | null;
+  call_outcome?: string | null;
+  notes?: string | null;
+  created_at?: string | null;
+  recording_available?: boolean;
+  transcript_status?: string | null;
+  persona?: "male" | "female" | null;
+  ai_training_selected?: boolean;
+}
+
+export interface AiTrainingSelectedCallsResponse {
+  total: number;
+  rows: AiTrainingSelectedCall[];
 }
 
 export interface EnrichmentColumnAnalysis {
@@ -961,6 +984,14 @@ export interface AvailablePhoneOption {
   wa_supported: boolean;
 }
 
+export interface AvailableEmailOption {
+  email: string;
+  label: string;
+  contact_name?: string | null;
+  contact_id?: number | null;
+  is_primary?: boolean;
+}
+
 export interface PersonalizedFollowupDraft {
   id: number;
   interaction_id: number;
@@ -973,6 +1004,8 @@ export interface PersonalizedFollowupDraft {
   contact_phone: string | null;
   available_phones?: AvailablePhoneOption[];
   selected_phone?: string | null;
+  available_emails?: AvailableEmailOption[];
+  selected_email?: string | null;
   created_by_user_id: number | null;
   call_outcome: string;
   call_context?: string | null;
@@ -1007,6 +1040,7 @@ export interface PersonalizedFollowupListResponse {
 export interface PersonalizedFollowupSendPayload {
   channels?: string;
   target_phone?: string;
+  target_email?: string;
   subject?: string;
   email_body?: string;
   whatsapp_body?: string;
@@ -1021,6 +1055,9 @@ export interface PersonalizedFollowupSendResponse {
   email_sent: boolean;
   whatsapp_sent: boolean;
   needs_whatsapp_template?: boolean;
+  email_invalid?: boolean;
+  failed_email?: string | null;
+  available_emails?: AvailableEmailOption[];
   message: string;
 }
 
@@ -1313,6 +1350,7 @@ export interface ContactUpdate {
   full_name?: string;
   designation?: string;
   email?: string;
+  secondary_email?: string;
   phone?: string;
   preferred_language?: string;
   consent_status?: string;
@@ -4000,10 +4038,24 @@ export const client = {
     request<AiTrainingData>("/ai-sales-agent/training", {
       headers: aiSalesAgentHeaders(),
     }),
-  trainAiFromHistory: () =>
+  listAiTrainingSelectedCalls: (limit = 80) =>
+    request<AiTrainingSelectedCallsResponse>(
+      `/ai-sales-agent/training/selected-calls?limit=${limit}`,
+      { headers: aiSalesAgentHeaders() },
+    ),
+  trainAiFromHistory: (
+    opts: {
+      source?: "auto" | "curated" | "history" | "ids";
+      interaction_ids?: number[];
+    } = {},
+  ) =>
     request<AiTrainingData>("/ai-sales-agent/train-from-history", {
       method: "POST",
       headers: aiSalesAgentHeaders(),
+      body: JSON.stringify({
+        source: opts.source || "auto",
+        interaction_ids: opts.interaction_ids || [],
+      }),
     }),
   updateAiSalesRules: (rules: string) =>
     request<AiTrainingData>("/ai-sales-agent/update-rules", {

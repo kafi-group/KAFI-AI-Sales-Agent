@@ -243,12 +243,20 @@ export function PersonalizedEmailsPage({
       }
       const result = await client.sendPersonalizedFollowup(selected.id, {
         channels,
+        target_email: selected.selected_email || selected.contact_email || undefined,
         ...templateOpts,
       });
       setNotice(result.message);
       setRows((prev) =>
         prev.map((r) => (r.id === result.draft.id ? result.draft : r)),
       );
+
+      if (result.email_invalid) {
+        setNotice(
+          result.message ||
+            "Email not sent — that address is no longer valid. Open the lead and try another email.",
+        );
+      }
 
       const waFailedNeedsTemplate =
         result.needs_whatsapp_template ||

@@ -139,7 +139,9 @@ async def save_upload(file: UploadFile) -> dict:
     if not data:
         raise ValueError(f"File '{filename}' is empty")
     if len(data) > MAX_FILE_BYTES:
-        raise ValueError(f"File '{filename}' exceeds 10 MB limit")
+        raise ValueError(
+            f"File '{filename}' exceeds {MAX_FILE_BYTES // (1024 * 1024)} MB limit"
+        )
 
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     att_id = str(uuid.uuid4())

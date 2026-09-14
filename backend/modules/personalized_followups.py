@@ -474,6 +474,81 @@ def get_available_phones_for_draft(db: Session, draft: PersonalizedFollowupDraft
     return result
 
 
+def _normalize_email_addr(raw: str | None) -> str:
+    return (raw or "").strip().lower()
+
+
+def get_available_emails_for_draft(db: Session, draft: PersonalizedFollowupDraft) -> list[dict[str, Any]]:
+    """Gather and deduplicate all emails on the lead's contact(s)."""
+    contact = db.get(Contact, draft.contact_id) if draft.contact_id else None
+    buyer = db.get(Buyer, draft.buyer_id) if draft.buyer_id else None
+
+    raw_list: list[dict[str, Any]] = []
+
+    if contact:
+        if contact.email:
+            raw_list.append({
+                "email": contact.email,
+                "label": "Primary Email",
+                "contact_name": contact.full_name,
+                "contact_id": contact.id,
+                "is_primary": True,
+            })
+        if contact.secondary_email:
+            raw_list.append({
+                "email": contact.secondary_email,
+                "label": "Secondary Email",
+                "contact_name": contact.full_name,
+                "contact_id": contact.id,
+                "is_primary": False,
+            })
+
+    if buyer and buyer.contacts:
+        for c in buyer.contacts:
+            if contact and c.id == contact.id:
+                continue
+            if c.email:
+                raw_list.append({
+                    "email": c.email,
+                    "label": f"{c.full_name} (Primary)",
+                    "contact_name": c.full_name,
+                    "contact_id": c.id,
+                    "is_primary": True,
+                })
+            if c.secondary_email:
+                raw_list.append({
+                    "email": c.secondary_email,
+                    "label": f"{c.full_name} (Secondary)",
+                    "contact_name": c.full_name,
+                    "contact_id": c.id,
+                    "is_primary": False,
+                })
+
+    seen: set[str] = set()
+    result: list[dict[str, Any]] = []
+    for item in raw_list:
+        raw_e = (item.get("email") or "").strip()
+        if not raw_e or "@" not in raw_e:
+            continue
+        key = _normalize_email_addr(raw_e)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append({
+            "email": raw_e,
+            "label": item.get("label") or "Email",
+            "contact_name": item.get("contact_name"),
+            "contact_id": item.get("contact_id"),
+            "is_primary": bool(item.get("is_primary")),
+        })
+
+    # Prefer the draft contact's primary email first
+    if contact and contact.email:
+        primary_key = _normalize_email_addr(contact.email)
+        result.sort(key=lambda x: (0 if _normalize_email_addr(x["email"]) == primary_key else 1, x["label"]))
+    return result
+
+
 def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, Any]:
     from modules.call_media import get_ai_training_selected, get_call_media, public_call_media
 
@@ -496,6 +571,13 @@ def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, An
         first_mobile = next((p["phone"] for p in available_phones if not p["is_landline"]), None)
         selected_phone = mobile_dialed or dialed or first_mobile or available_phones[0]["phone"]
 
+    available_emails = get_available_emails_for_draft(db, draft)
+    selected_email = None
+    if available_emails:
+        selected_email = available_emails[0]["email"]
+    elif contact and contact.email:
+        selected_email = contact.email
+
     media = public_call_media(get_call_media(interaction), interaction_id=draft.interaction_id) if interaction else {}
 
     return {
@@ -510,6 +592,8 @@ def draft_to_dict(db: Session, draft: PersonalizedFollowupDraft) -> dict[str, An
         "contact_phone": (contact.phone or contact.wa_id) if contact else None,
         "available_phones": available_phones,
         "selected_phone": selected_phone,
+        "available_emails": available_emails,
+        "selected_email": selected_email,
         "created_by_user_id": draft.created_by_user_id,
         "call_outcome": draft.call_outcome,
         "call_context": call_context,
@@ -885,6 +969,7 @@ def send_draft(
     user: AppUser,
     channels: str | list[str] | None = None,
     target_phone: str | None = None,
+    target_email: str | None = None,
     subject: str | None = None,
     email_body: str | None = None,
     whatsapp_body: str | None = None,
@@ -1006,6 +1091,14 @@ def send_draft(
         if dialed_p:
             recipient_wa_phone = normalize_e164(dialed_p) or dialed_p
 
+    available_emails = get_available_emails_for_draft(db, draft)
+    recipient_email = (target_email or "").strip() or None
+    if not recipient_email:
+        if available_emails:
+            recipient_email = available_emails[0]["email"]
+        elif contact and (contact.email or "").strip():
+            recipient_email = contact.email.strip()
+
     comms = get_comms()
     email_status = draft.email_send_status
     email_message = draft.email_send_message
@@ -1015,10 +1108,14 @@ def send_draft(
     wa_personal_message = draft.whatsapp_personal_send_message
     email_interaction_id = draft.email_interaction_id
     wa_interaction_id = draft.whatsapp_interaction_id
+    email_invalid = False
+    failed_email = None
 
     # Email
     if send_email:
         try:
+            if not recipient_email:
+                raise ValueError("No email address available for this contact")
             email_draft = comms.create_manual_email_draft(
                 db,
                 buyer_id=draft.buyer_id,
@@ -1034,6 +1131,7 @@ def send_draft(
                 approved_by=user.username,
                 send=True,
                 mailbox_user=user,
+                force_email=recipient_email,
             )
             email_status = (send_result or {}).get("status") or "sent"
             email_message = (send_result or {}).get("message")
@@ -1041,9 +1139,31 @@ def send_draft(
             if email_status not in {"sent", "queued"} and str(approved_status) == "sent":
                 email_status = "sent"
                 email_message = email_message or "Email sent"
+            from modules.email_activity import classify_send_result, is_invalid_recipient_message
+
+            if email_status not in {"sent", "queued"} and (
+                classify_send_result(send_result) == "invalid_recipient"
+                or is_invalid_recipient_message(email_message)
+            ):
+                email_invalid = True
+                failed_email = recipient_email
+                email_message = (
+                    f"Email not sent — {recipient_email} is no longer valid or does not exist. "
+                    "Try another email from this contact."
+                )
         except Exception as exc:  # noqa: BLE001
             email_status = "error"
             email_message = str(exc)
+            from modules.email_activity import is_invalid_recipient_message
+
+            if is_invalid_recipient_message(email_message) or "no email address" in email_message.lower():
+                email_invalid = True
+                failed_email = recipient_email
+                if recipient_email:
+                    email_message = (
+                        f"Email not sent — {recipient_email} is no longer valid or does not exist. "
+                        "Try another email from this contact."
+                    )
 
     # WhatsApp (free text inside 24h window, or approved template outside it)
     if send_whatsapp:
@@ -1247,6 +1367,19 @@ def send_draft(
     else:
         message = "WhatsApp sent." if wa_ok else f"WhatsApp not sent: {wa_message}"
 
+    remaining_emails = [
+        e
+        for e in available_emails
+        if not failed_email
+        or _normalize_email_addr(e.get("email")) != _normalize_email_addr(failed_email)
+    ]
+    if email_invalid and not remaining_emails:
+        message = (
+            f"All listed emails for this contact are invalid or do not exist"
+            f"{f' (last tried: {failed_email})' if failed_email else ''}. "
+            "Add a new email address to continue."
+        )
+
     return {
         "draft": draft_to_dict(db, draft),
         "email_sent": email_ok if requested_email else False,
@@ -1257,5 +1390,8 @@ def send_draft(
             and wa_message
             and "template" in (wa_message or "").lower()
         ),
+        "email_invalid": email_invalid if requested_email else False,
+        "failed_email": failed_email,
+        "available_emails": available_emails,
         "message": message,
     }
