@@ -668,6 +668,8 @@ function ExpandableCell({
 const MAX_BULK_ONBOARD = 25;
 const BULK_ONBOARD_DELAY_MS = 1000;
 const BULK_DELETE_CHUNK = 40;
+/** Keep each move request small enough for Vercel→Railway proxy timeouts. */
+const BULK_MOVE_CHUNK = 100;
 
 interface BulkOnboardRowResult {
   id: number;
@@ -2289,24 +2291,107 @@ export function LeadsTablePage({
     if (ids.length === 0) return;
 
     setMovingToModule(true);
+    setSaveNotice(null);
+    const startedAt = Date.now();
+    const labelHint =
+      MOVE_MODULE_LABELS[targetModule] || targetModule.replace(/_/g, " ");
     try {
-      setSaveNotice(`Moving ${ids.length} lead(s) to target module…`);
-      const res = await client.moveLeadsToModule(ids, targetModule, ids.length);
-      if (res.updated_count !== ids.length) {
+      let moved = 0;
+      let targetLabel = labelHint;
+      const failedChunks: string[] = [];
+      if (ids.length > 1) {
+        setActionProgress({
+          title: `Moving to ${labelHint}`,
+          mode: "determinate",
+          current: 0,
+          total: ids.length,
+          detail: `${ids.length} selected`,
+          startedAt,
+          accent: "emerald",
+        });
+      } else {
+        setSaveNotice(`Moving 1 lead to ${labelHint}…`);
+      }
+
+      for (let i = 0; i < ids.length; i += BULK_MOVE_CHUNK) {
+        const chunk = ids.slice(i, i + BULK_MOVE_CHUNK);
+        if (ids.length > 1) {
+          setActionProgress({
+            title: `Moving to ${labelHint}`,
+            mode: "determinate",
+            current: i,
+            total: ids.length,
+            detail: `Batch ${Math.floor(i / BULK_MOVE_CHUNK) + 1} · ${chunk.length} leads`,
+            startedAt,
+            accent: "emerald",
+          });
+        }
+        try {
+          const res = await client.moveLeadsToModule(chunk, targetModule, chunk.length);
+          moved += res.updated_count;
+          targetLabel = res.target_label || targetLabel;
+        } catch (chunkErr) {
+          const msg =
+            chunkErr instanceof Error ? chunkErr.message : "Batch failed";
+          failedChunks.push(
+            `IDs ${i + 1}–${Math.min(i + chunk.length, ids.length)}: ${msg}`,
+          );
+          // Continue remaining batches — partial success is better than all-or-nothing timeout.
+        }
+        if (ids.length > 1) {
+          setActionProgress({
+            title: `Moving to ${labelHint}`,
+            mode: "determinate",
+            current: Math.min(i + chunk.length, ids.length),
+            total: ids.length,
+            detail: `Moved ${moved} so far`,
+            startedAt,
+            accent: "emerald",
+          });
+        }
+      }
+
+      if (moved === 0 && failedChunks.length > 0) {
+        onError(failedChunks[0] || "Failed to move leads to target module");
+        return;
+      }
+
+      const movedSet = new Set(ids);
+      // Optimistically drop moved rows from the current table view.
+      setRows((prev) => prev.filter((row) => !movedSet.has(row.id)));
+      setDrafts((prev) => {
+        const next = { ...prev };
+        for (const id of movedSet) delete next[id];
+        return next;
+      });
+      setOriginalKeys((prev) => {
+        const next = { ...prev };
+        for (const id of movedSet) delete next[id];
+        return next;
+      });
+      setTotal((prev) => Math.max(0, prev - moved));
+      setFilteredCount((prev) => Math.max(0, prev - moved));
+      clearSelection();
+      await loadSectionCounts();
+      void loadTable();
+
+      if (failedChunks.length > 0) {
         setSaveNotice(
-          `Moved ${res.updated_count} of ${ids.length} selected lead(s) to ${res.target_label}.`,
+          `Moved ${moved} of ${ids.length} to ${targetLabel}. Some batches failed — retry remaining selection.`,
+        );
+        onError(failedChunks.slice(0, 2).join(" · "));
+      } else if (moved !== ids.length) {
+        setSaveNotice(
+          `Moved ${moved} of ${ids.length} selected lead(s) to ${targetLabel}.`,
         );
       } else {
-        setSaveNotice(
-          `Successfully moved ${res.updated_count} lead(s) to ${res.target_label}.`,
-        );
+        setSaveNotice(`Successfully moved ${moved} lead(s) to ${targetLabel}.`);
       }
-      clearSelection();
-      await loadTable();
-      await loadSectionCounts();
+      setTimeout(() => setSaveNotice(null), 6000);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to move leads to target module");
     } finally {
+      setActionProgress(null);
       setMovingToModule(false);
     }
   }

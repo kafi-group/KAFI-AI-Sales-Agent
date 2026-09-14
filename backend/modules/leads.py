@@ -2970,7 +2970,7 @@ def move_leads_to_module(
     """
     from datetime import datetime
     from sqlalchemy import or_, func as sa_func
-    from db.models import AppUser
+    from db.models import AppUser, Buyer
     from modules.audit import log_action
 
     # Preserve order, drop duplicates / invalid ids — never expand to a folder.
@@ -2995,6 +2995,34 @@ def move_leads_to_module(
     target_label = module.replace("_", " ").title()
     lead_ids = unique_ids
 
+    def _existing_buyer_ids(ids: list[int]) -> list[int]:
+        if not ids:
+            return []
+        found = {
+            int(row[0])
+            for row in db.query(Buyer.id).filter(Buyer.id.in_(ids)).all()
+        }
+        return [lid for lid in ids if lid in found]
+
+    def _bulk_set_source(ids: list[int], source: str) -> list[int]:
+        """Fast path: bulk UPDATE for source and blank master_type / intake_method."""
+        existing = _existing_buyer_ids(ids)
+        if not existing:
+            return []
+        db.query(Buyer).filter(
+            Buyer.id.in_(existing),
+            or_(Buyer.master_type.is_(None), Buyer.master_type == ""),
+        ).update({Buyer.master_type: "fmcg"}, synchronize_session=False)
+        db.query(Buyer).filter(
+            Buyer.id.in_(existing),
+            or_(Buyer.intake_method.is_(None), Buyer.intake_method == ""),
+        ).update({Buyer.intake_method: "upload"}, synchronize_session=False)
+        db.query(Buyer).filter(Buyer.id.in_(existing)).update(
+            {Buyer.source: source},
+            synchronize_session=False,
+        )
+        return existing
+
     if module == "khalid_focused_sales":
         khalid_user = (
             db.query(AppUser)
@@ -3008,18 +3036,26 @@ def move_leads_to_module(
         )
         khalid_id = khalid_user.id if khalid_user else 1
         khalid_name = khalid_user.username if khalid_user else "Mr. Khalid"
-        for lead_id in lead_ids:
-            buyer = buyers_module.get_buyer(db, lead_id)
-            if buyer:
-                buyer.source = "khalid_focused_sales"
-                buyer.assigned_to_user_id = khalid_id
-                buyer.assigned_to = khalid_name
-                buyer.assigned_at = datetime.utcnow()
-                if not buyer.master_type:
-                    buyer.master_type = "fmcg"
-                if not buyer.intake_method:
-                    buyer.intake_method = "upload"
-                updated_ids.append(lead_id)
+        existing = _existing_buyer_ids(lead_ids)
+        if existing:
+            db.query(Buyer).filter(
+                Buyer.id.in_(existing),
+                or_(Buyer.master_type.is_(None), Buyer.master_type == ""),
+            ).update({Buyer.master_type: "fmcg"}, synchronize_session=False)
+            db.query(Buyer).filter(
+                Buyer.id.in_(existing),
+                or_(Buyer.intake_method.is_(None), Buyer.intake_method == ""),
+            ).update({Buyer.intake_method: "upload"}, synchronize_session=False)
+            db.query(Buyer).filter(Buyer.id.in_(existing)).update(
+                {
+                    Buyer.source: "khalid_focused_sales",
+                    Buyer.assigned_to_user_id: khalid_id,
+                    Buyer.assigned_to: khalid_name,
+                    Buyer.assigned_at: datetime.utcnow(),
+                },
+                synchronize_session=False,
+            )
+        updated_ids = existing
         target_label = "Khalid Focused Sales"
 
     elif module in {
@@ -3029,15 +3065,7 @@ def move_leads_to_module(
         "incomplete_archives",
         "old_clients",
     }:
-        for lead_id in lead_ids:
-            buyer = buyers_module.get_buyer(db, lead_id)
-            if buyer:
-                buyer.source = module
-                if not buyer.master_type:
-                    buyer.master_type = "fmcg"
-                if not buyer.intake_method:
-                    buyer.intake_method = "upload"
-                updated_ids.append(lead_id)
+        updated_ids = _bulk_set_source(lead_ids, module)
         labels = {
             "hyperstore_targeted": "Hyperstore Target",
             "targeted_distributor": "Targeted Distributors",
@@ -3098,34 +3126,54 @@ def move_leads_to_module(
         target_label = "Did not receive call"
 
     elif module == "master":
-        for lead_id in lead_ids:
-            buyer = buyers_module.get_buyer(db, lead_id)
-            if buyer:
-                if not buyer.source or buyer.source == "master":
-                    buyer.source = "old_clients"
-                if not buyer.master_type:
-                    buyer.master_type = "fmcg"
-                if not buyer.intake_method:
-                    buyer.intake_method = "upload"
-                updated_ids.append(lead_id)
+        existing = _existing_buyer_ids(lead_ids)
+        if existing:
+            db.query(Buyer).filter(
+                Buyer.id.in_(existing),
+                or_(Buyer.master_type.is_(None), Buyer.master_type == ""),
+            ).update({Buyer.master_type: "fmcg"}, synchronize_session=False)
+            db.query(Buyer).filter(
+                Buyer.id.in_(existing),
+                or_(Buyer.intake_method.is_(None), Buyer.intake_method == ""),
+            ).update({Buyer.intake_method: "upload"}, synchronize_session=False)
+            db.query(Buyer).filter(
+                Buyer.id.in_(existing),
+                or_(
+                    Buyer.source.is_(None),
+                    Buyer.source == "",
+                    Buyer.source == "master",
+                ),
+            ).update({Buyer.source: "old_clients"}, synchronize_session=False)
+        updated_ids = existing
         target_label = "Master Table (FMCG)"
 
     else:
         # Dynamic custom module (e.g. testing or user-created custom list)
         from db.models import CustomLeadModule
 
-        for lead_id in lead_ids:
-            buyer = buyers_module.get_buyer(db, lead_id)
-            if buyer:
-                buyer.source = module
-                buyer.intake_method = "upload"
-                if not buyer.master_type:
-                    buyer.master_type = "fmcg"
-                if module == "schedule_meeting":
-                    # Queue for meeting details — not yet visible to PA until scheduled.
-                    if (buyer.meeting_status or "").strip().lower() != "scheduled":
-                        buyer.meeting_status = "pending"
-                updated_ids.append(lead_id)
+        existing = _existing_buyer_ids(lead_ids)
+        if existing:
+            db.query(Buyer).filter(
+                Buyer.id.in_(existing),
+                or_(Buyer.master_type.is_(None), Buyer.master_type == ""),
+            ).update({Buyer.master_type: "fmcg"}, synchronize_session=False)
+            db.query(Buyer).filter(Buyer.id.in_(existing)).update(
+                {
+                    Buyer.source: module,
+                    Buyer.intake_method: "upload",
+                },
+                synchronize_session=False,
+            )
+            if module == "schedule_meeting":
+                db.query(Buyer).filter(
+                    Buyer.id.in_(existing),
+                    or_(
+                        Buyer.meeting_status.is_(None),
+                        Buyer.meeting_status == "",
+                        sa_func.lower(sa_func.coalesce(Buyer.meeting_status, "")) != "scheduled",
+                    ),
+                ).update({Buyer.meeting_status: "pending"}, synchronize_session=False)
+        updated_ids = existing
         cm = db.query(CustomLeadModule).filter(CustomLeadModule.key == module).first()
         if cm:
             target_label = cm.name
@@ -3143,7 +3191,9 @@ def move_leads_to_module(
             details={
                 "target_module": module,
                 "target_label": target_label,
-                "lead_ids": updated_ids,
+                "updated_count": len(updated_ids),
+                "lead_ids": updated_ids[:200],
+                "lead_ids_truncated": len(updated_ids) > 200,
             },
         )
 
@@ -3154,6 +3204,7 @@ def move_leads_to_module(
         "target_module": module,
         "target_label": target_label,
     }
+
 
 
 def latest_call_caption_for_buyer(db: Session, buyer_id: int) -> dict[str, object]:
