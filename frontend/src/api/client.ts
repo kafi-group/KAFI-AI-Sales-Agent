@@ -2165,6 +2165,12 @@ export const client = {
     if (params.intake_method) search.set("intake_method", params.intake_method);
     if (params.new_search_lead_only) search.set("new_search_lead_only", "true");
     if (params.master_type) search.set("master_type", params.master_type);
+    // Same as listLeadsTable — column filters (designation blanks, etc.) must apply to Select all.
+    Object.entries(params).forEach(([k, v]) => {
+      if (v != null && v !== "" && v !== false && !search.has(k)) {
+        search.set(k, String(v));
+      }
+    });
     const query = search.toString();
     return request<LeadTableIdsResponse>(`/leads/table/ids${query ? `?${query}` : ""}`);
   },

@@ -2326,7 +2326,19 @@ export function LeadsTablePage({
     setSelectingAll(true);
     try {
       const result = await client.listLeadsTableIds(tableQueryParams);
-      setSelected(new Set(result.ids));
+      const ids = result.ids || [];
+      if (ids.length === 0) {
+        onError("No leads matched the current filters — nothing selected.");
+        return;
+      }
+      if (filteredCount > 0 && ids.length !== filteredCount) {
+        const proceed = window.confirm(
+          `Filter shows ${filteredCount} matching, but Select all loaded ${ids.length} IDs.\n\n` +
+            `Use the ${ids.length} loaded IDs? (Cancel to abort — do not move until counts match.)`,
+        );
+        if (!proceed) return;
+      }
+      setSelected(new Set(ids));
       setAllMatchingSelected(true);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to select all matching leads");
@@ -5308,6 +5320,12 @@ export function LeadsTablePage({
                   {moveConfirmTarget.moduleLabel}
                 </span>
               </div>
+              {moveConfirmTarget.count >= filteredCount && filteredCount > 0 ? (
+                <p className="pt-2 text-[11px] text-amber-300/90 border-t border-slate-800">
+                  This is the full current filter result ({filteredCount} matching
+                  {total > 0 ? ` · ${total} in section` : ""}). Double-check before confirming.
+                </p>
+              ) : null}
             </div>
 
             <div className="flex justify-end gap-2.5 pt-2">
