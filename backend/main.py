@@ -288,12 +288,13 @@ _PUBLIC_API_PATHS = {
     "/api/calls/twilio-status",
     "/api/mailer/session/redeem",
     "/api/mailer/handoff-login",
-    # Mailer SMTP routes report activity / Sent APPEND with handoff JWT (no session cookie).
+    # Mailer SMTP routes use handoff JWT (no session cookie) — must stay public.
     "/api/mailer/report-activity",
     "/api/mailer/append-sent",
     "/api/mailer/prepare-tracked-body",
     "/api/mailer/schedule-bulk",
     "/api/mailer/inline-upload",
+    "/api/mailer/smtp-credentials",
 }
 _PUBLIC_API_PREFIXES = (
     "/api/webhooks/",

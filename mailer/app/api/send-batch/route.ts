@@ -165,7 +165,8 @@ export async function POST(req: NextRequest) {
           send_mode: isBulk ? "bulk" : "individual",
           record_send: !isBulk,
         });
-        if (sent.ok) {
+        // Bulk: keep one Sent copy only (saves mailbox + DB space). Recipients still get full mail.
+        if (sent.ok && (!isBulk || i === 0)) {
           await appendMailerSentCopy({
             token,
             to: lead.contact_email,

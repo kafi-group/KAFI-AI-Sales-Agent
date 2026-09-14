@@ -213,6 +213,30 @@ class MailerSmtpCredentialsResponse(BaseModel):
     display_name: Optional[str] = None
 
 
+class MailerSmtpCredentialsRequest(BaseModel):
+    """Optional handoff JWT in JSON body (preferred over query for large bulk tokens)."""
+
+    token: Optional[str] = None
+
+
+def _smtp_credentials_for_user(user: AppUser) -> MailerSmtpCredentialsResponse:
+    account = resolve_user_mailbox(user)
+    if not account:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Company mailbox is not set up for this Sales Agent login. "
+                "An admin must configure the mailbox once for this user — "
+                "reps only need their Sales Agent username/password to send."
+            ),
+        )
+    return MailerSmtpCredentialsResponse(
+        email=account.email,
+        password=account.password,
+        display_name=account.display_name,
+    )
+
+
 @router.get("/smtp-credentials", response_model=MailerSmtpCredentialsResponse)
 def get_mailer_smtp_credentials(
     token: str | None = Query(default=None),
@@ -229,21 +253,24 @@ def get_mailer_smtp_credentials(
         authorization=authorization,
         handoff_token=token,
     )
-    account = resolve_user_mailbox(user)
-    if not account:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Company mailbox is not set up for this Sales Agent login. "
-                "An admin must configure the mailbox once for this user — "
-                "reps only need their Sales Agent username/password to send."
-            ),
-        )
-    return MailerSmtpCredentialsResponse(
-        email=account.email,
-        password=account.password,
-        display_name=account.display_name,
+    return _smtp_credentials_for_user(user)
+
+
+@router.post("/smtp-credentials", response_model=MailerSmtpCredentialsResponse)
+def post_mailer_smtp_credentials(
+    payload: MailerSmtpCredentialsRequest | None = None,
+    token: str | None = Query(default=None),
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Same as GET, but accepts handoff JWT in the JSON body (avoids URL length limits)."""
+    body_token = (payload.token if payload else None) or token
+    user = _resolve_report_user(
+        db,
+        authorization=authorization,
+        handoff_token=body_token,
     )
+    return _smtp_credentials_for_user(user)
 
 
 @router.post("/session", response_model=MailerSessionResponse)

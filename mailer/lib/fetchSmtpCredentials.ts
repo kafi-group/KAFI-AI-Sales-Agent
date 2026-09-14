@@ -36,18 +36,55 @@ export async function fetchSmtpCredentialsFromSalesAgent(opts: {
   const handoffToken = (opts.handoffToken || "").trim();
   if (!authToken && !handoffToken) return null;
 
-  const url = new URL(`${base}/mailer/smtp-credentials`);
-  if (handoffToken) url.searchParams.set("token", handoffToken);
-
-  const headers: Record<string, string> = {};
+  // Prefer POST so large bulk handoff JWTs are not truncated in query strings.
+  const url = `${base}/mailer/smtp-credentials`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
   try {
-    const res = await fetch(url.toString(), {
+    const res = await fetch(url, {
+      method: "POST",
       headers,
+      body: JSON.stringify(handoffToken ? { token: handoffToken } : {}),
       cache: "no-store",
     });
     if (!res.ok) {
+      // Older backends may only expose GET — fall back once.
+      if (res.status === 405 || res.status === 404) {
+        const getUrl = new URL(url);
+        if (handoffToken) getUrl.searchParams.set("token", handoffToken);
+        const getRes = await fetch(getUrl.toString(), {
+          headers: authToken
+            ? { Authorization: `Bearer ${authToken}` }
+            : undefined,
+          cache: "no-store",
+        });
+        if (!getRes.ok) {
+          const detail = await getRes.text().catch(() => "");
+          console.error(
+            `[mailer] smtp-credentials HTTP ${getRes.status}: ${detail.slice(0, 200)}`,
+          );
+          return null;
+        }
+        const data = (await getRes.json()) as {
+          email?: string;
+          password?: string;
+          display_name?: string | null;
+        };
+        const email = (data.email || "").trim();
+        const password = (data.password || "").trim();
+        if (!email || !password) {
+          console.error("[mailer] smtp-credentials response missing email/password");
+          return null;
+        }
+        return {
+          email,
+          password,
+          displayName: data.display_name ?? null,
+        };
+      }
       const detail = await res.text().catch(() => "");
       console.error(
         `[mailer] smtp-credentials HTTP ${res.status}: ${detail.slice(0, 200)}`,
