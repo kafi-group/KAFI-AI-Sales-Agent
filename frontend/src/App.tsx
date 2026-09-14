@@ -783,7 +783,7 @@ function DashboardApp() {
       setError(
         e instanceof Error
           ? e.message
-          : "Could not reconnect. If you see 502, redeploy Kafi-Sales-Agent on Railway.",
+          : "Could not reconnect. If you see 502, open Settings → Restart Railway backend.",
       );
     } finally {
       setReconnectingDb(false);

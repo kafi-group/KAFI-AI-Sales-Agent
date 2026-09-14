@@ -38,6 +38,8 @@ export function SettingsPage({ onError }: SettingsPageProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [recoverNotice, setRecoverNotice] = useState<string | null>(null);
+  const [restartingRailway, setRestartingRailway] = useState(false);
+  const [railwayPin, setRailwayPin] = useState("");
 
   // Lock / Unlock State
   const [isUnlocked, setIsUnlocked] = useState(false);
@@ -113,10 +115,35 @@ export function SettingsPage({ onError }: SettingsPageProps) {
       onError(
         err instanceof Error
           ? err.message
-          : "Could not reconnect. If you see 502, redeploy Kafi-Sales-Agent on Railway.",
+          : "Could not reconnect. If you see 502, use Restart Railway backend below.",
       );
     } finally {
       setRecovering(false);
+    }
+  }
+
+  async function handleRestartRailway(mode: "restart" | "redeploy") {
+    if (!railwayPin.trim()) {
+      onError("Enter the emergency OPS_REDEPLOY_PIN first (set on Vercel).");
+      return;
+    }
+    const label = mode === "redeploy" ? "redeploy" : "restart";
+    const confirmed = window.confirm(
+      mode === "redeploy"
+        ? "Redeploy Kafi-Sales-Agent on Railway (rebuild)? Takes 1–2 minutes."
+        : "Restart Kafi-Sales-Agent on Railway (no rebuild)? Clears stuck 502s in ~30–60s.",
+    );
+    if (!confirmed) return;
+    setRestartingRailway(true);
+    setRecoverNotice(null);
+    try {
+      const result = await client.restartRailwayBackend(railwayPin.trim(), mode);
+      setRecoverNotice(result.message || `Railway ${label} started.`);
+      setRailwayPin("");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : `Railway ${label} failed`);
+    } finally {
+      setRestartingRailway(false);
     }
   }
 
@@ -251,8 +278,7 @@ export function SettingsPage({ onError }: SettingsPageProps) {
             <h3 className="text-base font-medium text-slate-100">Database connection</h3>
             <p className="mt-1 text-sm text-slate-400">
               If contacts, WhatsApp, or email suddenly show empty (overnight / weekend), click
-              Reconnect to reset the database pool. Works when the API still responds. A full{" "}
-              <span className="text-slate-300">502 Bad Gateway</span> still needs a Railway redeploy.
+              Reconnect to reset the database pool. Works when the API still responds.
             </p>
             {recoverNotice ? (
               <p className="mt-2 text-xs text-emerald-300/90">{recoverNotice}</p>
@@ -262,10 +288,54 @@ export function SettingsPage({ onError }: SettingsPageProps) {
             type="button"
             variant="secondary"
             onClick={() => void handleReconnectDb()}
-            disabled={recovering}
+            disabled={recovering || restartingRailway}
             icon={IconRefresh}
           >
             {recovering ? "Reconnecting…" : "Reconnect database"}
+          </ActionButton>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-5 sm:p-6 space-y-4">
+        <div>
+          <h3 className="text-base font-medium text-slate-100">Restart Railway backend (502 fix)</h3>
+          <p className="mt-1 text-sm text-slate-400">
+            Use this when the whole API is dead (<span className="text-slate-300">502 Bad Gateway</span>).
+            Runs on Vercel → Railway API, so it still works when Sales Agent is down. Requires env vars on
+            Vercel: <span className="font-mono text-[11px] text-slate-300">RAILWAY_API_TOKEN</span>,{" "}
+            <span className="font-mono text-[11px] text-slate-300">RAILWAY_SERVICE_ID</span>,{" "}
+            <span className="font-mono text-[11px] text-slate-300">RAILWAY_ENVIRONMENT_ID</span>,{" "}
+            <span className="font-mono text-[11px] text-slate-300">OPS_REDEPLOY_PIN</span>.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block min-w-[12rem] flex-1">
+            <span className="text-xs font-medium text-slate-300">Emergency PIN</span>
+            <input
+              type="password"
+              value={railwayPin}
+              onChange={(e) => setRailwayPin(e.target.value)}
+              placeholder="OPS_REDEPLOY_PIN"
+              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 font-mono tracking-widest"
+              autoComplete="off"
+            />
+          </label>
+          <ActionButton
+            type="button"
+            variant="secondary"
+            onClick={() => void handleRestartRailway("restart")}
+            disabled={restartingRailway || recovering}
+            icon={IconRefresh}
+          >
+            {restartingRailway ? "Working…" : "Restart backend"}
+          </ActionButton>
+          <ActionButton
+            type="button"
+            variant="secondary"
+            onClick={() => void handleRestartRailway("redeploy")}
+            disabled={restartingRailway || recovering}
+          >
+            Full redeploy
           </ActionButton>
         </div>
       </section>

@@ -1916,6 +1916,29 @@ export const client = {
       note?: string;
     }>("/system/reconnect-db", { method: "POST" }),
 
+  /**
+   * Admin emergency: restart Railway via Vercel (works even when Railway is 502).
+   * Calls same-origin /api/ops/restart-backend — not the Railway proxy.
+   */
+  restartRailwayBackend: async (pin: string, mode: "restart" | "redeploy" = "restart") => {
+    const res = await fetch("/api/ops/restart-backend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin, mode }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      message?: string;
+      action?: string;
+      configured?: Record<string, boolean>;
+    };
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || `Railway restart failed (${res.status})`);
+    }
+    return data as { ok: true; message: string; action?: string };
+  },
+
   /** Fire-and-forget wake for Railway cold starts before session bootstrap. */
   wakeBackend: async (): Promise<boolean> => {
     try {
