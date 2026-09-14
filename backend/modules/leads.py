@@ -998,8 +998,8 @@ def _filtered_lead_table_rows(
     in_interested_clients: bool = False,
     market_role: str | None = None,
     q: str | None = None,
-    sort_by: str = "created_at",
-    sort_dir: str = "desc",
+    sort_by: str = "company_name",
+    sort_dir: str = "asc",
     assigned_to_user_id: int | None = None,
     unassigned_only: bool = False,
     pool_for_user_id: int | None = None,
@@ -1094,38 +1094,17 @@ def _filtered_lead_table_rows(
                 )
             )
 
+    # Table search is company-name only (spell / substring match). Searching contact,
+    # phone, remarks, etc. caused false hits (e.g. "maya" → "ASMA YASIR TR").
     query_text = (q or "").strip().lower()
     if query_text:
-        pattern = f"%{query_text}%"
-        contact_match = (
-            db.query(Contact.buyer_id)
-            .filter(
-                or_(
-                    sa_func.lower(sa_func.coalesce(Contact.full_name, "")).like(pattern),
-                    sa_func.lower(sa_func.coalesce(Contact.email, "")).like(pattern),
-                    sa_func.lower(sa_func.coalesce(Contact.phone, "")).like(pattern),
-                    sa_func.lower(sa_func.coalesce(Contact.designation, "")).like(pattern),
-                    sa_func.lower(sa_func.coalesce(Contact.secondary_mobile, "")).like(pattern),
-                    sa_func.lower(sa_func.coalesce(Contact.primary_phone, "")).like(pattern),
-                    sa_func.lower(sa_func.coalesce(Contact.secondary_phone, "")).like(pattern),
-                    sa_func.lower(sa_func.coalesce(Contact.secondary_email, "")).like(pattern),
-                )
-            )
-            .distinct()
-            .subquery()
+        escaped = (
+            query_text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         )
+        pattern = f"%{escaped}%"
         buyer_query = buyer_query.filter(
-            or_(
-                sa_func.lower(sa_func.coalesce(Buyer.company_name, "")).like(pattern),
-                sa_func.lower(sa_func.coalesce(Buyer.country, "")).like(pattern),
-                sa_func.lower(sa_func.coalesce(Buyer.industry, "")).like(pattern),
-                sa_func.lower(sa_func.coalesce(Buyer.company_grading, "")).like(pattern),
-                sa_func.lower(sa_func.coalesce(Buyer.product_interest, "")).like(pattern),
-                sa_func.lower(sa_func.coalesce(Buyer.city, "")).like(pattern),
-                sa_func.lower(sa_func.coalesce(Buyer.address, "")).like(pattern),
-                sa_func.lower(sa_func.coalesce(Buyer.remarks, "")).like(pattern),
-                sa_func.lower(sa_func.coalesce(Buyer.assigned_to, "")).like(pattern),
-                Buyer.id.in_(db.query(contact_match.c.buyer_id)),
+            sa_func.lower(sa_func.coalesce(Buyer.company_name, "")).like(
+                pattern, escape="\\"
             )
         )
 
@@ -1173,8 +1152,8 @@ def _filtered_lead_table_rows(
     # fetching every matching row into Python just to sort and slice it.
     _SQL_SORT_COLS = {
         "created_at": Buyer.created_at,
-        "company_name": Buyer.company_name,
-        "country": Buyer.country,
+        "company_name": sa_func.lower(sa_func.coalesce(Buyer.company_name, "")),
+        "country": sa_func.lower(sa_func.coalesce(Buyer.country, "")),
     }
     use_sql_sort = (
         not call_recommended
@@ -1558,8 +1537,8 @@ def list_leads_table_ids(
     in_interested_clients: bool = False,
     market_role: str | None = None,
     q: str | None = None,
-    sort_by: str = "created_at",
-    sort_dir: str = "desc",
+    sort_by: str = "company_name",
+    sort_dir: str = "asc",
     assigned_to_user_id: int | None = None,
     unassigned_only: bool = False,
     pool_for_user_id: int | None = None,
@@ -1640,8 +1619,8 @@ def list_leads_table(
     in_interested_clients: bool = False,
     market_role: str | None = None,
     q: str | None = None,
-    sort_by: str = "created_at",
-    sort_dir: str = "desc",
+    sort_by: str = "company_name",
+    sort_dir: str = "asc",
     page: int = 1,
     page_size: int = 20,
     assigned_to_user_id: int | None = None,

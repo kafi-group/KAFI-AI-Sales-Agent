@@ -70,9 +70,9 @@ import { UNASSIGNED } from "../utils/leadAssignees";
 import { loadResearchPatience, RESEARCH_PATIENCE } from "../lib/researchPatience";
 
 const SORT_FILTER_OPTIONS = [
+  { value: "company_name", label: "Company name" },
   { value: "recent", label: "Recently added" },
   { value: "oldest", label: "Oldest first" },
-  { value: "company_name", label: "Company name" },
   { value: "country", label: "Country" },
   { value: "latest_score", label: "AI company grading" },
   { value: "market_role", label: "Market role" },
@@ -102,7 +102,7 @@ import {
 import { useAuth } from "../auth/AuthContext";
 
 const TABLE_PAGE_SIZE = 20;
-const TABLE_VIEW_STORAGE_PREFIX = "kafi_leads_table_view";
+const TABLE_VIEW_STORAGE_PREFIX = "kafi_leads_table_view_v2";
 
 const MOVE_MODULE_LABELS: Record<string, string> = {
   khalid_focused_sales: "📌 Khalid Focused Sales",
@@ -194,8 +194,8 @@ const DEFAULT_TABLE_VIEW: StoredTableView = {
   city: "",
   callRecommended: "",
   search: "",
-  sortBy: "created_at",
-  sortDir: "desc",
+  sortBy: "company_name",
+  sortDir: "asc",
 };
 
 const LEADS_WIDE_COLUMNS: ColumnDef[] = [
@@ -1248,6 +1248,98 @@ export function LeadsTablePage({
       setOpeningMailer(false);
     }
   }, [selected, onError, showEmailNotice]);
+
+  /** One email with every selected contact address in To (meeting / group outreach). */
+  const openGroupMailerCompose = useCallback(async () => {
+    const ids = [...selected];
+    if (!ids.length) return;
+    setOpeningMailer(true);
+    try {
+      const handoff = await client.createMailerHandoff(ids);
+      let emails: string[] = [];
+      let companies: string[] = [];
+      try {
+        const mid = handoff.token.split(".")[1];
+        if (mid) {
+          const json = JSON.parse(
+            atob(mid.replace(/-/g, "+").replace(/_/g, "/")),
+          ) as {
+            leads?: Array<{ contact_email?: string; company_name?: string }>;
+          };
+          for (const lead of json.leads || []) {
+            const email = (lead.contact_email || "").trim();
+            if (email.includes("@")) emails.push(email);
+            const company = (lead.company_name || "").trim();
+            if (company) companies.push(company);
+          }
+        }
+      } catch {
+        emails = [];
+      }
+      // Also include secondary emails from rows currently on screen.
+      for (const id of ids) {
+        const row = rows.find((r) => r.id === id);
+        if (!row) continue;
+        for (const raw of [row.contact_email, row.contact_secondary_email]) {
+          const email = (raw || "").trim();
+          if (email.includes("@")) emails.push(email);
+        }
+        if (row.company_name?.trim()) companies.push(row.company_name.trim());
+      }
+      const uniqueEmails = [...new Set(emails.map((e) => e.toLowerCase()))].map(
+        (lower) => emails.find((e) => e.toLowerCase() === lower) || lower,
+      );
+      if (!uniqueEmails.length) {
+        onError(
+          handoff.skipped_no_email
+            ? "None of the selected contacts have an email address."
+            : "No email addresses found for the selection.",
+        );
+        return;
+      }
+      if (uniqueEmails.length > 40) {
+        onError(
+          `Too many addresses (${uniqueEmails.length}). Select fewer contacts (max 40) for one group email.`,
+        );
+        return;
+      }
+      const uniqueCompanies = [...new Set(companies)];
+      const session = await client.createMailerSession();
+      const composeParams = new URLSearchParams();
+      // All selected addresses on one message so everyone sees the group (meeting invite).
+      composeParams.set("to", uniqueEmails.join(", "));
+      if (uniqueCompanies.length === 1) {
+        composeParams.set("company_name", uniqueCompanies[0]);
+        composeParams.set("subject", `Meeting — ${uniqueCompanies[0]}`);
+      } else if (uniqueCompanies.length > 1) {
+        const label =
+          uniqueCompanies.slice(0, 3).join(", ") +
+          (uniqueCompanies.length > 3 ? "…" : "");
+        composeParams.set("subject", `Meeting — ${label}`);
+      }
+      const url = new URL(session.url);
+      url.searchParams.set("next", `/compose?${composeParams.toString()}`);
+      const opened = window.open(url.toString(), "_blank", "noopener,noreferrer");
+      if (!opened) {
+        onError(
+          "Pop-up blocked. Allow pop-ups for this site, then try Group email again.",
+        );
+        return;
+      }
+      showEmailNotice(
+        `Opened one compose with ${uniqueEmails.length} address${
+          uniqueEmails.length === 1 ? "" : "es"
+        } in To` +
+          (handoff.skipped_no_email
+            ? ` (${handoff.skipped_no_email} contacts skipped — no email).`
+            : "."),
+      );
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to open group email");
+    } finally {
+      setOpeningMailer(false);
+    }
+  }, [selected, rows, onError, showEmailNotice]);
 
   const openScheduleBulkMailer = useCallback(async () => {
     const ids = [...selected];
@@ -3147,10 +3239,28 @@ export function LeadsTablePage({
                 editMode ||
                 openingMailer
               }
-              title="Send emails"
+              title="Send a separate personalized email to each selected contact"
               onClick={() => void openBulkMailer()}
             >
-              {openingMailer ? "Opening mailer…" : `Send emails (${selected.size})`}
+              {openingMailer ? "Opening mailer…" : `Send emails separately (${selected.size})`}
+            </ToolbarMenuItem>
+            <ToolbarMenuItem
+              icon={IconMail}
+              tone="violet"
+              disabled={
+                selected.size < 2 ||
+                bulkOnboarding ||
+                deletingSelected ||
+                deletingId !== null ||
+                editMode ||
+                openingMailer
+              }
+              title="One email with all selected contacts in To (e.g. group meeting invite)"
+              onClick={() => void openGroupMailerCompose()}
+            >
+              {openingMailer
+                ? "Opening…"
+                : `Group email — one message (${selected.size})`}
             </ToolbarMenuItem>
           </ToolbarDropdown>
 
@@ -3672,7 +3782,7 @@ export function LeadsTablePage({
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Company, contact, phone, designation, address…"
+                  placeholder="Company name…"
                   className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
                 />
               </label>
@@ -3766,7 +3876,7 @@ export function LeadsTablePage({
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Company, email, contact…"
+                  placeholder="Company name…"
                   className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
                 />
               </label>
