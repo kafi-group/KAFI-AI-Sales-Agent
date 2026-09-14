@@ -1125,10 +1125,12 @@ export function LeadsTablePage({
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [intakeMethodFilter, setIntakeMethodFilter] = useState<"all" | "upload" | "discover">("all");
   const [movingToPool, setMovingToPool] = useState(false);
+  const [movingToModule, setMovingToModule] = useState(false);
   const [moveConfirmTarget, setMoveConfirmTarget] = useState<{
     moduleKey: string;
     moduleLabel: string;
     count: number;
+    leadIds: number[];
   } | null>(null);
   const [populatingPool, setPopulatingPool] = useState(false);
   const [removingFromPool, setRemovingFromPool] = useState(false);
@@ -1675,6 +1677,7 @@ export function LeadsTablePage({
     debouncedSearch,
     sortBy,
     sortDir,
+    selectedColValues,
   ]);
 
   useEffect(() => {
@@ -1999,8 +2002,9 @@ export function LeadsTablePage({
     pool: "hyperstore_targeted" | "targeted_distributor" | "targeted_client" | "khalid_focused_sales",
   ) {
     if (!isAdmin || selected.size === 0 || movingToPool) return;
+    const leadIds = [...selected];
     const labels = targetPoolLabels();
-    const count = selected.size;
+    const count = leadIds.length;
     const intake = targetPoolIntakeMethod(section);
     const confirmed = window.confirm(
       `Move ${count} selected lead${count === 1 ? "" : "s"} to ${labels[pool]}?`,
@@ -2010,7 +2014,7 @@ export function LeadsTablePage({
     setMovingToPool(true);
     setSaveNotice(null);
     try {
-      const result = await client.setTargetPool([...selected], pool, intake);
+      const result = await client.setTargetPool(leadIds, pool, intake);
       const movedIds = new Set(result.updated_ids);
       if (movedIds.size > 0) {
         setRows((prev) => prev.filter((row) => !movedIds.has(row.id)));
@@ -2171,7 +2175,9 @@ export function LeadsTablePage({
   }
 
   function confirmMoveToModule(moduleKey: string) {
-    if (selected.size === 0 || movingToModule) return;
+    if (movingToModule) return;
+    const leadIds = [...selected];
+    if (leadIds.length === 0) return;
     const custom = customModules.find((module) => module.key === moduleKey);
     const label = custom
       ? `${custom.icon ? `${custom.icon} ` : ""}${custom.name}`
@@ -2179,8 +2185,37 @@ export function LeadsTablePage({
     setMoveConfirmTarget({
       moduleKey,
       moduleLabel: label,
-      count: selected.size,
+      count: leadIds.length,
+      leadIds,
     });
+  }
+
+  async function handleMoveToModule(targetModule: string, leadIdsOverride?: number[]) {
+    if (!targetModule || movingToModule) return;
+    const ids = [...(leadIdsOverride ?? selected)];
+    if (ids.length === 0) return;
+
+    setMovingToModule(true);
+    try {
+      setSaveNotice(`Moving ${ids.length} lead(s) to target module…`);
+      const res = await client.moveLeadsToModule(ids, targetModule, ids.length);
+      if (res.updated_count !== ids.length) {
+        setSaveNotice(
+          `Moved ${res.updated_count} of ${ids.length} selected lead(s) to ${res.target_label}.`,
+        );
+      } else {
+        setSaveNotice(
+          `Successfully moved ${res.updated_count} lead(s) to ${res.target_label}.`,
+        );
+      }
+      clearSelection();
+      await loadTable();
+      await loadSectionCounts();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to move leads to target module");
+    } finally {
+      setMovingToModule(false);
+    }
   }
 
   async function moveSelectedToInterestedClients(inList: boolean) {
@@ -2763,32 +2798,6 @@ export function LeadsTablePage({
     }
   }
 
-  const [movingToModule, setMovingToModule] = useState(false);
-
-  async function handleMoveToModule(targetModule: string) {
-    if (!targetModule || movingToModule) return;
-    const ids = [...selected];
-    if (ids.length === 0) return;
-
-    setMovingToModule(true);
-    try {
-      setSaveNotice(`Moving ${ids.length} lead(s) to target module…`);
-      const res = await client.moveLeadsToModule(ids, targetModule);
-      const isTargeted = isTargetedPoolSection(section);
-      setSaveNotice(
-        `Successfully moved ${res.updated_count} lead(s) to ${res.target_label}.` +
-          (isTargeted ? ` (They remain visible in ${sectionTitle(section, assigneeUsername, isAdmin, masterType)} as well.)` : ""),
-      );
-      clearSelection();
-      await loadTable();
-      await loadSectionCounts();
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to move leads to target module");
-    } finally {
-      setMovingToModule(false);
-    }
-  }
-
   function clearFilters() {
     setScore("");
     setMarketRole("");
@@ -2830,22 +2839,7 @@ export function LeadsTablePage({
     [rows, selectedColValues],
   );
 
-  const displayedRows = useMemo(() => {
-    const activeFields = Object.keys(selectedColValues).filter(
-      (field) => selectedColValues[field] && selectedColValues[field].length > 0,
-    );
-
-    if (activeFields.length === 0) return rows;
-
-    return rows.filter((row) => {
-      return activeFields.every((field) => {
-        const allowedVals = selectedColValues[field];
-        const rawVal = getRowFieldValue(row, field);
-        const valLabel = rawVal ? rawVal : "(Blanks)";
-        return allowedVals.includes(valLabel) || (rawVal !== "" && allowedVals.includes(rawVal));
-      });
-    });
-  }, [rows, selectedColValues]);
+  const displayedRows = useMemo(() => rows, [rows]);
 
   const hasActiveFilters = useClientsFilters
     ? Boolean(
@@ -5342,8 +5336,9 @@ export function LeadsTablePage({
                 disabled={movingToModule}
                 onClick={async () => {
                   const target = moveConfirmTarget;
+                  if (!target?.leadIds?.length) return;
                   setMoveConfirmTarget(null);
-                  await handleMoveToModule(target.moduleKey);
+                  await handleMoveToModule(target.moduleKey, target.leadIds);
                 }}
                 className="rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-2 text-xs font-extrabold text-white shadow-lg transition-all disabled:opacity-50"
               >

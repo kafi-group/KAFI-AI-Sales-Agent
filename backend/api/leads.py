@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pathlib import Path
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db, require_admin
@@ -887,12 +887,16 @@ def set_target_pool_rows(
 
 
 class LeadTableMoveToModuleRequest(BaseModel):
-    lead_ids: list[int]
+    lead_ids: list[int] = Field(..., min_length=1, max_length=5000)
     target_module: str
+    # Optional sanity check from the UI — must match len(unique lead_ids).
+    expected_count: int | None = None
 
 
 class LeadTableMoveToModuleResponse(BaseModel):
     updated_count: int
+    updated_ids: list[int] = Field(default_factory=list)
+    requested_count: int = 0
     target_module: str
     target_label: str
 
@@ -903,13 +907,25 @@ def move_leads_to_target_module(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
-    """Move leads into any destination section/module."""
+    """Move only the provided lead_ids into a destination section/module.
+
+    Never expands to the whole folder — if the client sends 721 IDs, at most 721 move.
+    """
     if not payload.lead_ids:
         raise HTTPException(400, "Select at least one lead")
+    unique = list(dict.fromkeys(int(x) for x in payload.lead_ids if int(x) > 0))
+    if payload.expected_count is not None and payload.expected_count != len(unique):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Selection mismatch: UI expected {payload.expected_count} leads but "
+                f"request had {len(unique)} unique IDs. Clear selection and try again."
+            ),
+        )
     try:
         result = leads_module.move_leads_to_module(
             db,
-            lead_ids=payload.lead_ids,
+            lead_ids=unique,
             target_module=payload.target_module,
             by_user_id=user.id,
         )

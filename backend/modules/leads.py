@@ -840,7 +840,32 @@ def _is_blank_token(token: str | None) -> bool:
     if not token:
         return True
     t = token.strip().lower()
-    return t in {"(blanks)", "(blank)", "__blank__", "blanks", "blank", ""}
+    if t in {"(blanks)", "(blank)", "__blank__", "blanks", "blank", "—", "-", "n/a", "na"}:
+        return True
+    # UI label: "(Blanks / Empty Data)" or similar
+    if "blank" in t and ("empty" in t or t.startswith("(")):
+        return True
+    return False
+
+
+def _display_contact_subquery(db: Session):
+    """First contact per buyer (lowest id) — matches table designation/person columns."""
+    return (
+        db.query(
+            Contact.buyer_id.label("buyer_id"),
+            Contact.designation.label("designation"),
+            Contact.full_name.label("full_name"),
+            Contact.phone.label("phone"),
+            Contact.secondary_mobile.label("secondary_mobile"),
+            Contact.primary_phone.label("primary_phone"),
+            Contact.secondary_phone.label("secondary_phone"),
+            Contact.email.label("email"),
+            Contact.secondary_email.label("secondary_email"),
+        )
+        .distinct(Contact.buyer_id)
+        .order_by(Contact.buyer_id.asc(), Contact.id.asc())
+        .subquery()
+    )
 
 
 def _apply_column_field_filter(db: Session, buyer_query, field: str, values_str: str | None):
@@ -910,35 +935,49 @@ def _apply_column_field_filter(db: Session, buyer_query, field: str, values_str:
             buyer_query = buyer_query.filter(or_(*conds))
 
     elif field in {"designation", "contact_person", "primary_mobile", "secondary_mobile", "phone", "secondary_phone", "email", "secondary_email"}:
+        # Match the table display contact (lowest contact id), not "any contact".
+        # Filtering on any-contact blanks previously pulled in leads whose shown
+        # designation was filled, and Select-all / move could diverge from the UI.
+        display = _display_contact_subquery(db)
         col_map = {
-            "designation": Contact.designation,
-            "contact_person": Contact.full_name,
-            "primary_mobile": Contact.phone,
-            "secondary_mobile": Contact.secondary_mobile,
-            "phone": Contact.primary_phone,
-            "secondary_phone": Contact.secondary_phone,
-            "email": Contact.email,
-            "secondary_email": Contact.secondary_email,
+            "designation": display.c.designation,
+            "contact_person": display.c.full_name,
+            "primary_mobile": display.c.phone,
+            "secondary_mobile": display.c.secondary_mobile,
+            "phone": display.c.primary_phone,
+            "secondary_phone": display.c.secondary_phone,
+            "email": display.c.email,
+            "secondary_email": display.c.secondary_email,
         }
         contact_col = col_map[field]
-        conds = []
+        value_conds = []
         if has_blank:
-            conds.append(or_(contact_col.is_(None), contact_col == "", contact_col == "—", contact_col == "-"))
-        if non_blank_items:
-            conds.append(sa_func.lower(sa_func.coalesce(contact_col, "")).in_(non_blank_items))
-
-        if conds:
-            contact_subq = db.query(Contact.buyer_id).filter(or_(*conds)).distinct().subquery()
-            if has_blank:
-                no_contact_subq = db.query(Contact.buyer_id).distinct().subquery()
-                buyer_query = buyer_query.filter(
-                    or_(
-                        ~Buyer.id.in_(db.query(no_contact_subq.c.buyer_id)),
-                        Buyer.id.in_(db.query(contact_subq.c.buyer_id)),
-                    )
+            value_conds.append(
+                or_(
+                    contact_col.is_(None),
+                    contact_col == "",
+                    contact_col == "—",
+                    contact_col == "-",
                 )
-            else:
-                buyer_query = buyer_query.filter(Buyer.id.in_(db.query(contact_subq.c.buyer_id)))
+            )
+        if non_blank_items:
+            value_conds.append(
+                sa_func.lower(sa_func.coalesce(contact_col, "")).in_(non_blank_items)
+            )
+        if not value_conds:
+            return buyer_query
+
+        matched_buyer_ids = (
+            db.query(display.c.buyer_id).filter(or_(*value_conds)).distinct()
+        )
+        if has_blank:
+            # Include buyers with no contacts at all (shown as blank in the table).
+            no_contact = ~Buyer.id.in_(db.query(Contact.buyer_id).distinct())
+            buyer_query = buyer_query.filter(
+                or_(no_contact, Buyer.id.in_(matched_buyer_ids))
+            )
+        else:
+            buyer_query = buyer_query.filter(Buyer.id.in_(matched_buyer_ids))
 
     return buyer_query
 
@@ -2946,15 +2985,36 @@ def move_leads_to_module(
     target_module: str,
     by_user_id: int | None = None,
 ) -> dict[str, object]:
-    """Move a list of leads into any section/module (Khalid Focused, Call outcomes, Targeted Pools, Archives)."""
+    """Move a list of leads into any section/module (Khalid Focused, Call outcomes, Targeted Pools, Archives).
+
+    Only the explicit ``lead_ids`` are moved — never the whole section/folder.
+    """
     from datetime import datetime
     from sqlalchemy import or_, func as sa_func
     from db.models import AppUser
     from modules.audit import log_action
 
+    # Preserve order, drop duplicates / invalid ids — never expand to a folder.
+    seen: set[int] = set()
+    unique_ids: list[int] = []
+    for raw in lead_ids:
+        try:
+            lid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if lid <= 0 or lid in seen:
+            continue
+        seen.add(lid)
+        unique_ids.append(lid)
+    if not unique_ids:
+        raise ValueError("Select at least one lead to move")
+    if len(unique_ids) > 5000:
+        raise ValueError("Too many leads in one move (max 5000). Narrow your selection.")
+
     module = target_module.strip().lower()
     updated_ids: list[int] = []
     target_label = module.replace("_", " ").title()
+    lead_ids = unique_ids
 
     if module == "khalid_focused_sales":
         khalid_user = (
@@ -3110,6 +3170,8 @@ def move_leads_to_module(
 
     return {
         "updated_count": len(updated_ids),
+        "updated_ids": updated_ids,
+        "requested_count": len(unique_ids),
         "target_module": module,
         "target_label": target_label,
     }

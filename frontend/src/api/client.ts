@@ -2095,14 +2095,24 @@ export const client = {
       unique_values: Array<{ value: string; count: number }>;
     }>(`/leads/table/column-values?${query}`);
   },
-  moveLeadsToModule: (leadIds: number[], targetModule: string) =>
+  moveLeadsToModule: (
+    leadIds: number[],
+    targetModule: string,
+    expectedCount?: number,
+  ) =>
     request<{
       updated_count: number;
+      updated_ids?: number[];
+      requested_count?: number;
       target_module: string;
       target_label: string;
     }>("/leads/table/move-to-module", {
       method: "POST",
-      body: JSON.stringify({ lead_ids: leadIds, target_module: targetModule }),
+      body: JSON.stringify({
+        lead_ids: leadIds,
+        target_module: targetModule,
+        expected_count: expectedCount ?? leadIds.length,
+      }),
     }),
   suggestLeadMeeting: (leadId: number) =>
     request<{
