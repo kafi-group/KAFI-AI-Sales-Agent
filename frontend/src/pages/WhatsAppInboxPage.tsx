@@ -274,11 +274,15 @@ export function WhatsAppInboxPage({
       const result = await client.replyToWhatsAppConversation(selected.contact_id, {
         content: cleaned,
         send: true,
+        to_phone: selected.contact_phone || undefined,
       });
       if (!result.sent) {
         const message =
           result.send_message || "Send did not complete — Meta may require a template.";
-        if (/template|24|window/i.test(message)) {
+        if (
+          result.needs_template ||
+          /template|24|window|re-engagement|131047/i.test(message)
+        ) {
           setNeedsTemplate(true);
         }
         onError(message);
@@ -293,7 +297,7 @@ export function WhatsAppInboxPage({
       await refreshConversations({ silent: true });
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to send reply";
-      if (/template|24|window/i.test(message)) {
+      if (/template|24|window|re-engagement|131047/i.test(message)) {
         setNeedsTemplate(true);
       } else {
         onError(message);
@@ -317,6 +321,7 @@ export function WhatsAppInboxPage({
         template_name: selectedTemplate.name,
         template_language: selectedTemplate.language,
         template_variables: variables,
+        to_phone: selected.contact_phone || undefined,
       });
       await loadThread(selected);
       await refreshConversations({ silent: true });

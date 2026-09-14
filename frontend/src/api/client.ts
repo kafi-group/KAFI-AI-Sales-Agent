@@ -1942,6 +1942,7 @@ export interface WhatsAppReplyResponse {
   sent: boolean;
   send_status?: string | null;
   send_message?: string | null;
+  needs_template?: boolean;
 }
 
 export const client = {
@@ -3806,6 +3807,7 @@ export const client = {
       template_name?: string;
       template_language?: string;
       template_variables?: string[];
+      to_phone?: string;
     },
   ) =>
     request<WhatsAppReplyResponse>(`/whatsapp/conversations/${contactId}/reply`, {
@@ -3816,6 +3818,7 @@ export const client = {
         template_name: data.template_name,
         template_language: data.template_language ?? "en_US",
         template_variables: data.template_variables ?? [],
+        to_phone: data.to_phone || undefined,
       }),
     }),
 

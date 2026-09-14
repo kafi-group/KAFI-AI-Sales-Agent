@@ -449,11 +449,16 @@ class CommsGenerator:
         profile_name: str | None = None,
         create_reply_draft: bool = True,
         personal_whatsapp_user_id: int | None = None,
+        meta_timestamp: int | str | None = None,
     ) -> Interaction | None:
         """Webhook entrypoint — logs inbound WhatsApp, opens the 24h window.
 
         Unknown senders are auto-created as individual leads so messages always
         appear in WhatsApp inbox.
+
+        ``meta_timestamp`` is Meta's ``messages[].timestamp`` (unix seconds). Using
+        webhook arrival time alone can show a false open window when Meta retries
+        old deliveries — then free-text replies fail with (#131047) Re-engagement.
         """
         if provider_message_id:
             existing = (
@@ -489,7 +494,18 @@ class CommsGenerator:
             if buyer and buyer.source == "whatsapp_inbound":
                 buyer.company_name = profile_name.strip()
 
-        contact.whatsapp_window_expires_at = datetime.now(timezone.utc) + timedelta(
+        now = datetime.now(timezone.utc)
+        msg_at = now
+        if meta_timestamp is not None and str(meta_timestamp).strip():
+            try:
+                ts = int(str(meta_timestamp).strip())
+                # Meta sends seconds; ignore absurd values.
+                if 1_000_000_000 <= ts <= 2_000_000_000:
+                    msg_at = datetime.fromtimestamp(ts, tz=timezone.utc)
+            except (TypeError, ValueError, OSError, OverflowError):
+                msg_at = now
+
+        contact.whatsapp_window_expires_at = msg_at + timedelta(
             hours=WHATSAPP_SESSION_WINDOW_HOURS
         )
         # Tag Cloud inbound so Meta Verified replies always match the Cloud inbox
@@ -506,6 +522,7 @@ class CommsGenerator:
             provider_message_id=provider_message_id,
             personal_whatsapp_user_id=personal_whatsapp_user_id,
             wa_status="received" if cloud_inbound else None,
+            created_at=msg_at,
         )
         db.add(inbound)
         db.commit()
@@ -1419,6 +1436,24 @@ class CommsGenerator:
         draft.attachments = atts
         db.commit()
 
+        # Reply in-thread to the customer's latest Cloud inbound (helps Meta session).
+        context_wamid = None
+        if within_window and not template_name:
+            last_in = (
+                db.query(Interaction)
+                .filter(
+                    Interaction.contact_id == contact.id,
+                    Interaction.channel == Channel.whatsapp,
+                    Interaction.direction == Direction.inbound,
+                    Interaction.personal_whatsapp_user_id.is_(None),
+                    Interaction.provider_message_id.isnot(None),
+                )
+                .order_by(Interaction.created_at.desc())
+                .first()
+            )
+            if last_in and (last_in.provider_message_id or "").startswith("wamid"):
+                context_wamid = last_in.provider_message_id
+
         send_result = whatsapp_client.send_approved(
             phone=phone,
             message=draft.content,
@@ -1426,6 +1461,7 @@ class CommsGenerator:
             template_language=send_language,
             template_components=components,
             within_session_window=within_window,
+            context_message_id=context_wamid,
         )
 
         if send_result.get("status") == "sent":

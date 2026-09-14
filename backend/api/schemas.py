@@ -1757,6 +1757,8 @@ class WhatsAppReplyRequest(BaseModel):
     template_name: Optional[str] = None
     template_language: Optional[str] = "en_US"
     template_variables: list[str] = Field(default_factory=list)
+    # Optional override — UI should pass the conversation phone / Meta wa_id.
+    to_phone: Optional[str] = None
 
 
 class WhatsAppReplyResponse(BaseModel):
@@ -1764,3 +1766,4 @@ class WhatsAppReplyResponse(BaseModel):
     sent: bool
     send_status: Optional[str] = None
     send_message: Optional[str] = None
+    needs_template: bool = False

@@ -113,7 +113,13 @@ class WhatsAppClient:
             "raw": body,
         }
 
-    def send_text(self, *, phone: str, message: str) -> dict[str, Any]:
+    def send_text(
+        self,
+        *,
+        phone: str,
+        message: str,
+        context_message_id: str | None = None,
+    ) -> dict[str, Any]:
         """Free-form text — only deliverable within the 24h customer service window."""
         blocked = self._blocked_if_sending_disabled()
         if blocked:
@@ -126,15 +132,23 @@ class WhatsAppClient:
             }
         to = normalize_e164(phone)
         if not to:
+            # Meta wa_id is often digits-only already.
+            digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+            to = f"+{digits}" if digits else None
+        if not to:
             return {"status": "error", "message": f"Invalid WhatsApp number: {phone!r}"}
 
-        payload = {
+        payload: dict[str, Any] = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": to.lstrip("+"),
             "type": "text",
             "text": {"body": message, "preview_url": False},
         }
+        # Quote the customer's last inbound wamid — ties the reply to that conversation.
+        ctx = (context_message_id or "").strip()
+        if ctx.startswith("wamid"):
+            payload["context"] = {"message_id": ctx}
         return self._post(f"{settings.whatsapp_phone_number_id}/messages", payload)
 
     def send_template(
@@ -270,6 +284,7 @@ class WhatsAppClient:
         template_language: str = "en_US",
         template_components: list[dict[str, Any]] | None = None,
         within_session_window: bool = False,
+        context_message_id: str | None = None,
     ) -> dict[str, Any]:
         """Dispatch for an approved draft — free text if inside the session window and no
         template was specified, otherwise an approved template is required."""
@@ -281,7 +296,11 @@ class WhatsAppClient:
                 components=template_components,
             )
         if within_session_window:
-            return self.send_text(phone=phone, message=message)
+            return self.send_text(
+                phone=phone,
+                message=message,
+                context_message_id=context_message_id,
+            )
         return {
             "status": "error",
             "message": (

@@ -526,6 +526,7 @@ def reply_to_whatsapp_conversation(
                 template_language=payload.template_language or "en_US",
                 template_variables=payload.template_variables or None,
                 user_id=user.id,
+                force_phone=(payload.to_phone or "").strip() or None,
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -554,11 +555,22 @@ def reply_to_whatsapp_conversation(
             details={"mode": "reply", "channel": "whatsapp", "contact_id": contact_id},
         )
 
+    send_message = (send_result or {}).get("message")
+    needs_template = bool(
+        payload.send
+        and draft.status != InteractionStatus.sent
+        and send_message
+        and any(
+            token in (send_message or "").lower()
+            for token in ("template", "24h", "24 hour", "re-engagement", "window")
+        )
+    )
     return WhatsAppReplyResponse(
         interaction=_interaction_read(db, draft),
         sent=draft.status == InteractionStatus.sent,
         send_status=(send_result or {}).get("status"),
-        send_message=(send_result or {}).get("message"),
+        send_message=send_message,
+        needs_template=needs_template,
     )
 
 
@@ -677,6 +689,7 @@ async def receive_whatsapp_webhook(request: Request, db: Session = Depends(get_d
                     provider_message_id=provider_message_id,
                     profile_name=profiles.get(wa_id),
                     create_reply_draft=False,
+                    meta_timestamp=message.get("timestamp"),
                 )
                 if provider_message_id:
                     try:
