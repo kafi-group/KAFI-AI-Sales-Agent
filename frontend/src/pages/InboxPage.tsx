@@ -64,6 +64,7 @@ interface InboxPageProps {
     inbox: number;
     sent: number;
     trash: number;
+    junk: number;
     archive: number;
   }) => void;
   onMailExtrasChange?: () => void;
@@ -237,6 +238,7 @@ function sectionDescription(section: MailSection, email?: string | null): string
   const mailbox = email ? email : "Company mailbox";
   if (section === "sent") return `${mailbox} · Messages you sent`;
   if (section === "trash") return `${mailbox} · Deleted messages`;
+  if (section === "junk") return `${mailbox} · Spam / Junk from Outlook`;
   if (section === "archive") return `${mailbox} · Archived messages`;
   if (section === "drafts") return `${mailbox} · Unsent compose drafts`;
   if (isMailLabelSection(section)) return `${mailbox} · Labeled / flagged messages`;
@@ -246,6 +248,7 @@ function sectionDescription(section: MailSection, email?: string | null): string
 function emptyListMessage(section: MailSection): string {
   if (section === "sent") return "No sent messages.";
   if (section === "trash") return "Trash is empty.";
+  if (section === "junk") return "Spam / Junk is empty — or Outlook has no Junk folder linked to this mailbox.";
   if (section === "archive") return "No archived messages.";
   if (section === "drafts") return "No drafts.";
   if (isMailLabelSection(section)) return "No messages in this label. Flagged emails appear here after you Flag them.";
@@ -456,6 +459,7 @@ export function InboxPage({
     section === "inbox" ||
     section === "sent" ||
     section === "trash" ||
+    section === "junk" ||
     section === "archive" ||
     isLabelView;
   const isThreadView = section === "inbox" && !isLabelView;
@@ -469,12 +473,13 @@ export function InboxPage({
     if (!onFolderCountsChangeRef.current) return;
     try {
       const result = await client.listInboxFolders(mailboxUserIdRef.current);
-      const next = { inbox: 0, sent: 0, trash: 0, archive: 0 };
+      const next = { inbox: 0, sent: 0, trash: 0, junk: 0, archive: 0 };
       for (const folder of result.folders) {
         if (
           folder.key === "inbox" ||
           folder.key === "sent" ||
           folder.key === "trash" ||
+          folder.key === "junk" ||
           folder.key === "archive"
         ) {
           next[folder.key] = folder.count;
@@ -585,7 +590,12 @@ export function InboxPage({
           setDrafts([]);
           hadCachedRender = true;
         }
-      } else if (section === "sent" || section === "trash" || section === "archive") {
+      } else if (
+        section === "sent" ||
+        section === "trash" ||
+        section === "junk" ||
+        section === "archive"
+      ) {
         const cacheKey = `messages:${mailboxKey}:${section}:${messagePage}:${unreadOnly}`;
         const cached = _MEM_MESSAGE_CACHE.get(cacheKey);
         if (cached) {
@@ -639,6 +649,7 @@ export function InboxPage({
         } else if (
           section === "sent" ||
           section === "trash" ||
+          section === "junk" ||
           section === "archive"
         ) {
           const offset = (messagePage - 1) * PAGE_SIZE;
@@ -750,7 +761,10 @@ export function InboxPage({
           setThreads([]);
           setDrafts([]);
         } else if (
-          (section === "sent" || section === "trash" || section === "archive") &&
+          (section === "sent" ||
+            section === "trash" ||
+            section === "junk" ||
+            section === "archive") &&
           listResult
         ) {
           const msgList = listResult as InboxMessageListResponse;
@@ -1683,6 +1697,7 @@ export function InboxPage({
               <option value="sent">Sent</option>
               <option value="archive">Archive</option>
               <option value="trash">Trash</option>
+              <option value="junk">Spam / Junk</option>
               <option value="all">All mail</option>
               {customLabels.map((label) => (
                 <option key={label.id} value={`label:${label.id}`}>
@@ -2610,7 +2625,7 @@ export function InboxPage({
                     >
                       {currentMessageFlagged ? "⚑ Remove flag" : "⚐ Flag"}
                     </button>
-                    {(section === "trash" || section === "archive") && (
+                    {(section === "trash" || section === "junk" || section === "archive") && (
                       <ActionButton
                         icon={IconInbox}
                         onClick={() => void moveSelectedMessage("inbox")}

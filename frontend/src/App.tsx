@@ -184,6 +184,7 @@ function DashboardApp() {
     inbox: 0,
     sent: 0,
     trash: 0,
+    junk: 0,
     archive: 0,
   });
   const [leadsTableRefreshToken, setLeadsTableRefreshToken] = useState(0);
@@ -391,9 +392,15 @@ function DashboardApp() {
   const loadMailCounts = useCallback(async () => {
     try {
       const result = await client.listInboxFolders();
-      const next = { inbox: 0, sent: 0, trash: 0, archive: 0 };
+      const next = { inbox: 0, sent: 0, trash: 0, junk: 0, archive: 0 };
       for (const folder of result.folders) {
-        if (folder.key === "inbox" || folder.key === "sent" || folder.key === "trash" || folder.key === "archive") {
+        if (
+          folder.key === "inbox" ||
+          folder.key === "sent" ||
+          folder.key === "trash" ||
+          folder.key === "junk" ||
+          folder.key === "archive"
+        ) {
           next[folder.key] = folder.count;
         }
       }
@@ -990,6 +997,7 @@ function DashboardApp() {
       inbox: number;
       sent: number;
       trash: number;
+      junk: number;
       archive: number;
     }) => {
       setMailCounts(counts);
@@ -1324,6 +1332,7 @@ function DashboardApp() {
         { id: "sent", label: "Sent", count: mailCounts.sent },
         { id: "drafts", label: "Drafts", count: mailDraftCount },
         { id: "trash", label: "Trash", count: mailCounts.trash },
+        { id: "junk", label: "Spam / Junk", count: mailCounts.junk },
         { id: "archive", label: "Archive", count: mailCounts.archive },
         {
           id: "activity",
@@ -1414,6 +1423,7 @@ function DashboardApp() {
       if (mailSection === "inbox") return "Inbox";
       if (mailSection === "sent") return "Sent";
       if (mailSection === "trash") return "Trash";
+      if (mailSection === "junk") return "Spam / Junk";
       if (mailSection === "archive") return "Archive";
       if (mailSection === "drafts") return "Drafts";
       const labelId = mailLabelIdFromSection(mailSection);

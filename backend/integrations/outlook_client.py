@@ -395,6 +395,7 @@ class OutlookClient:
             "sent": ("sent",),
             "trash": ("trash", "deleted"),
             "archive": ("archive",),
+            "junk": ("junk", "spam"),
         }.get(key, ())
         for needle in needles:
             for name in names:

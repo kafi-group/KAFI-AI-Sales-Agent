@@ -90,6 +90,7 @@ export type MailSection =
   | "inbox"
   | "sent"
   | "trash"
+  | "junk"
   | "archive"
   | "drafts"
   | "activity"

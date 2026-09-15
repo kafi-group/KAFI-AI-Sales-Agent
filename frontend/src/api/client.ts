@@ -530,7 +530,7 @@ export interface InboxComposeResponse {
   from_email?: string | null;
 }
 
-export type MailFolderKey = "inbox" | "sent" | "trash" | "archive";
+export type MailFolderKey = "inbox" | "sent" | "trash" | "junk" | "archive";
 
 export interface InboxFolderInfo {
   key: MailFolderKey | string;

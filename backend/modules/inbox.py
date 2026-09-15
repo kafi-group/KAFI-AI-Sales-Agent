@@ -302,7 +302,7 @@ def search_mail(
     scope_key = (scope or "inbox").strip().lower()
     if scope_key == "all":
         combined: list[dict[str, Any]] = []
-        for folder in ("inbox", "sent", "archive", "trash"):
+        for folder in ("inbox", "sent", "archive", "trash", "junk"):
             combined.extend(
                 list_messages(
                     user,
