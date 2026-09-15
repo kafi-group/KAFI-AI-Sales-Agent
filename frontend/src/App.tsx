@@ -1194,13 +1194,13 @@ function DashboardApp() {
       ]
     : [
         {
-          id: "my_assigned" as const,
-          label: "My Assigned Leads",
-          count: tableCounts.my_assigned ?? 0,
-        },
-        {
           id: "all_contacts" as const,
           label: "All Contacts",
+          count: tableCounts.all_contacts ?? tableCounts.my_assigned ?? 0,
+        },
+        {
+          id: "my_assigned" as const,
+          label: "My Assigned Leads",
           count: tableCounts.my_assigned ?? 0,
         },
         ...(isWorkspaceOnlySalesUser
@@ -1251,7 +1251,7 @@ function DashboardApp() {
     {
       id: "table",
       label: isAdmin ? masterTableLabel : "My Assigned Leads",
-      count: isAdmin ? (tableCounts.master ?? 0) : (tableCounts.my_assigned ?? 0),
+      count: isAdmin ? (tableCounts.master ?? 0) : (tableCounts.all_contacts ?? tableCounts.my_assigned ?? 0),
       children: [
         ...clientSectionNavChildren,
         ...assigneeNavChildren,

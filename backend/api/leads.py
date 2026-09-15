@@ -551,8 +551,8 @@ def list_leads_table(
         admin_sent_only=admin_sent_only,
         intake_method=intake_method,
         new_search_lead_only=new_search_lead_only,
-        master_type=None if (all_contacts or my_assigned) else master_type,
-        all_assigned_contacts=all_contacts or my_assigned,
+        master_type=None if all_contacts else master_type,
+        all_assigned_contacts=all_contacts,
         designation=designation,
         contact_person=contact_person,
         primary_mobile=primary_mobile,
@@ -640,8 +640,8 @@ def get_lead_table_column_values(
         admin_sent_only=admin_sent_only,
         intake_method=intake_method,
         new_search_lead_only=new_search_lead_only,
-        master_type=None if (all_contacts or my_assigned) else master_type,
-        all_assigned_contacts=all_contacts or my_assigned,
+        master_type=None if all_contacts else master_type,
+        all_assigned_contacts=all_contacts,
         designation=designation,
         contact_person=contact_person,
         primary_mobile=primary_mobile,
@@ -731,8 +731,8 @@ def list_leads_table_ids(
         admin_sent_only=admin_sent_only,
         intake_method=intake_method,
         new_search_lead_only=new_search_lead_only,
-        master_type=None if (all_contacts or my_assigned) else master_type,
-        all_assigned_contacts=all_contacts or my_assigned,
+        master_type=None if all_contacts else master_type,
+        all_assigned_contacts=all_contacts,
         designation=designation,
         contact_person=contact_person,
         primary_mobile=primary_mobile,
@@ -761,7 +761,10 @@ def get_leads_table_section_counts(
         pool_for_user_id=None,
         master_type=master_type,
     )
-    counts["my_assigned"] = leads_module.count_my_assigned_leads(db, user.id)
+    counts["all_contacts"] = leads_module.count_my_assigned_leads(db, user.id)
+    counts["my_assigned"] = leads_module.count_my_assigned_leads_filtered(
+        db, user.id, master_type=master_type
+    )
     return LeadTableSectionCountsResponse(**counts)
 
 

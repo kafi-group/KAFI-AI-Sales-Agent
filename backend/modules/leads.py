@@ -1742,12 +1742,29 @@ _SECTION_COUNTS_PREFIX = "section_counts:"
 
 
 def count_my_assigned_leads(db: Session, user_id: int) -> int:
-    """Leads assigned to a sales user (admin-sent + self-imports)."""
+    """Leads assigned to a sales user (admin-sent + self-imports). All sources/master types."""
     from sqlalchemy import func as sa_func
 
     return (
         db.query(sa_func.count(Buyer.id)).filter(Buyer.assigned_to_user_id == user_id).scalar()
     ) or 0
+
+
+def count_my_assigned_leads_filtered(
+    db: Session,
+    user_id: int,
+    *,
+    master_type: str | None = "fmcg",
+) -> int:
+    """Assigned leads as shown in My Assigned Leads (Master type + no targeted pools)."""
+    _rows, section_total, _filtered = _filtered_lead_table_rows(
+        db,
+        assigned_to_user_id=user_id,
+        include_placed_outcomes=True,
+        master_type=master_type,
+        ids_only=True,
+    )
+    return int(section_total or 0)
 
 
 def invalidate_section_counts_cache() -> None:

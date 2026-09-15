@@ -646,6 +646,7 @@ class LeadTableSectionCountsResponse(BaseModel):
     khalid_focused_sales: int = 0
     incomplete_archives: int = 0
     my_assigned: int = 0
+    all_contacts: int = 0
 
 
 class LeadTablePromoteIncompleteArchivesRequest(BaseModel):

@@ -1596,6 +1596,7 @@ export interface LeadTableSectionCountsResponse {
   khalid_focused_sales?: number;
   incomplete_archives?: number;
   my_assigned?: number;
+  all_contacts?: number;
 }
 
 export interface LeadTableBulkDeleteResponse {
