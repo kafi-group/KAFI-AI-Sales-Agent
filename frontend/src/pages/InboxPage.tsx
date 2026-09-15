@@ -632,19 +632,38 @@ export function InboxPage({
           if (id == null) {
             listPromise = Promise.resolve(null);
           } else {
-            listPromise = Promise.all([
-              client.listMailLabelMessages(id, mailboxId),
-              client.listInboxMessages({
-                limit: 60,
-                folder: "inbox",
-                mailbox_user_id: mailboxId,
-              }),
-              client.listInboxMessages({
-                limit: 30,
-                folder: "sent",
-                mailbox_user_id: mailboxId,
-              }),
-            ]);
+            // Decide Flagged vs rule-label after labels resolve (section id is label:N only).
+            listPromise = labelsPromise.then(async (labelRows) => {
+              const active =
+                labelRows.find((l) => l.id === id) ||
+                null;
+              const isFlagged =
+                Boolean(active?.is_system) ||
+                (active?.name || "").trim().toLowerCase() === "flagged";
+              if (isFlagged) {
+                const resolved = await client.resolveMailLabelMessages(id, mailboxId);
+                return { kind: "flagged_resolved" as const, resolved };
+              }
+              const [keys, inboxRows, sentRows] = await Promise.all([
+                client.listMailLabelMessages(id, mailboxId),
+                client.listInboxMessages({
+                  limit: 60,
+                  folder: "inbox",
+                  mailbox_user_id: mailboxId,
+                }),
+                client.listInboxMessages({
+                  limit: 30,
+                  folder: "sent",
+                  mailbox_user_id: mailboxId,
+                }),
+              ]);
+              return {
+                kind: "label_scan" as const,
+                keys,
+                inboxRows,
+                sentRows,
+              };
+            });
           }
         } else if (
           section === "sent" ||
@@ -706,60 +725,73 @@ export function InboxPage({
             total: threadList.total || 0,
             has_more: Boolean(threadList.has_more),
           });
-        } else if (isMailLabelSection(section) && Array.isArray(listResult)) {
-          const [keys, inboxRows, sentRows] = listResult as [
-            MailLabelMessageKey[],
-            InboxMessageListResponse,
-            InboxMessageListResponse,
-          ];
-          const id = mailLabelIdFromSection(section);
-          const activeLabel = labelRows.find((l) => l.id === id) || null;
-          const fromScan = [...(inboxRows?.items || []), ...(sentRows?.items || [])].filter(
-            (m) => {
-              if (activeLabel && messageMatchesLabelRules(m, activeLabel)) return true;
-              return messageMatchesLabelKeys(m, keys || []);
-            },
-          );
-          const seen = new Set(
-            fromScan.map((m) => {
-              const folder = (m.folder || "inbox").trim().toLowerCase() || "inbox";
-              return `${folder}:${String(m.uid || "").trim()}`;
-            }),
-          );
-          // Flagged (and other exact assignments) can point at older mail outside the
-          // recent inbox/sent window — fetch those UIDs directly so the list matches the badge.
-          const missingKeys = (keys || []).filter((k) => {
-            const folder = (k.folder || "inbox").trim().toLowerCase() || "inbox";
-            const uid = String(k.message_uid || "").trim();
-            return Boolean(uid) && !seen.has(`${folder}:${uid}`);
-          });
-          const hydrated: InboxMessageSummary[] = [];
-          if (missingKeys.length > 0) {
-            const fetched = await Promise.all(
-              missingKeys.slice(0, 80).map(async (k) => {
-                const folder = (k.folder || "inbox").trim() || "inbox";
-                const uid = String(k.message_uid || "").trim();
-                if (!uid) return null;
-                try {
-                  return await client.getInboxMessage(uid, folder, mailboxId);
-                } catch {
-                  return null;
-                }
+        } else if (
+          isMailLabelSection(section) &&
+          listResult &&
+          typeof listResult === "object" &&
+          "kind" in (listResult as object)
+        ) {
+          const payload = listResult as
+            | {
+                kind: "flagged_resolved";
+                resolved: {
+                  items: InboxMessageSummary[];
+                  total: number;
+                  keys: MailLabelMessageKey[];
+                };
+              }
+            | {
+                kind: "label_scan";
+                keys: MailLabelMessageKey[];
+                inboxRows: InboxMessageListResponse;
+                sentRows: InboxMessageListResponse;
+              };
+          if (payload.kind === "flagged_resolved") {
+            setMessages(payload.resolved.items || []);
+            setMessageTotal(payload.resolved.total || 0);
+            setMessageHasMore(false);
+            setThreads([]);
+            setDrafts([]);
+          } else {
+            const { keys, inboxRows, sentRows } = payload;
+            const id = mailLabelIdFromSection(section);
+            const activeLabel = labelRows.find((l) => l.id === id) || null;
+            const fromScan = [...(inboxRows?.items || []), ...(sentRows?.items || [])].filter(
+              (m) => {
+                if (activeLabel && messageMatchesLabelRules(m, activeLabel)) return true;
+                return messageMatchesLabelKeys(m, keys || []);
+              },
+            );
+            // Assignment keys outside the recent window: one batch resolve, never N IMAP gets.
+            const seen = new Set(
+              fromScan.map((m) => {
+                const folder = (m.folder || "inbox").trim().toLowerCase() || "inbox";
+                return `${folder}:${String(m.uid || "").trim()}`;
               }),
             );
-            for (const msg of fetched) {
-              if (!msg?.uid) continue;
-              const folder = (msg.folder || "inbox").trim().toLowerCase() || "inbox";
-              const key = `${folder}:${String(msg.uid).trim()}`;
-              if (seen.has(key)) continue;
-              seen.add(key);
-              hydrated.push(msg);
+            const missingKeys = (keys || []).filter((k) => {
+              const folder = (k.folder || "inbox").trim().toLowerCase() || "inbox";
+              const uid = String(k.message_uid || "").trim();
+              return Boolean(uid) && !seen.has(`${folder}:${uid}`);
+            });
+            let hydrated: InboxMessageSummary[] = [];
+            if (missingKeys.length > 0 && id != null) {
+              try {
+                const resolved = await client.resolveMailLabelMessages(id, mailboxId);
+                hydrated = (resolved.items || []).filter((msg) => {
+                  const folder = (msg.folder || "inbox").trim().toLowerCase() || "inbox";
+                  const key = `${folder}:${String(msg.uid).trim()}`;
+                  return !seen.has(key);
+                });
+              } catch {
+                hydrated = [];
+              }
             }
+            if (generation !== loadGenerationRef.current) return;
+            setMessages([...fromScan, ...hydrated]);
+            setThreads([]);
+            setDrafts([]);
           }
-          if (generation !== loadGenerationRef.current) return;
-          setMessages([...fromScan, ...hydrated]);
-          setThreads([]);
-          setDrafts([]);
         } else if (
           (section === "sent" ||
             section === "trash" ||

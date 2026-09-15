@@ -413,6 +413,39 @@ def get_message(user: AppUser, uid: str, *, folder: str = "INBOX") -> dict[str, 
         return {**message, "provider": _mailbox_provider()}
 
 
+def list_messages_by_folder_uids(
+    user: AppUser,
+    keys: list[dict[str, Any]],
+    *,
+    limit: int = 80,
+    headers_only: bool = True,
+) -> list[dict[str, Any]]:
+    """Fetch assigned label/flagged messages in one IMAP session (no N round-trips)."""
+    account = resolve_user_mailbox(user)
+    if not account:
+        return []
+    fetch_keys: list[str] = []
+    seen: set[str] = set()
+    for row in keys[: max(1, int(limit))]:
+        folder = (row.get("folder") or "inbox").strip().lower() or "inbox"
+        uid = str(row.get("message_uid") or row.get("uid") or "").strip()
+        if not uid:
+            continue
+        key = f"{folder}:{uid}"
+        if key in seen:
+            continue
+        seen.add(key)
+        fetch_keys.append(key)
+    if not fetch_keys:
+        return []
+    with use_mailbox(account, user_id=user.id):
+        rows = outlook_client.get_messages_by_keys(
+            fetch_keys,
+            headers_only=headers_only,
+        )
+        return [{**message, "provider": _mailbox_provider()} for message in rows]
+
+
 def unread_count(user: AppUser) -> int:
     account = resolve_user_mailbox(user)
     if not account:

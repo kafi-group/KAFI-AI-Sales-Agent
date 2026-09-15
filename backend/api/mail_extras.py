@@ -146,11 +146,10 @@ def list_mail_labels(
     user: AppUser = Depends(get_current_user),
 ) -> Any:
     mailbox = _resolve_mailbox_user(user, mailbox_user_id)
-    counts = labels_module.label_display_counts(
-        db,
-        user,
-        mailbox_user_id=int(mailbox.id),
-        mailbox_user=mailbox,
+    # DB assignment counts only — never live IMAP here. Label polls run often and
+    # IMAP scans hang Emails / WhatsApp / contacts. Flagged + labels hydrate on open.
+    counts = labels_module.label_counts(
+        db, user.id, mailbox_user_id=int(mailbox.id)
     )
     return [
         _mail_label_read(label, count=counts.get(label.id, 0))
@@ -288,12 +287,16 @@ def map_labels_by_uids(
 def list_label_messages(
     label_id: int,
     mailbox_user_id: int | None = Query(default=None),
+    resolve: bool = Query(
+        default=False,
+        description="When true, return message summaries via one IMAP batch (Flagged).",
+    ),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> Any:
     mailbox = _resolve_mailbox_user(user, mailbox_user_id)
     try:
-        return labels_module.message_keys_for_label(
+        keys = labels_module.message_keys_for_label(
             db,
             user.id,
             label_id,
@@ -301,6 +304,17 @@ def list_label_messages(
         )
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
+    if not resolve:
+        return keys
+    from modules import inbox as inbox_module
+
+    items = inbox_module.list_messages_by_folder_uids(
+        mailbox,
+        keys,
+        limit=80,
+        headers_only=True,
+    )
+    return {"items": items, "total": len(items), "keys": keys}
 
 
 @router.get("/drafts", response_model=list[MailDraftRead])

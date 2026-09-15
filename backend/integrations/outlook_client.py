@@ -936,12 +936,30 @@ class OutlookClient:
             _UNREAD_CACHE[acct_k] = {"at": time.monotonic(), "count": inbox_unseen}
         return unique
 
+    def _imap_folder_for(self, mailbox, folder: str | None) -> str:
+        """Map logical keys (inbox/sent/…) or raw IMAP names to a selectable folder."""
+        raw = (folder or "INBOX").strip() or "INBOX"
+        key = raw.lower()
+        if key in FOLDER_KEYS:
+            return self._resolve_folder_name(mailbox, key) or (
+                "INBOX" if key == "inbox" else raw
+            )
+        if key == "inbox":
+            return "INBOX"
+        return raw
+
     def get_message(self, uid: str, *, folder: str = "INBOX") -> dict[str, Any] | None:
         from imap_tools import AND
 
         with _imap_lock():
-            mailbox = self._mailbox(folder)
+            mailbox = self._mailbox("INBOX")
             try:
+                imap_folder = self._imap_folder_for(mailbox, folder)
+                if imap_folder != "INBOX":
+                    try:
+                        mailbox.folder.set(imap_folder)
+                    except Exception:  # noqa: BLE001
+                        return None
                 messages = list(
                     mailbox.fetch(
                         AND(uid=str(uid)),
@@ -959,28 +977,34 @@ class OutlookClient:
             return None
         return self._detail_from_msg(messages[0], folder=folder)
 
-    def get_messages_by_keys(self, keys: list[str]) -> list[dict[str, Any]]:
-        """Fetch full message bodies for folder:uid keys in one IMAP session (batched)."""
+    def get_messages_by_keys(
+        self,
+        keys: list[str],
+        *,
+        headers_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Fetch messages for folder:uid keys in one IMAP session (batched)."""
         from imap_tools import AND
 
         grouped: dict[str, list[str]] = {}
         for key in keys:
             if ":" not in key:
-                grouped.setdefault("INBOX", []).append(key)
+                grouped.setdefault("inbox", []).append(key)
                 continue
             folder, uid = key.split(":", 1)
-            grouped.setdefault(folder, []).append(uid)
+            grouped.setdefault((folder or "inbox").strip() or "inbox", []).append(uid)
 
         out: list[dict[str, Any]] = []
         with _imap_lock():
             mailbox = self._mailbox("INBOX")
             try:
-                for folder, uids in grouped.items():
-                    try:
-                        mailbox.folder.set(folder)
-                    except Exception:  # noqa: BLE001
-                        continue
+                for folder_key, uids in grouped.items():
                     if not uids:
+                        continue
+                    imap_folder = self._imap_folder_for(mailbox, folder_key)
+                    try:
+                        mailbox.folder.set(imap_folder)
+                    except Exception:  # noqa: BLE001
                         continue
                     # Batch UID FETCH instead of one round-trip per message.
                     uid_set = ",".join(str(u) for u in uids)
@@ -990,7 +1014,7 @@ class OutlookClient:
                                 AND(uid=uid_set),
                                 mark_seen=False,
                                 bulk=True,
-                                headers_only=False,
+                                headers_only=headers_only,
                             )
                         )
                     except Exception:  # noqa: BLE001
@@ -1002,13 +1026,19 @@ class OutlookClient:
                                         AND(uid=str(uid)),
                                         mark_seen=False,
                                         bulk=False,
-                                        headers_only=False,
+                                        headers_only=headers_only,
                                     )
                                 )
                             except Exception:  # noqa: BLE001
                                 continue
                     for msg in messages:
-                        out.append(self._detail_from_msg(msg, folder=folder))
+                        # Keep logical folder key for label assignment matching.
+                        logical = (folder_key or "inbox").strip().lower() or "inbox"
+                        display_folder = logical if logical in FOLDER_KEYS else imap_folder
+                        if headers_only:
+                            out.append(self._summarize(msg, folder=display_folder))
+                        else:
+                            out.append(self._detail_from_msg(msg, folder=display_folder))
             finally:
                 try:
                     mailbox.logout()

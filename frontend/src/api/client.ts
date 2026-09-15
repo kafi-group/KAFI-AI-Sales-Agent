@@ -3295,6 +3295,18 @@ export const client = {
       `/inbox/labels/${labelId}/messages${q ? `?${q}` : ""}`,
     );
   },
+  /** Flagged / exact assignments: one IMAP batch — avoids N parallel getInboxMessage hangs. */
+  resolveMailLabelMessages: (labelId: number, mailboxUserId?: number | null) => {
+    const search = new URLSearchParams({ resolve: "true" });
+    if (mailboxUserId != null && Number.isFinite(mailboxUserId)) {
+      search.set("mailbox_user_id", String(mailboxUserId));
+    }
+    return request<{
+      items: InboxMessageSummary[];
+      total: number;
+      keys: MailLabelMessageKey[];
+    }>(`/inbox/labels/${labelId}/messages?${search.toString()}`);
+  },
   mapMailLabelsByUids: (folder: string, uids: string[], mailboxUserId?: number | null) => {
     const search = new URLSearchParams();
     search.set("folder", folder);
