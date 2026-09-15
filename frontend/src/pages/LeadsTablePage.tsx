@@ -708,6 +708,7 @@ function sectionTableScope(
   if (section === "master") return { master: true };
   if (section === "old_clients") return { source: "old_clients" };
   if (section === "my_assigned") return {};
+  if (section === "all_contacts") return {};
   if (section === "hyperstore_targeted") return { source: "hyperstore_targeted" };
   if (section === "targeted_distributor") return { source: "targeted_distributor" };
   if (section === "targeted_client") return { source: "targeted_client" };
@@ -742,12 +743,14 @@ function sectionTableParams(
   assigned_to_user_id?: number;
   my_assigned?: boolean;
   master?: boolean;
+  all_contacts?: boolean;
   intake_method?: string;
   new_search_lead_only?: boolean;
 } {
   if (section === "master") return { master: true };
   if (section === "old_clients") return { source: "old_clients" };
   if (section === "my_assigned") return { my_assigned: true };
+  if (section === "all_contacts") return { my_assigned: true, all_contacts: true };
   if (section === "hyperstore_targeted") {
     return {
       source: "hyperstore_targeted",
@@ -805,6 +808,7 @@ function sectionTitle(
   if (section === "old_clients") return isAdmin ? "Old clients" : "Clients";
   if (section === "khalid_focused_sales") return "Khalid Focused Sales";
   if (section === "my_assigned") return "Assigned";
+  if (section === "all_contacts") return "All Contacts";
   if (section === "hyperstore_targeted") return "Hyperstore Target";
   if (section === "targeted_distributor") return "Targeted Distributors";
   if (section === "targeted_client") return "Targeted Client";
@@ -859,6 +863,9 @@ function sectionDescription(
   }
   if (section === "my_assigned") {
     return "Leads assigned to you — from admin assignment or your own imports. Use this list for your daily calling and follow-ups.";
+  }
+  if (section === "all_contacts") {
+    return "Every contact assigned to you across all lists and master types — including Hyperstore, distributors, old clients, and custom lists. Search company name to find anyone (e.g. WRIST Ship Supply).";
   }
   if (section === "interested_clients") {
     return "Clients moved here after a call is labeled Follow up — schedule the next call. This does not mean the client is interested.";
@@ -923,6 +930,9 @@ function sectionEmptyMessage(section: LeadsTableSection): string | null {
   }
   if (section === "my_assigned") {
     return "No leads assigned to you yet. An admin can assign clients from Old clients, or import a spreadsheet to add your own.";
+  }
+  if (section === "all_contacts") {
+    return "No contacts assigned to you yet.";
   }
   if (section === "all") {
     return "No AI-discovered leads yet. Use Discover Leads to search and import prospects — uploads belong in Old clients or Incomplete Data from Archives.";
@@ -1513,7 +1523,7 @@ export function LeadsTablePage({
 
   const useClientsFilters = true;
   const isOldClients = section === "old_clients";
-  const isMyAssigned = section === "my_assigned";
+  const isMyAssigned = section === "my_assigned" || section === "all_contacts";
   const isIncompleteArchives = section === "incomplete_archives";
   const isMaster = section === "master";
   const isTargetedPool = isTargetedPoolSection(section);
@@ -1656,7 +1666,8 @@ export function LeadsTablePage({
         q: debouncedSearch.trim() || undefined,
         sort_by: sortBy,
         sort_dir: sortDir,
-        master_type: masterType,
+        // All Contacts ignores Master FMCG / Minerals filter so every assigned row shows
+        master_type: section === "all_contacts" ? undefined : masterType,
         ...sectionTableParams(section, intakeMethodFilter),
         // Column filters last so they stack and override matching dropdown filters
         ...colFiltersParams,

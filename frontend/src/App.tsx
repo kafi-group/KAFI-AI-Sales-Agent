@@ -1198,6 +1198,11 @@ function DashboardApp() {
           label: "My Assigned Leads",
           count: tableCounts.my_assigned ?? 0,
         },
+        {
+          id: "all_contacts" as const,
+          label: "All Contacts",
+          count: tableCounts.my_assigned ?? 0,
+        },
         ...(isWorkspaceOnlySalesUser
           ? []
           : [
@@ -1223,7 +1228,7 @@ function DashboardApp() {
               },
             ]),
         ...(customModules.length > 0
-          ? enabledCustomNavItems.filter((m) => !["sales_interested_clients", "interested_clients", "not_interested_clients", "not_received_call_clients"].includes(m.id))
+          ? enabledCustomNavItems.filter((m) => !["sales_interested_clients", "interested_clients", "not_interested_clients", "not_received_call_clients", "all_contacts"].includes(m.id))
           : []),
       ];
 

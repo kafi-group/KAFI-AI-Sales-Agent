@@ -416,9 +416,10 @@ export function SettingsPage({ onError }: SettingsPageProps) {
           <div className="min-w-[220px] flex-1">
             <p className="text-sm font-medium text-slate-100">Hang up after 4th ring</p>
             <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-              Default <strong className="text-slate-300">ON</strong> for Sara, Rayan, and every
-              dashboard caller. Unanswered calls drop after about {ringSeconds} seconds (~4 rings)
-              so voicemail does not pick up and Twilio credits are not used.
+              Default <strong className="text-slate-300">ON</strong> for every caller — Sara, Rayan,
+              and all dashboard users (Asim, Usman, Sadia, and anyone else). Unanswered calls drop
+              after about {ringSeconds} seconds (~4 rings) so voicemail does not pick up and Twilio
+              credits are not used.
             </p>
           </div>
           <div className="flex items-center gap-3">

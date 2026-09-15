@@ -289,9 +289,11 @@ class VoiceClient:
             f'callerId="{caller_xml}"',
             'record="record-from-answer"',
         ]
-        # Browser sales dials: do NOT apply the short 4-ring hangup timeout.
-        # That limit is for AI/credit-saving outbound; human dials need time to connect
-        # and ring (especially international). Trial/geo failures fail instantly anyway.
+        # All callers (Sara/Rayan + dashboard sales dials): hang up after ~4 rings when
+        # hangup_after_fourth_ring is ON so unanswered calls do not hit voicemail / burn credits.
+        ring_timeout = self.ring_timeout_seconds()
+        if ring_timeout:
+            dial_attrs.append(f'timeout="{ring_timeout}"')
         if recording_url:
             recording_xml = html.escape(recording_url, quote=True)
             dial_attrs.extend(

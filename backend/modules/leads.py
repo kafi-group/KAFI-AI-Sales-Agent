@@ -580,8 +580,15 @@ def _apply_lead_table_scope(
     pool_for_user_id: int | None = None,
     admin_sent_only: bool = False,
     master_type: str | None = None,
+    all_assigned_contacts: bool = False,
 ):
     from sqlalchemy import or_
+
+    # Sales "All Contacts": every lead assigned to the user, every source / master type.
+    if all_assigned_contacts:
+        if assigned_to_user_id is not None:
+            return buyer_query.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
+        return buyer_query
 
     if master_type:
         if master_type.strip().lower() == "fmcg":
@@ -1033,6 +1040,7 @@ def _filtered_lead_table_rows(
     page_size: int | None = None,
     ids_only: bool = False,
     master_type: str | None = None,
+    all_assigned_contacts: bool = False,
     designation: str | None = None,
     contact_person: str | None = None,
     primary_mobile: str | None = None,
@@ -1060,7 +1068,8 @@ def _filtered_lead_table_rows(
         unassigned_only=unassigned_only,
         pool_for_user_id=pool_for_user_id,
         admin_sent_only=admin_sent_only,
-        master_type=master_type,
+        master_type=None if all_assigned_contacts else master_type,
+        all_assigned_contacts=all_assigned_contacts,
     )
     buyer_query = _apply_intake_method_scope(buyer_query, intake_method=intake_method)
     if new_search_lead_only:
@@ -1395,6 +1404,7 @@ def get_lead_table_column_values(
     intake_method: str | None = None,
     new_search_lead_only: bool = False,
     master_type: str | None = None,
+    all_assigned_contacts: bool = False,
     designation: str | None = None,
     contact_person: str | None = None,
     primary_mobile: str | None = None,
@@ -1430,6 +1440,7 @@ def get_lead_table_column_values(
         intake_method=intake_method,
         new_search_lead_only=new_search_lead_only,
         master_type=master_type,
+        all_assigned_contacts=all_assigned_contacts,
         designation=designation,
         contact_person=contact_person,
         primary_mobile=primary_mobile,
@@ -1569,6 +1580,7 @@ def list_leads_table_ids(
     intake_method: str | None = None,
     new_search_lead_only: bool = False,
     master_type: str | None = None,
+    all_assigned_contacts: bool = False,
     designation: str | None = None,
     contact_person: str | None = None,
     primary_mobile: str | None = None,
@@ -1607,6 +1619,7 @@ def list_leads_table_ids(
         new_search_lead_only=new_search_lead_only,
         ids_only=True,
         master_type=master_type,
+        all_assigned_contacts=all_assigned_contacts,
         designation=designation,
         contact_person=contact_person,
         primary_mobile=primary_mobile,
@@ -1653,6 +1666,7 @@ def list_leads_table(
     intake_method: str | None = None,
     new_search_lead_only: bool = False,
     master_type: str | None = None,
+    all_assigned_contacts: bool = False,
     designation: str | None = None,
     contact_person: str | None = None,
     primary_mobile: str | None = None,
@@ -1695,6 +1709,7 @@ def list_leads_table(
         page=page,
         page_size=page_size,
         master_type=master_type,
+        all_assigned_contacts=all_assigned_contacts,
         designation=designation,
         contact_person=contact_person,
         primary_mobile=primary_mobile,

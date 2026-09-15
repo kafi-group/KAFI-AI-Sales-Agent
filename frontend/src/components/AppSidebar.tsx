@@ -46,6 +46,7 @@ export type LeadsTableSection =
   | "master"
   | "old_clients"
   | "my_assigned"
+  | "all_contacts"
   | "interested_clients"
   | "sales_interested_clients"
   | "not_interested_clients"

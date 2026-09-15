@@ -1794,6 +1794,7 @@ export interface LeadTableQuery {
   intake_method?: string;
   new_search_lead_only?: boolean;
   master_type?: string;
+  all_contacts?: boolean;
 }
 
 export type LeadTableSectionScope = Pick<
@@ -2082,6 +2083,7 @@ export const client = {
     if (params.intake_method) search.set("intake_method", params.intake_method);
     if (params.new_search_lead_only) search.set("new_search_lead_only", "true");
     if (params.master_type) search.set("master_type", params.master_type);
+    if (params.all_contacts) search.set("all_contacts", "true");
     if (params.score) search.set("score", params.score);
     if (params.country) search.set("country", params.country);
     if (params.industry) search.set("industry", params.industry);
