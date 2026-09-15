@@ -696,14 +696,57 @@ export function InboxPage({
             has_more: Boolean(threadList.has_more),
           });
         } else if (isMailLabelSection(section) && Array.isArray(listResult)) {
-          const [keys, inboxRows, sentRows] = listResult as [MailLabelMessageKey[], InboxMessageListResponse, InboxMessageListResponse];
+          const [keys, inboxRows, sentRows] = listResult as [
+            MailLabelMessageKey[],
+            InboxMessageListResponse,
+            InboxMessageListResponse,
+          ];
           const id = mailLabelIdFromSection(section);
           const activeLabel = labelRows.find((l) => l.id === id) || null;
-          const combined = [...(inboxRows?.items || []), ...(sentRows?.items || [])].filter((m) => {
-            if (activeLabel && messageMatchesLabelRules(m, activeLabel)) return true;
-            return messageMatchesLabelKeys(m, keys || []);
+          const fromScan = [...(inboxRows?.items || []), ...(sentRows?.items || [])].filter(
+            (m) => {
+              if (activeLabel && messageMatchesLabelRules(m, activeLabel)) return true;
+              return messageMatchesLabelKeys(m, keys || []);
+            },
+          );
+          const seen = new Set(
+            fromScan.map((m) => {
+              const folder = (m.folder || "inbox").trim().toLowerCase() || "inbox";
+              return `${folder}:${String(m.uid || "").trim()}`;
+            }),
+          );
+          // Flagged (and other exact assignments) can point at older mail outside the
+          // recent inbox/sent window — fetch those UIDs directly so the list matches the badge.
+          const missingKeys = (keys || []).filter((k) => {
+            const folder = (k.folder || "inbox").trim().toLowerCase() || "inbox";
+            const uid = String(k.message_uid || "").trim();
+            return Boolean(uid) && !seen.has(`${folder}:${uid}`);
           });
-          setMessages(combined);
+          const hydrated: InboxMessageSummary[] = [];
+          if (missingKeys.length > 0) {
+            const fetched = await Promise.all(
+              missingKeys.slice(0, 80).map(async (k) => {
+                const folder = (k.folder || "inbox").trim() || "inbox";
+                const uid = String(k.message_uid || "").trim();
+                if (!uid) return null;
+                try {
+                  return await client.getInboxMessage(uid, folder, mailboxId);
+                } catch {
+                  return null;
+                }
+              }),
+            );
+            for (const msg of fetched) {
+              if (!msg?.uid) continue;
+              const folder = (msg.folder || "inbox").trim().toLowerCase() || "inbox";
+              const key = `${folder}:${String(msg.uid).trim()}`;
+              if (seen.has(key)) continue;
+              seen.add(key);
+              hydrated.push(msg);
+            }
+          }
+          if (generation !== loadGenerationRef.current) return;
+          setMessages([...fromScan, ...hydrated]);
           setThreads([]);
           setDrafts([]);
         } else if (
