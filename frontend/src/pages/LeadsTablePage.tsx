@@ -749,7 +749,7 @@ function sectionTableParams(
 } {
   if (section === "master") return { master: true };
   if (section === "old_clients") return { source: "old_clients" };
-  if (section === "my_assigned") return { my_assigned: true };
+  if (section === "my_assigned") return { my_assigned: true, all_contacts: true };
   if (section === "all_contacts") return { my_assigned: true, all_contacts: true };
   if (section === "hyperstore_targeted") {
     return {
@@ -862,10 +862,10 @@ function sectionDescription(
       : "Your client list from imports and past relationships. Import a spreadsheet to add clients — only you can see rows assigned to you.";
   }
   if (section === "my_assigned") {
-    return "Leads assigned to you — from admin assignment or your own imports. Use this list for your daily calling and follow-ups.";
+    return "Every lead assigned to you — all lists and master types (same full set as All Contacts). Search company name to find anyone.";
   }
   if (section === "all_contacts") {
-    return "Every contact assigned to you across all lists and master types — including Hyperstore, distributors, old clients, and custom lists. Search company name to find anyone (e.g. WRIST Ship Supply).";
+    return "Same as My Assigned Leads: every contact assigned to you across all lists and master types. Search company name (e.g. WRIST Ship Supply).";
   }
   if (section === "interested_clients") {
     return "Clients moved here after a call is labeled Follow up — schedule the next call. This does not mean the client is interested.";
@@ -1666,8 +1666,10 @@ export function LeadsTablePage({
         q: debouncedSearch.trim() || undefined,
         sort_by: sortBy,
         sort_dir: sortDir,
-        // All Contacts ignores Master FMCG / Minerals filter so every assigned row shows
-        master_type: section === "all_contacts" ? undefined : masterType,
+        // My Assigned + All Contacts: every lead assigned to the user (no Master FMCG /
+        // targeted-pool exclusion). That is why WRIST and ~100 peers were missing before.
+        master_type:
+          section === "all_contacts" || section === "my_assigned" ? undefined : masterType,
         ...sectionTableParams(section, intakeMethodFilter),
         // Column filters last so they stack and override matching dropdown filters
         ...colFiltersParams,
