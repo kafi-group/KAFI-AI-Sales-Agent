@@ -45,6 +45,11 @@ const MODE_OPTIONS: { value: NotificationMode; label: string; hint: string }[] =
     hint: "In-app popup with spoken alert",
   },
   {
+    value: "handsfree_email",
+    label: "Hands-free email reader",
+    hint: "Asks to read new emails aloud; say yes/ha parho or no/nahi",
+  },
+  {
     value: "off",
     label: "No popup or voiceover",
     hint: "Silent — no popup, sound, or speech",
@@ -130,6 +135,13 @@ export function AppTopActions({
     unlockNotificationAudio();
     setNotificationMode(next);
     setMode(next);
+    if (next === "handsfree_email" && typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia) {
+      void navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+        stream.getTracks().forEach((t) => t.stop());
+      }).catch(() => {
+        /* user can allow mic later when listening starts */
+      });
+    }
   }
 
   async function enableDesktopNotifications() {
@@ -299,7 +311,8 @@ export function AppTopActions({
             Notifications
           </p>
           <p className="text-xs text-slate-500 mt-1 mb-3">
-            Applies to email, WhatsApp, and follow-up alerts. Turning this off silences all of them.
+            Applies to email, WhatsApp, and follow-up alerts. Hands-free email reader
+            only drives the email read-aloud conversation; WhatsApp still gets a short voiceover.
           </p>
 
           <fieldset className="space-y-2">

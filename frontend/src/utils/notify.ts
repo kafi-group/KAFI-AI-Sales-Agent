@@ -1,6 +1,10 @@
 /** Inbox alerts — popup, chime, optional voiceover, or fully off (user preference). */
 
-export type NotificationMode = "popup_sound" | "popup_voiceover" | "off";
+export type NotificationMode =
+  | "popup_sound"
+  | "popup_voiceover"
+  | "handsfree_email"
+  | "off";
 
 export interface InboxPopupPayload {
   id: string;
@@ -45,7 +49,12 @@ export interface QuotationMeetingPopupPayload {
 }
 
 const MODE_STORAGE_KEY = "kafi.notificationMode";
-const MODE_VALUES: NotificationMode[] = ["popup_sound", "popup_voiceover", "off"];
+const MODE_VALUES: NotificationMode[] = [
+  "popup_sound",
+  "popup_voiceover",
+  "handsfree_email",
+  "off",
+];
 
 let audioCtx: AudioContext | null = null;
 let audioUnlocked = false;
@@ -246,7 +255,11 @@ function speakAlert(text: string) {
   }
 }
 
-function applyAlertEffects(mode: NotificationMode, spokenText: string) {
+function applyAlertEffects(
+  mode: NotificationMode,
+  spokenText: string,
+  options?: { emailHandsFree?: boolean },
+) {
   if (mode === "off") return;
   unlockNotificationAudio();
   if (mode === "popup_sound") {
@@ -254,6 +267,13 @@ function applyAlertEffects(mode: NotificationMode, spokenText: string) {
     playNotificationChime();
   } else if (mode === "popup_voiceover") {
     speakAlert(spokenText);
+  } else if (mode === "handsfree_email") {
+    // Email hands-free session speaks the offer; other alerts still get a short voiceover.
+    if (options?.emailHandsFree) {
+      playNotificationChime();
+    } else {
+      speakAlert(spokenText);
+    }
   }
 }
 
@@ -318,7 +338,9 @@ export function alertNewInboxMessage(details: {
       ? `You have ${count} new inbox messages.`
       : `New inbox message from ${sender}. ${subject}.`;
 
-  applyAlertEffects(mode, spoken);
+  applyAlertEffects(mode, spoken, {
+    emailHandsFree: mode === "handsfree_email",
+  });
   showDesktopNotification("New inbox message", body, { tag: "kafi-inbox" });
 
   emitInboxPopup({

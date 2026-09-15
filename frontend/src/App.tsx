@@ -74,9 +74,12 @@ import {
   alertNewInboxMessage,
   alertNewWhatsAppMessage,
   alertQuotationMeeting,
+  getNotificationMode,
   requestNotificationPermission,
   unlockNotificationAudio,
 } from "./utils/notify";
+import { startHandsFreeEmailReader } from "./utils/handsFreeEmailReader";
+import { HandsFreeEmailReaderHost } from "./components/HandsFreeEmailReaderHost";
 
 
 const INBOX_POLL_INTERVAL_MS = 20_000;
@@ -492,6 +495,47 @@ function DashboardApp() {
               subject: first.subject,
               count: newMessages.length,
             });
+            if (getNotificationMode() === "handsfree_email") {
+              const mailboxId = mailboxOverride;
+              void (async () => {
+                const items = await Promise.all(
+                  newMessages.slice(0, 10).map(async (m) => {
+                    try {
+                      const detail = await client.getInboxMessage(
+                        m.uid,
+                        m.folder || "inbox",
+                        mailboxId,
+                      );
+                      return {
+                        uid: m.uid,
+                        folder: m.folder || "inbox",
+                        from:
+                          detail.from_name ||
+                          detail.from_email ||
+                          m.from_name ||
+                          m.from_email ||
+                          "Unknown",
+                        subject: detail.subject || m.subject || "(no subject)",
+                        body:
+                          detail.body_text ||
+                          detail.preview ||
+                          m.preview ||
+                          "",
+                      };
+                    } catch {
+                      return {
+                        uid: m.uid,
+                        folder: m.folder || "inbox",
+                        from: m.from_name || m.from_email || "Unknown",
+                        subject: m.subject || "(no subject)",
+                        body: m.preview || "",
+                      };
+                    }
+                  }),
+                );
+                await startHandsFreeEmailReader(items);
+              })();
+            }
           }
 
           seenMessageUidsRef.current = currentUids;
@@ -1496,6 +1540,7 @@ function DashboardApp() {
             handleSelectTab("inbox");
           }}
         />
+        <HandsFreeEmailReaderHost />
         <WhatsAppAlertToasts
           onOpenWhatsAppInbox={() => {
             handleSelectWhatsAppSection("whatsapp-inbox");
