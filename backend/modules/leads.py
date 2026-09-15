@@ -1757,14 +1757,18 @@ def count_my_assigned_leads_filtered(
     master_type: str | None = "fmcg",
 ) -> int:
     """Assigned leads as shown in My Assigned Leads (Master type + no targeted pools)."""
-    _rows, section_total, _filtered = _filtered_lead_table_rows(
-        db,
+    from sqlalchemy import func as sa_func
+
+    buyer_query = _apply_lead_table_scope(
+        db.query(Buyer),
+        source=None,
+        exclude_source=None,
         assigned_to_user_id=user_id,
-        include_placed_outcomes=True,
+        unassigned_only=False,
         master_type=master_type,
-        ids_only=True,
+        all_assigned_contacts=False,
     )
-    return int(section_total or 0)
+    return int(buyer_query.with_entities(sa_func.count(Buyer.id)).scalar() or 0)
 
 
 def invalidate_section_counts_cache() -> None:

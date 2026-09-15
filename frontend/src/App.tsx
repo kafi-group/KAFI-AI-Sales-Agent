@@ -498,42 +498,46 @@ function DashboardApp() {
             if (getNotificationMode() === "handsfree_email") {
               const mailboxId = mailboxOverride;
               void (async () => {
-                const items = await Promise.all(
-                  newMessages.slice(0, 10).map(async (m) => {
-                    try {
-                      const detail = await client.getInboxMessage(
-                        m.uid,
-                        m.folder || "inbox",
-                        mailboxId,
-                      );
-                      return {
-                        uid: m.uid,
-                        folder: m.folder || "inbox",
-                        from:
-                          detail.from_name ||
-                          detail.from_email ||
-                          m.from_name ||
-                          m.from_email ||
-                          "Unknown",
-                        subject: detail.subject || m.subject || "(no subject)",
-                        body:
-                          detail.body_text ||
-                          detail.preview ||
-                          m.preview ||
-                          "",
-                      };
-                    } catch {
-                      return {
-                        uid: m.uid,
-                        folder: m.folder || "inbox",
-                        from: m.from_name || m.from_email || "Unknown",
-                        subject: m.subject || "(no subject)",
-                        body: m.preview || "",
-                      };
-                    }
-                  }),
-                );
-                await startHandsFreeEmailReader(items);
+                try {
+                  const items = await Promise.all(
+                    newMessages.slice(0, 10).map(async (m) => {
+                      try {
+                        const detail = await client.getInboxMessage(
+                          m.uid,
+                          m.folder || "inbox",
+                          mailboxId,
+                        );
+                        return {
+                          uid: m.uid,
+                          folder: m.folder || "inbox",
+                          from:
+                            detail.from_name ||
+                            detail.from_email ||
+                            m.from_name ||
+                            m.from_email ||
+                            "Unknown",
+                          subject: detail.subject || m.subject || "(no subject)",
+                          body:
+                            detail.body_text ||
+                            detail.preview ||
+                            m.preview ||
+                            "",
+                        };
+                      } catch {
+                        return {
+                          uid: m.uid,
+                          folder: m.folder || "inbox",
+                          from: m.from_name || m.from_email || "Unknown",
+                          subject: m.subject || "(no subject)",
+                          body: m.preview || "",
+                        };
+                      }
+                    }),
+                  );
+                  await startHandsFreeEmailReader(items);
+                } catch {
+                  /* never block inbox polling */
+                }
               })();
             }
           }

@@ -609,37 +609,13 @@ def label_display_counts(
         # Flagged: manual assignments only (never domain/keyword routing).
         allow_rules = not is_flagged_label(label)
 
+        # Do NOT resolve Flagged via live IMAP here — listMailLabels runs often and
+        # per-UID fetches hang the Emails UI. Badge = assignment count; list hydrates UIDs.
         if is_flagged_label(label):
-            # Resolve each Flagged UID on IMAP so badge matches the list (not just
-            # "assignment exists in DB"). Drop stale assignments for deleted/moved mail.
-            stale_uids: list[tuple[str, str]] = []
             for key in keys:
-                folder = (key.get("folder") or "inbox").strip() or "inbox"
-                uid = str(key.get("message_uid") or "").strip()
-                if not uid:
-                    continue
-                try:
-                    msg = inbox_module.get_message(scan_user, uid, folder=folder)
-                except Exception:
-                    msg = None
-                if msg and str(msg.get("uid") or "").strip():
-                    folder_key = (msg.get("folder") or folder).strip().lower() or "inbox"
-                    matched.add((folder_key, str(msg.get("uid")).strip()))
-                else:
-                    stale_uids.append((folder.lower(), uid))
-            if stale_uids:
-                for folder_key, uid in stale_uids:
-                    try:
-                        unassign_label(
-                            db,
-                            user.id,
-                            label_id=int(label.id),
-                            folder=folder_key,
-                            message_uid=uid,
-                            mailbox_user_id=mailbox_id,
-                        )
-                    except Exception:
-                        pass
+                parsed = _message_key(key.get("folder"), key.get("message_uid"))
+                if parsed:
+                    matched.add(parsed)
             counts[int(label.id)] = len(matched)
             continue
 
@@ -669,8 +645,6 @@ def label_display_counts(
                 keys=keys,
             ):
                 matched.add(current)
-        # Manual assigns for custom labels: keep counting keys even if outside scan window
-        # (list view hydrates those UIDs). Flagged handled above with live IMAP resolve.
         for key in keys:
             parsed = _message_key(key.get("folder"), key.get("message_uid"))
             if parsed:

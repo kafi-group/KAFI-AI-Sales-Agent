@@ -108,7 +108,7 @@ export function stopHandsFreeEmailReader(reason = "Stopped.") {
 function normalizeHeard(raw: string): string {
   return raw
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/[^a-z0-9\u00C0-\u024F\s]/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
