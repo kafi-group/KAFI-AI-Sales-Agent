@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import re
 import threading
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
@@ -52,14 +53,24 @@ def _account_cache_key() -> str:
     return (settings.mailbox_email or "").strip().lower() or "_default"
 
 
-def _imap_lock() -> threading.RLock:
+@contextmanager
+def _imap_lock(timeout: float = 35.0):
+    """Per-mailbox lock with timeout so stuck IMAP cannot freeze the API worker."""
     key = _account_cache_key()
     with _IMAP_LOCKS_GUARD:
         lock = _IMAP_LOCKS.get(key)
         if lock is None:
             lock = threading.RLock()
             _IMAP_LOCKS[key] = lock
-        return lock
+    acquired = lock.acquire(timeout=timeout)
+    if not acquired:
+        raise TimeoutError(
+            "Mailbox is busy. Contacts, WhatsApp, and workspace still work — retry mail shortly."
+        )
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 def _password_auth_help() -> str:
@@ -295,17 +306,24 @@ class OutlookClient:
         host = settings.mailbox_imap_host
         port = settings.mailbox_imap_port
         ssl_context, server_hostname = self._ssl_context(host)
+        # Hard cap so a hung IMAP server cannot pin the only uvicorn worker.
+        imap_timeout = 25
 
         if server_hostname:
 
             class _IMAP4_SSL(imaplib.IMAP4_SSL):
                 def _create_socket(self, timeout):  # noqa: ANN001
-                    sock = socket.create_connection((self.host, self.port), timeout)
+                    sock = socket.create_connection(
+                        (self.host, self.port),
+                        timeout if timeout is not None else imap_timeout,
+                    )
                     return ssl_context.wrap_socket(sock, server_hostname=server_hostname)
 
-            client = _IMAP4_SSL(host, port)
+            client = _IMAP4_SSL(host, port, timeout=imap_timeout)
         else:
-            client = imaplib.IMAP4_SSL(host, port, ssl_context=ssl_context)
+            client = imaplib.IMAP4_SSL(
+                host, port, ssl_context=ssl_context, timeout=imap_timeout
+            )
 
         if self._use_oauth():
             token = self._acquire_access_token(IMAP_SCOPES)

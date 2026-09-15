@@ -504,7 +504,16 @@ def list_inbox_messages(
             "total": total,
             "offset": offset,
             "limit": limit,
-            "has_more": len(items) >= limit if key == "all" else len(items) >= limit,
+            "has_more": len(items) >= limit,
+        }
+    except TimeoutError:
+        # Keep API worker free for leads / WhatsApp / workspace.
+        return {
+            "items": [],
+            "total": 0,
+            "offset": offset,
+            "limit": limit,
+            "has_more": False,
         }
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

@@ -255,20 +255,24 @@ def list_messages(
         return []
     key = (folder or "inbox").strip().lower()
     if key == "all":
-        # Recent mail across Inbox / Sent / Junk / Trash / Archive (All emails view).
-        per = max(15, min(40, int(limit)))
+        # Light cross-folder peek — soft-fail each folder so one hung Junk IMAP
+        # cannot block contacts / WhatsApp / workspace on the single worker.
+        per = max(8, min(15, int(limit)))
         combined: list[dict[str, Any]] = []
         for folder_key in ("inbox", "sent", "junk", "trash", "archive"):
-            combined.extend(
-                list_messages(
-                    user,
-                    limit=per,
-                    offset=0,
-                    unread_only=unread_only,
-                    folder=folder_key,
-                    search_text=search_text,
+            try:
+                combined.extend(
+                    list_messages(
+                        user,
+                        limit=per,
+                        offset=0,
+                        unread_only=unread_only,
+                        folder=folder_key,
+                        search_text=search_text,
+                    )
                 )
-            )
+            except Exception:  # noqa: BLE001
+                continue
         combined.sort(key=lambda m: m.get("date") or "", reverse=True)
         return combined[offset : offset + limit]
     if key not in FOLDER_KEYS:
@@ -319,18 +323,22 @@ def search_mail(
     scope_key = (scope or "inbox").strip().lower()
     if scope_key == "all":
         # Scan each Outlook folder (incl. Junk) so spam-tagged mail still matches.
-        per_folder = max(limit, 80)
+        # Soft-fail per folder — never let one IMAP hang starve the API worker.
+        per_folder = max(40, min(80, int(limit)))
         combined: list[dict[str, Any]] = []
         for folder in ("inbox", "sent", "archive", "trash", "junk"):
-            combined.extend(
-                list_messages(
-                    user,
-                    limit=per_folder,
-                    offset=0,
-                    folder=folder,
-                    search_text=text,
+            try:
+                combined.extend(
+                    list_messages(
+                        user,
+                        limit=per_folder,
+                        offset=0,
+                        folder=folder,
+                        search_text=text,
+                    )
                 )
-            )
+            except Exception:  # noqa: BLE001
+                continue
         combined.sort(key=lambda m: m.get("date") or "", reverse=True)
         page = combined[offset : offset + limit]
         return {
@@ -457,12 +465,15 @@ def list_messages_by_folder_uids(
         fetch_keys.append(key)
     if not fetch_keys:
         return []
-    with use_mailbox(account, user_id=user.id):
-        rows = outlook_client.get_messages_by_keys(
-            fetch_keys,
-            headers_only=headers_only,
-        )
-        return [{**message, "provider": _mailbox_provider()} for message in rows]
+    try:
+        with use_mailbox(account, user_id=user.id):
+            rows = outlook_client.get_messages_by_keys(
+                fetch_keys,
+                headers_only=headers_only,
+            )
+            return [{**message, "provider": _mailbox_provider()} for message in rows]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def unread_count(user: AppUser) -> int:

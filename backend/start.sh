@@ -15,5 +15,5 @@ else
   fi
 fi
 export KAFI_SKIP_LIFESPAN_MIGRATE=1
-# Single worker for reliability on typical Railway memory; scale later if needed.
-exec uvicorn main:app --host 0.0.0.0 --port "${PORT:-8000}" --workers 1
+# Two workers so a slow IMAP request cannot starve leads / WhatsApp / workspace.
+exec uvicorn main:app --host 0.0.0.0 --port "${PORT:-8000}" --workers "${WEB_CONCURRENCY:-2}"
