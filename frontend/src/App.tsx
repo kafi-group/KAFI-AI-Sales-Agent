@@ -176,6 +176,7 @@ function DashboardApp() {
     khalid_focused_sales: 0,
     incomplete_archives: 0,
     my_assigned: 0,
+    all_contacts: 0,
     by_assignee: {},
   });
   const [assigneeNavUsers, setAssigneeNavUsers] = useState<AppUser[]>([]);
