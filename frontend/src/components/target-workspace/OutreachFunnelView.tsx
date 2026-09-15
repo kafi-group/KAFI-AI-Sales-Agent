@@ -9,6 +9,7 @@ import {
   type LeadTableRow,
 } from "../../api/client";
 import { CallLeadButton } from "../CallLeadButton";
+import { CallRecommendationBadge } from "../CallRecommendationBadge";
 import {
   LeadWhatsAppComposeModal,
   type WhatsAppComposeTarget,
@@ -33,6 +34,8 @@ interface OutreachFunnelViewProps {
   onSelectDay: (day: string) => void;
   onOpenCall?: (phone: string, companyName: string, leadId?: number) => void;
   onOpenEmailComposer?: (email: string, companyName: string, contactName?: string) => void;
+  /** Jump to Assigned/Master table in edit mode for this lead. */
+  onEditLead?: (leadId: number, companyName: string) => void;
   onError?: (message: string) => void;
 }
 
@@ -74,6 +77,7 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
   onSelectDay,
   onOpenCall: _onOpenCall,
   onOpenEmailComposer,
+  onEditLead,
   onError,
 }) => {
   const [selectedStage, setSelectedStage] = useState<string>("fresh");
@@ -591,6 +595,23 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                         👤 Rep: {lead.assigned_to_name}
                       </span>
                     )}
+                    <CallRecommendationBadge
+                      recommended={
+                        lead.call_recommended === undefined ? null : lead.call_recommended
+                      }
+                      localTime={lead.call_local_time ?? null}
+                      reason={lead.call_reason ?? null}
+                    />
+                    {onEditLead ? (
+                      <button
+                        type="button"
+                        onClick={() => onEditLead(lead.id, lead.company_name)}
+                        className="px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-slate-800 text-slate-100 border border-slate-600 hover:border-emerald-500/50 hover:text-emerald-200 transition"
+                        title="Open this contact in the leads table to edit any field"
+                      >
+                        ✎ Edit
+                      </button>
+                    ) : null}
                   </div>
 
                   <div className="flex items-center gap-4 text-xs text-slate-300 flex-wrap">

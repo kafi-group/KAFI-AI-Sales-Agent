@@ -352,18 +352,48 @@ def list_events(
     user_id: int | None = None,
     is_admin: bool = False,
     channel: ActivityChannel | None = "email",
+    event_type: str | None = None,
+    send_mode: str | None = None,
 ) -> tuple[list[EmailActivityEvent], int, int]:
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     query = _scoped_query(db, user_id=user_id, is_admin=is_admin, channel=channel)
     if unread_only:
         query = query.filter(EmailActivityEvent.read_at.is_(None))
-    total = query.count()
+    event_key = (event_type or "").strip().lower()
+    if event_key:
+        if event_key in {"failed", "send_failed"}:
+            query = query.filter(
+                EmailActivityEvent.event_type.in_(
+                    ("send_failed", "mailbox_not_configured", "invalid_recipient")
+                )
+            )
+        else:
+            query = query.filter(EmailActivityEvent.event_type == event_key)
     unread = (
         _scoped_query(db, user_id=user_id, is_admin=is_admin, channel=channel)
         .filter(EmailActivityEvent.read_at.is_(None))
         .count()
     )
+    mode_key = (send_mode or "").strip().lower()
+    if mode_key in {"individual", "bulk"}:
+        # JSON send_mode filter in Python (reliable across null / missing keys).
+        candidates = (
+            query.order_by(EmailActivityEvent.created_at.desc()).limit(800).all()
+        )
+
+        def _row_mode(event: EmailActivityEvent) -> str:
+            details = event.details if isinstance(event.details, dict) else {}
+            raw = str(details.get("send_mode") or "individual").strip().lower()
+            return "bulk" if raw == "bulk" else "individual"
+
+        filtered = [row for row in candidates if _row_mode(row) == mode_key]
+        total = len(filtered)
+        start = (page - 1) * page_size
+        rows = filtered[start : start + page_size]
+        return rows, total, unread
+
+    total = query.count()
     rows = (
         query.order_by(EmailActivityEvent.created_at.desc())
         .offset((page - 1) * page_size)

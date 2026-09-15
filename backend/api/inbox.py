@@ -36,7 +36,8 @@ from modules.mailbox_accounts import hosts_enabled, resolve_user_mailbox
 
 router = APIRouter(prefix="/inbox", tags=["inbox"])
 
-_VALID_FOLDERS = {"inbox", "sent", "trash", "archive"}
+_VALID_FOLDERS = {"inbox", "sent", "trash", "archive", "junk"}
+_LIST_FOLDERS = _VALID_FOLDERS | {"all"}
 
 # Asim-only shared mailboxes (Mr Khalid request). Email-module override only.
 _ASIM_SHARED_MAILBOX_EMAILS = frozenset(
@@ -480,8 +481,8 @@ def list_inbox_messages(
 ):
     target = _mailbox_target(user, mailbox_user_id)
     key = folder.strip().lower()
-    if key not in _VALID_FOLDERS:
-        raise HTTPException(400, f"folder must be one of: {', '.join(sorted(_VALID_FOLDERS))}")
+    if key not in _LIST_FOLDERS:
+        raise HTTPException(400, f"folder must be one of: {', '.join(sorted(_LIST_FOLDERS))}")
     try:
         items = inbox_module.list_messages(
             target,
@@ -492,7 +493,7 @@ def list_inbox_messages(
             search_text=q,
         )
         total = len(items)
-        if not q:
+        if not q and key != "all":
             folders = inbox_module.list_folders(target)
             for row in folders.get("folders") or []:
                 if row.get("key") == key:
@@ -503,7 +504,7 @@ def list_inbox_messages(
             "total": total,
             "offset": offset,
             "limit": limit,
-            "has_more": len(items) >= limit,
+            "has_more": len(items) >= limit if key == "all" else len(items) >= limit,
         }
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

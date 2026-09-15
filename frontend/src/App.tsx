@@ -156,6 +156,8 @@ function DashboardApp() {
   const [tableSection, setTableSection] = useState<LeadsTableSection>("master");
   const [masterType, setMasterType] = useState<string>("fmcg");
   const [mailSection, setMailSection] = useState<MailSection>("inbox");
+  const [focusEditLeadId, setFocusEditLeadId] = useState<number | null>(null);
+  const [focusEditCompany, setFocusEditCompany] = useState<string | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpenPreference);
   const [mailDraftCount, setMailDraftCount] = useState(0);
@@ -1361,6 +1363,7 @@ function DashboardApp() {
       count: 0,
       alert: inboxUnread > 0,
       children: [
+        { id: "all", label: "All emails", count: 0 },
         { id: "inbox", label: "Inbox", count: mailCounts.inbox, alert: inboxUnread > 0 },
         ...(flaggedMailLabel
           ? [
@@ -1468,6 +1471,7 @@ function DashboardApp() {
       return masterTableLabel;
     }
     if (tab === "inbox") {
+      if (mailSection === "all") return "All emails";
       if (mailSection === "inbox") return "Inbox";
       if (mailSection === "sent") return "Sent";
       if (mailSection === "trash") return "Trash";
@@ -1772,6 +1776,13 @@ function DashboardApp() {
                     `/compose?to=${encodeURIComponent(email)}&subject=${encodeURIComponent(`Inquiry - ${company}`)}`
                   );
                 }}
+                onEditLead={(leadId, companyName) => {
+                  setTableSection(isAdmin ? "master" : "my_assigned");
+                  setSelectedLeadId(null);
+                  setFocusEditLeadId(leadId);
+                  setFocusEditCompany(companyName);
+                  setTab("table");
+                }}
                 onError={setError}
               />
             )}
@@ -1793,6 +1804,12 @@ function DashboardApp() {
                 onSelectLead={handleSelectLead}
                 onSectionCountsChange={setTableCounts}
                 masterType={masterType}
+                focusEditLeadId={focusEditLeadId}
+                focusEditCompany={focusEditCompany}
+                onFocusEditConsumed={() => {
+                  setFocusEditLeadId(null);
+                  setFocusEditCompany(null);
+                }}
               />
             )}
             {tab === "inbox" && (

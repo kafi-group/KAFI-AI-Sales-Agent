@@ -87,17 +87,18 @@ export function assignedUserIdFromSection(section: LeadsTableSection): number | 
 }
 
 export type MailSection =
-  | "inbox"
-  | "sent"
-  | "trash"
-  | "junk"
-  | "archive"
-  | "drafts"
-  | "activity"
-  | "email-templates"
-  | "personalized-emails"
-  | `label:${number}`
-  | `label-linkedin:${number}`;
+    | "all"
+    | "inbox"
+    | "sent"
+    | "trash"
+    | "junk"
+    | "archive"
+    | "drafts"
+    | "activity"
+    | "email-templates"
+    | "personalized-emails"
+    | `label:${number}`
+    | `label-linkedin:${number}`;
 
 export type WhatsAppSection = "whatsapp-inbox" | "whatsapp-templates" | "whatsapp-activity";
 

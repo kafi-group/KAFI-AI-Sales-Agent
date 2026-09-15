@@ -254,6 +254,23 @@ def list_messages(
     if not account:
         return []
     key = (folder or "inbox").strip().lower()
+    if key == "all":
+        # Recent mail across Inbox / Sent / Junk / Trash / Archive (All emails view).
+        per = max(15, min(40, int(limit)))
+        combined: list[dict[str, Any]] = []
+        for folder_key in ("inbox", "sent", "junk", "trash", "archive"):
+            combined.extend(
+                list_messages(
+                    user,
+                    limit=per,
+                    offset=0,
+                    unread_only=unread_only,
+                    folder=folder_key,
+                    search_text=search_text,
+                )
+            )
+        combined.sort(key=lambda m: m.get("date") or "", reverse=True)
+        return combined[offset : offset + limit]
     if key not in FOLDER_KEYS:
         raise ValueError(f"Unknown folder: {folder}")
     with use_mailbox(account, user_id=user.id):
@@ -301,12 +318,14 @@ def search_mail(
         raise ValueError("Search query is required")
     scope_key = (scope or "inbox").strip().lower()
     if scope_key == "all":
+        # Scan each Outlook folder (incl. Junk) so spam-tagged mail still matches.
+        per_folder = max(limit, 80)
         combined: list[dict[str, Any]] = []
         for folder in ("inbox", "sent", "archive", "trash", "junk"):
             combined.extend(
                 list_messages(
                     user,
-                    limit=limit,
+                    limit=per_folder,
                     offset=0,
                     folder=folder,
                     search_text=text,

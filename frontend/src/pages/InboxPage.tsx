@@ -236,6 +236,7 @@ function participantsLabel(thread: InboxThreadSummary, mailboxEmail?: string | n
 
 function sectionDescription(section: MailSection, email?: string | null): string {
   const mailbox = email ? email : "Company mailbox";
+  if (section === "all") return `${mailbox} · All folders (Inbox, Sent, Spam, Trash, Archive)`;
   if (section === "sent") return `${mailbox} · Messages you sent`;
   if (section === "trash") return `${mailbox} · Deleted messages`;
   if (section === "junk") return `${mailbox} · Spam / Junk from Outlook`;
@@ -246,6 +247,7 @@ function sectionDescription(section: MailSection, email?: string | null): string
 }
 
 function emptyListMessage(section: MailSection): string {
+  if (section === "all") return "No messages across folders. Try Search with All mail.";
   if (section === "sent") return "No sent messages.";
   if (section === "trash") return "Trash is empty.";
   if (section === "junk") return "Spam / Junk is empty — or Outlook has no Junk folder linked to this mailbox.";
@@ -393,7 +395,9 @@ export function InboxPage({
   const [messageTotal, setMessageTotal] = useState(0);
   const [messageHasMore, setMessageHasMore] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchScope, setSearchScope] = useState("inbox");
+  const [searchScope, setSearchScope] = useState(() =>
+    section === "all" ? "all" : section === "junk" ? "junk" : "inbox",
+  );
   const [searchActive, setSearchActive] = useState(false);
   const [mailAiOpen, setMailAiOpen] = useState(false);
   const [mailAiQuestion, setMailAiQuestion] = useState("");
@@ -455,7 +459,9 @@ export function InboxPage({
     flaggedLabel && messageLabels.some((label) => label.id === flaggedLabel.id),
   );
   const isDraftsView = section === "drafts";
+  const isAllMailView = section === "all";
   const isFolderMail =
+    section === "all" ||
     section === "inbox" ||
     section === "sent" ||
     section === "trash" ||
@@ -606,6 +612,17 @@ export function InboxPage({
           setDrafts([]);
           hadCachedRender = true;
         }
+      } else if (section === "all") {
+        const cacheKey = `messages:${mailboxKey}:all:${messagePage}:${unreadOnly}`;
+        const cached = _MEM_MESSAGE_CACHE.get(cacheKey);
+        if (cached) {
+          setMessages(cached.items);
+          setMessageTotal(cached.total);
+          setMessageHasMore(cached.has_more);
+          setThreads([]);
+          setDrafts([]);
+          hadCachedRender = true;
+        }
       }
 
       if (!options?.silent && !hadCachedRender) setLoading(true);
@@ -632,51 +649,39 @@ export function InboxPage({
           if (id == null) {
             listPromise = Promise.resolve(null);
           } else {
-            // Decide Flagged vs rule-label after labels resolve (section id is label:N only).
-            listPromise = labelsPromise.then(async (labelRows) => {
-              const active =
-                labelRows.find((l) => l.id === id) ||
-                null;
-              const isFlagged =
-                Boolean(active?.is_system) ||
-                (active?.name || "").trim().toLowerCase() === "flagged";
-              if (isFlagged) {
-                const resolved = await client.resolveMailLabelMessages(id, mailboxId);
-                return { kind: "flagged_resolved" as const, resolved };
-              }
-              const [keys, inboxRows, sentRows] = await Promise.all([
-                client.listMailLabelMessages(id, mailboxId),
-                client.listInboxMessages({
-                  limit: 60,
-                  folder: "inbox",
-                  mailbox_user_id: mailboxId,
-                }),
-                client.listInboxMessages({
-                  limit: 30,
-                  folder: "sent",
-                  mailbox_user_id: mailboxId,
-                }),
-              ]);
-              return {
-                kind: "label_scan" as const,
-                keys,
-                inboxRows,
-                sentRows,
-              };
-            });
+            // Same path for Flagged and custom labels: keys + recent scan + batch hydrate.
+            listPromise = Promise.all([
+              client.listMailLabelMessages(id, mailboxId),
+              client.listInboxMessages({
+                limit: 60,
+                folder: "inbox",
+                mailbox_user_id: mailboxId,
+              }),
+              client.listInboxMessages({
+                limit: 30,
+                folder: "sent",
+                mailbox_user_id: mailboxId,
+              }),
+            ]).then(([keys, inboxRows, sentRows]) => ({
+              kind: "label_scan" as const,
+              keys,
+              inboxRows,
+              sentRows,
+            }));
           }
         } else if (
           section === "sent" ||
           section === "trash" ||
           section === "junk" ||
-          section === "archive"
+          section === "archive" ||
+          section === "all"
         ) {
           const offset = (messagePage - 1) * PAGE_SIZE;
           listPromise = client.listInboxMessages({
             limit: PAGE_SIZE,
             offset,
-            unread_only: unreadOnly && section !== "sent",
-            folder: section,
+            unread_only: unreadOnly && section !== "sent" && section !== "all",
+            folder: section === "all" ? "all" : section,
             mailbox_user_id: mailboxId,
           });
         } else {
@@ -731,72 +736,63 @@ export function InboxPage({
           typeof listResult === "object" &&
           "kind" in (listResult as object)
         ) {
-          const payload = listResult as
-            | {
-                kind: "flagged_resolved";
-                resolved: {
-                  items: InboxMessageSummary[];
-                  total: number;
-                  keys: MailLabelMessageKey[];
-                };
+          const payload = listResult as {
+            kind: "label_scan";
+            keys: MailLabelMessageKey[];
+            inboxRows: InboxMessageListResponse;
+            sentRows: InboxMessageListResponse;
+          };
+          const { keys, inboxRows, sentRows } = payload;
+          const id = mailLabelIdFromSection(section);
+          const activeLabel = labelRows.find((l) => l.id === id) || null;
+          const fromScan = [...(inboxRows?.items || []), ...(sentRows?.items || [])].filter(
+            (m) => {
+              // Flagged / system labels are assignment-only (no domain rules).
+              if (
+                activeLabel &&
+                !activeLabel.is_system &&
+                activeLabel.name.trim().toLowerCase() !== "flagged" &&
+                messageMatchesLabelRules(m, activeLabel)
+              ) {
+                return true;
               }
-            | {
-                kind: "label_scan";
-                keys: MailLabelMessageKey[];
-                inboxRows: InboxMessageListResponse;
-                sentRows: InboxMessageListResponse;
-              };
-          if (payload.kind === "flagged_resolved") {
-            setMessages(payload.resolved.items || []);
-            setMessageTotal(payload.resolved.total || 0);
-            setMessageHasMore(false);
-            setThreads([]);
-            setDrafts([]);
-          } else {
-            const { keys, inboxRows, sentRows } = payload;
-            const id = mailLabelIdFromSection(section);
-            const activeLabel = labelRows.find((l) => l.id === id) || null;
-            const fromScan = [...(inboxRows?.items || []), ...(sentRows?.items || [])].filter(
-              (m) => {
-                if (activeLabel && messageMatchesLabelRules(m, activeLabel)) return true;
-                return messageMatchesLabelKeys(m, keys || []);
-              },
-            );
-            // Assignment keys outside the recent window: one batch resolve, never N IMAP gets.
-            const seen = new Set(
-              fromScan.map((m) => {
-                const folder = (m.folder || "inbox").trim().toLowerCase() || "inbox";
-                return `${folder}:${String(m.uid || "").trim()}`;
-              }),
-            );
-            const missingKeys = (keys || []).filter((k) => {
-              const folder = (k.folder || "inbox").trim().toLowerCase() || "inbox";
-              const uid = String(k.message_uid || "").trim();
-              return Boolean(uid) && !seen.has(`${folder}:${uid}`);
-            });
-            let hydrated: InboxMessageSummary[] = [];
-            if (missingKeys.length > 0 && id != null) {
-              try {
-                const resolved = await client.resolveMailLabelMessages(id, mailboxId);
-                hydrated = (resolved.items || []).filter((msg) => {
-                  const folder = (msg.folder || "inbox").trim().toLowerCase() || "inbox";
-                  const key = `${folder}:${String(msg.uid).trim()}`;
-                  return !seen.has(key);
-                });
-              } catch {
-                hydrated = [];
-              }
+              return messageMatchesLabelKeys(m, keys || []);
+            },
+          );
+          const seen = new Set(
+            fromScan.map((m) => {
+              const folder = (m.folder || "inbox").trim().toLowerCase() || "inbox";
+              return `${folder}:${String(m.uid || "").trim()}`;
+            }),
+          );
+          const missingKeys = (keys || []).filter((k) => {
+            const folder = (k.folder || "inbox").trim().toLowerCase() || "inbox";
+            const uid = String(k.message_uid || "").trim();
+            return Boolean(uid) && !seen.has(`${folder}:${uid}`);
+          });
+          let hydrated: InboxMessageSummary[] = [];
+          if (missingKeys.length > 0 && id != null) {
+            try {
+              const resolved = await client.resolveMailLabelMessages(id, mailboxId);
+              hydrated = (resolved.items || []).filter((msg) => {
+                const folder = (msg.folder || "inbox").trim().toLowerCase() || "inbox";
+                const key = `${folder}:${String(msg.uid).trim()}`;
+                return !seen.has(key);
+              });
+            } catch {
+              hydrated = [];
             }
-            if (generation !== loadGenerationRef.current) return;
-            setMessages([...fromScan, ...hydrated]);
-            setThreads([]);
-            setDrafts([]);
           }
+          if (generation !== loadGenerationRef.current) return;
+          setMessages([...fromScan, ...hydrated]);
+          setThreads([]);
+          setDrafts([]);
         } else if (
           (section === "sent" ||
             section === "trash" ||
             section === "junk" ||
-            section === "archive") &&
+            section === "archive" ||
+            section === "all") &&
           listResult
         ) {
           const msgList = listResult as InboxMessageListResponse;
@@ -848,6 +844,20 @@ export function InboxPage({
     setMessagePage(1);
     setSearchActive(false);
     setTriageFilter("");
+    // Default search to All mail when opening All emails (finds Spam like Outlook).
+    if (section === "all") {
+      setSearchScope("all");
+      setFilterRibbonOpen(true);
+    } else if (
+      section === "sent" ||
+      section === "trash" ||
+      section === "junk" ||
+      section === "archive"
+    ) {
+      setSearchScope(section);
+    } else if (section === "inbox") {
+      setSearchScope("inbox");
+    }
   }, [clearSelection, section]);
 
   useEffect(() => {
@@ -1627,7 +1637,21 @@ export function InboxPage({
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {isFolderMail && !isDraftsView ? (
-            <ActionButton
+            <>
+              <ActionButton
+                icon={IconInbox}
+                variant={isAllMailView || searchScope === "all" ? "emerald" : "secondary"}
+                size="md"
+                onClick={() => {
+                  onSelectMailSection?.("all");
+                  setSearchScope("all");
+                  setFilterRibbonOpen(true);
+                }}
+                title="Search and browse Inbox + Sent + Spam/Junk + Trash + Archive"
+              >
+                All emails
+              </ActionButton>
+              <ActionButton
               icon={IconFilter}
               variant={filterRibbonOpen || searchActive || Boolean(triageFilter) ? "emerald" : "secondary"}
               size="md"
@@ -1637,6 +1661,7 @@ export function InboxPage({
               Filter & Search
               {searchActive || (triageFilter && triageFilter !== "all") ? " · on" : ""}
             </ActionButton>
+            </>
           ) : null}
           {isLabelView && labelId != null && !isFlaggedSection ? (
             <>
@@ -1725,12 +1750,12 @@ export function InboxPage({
               className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-sm text-slate-200"
               aria-label="Search scope"
             >
+              <option value="all">All mail (Inbox + Sent + Spam + …)</option>
               <option value="inbox">Inbox</option>
               <option value="sent">Sent</option>
               <option value="archive">Archive</option>
               <option value="trash">Trash</option>
               <option value="junk">Spam / Junk</option>
-              <option value="all">All mail</option>
               {customLabels.map((label) => (
                 <option key={label.id} value={`label:${label.id}`}>
                   Label: {label.name}

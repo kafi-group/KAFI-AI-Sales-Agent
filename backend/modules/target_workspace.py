@@ -22,6 +22,7 @@ from db.models import (
     WorkspaceReviewOption,
 )
 from modules import activity as activity_module
+from modules.call_timing import get_call_recommendation
 
 PK_TZ = ZoneInfo("Asia/Karachi")
 
@@ -512,6 +513,8 @@ def list_workspace_leads(
             if not assigned_name and b.assigned_to and str(b.assigned_to).lower() != "unassigned":
                 assigned_name = str(b.assigned_to)
 
+            call_timing = get_call_recommendation(b.country)
+
             item_data = {
                 "id": b.id,
                 "buyer_id": b.id,
@@ -533,6 +536,9 @@ def list_workspace_leads(
                 "phones": phones,
                 "assigned_to_user_id": b.assigned_to_user_id,
                 "assigned_to_name": assigned_name,
+                "call_recommended": call_timing.get("call_recommended"),
+                "call_local_time": call_timing.get("call_local_time"),
+                "call_reason": call_timing.get("call_reason"),
                 "stage": current_stage,
                 "not_interested_reason": lc.not_interested_reason if lc else None,
                 "not_interested_remarks": lc.not_interested_remarks if lc else None,

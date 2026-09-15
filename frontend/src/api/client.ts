@@ -2727,6 +2727,8 @@ export const client = {
       page_size?: number;
       unread_only?: boolean;
       channel?: "email" | "whatsapp";
+      event_type?: string;
+      send_mode?: "individual" | "bulk" | string;
     } = {},
   ) => {
     const search = new URLSearchParams();
@@ -2734,6 +2736,8 @@ export const client = {
     if (params.page_size) search.set("page_size", String(params.page_size));
     if (params.unread_only) search.set("unread_only", "true");
     search.set("channel", params.channel || "email");
+    if (params.event_type) search.set("event_type", params.event_type);
+    if (params.send_mode) search.set("send_mode", params.send_mode);
     const query = search.toString();
     return request<EmailActivityListResponse>(`/email-activity${query ? `?${query}` : ""}`);
   },
@@ -4332,6 +4336,10 @@ export interface WorkspaceLeadItem {
   product_interest: string | null;
   assigned_to_user_id: number | null;
   assigned_to_name: string | null;
+  /** Local calling window — same badges as My Assigned table. */
+  call_recommended?: boolean | null;
+  call_local_time?: string | null;
+  call_reason?: string | null;
   stage: "fresh" | "needs_follow_up" | "not_interested" | "no_response";
   not_interested_reason: string | null;
   not_interested_remarks: string | null;

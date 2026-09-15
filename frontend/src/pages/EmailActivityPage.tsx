@@ -75,11 +75,15 @@ function StatTile({
   value,
   hint,
   tone = "neutral",
+  onClick,
+  active,
 }: {
   label: string;
   value: string | number;
   hint?: string;
   tone?: "neutral" | "good" | "bad" | "accent";
+  onClick?: () => void;
+  active?: boolean;
 }) {
   const toneClass =
     tone === "good"
@@ -89,13 +93,35 @@ function StatTile({
         : tone === "accent"
           ? "border-sky-500/25 bg-sky-500/10 text-sky-100"
           : "border-slate-700/80 bg-slate-950/60 text-slate-100";
-  return (
-    <div className={`rounded-xl border px-3.5 py-3 ${toneClass}`}>
+  const interactive = Boolean(onClick);
+  const className = `rounded-xl border px-3.5 py-3 text-left w-full ${toneClass} ${
+    interactive
+      ? "cursor-pointer hover:ring-1 hover:ring-emerald-400/40 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50"
+      : ""
+  } ${active ? "ring-2 ring-emerald-400/60" : ""}`;
+  const body = (
+    <>
       <p className="text-[11px] uppercase tracking-[0.12em] opacity-70">{label}</p>
       <p className="mt-1.5 text-2xl font-semibold tabular-nums tracking-tight">{value}</p>
       {hint ? <p className="mt-1 text-xs opacity-65">{hint}</p> : null}
-    </div>
+      {interactive ? (
+        <p className="mt-1.5 text-[10px] uppercase tracking-wide opacity-50">Click for list</p>
+      ) : null}
+    </>
   );
+  if (interactive) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={className}
+        title={`Show ${label.toLowerCase()} contacts and emails`}
+      >
+        {body}
+      </button>
+    );
+  }
+  return <div className={className}>{body}</div>;
 }
 
 function ModeBlock({
@@ -104,6 +130,9 @@ function ModeBlock({
   stats,
   showBatches,
   showOpens = true,
+  sendMode,
+  activeEventType,
+  onStatClick,
 }: {
   title: string;
   subtitle: string;
@@ -111,7 +140,13 @@ function ModeBlock({
   showBatches?: boolean;
   /** Email open-pixel stats — hide for WhatsApp. */
   showOpens?: boolean;
+  sendMode: "individual" | "bulk";
+  activeEventType: string | null;
+  onStatClick?: (eventType: "sent" | "failed" | "opened", sendMode: "individual" | "bulk") => void;
 }) {
+  const activeMode = activeEventType?.startsWith(`${sendMode}:`)
+    ? activeEventType.slice(sendMode.length + 1)
+    : null;
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
       <div className="mb-3">
@@ -127,8 +162,21 @@ function ModeBlock({
             tone="accent"
           />
         ) : null}
-        <StatTile label="Sent" value={stats.sent} hint={`${stats.success_rate_pct}% success`} tone="good" />
-        <StatTile label="Failed" value={stats.failed} tone="bad" />
+        <StatTile
+          label="Sent"
+          value={stats.sent}
+          hint={`${stats.success_rate_pct}% success`}
+          tone="good"
+          active={activeMode === "sent"}
+          onClick={onStatClick ? () => onStatClick("sent", sendMode) : undefined}
+        />
+        <StatTile
+          label="Failed"
+          value={stats.failed}
+          tone="bad"
+          active={activeMode === "failed"}
+          onClick={onStatClick ? () => onStatClick("failed", sendMode) : undefined}
+        />
         {showOpens ? (
           <>
             <StatTile
@@ -136,6 +184,8 @@ function ModeBlock({
               value={stats.opened}
               hint={`${stats.open_rate_pct}% of sent`}
               tone="accent"
+              active={activeMode === "opened"}
+              onClick={onStatClick ? () => onStatClick("opened", sendMode) : undefined}
             />
             <StatTile label="Not opened" value={stats.not_opened} />
           </>
@@ -169,6 +219,11 @@ export function EmailActivityPage({
   const [insights, setInsights] = useState<EmailActivityInsights | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [unreadOnly, setUnreadOnly] = useState(false);
+  /** e.g. individual:sent | bulk:opened — filters the feed below. */
+  const [insightDrillKey, setInsightDrillKey] = useState<string | null>(null);
+
+  const drillSendMode = insightDrillKey?.split(":")[0] as "individual" | "bulk" | undefined;
+  const drillEventType = insightDrillKey?.split(":")[1] || undefined;
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -178,6 +233,8 @@ export function EmailActivityPage({
         page_size: PAGE_SIZE,
         unread_only: unreadOnly,
         channel,
+        event_type: drillEventType,
+        send_mode: drillSendMode,
       });
       setRows(result.rows);
       setTotal(result.total);
@@ -195,7 +252,16 @@ export function EmailActivityPage({
     } finally {
       setLoading(false);
     }
-  }, [channel, isWhatsApp, onError, onUnreadChange, page, unreadOnly]);
+  }, [
+    channel,
+    drillEventType,
+    drillSendMode,
+    isWhatsApp,
+    onError,
+    onUnreadChange,
+    page,
+    unreadOnly,
+  ]);
 
   const refreshInsights = useCallback(async () => {
     if (insightsPeriod === "range" && !rangeFrom && !rangeTo) {
@@ -231,9 +297,28 @@ export function EmailActivityPage({
   useEffect(() => {
     setPage(1);
     setInsights(null);
+    setInsightDrillKey(null);
     // Email keeps insights open by default; WhatsApp starts collapsed until clicked.
     setShowInsights(channel === "email");
   }, [channel]);
+
+  function handleInsightStatClick(
+    eventType: "sent" | "failed" | "opened",
+    sendMode: "individual" | "bulk",
+  ) {
+    const key = `${sendMode}:${eventType}`;
+    setInsightDrillKey((prev) => (prev === key ? null : key));
+    setPage(1);
+    setUnreadOnly(false);
+    setShowInsights(true);
+    // Scroll feed into view so users see the contact/email list.
+    window.setTimeout(() => {
+      document.getElementById("email-activity-feed")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 50);
+  }
 
   useEffect(() => {
     void refresh();
@@ -459,23 +544,49 @@ export function EmailActivityPage({
                   subtitle={
                     isWhatsApp
                       ? "One-off replies and personal messages"
-                      : "One-off sends to a single lead"
+                      : "One-off sends to a single lead — click Sent / Failed / Opened for the contact list"
                   }
                   stats={insights.individual}
                   showOpens={!isWhatsApp}
+                  sendMode="individual"
+                  activeEventType={insightDrillKey}
+                  onStatClick={handleInsightStatClick}
                 />
                 <ModeBlock
                   title={isWhatsApp ? "Bulk WhatsApp" : "Bulk emails"}
                   subtitle={
                     isWhatsApp
                       ? "Template campaigns from Leads / WhatsApp compose"
-                      : "Multi-recipient campaigns from Leads"
+                      : "Multi-recipient campaigns — click Sent / Failed / Opened for the list"
                   }
                   stats={insights.bulk}
                   showBatches
                   showOpens={!isWhatsApp}
+                  sendMode="bulk"
+                  activeEventType={insightDrillKey}
+                  onStatClick={handleInsightStatClick}
                 />
               </div>
+
+              {insightDrillKey ? (
+                <div className="flex flex-wrap items-center gap-2 text-xs text-emerald-200/90 border border-emerald-500/25 bg-emerald-500/10 rounded-lg px-3 py-2">
+                  <span>
+                    Showing{" "}
+                    <strong className="uppercase">{drillEventType}</strong> ·{" "}
+                    <strong>{drillSendMode}</strong> ({total} in list)
+                  </span>
+                  <button
+                    type="button"
+                    className="underline decoration-dotted hover:text-white"
+                    onClick={() => {
+                      setInsightDrillKey(null);
+                      setPage(1);
+                    }}
+                  >
+                    Clear filter
+                  </button>
+                </div>
+              ) : null}
 
               {isWhatsApp ? (
                 <p className="text-xs text-slate-500">
@@ -551,9 +662,20 @@ export function EmailActivityPage({
           </p>
         </div>
       ) : (
-        <ul className="space-y-3">
+        <ul id="email-activity-feed" className="space-y-3">
           {rows.map((event) => {
             const unread = !event.read_at;
+            const details = event.details || {};
+            const toEmail =
+              typeof details.to_email === "string"
+                ? details.to_email
+                : typeof details.recipient === "string"
+                  ? details.recipient
+                  : null;
+            const company =
+              typeof details.company_name === "string" ? details.company_name : null;
+            const subject =
+              typeof details.subject === "string" ? details.subject : null;
             return (
               <li
                 key={event.id}
@@ -579,6 +701,20 @@ export function EmailActivityPage({
                       ) : null}
                     </div>
                     <p className="text-sm font-medium mt-1">{event.title}</p>
+                    {(company || toEmail) && (
+                      <p className="text-sm text-cyan-200/90 mt-1">
+                        {company ? <strong>{company}</strong> : null}
+                        {company && toEmail ? " · " : null}
+                        {toEmail ? (
+                          <span className="font-mono text-xs">{toEmail}</span>
+                        ) : null}
+                      </p>
+                    )}
+                    {subject ? (
+                      <p className="text-xs text-slate-300 mt-1 truncate" title={subject}>
+                        Subject: {subject}
+                      </p>
+                    ) : null}
                     <p className="text-sm opacity-90 mt-1 whitespace-pre-wrap">{event.message}</p>
                     <p className="text-xs opacity-60 mt-2">{formatWhen(event.created_at)}</p>
                   </div>

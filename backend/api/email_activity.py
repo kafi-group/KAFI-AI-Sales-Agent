@@ -38,6 +38,10 @@ def list_email_activity(
     page_size: int = email_activity.DEFAULT_PAGE_SIZE,
     unread_only: bool = False,
     channel: Optional[ChannelParam] = Query("email"),
+    event_type: Optional[str] = Query(
+        None, description="Filter: sent | opened | failed | send_failed | …"
+    ),
+    send_mode: Optional[str] = Query(None, description="individual | bulk"),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -51,6 +55,8 @@ def list_email_activity(
         user_id=user.id,
         is_admin=is_admin,
         channel=ch,
+        event_type=event_type,
+        send_mode=send_mode,
     )
     page = max(1, page)
     page_size = min(max(1, page_size), 100)

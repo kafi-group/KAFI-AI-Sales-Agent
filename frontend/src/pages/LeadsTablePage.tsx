@@ -142,6 +142,10 @@ interface LeadsTablePageProps {
   onSelectLead: (leadId: number) => void;
   onSectionCountsChange?: (counts: LeadTableSectionCountsResponse) => void;
   masterType?: string;
+  /** From Target Workspace Edit — search company and open table edit mode. */
+  focusEditLeadId?: number | null;
+  focusEditCompany?: string | null;
+  onFocusEditConsumed?: () => void;
 }
 
 type SortField =
@@ -1105,6 +1109,9 @@ export function LeadsTablePage({
   onSelectLead,
   onSectionCountsChange,
   masterType = "fmcg",
+  focusEditLeadId = null,
+  focusEditCompany = null,
+  onFocusEditConsumed,
 }: LeadsTablePageProps) {
   const { isAdmin, user } = useAuth();
   const initialTableViewRef = useRef(readStoredTableView(user?.id, section));
@@ -1892,6 +1899,39 @@ export function LeadsTablePage({
     setBulkAssignValue("");
     clearSelection();
   }, [clearSelection, section]);
+
+  useEffect(() => {
+    const company = (focusEditCompany || "").trim();
+    if (!company && focusEditLeadId == null) return;
+    if (company) {
+      setSearch(company);
+      setPage(1);
+    }
+  }, [focusEditLeadId, focusEditCompany]);
+
+  useEffect(() => {
+    if (focusEditLeadId == null) return;
+    if (loading) return;
+    if (rows.length === 0) return;
+    const match =
+      rows.find((row) => row.id === focusEditLeadId) ||
+      rows.find((row) =>
+        (row.company_name || "")
+          .toLowerCase()
+          .includes((focusEditCompany || "").trim().toLowerCase()),
+      );
+    if (!match) return;
+    setDrafts(Object.fromEntries(rows.map((row) => [row.id, { ...row }])));
+    setOriginalKeys(Object.fromEntries(rows.map((row) => [row.id, rowDraftKey(row)])));
+    setEditMode(true);
+    setSaveNotice(`Editing “${match.company_name}” — change any field, then Done.`);
+    window.setTimeout(() => {
+      document
+        .querySelector(`[data-lead-row-id="${match.id}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    onFocusEditConsumed?.();
+  }, [focusEditLeadId, focusEditCompany, loading, rows, onFocusEditConsumed]);
 
   function enterEditMode() {
     setDrafts(Object.fromEntries(rows.map((row) => [row.id, { ...row }])));
@@ -4269,6 +4309,7 @@ export function LeadsTablePage({
                   return (
                     <tr
                       key={row.id}
+                      data-lead-row-id={row.id}
                       onClick={() => {
                         if (!editMode) onSelectLead(row.id);
                       }}
@@ -4783,6 +4824,7 @@ export function LeadsTablePage({
                 return (
                   <tr
                     key={row.id}
+                    data-lead-row-id={row.id}
                     onClick={() => {
                       if (!editMode) onSelectLead(row.id);
                     }}
