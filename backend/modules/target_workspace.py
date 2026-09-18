@@ -23,6 +23,7 @@ from db.models import (
 )
 from modules import activity as activity_module
 from modules.call_timing import get_call_recommendation
+from modules.client_history import resolve_current_remarks
 
 PK_TZ = ZoneInfo("Asia/Karachi")
 
@@ -515,6 +516,17 @@ def list_workspace_leads(
 
             call_timing = get_call_recommendation(b.country)
 
+            latest_remarks = resolve_current_remarks(b) or None
+            remarks_history_count = len(
+                [
+                    entry
+                    for entry in (b.remarks_history or [])
+                    if isinstance(entry, dict) and (entry.get("text") or "").strip()
+                ]
+            )
+            if latest_remarks and remarks_history_count == 0:
+                remarks_history_count = 1
+
             item_data = {
                 "id": b.id,
                 "buyer_id": b.id,
@@ -539,6 +551,8 @@ def list_workspace_leads(
                 "call_recommended": call_timing.get("call_recommended"),
                 "call_local_time": call_timing.get("call_local_time"),
                 "call_reason": call_timing.get("call_reason"),
+                "remarks": latest_remarks,
+                "remarks_history_count": remarks_history_count,
                 "stage": current_stage,
                 "not_interested_reason": lc.not_interested_reason if lc else None,
                 "not_interested_remarks": lc.not_interested_remarks if lc else None,

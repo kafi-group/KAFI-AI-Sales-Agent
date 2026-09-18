@@ -4344,6 +4344,9 @@ export interface WorkspaceLeadItem {
   call_recommended?: boolean | null;
   call_local_time?: string | null;
   call_reason?: string | null;
+  /** Latest client remarks (same field as contact list / profile). */
+  remarks?: string | null;
+  remarks_history_count?: number;
   stage: "fresh" | "needs_follow_up" | "not_interested" | "no_response";
   not_interested_reason: string | null;
   not_interested_remarks: string | null;

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import {
   client,
   type WorkspaceLeadItem,
@@ -10,6 +11,8 @@ import {
 } from "../../api/client";
 import { CallLeadButton } from "../CallLeadButton";
 import { CallRecommendationBadge } from "../CallRecommendationBadge";
+import { ClientHistoryPanel } from "../ClientHistoryPanel";
+import { IconX } from "../icons/AppIcons";
 import {
   LeadWhatsAppComposeModal,
   type WhatsAppComposeTarget,
@@ -95,6 +98,7 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
 
   // Modal states
   const [proofModalLead, setProofModalLead] = useState<WorkspaceLeadItem | null>(null);
+  const [remarksLead, setRemarksLead] = useState<WorkspaceLeadItem | null>(null);
   const [whatsappTarget, setWhatsappTarget] = useState<WhatsAppComposeTarget | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   /** leadId -> selected phone number for Call / WhatsApp */
@@ -105,6 +109,20 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
   const [inlineReason, setInlineReason] = useState("");
   const [inlineAction, setInlineAction] = useState("call");
   const [inlineRemarks, setInlineRemarks] = useState("");
+
+  useEffect(() => {
+    if (!remarksLead) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setRemarksLead(null);
+    };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [remarksLead]);
 
   const currentFormattedDate = useMemo(() => {
     const d = new Date();
@@ -628,6 +646,30 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                     )}
                   </div>
 
+                  {lead.remarks?.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => setRemarksLead(lead)}
+                      className="mt-2 w-full text-left rounded-xl border border-slate-700/80 bg-slate-950/60 px-3 py-2 hover:border-amber-500/40 transition"
+                      title="View and edit client remarks history"
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-300/90">
+                          Latest remarks
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          History{(lead.remarks_history_count ?? 0) > 0
+                            ? ` (${lead.remarks_history_count})`
+                            : ""}{" "}
+                          · Open
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-200 line-clamp-2 whitespace-pre-wrap break-words">
+                        {lead.remarks}
+                      </p>
+                    </button>
+                  ) : null}
+
                   {(() => {
                     const phones = workspaceLeadPhones(lead);
                     if (phones.length === 0) return null;
@@ -930,6 +972,18 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                   <div className="flex items-center gap-1.5 flex-wrap justify-end">
                     <button
                       type="button"
+                      onClick={() => setRemarksLead(lead)}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-200 border border-amber-500/40 hover:bg-amber-500/20 text-xs font-medium transition"
+                      title="View / add client remarks and history"
+                    >
+                      📝 {lead.remarks?.trim() ? "Remarks" : "Add remarks"}
+                      {(lead.remarks_history_count ?? 0) > 1
+                        ? ` (${lead.remarks_history_count})`
+                        : ""}
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => handleUpdateStage(lead.id, "interested")}
                       className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/20 text-xs font-medium transition"
                       title="Move to Interested/Potential deals pipeline"
@@ -1105,6 +1159,85 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
           }}
         />
       ) : null}
+
+      {remarksLead
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60"
+              onClick={() => setRemarksLead(null)}
+              role="presentation"
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={`Client remarks for ${remarksLead.company_name}`}
+                className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border border-slate-700 bg-slate-950 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-medium text-slate-100 truncate">
+                      Remarks · {remarksLead.company_name}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Latest remark by default — open History for prior versions
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRemarksLead(null)}
+                    className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                    aria-label="Close remarks"
+                  >
+                    <IconX size="sm" />
+                  </button>
+                </div>
+                <div className="p-4">
+                  <ClientHistoryPanel
+                    buyerId={remarksLead.id}
+                    companyName={remarksLead.company_name}
+                    onError={(msg) => {
+                      onError?.(msg);
+                      setError(msg);
+                    }}
+                    onRemarksSaved={(text) => {
+                      const nextText = text.trim();
+                      setLeads((prev) =>
+                        prev.map((row) => {
+                          if (row.id !== remarksLead.id) return row;
+                          const prevText = (row.remarks || "").trim();
+                          const bumped =
+                            nextText && nextText !== prevText
+                              ? (row.remarks_history_count ?? 0) + 1
+                              : Math.max(row.remarks_history_count ?? 0, nextText ? 1 : 0);
+                          return {
+                            ...row,
+                            remarks: nextText || null,
+                            remarks_history_count: bumped,
+                          };
+                        }),
+                      );
+                      setRemarksLead((current) => {
+                        if (!current || current.id !== remarksLead.id) return current;
+                        const prevText = (current.remarks || "").trim();
+                        const bumped =
+                          nextText && nextText !== prevText
+                            ? (current.remarks_history_count ?? 0) + 1
+                            : Math.max(current.remarks_history_count ?? 0, nextText ? 1 : 0);
+                        return {
+                          ...current,
+                          remarks: nextText || null,
+                          remarks_history_count: bumped,
+                        };
+                      });
+                    }}
+                  />
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 };
