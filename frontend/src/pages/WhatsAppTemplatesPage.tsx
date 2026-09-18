@@ -89,6 +89,8 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
   const [resubmitting, setResubmitting] = useState(false);
   const [viewingTemplate, setViewingTemplate] = useState<WhatsAppTemplate | null>(null);
   const [deletingTemplateId, setDeletingTemplateId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const refreshNotifications = useCallback(async () => {
     try {
@@ -109,6 +111,15 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
       ]);
       setConfig(cfg);
       setTemplates(rows);
+      setSelectedIds((prev) => {
+        if (prev.size === 0) return prev;
+        const alive = new Set(rows.map((t) => t.id));
+        const next = new Set<number>();
+        for (const id of prev) {
+          if (alive.has(id)) next.add(id);
+        }
+        return next.size === prev.size ? prev : next;
+      });
       onCountChange?.(rows.filter((t) => t.status === "approved").length);
       const approved = rows.filter((t) => t.status === "approved");
       setTestTemplateId((current) => {
@@ -258,12 +269,82 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
       const result = await client.deleteWhatsAppTemplate(template.id);
       if (viewingTemplate?.id === template.id) setViewingTemplate(null);
       if (editingTemplateId === template.id) cancelEditTemplate();
+      setSelectedIds((prev) => {
+        if (!prev.has(template.id)) return prev;
+        const next = new Set(prev);
+        next.delete(template.id);
+        return next;
+      });
       setNotice(result.message || `Deleted ${template.name}.`);
       await refresh();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to delete template");
     } finally {
       setDeletingTemplateId(null);
+    }
+  }
+
+  function toggleTemplateSelected(templateId: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(templateId)) next.delete(templateId);
+      else next.add(templateId);
+      return next;
+    });
+  }
+
+  function toggleSelectAllFiltered(visibleIds: number[]) {
+    setSelectedIds((prev) => {
+      const allVisibleSelected =
+        visibleIds.length > 0 && visibleIds.every((id) => prev.has(id));
+      if (allVisibleSelected) {
+        const next = new Set(prev);
+        for (const id of visibleIds) next.delete(id);
+        return next;
+      }
+      const next = new Set(prev);
+      for (const id of visibleIds) next.add(id);
+      return next;
+    });
+  }
+
+  async function handleBulkDeleteSelected() {
+    const selected = templates.filter((t) => selectedIds.has(t.id));
+    if (selected.length === 0) return;
+    const confirmed = window.confirm(
+      `Delete ${selected.length} selected WhatsApp template${selected.length === 1 ? "" : "s"}?\n\nThis removes them from Meta and this list. This cannot be undone.`,
+    );
+    if (!confirmed) return;
+    setBulkDeleting(true);
+    setNotice(null);
+    let deleted = 0;
+    const failures: string[] = [];
+    try {
+      for (const template of selected) {
+        try {
+          await client.deleteWhatsAppTemplate(template.id);
+          deleted += 1;
+          if (viewingTemplate?.id === template.id) setViewingTemplate(null);
+          if (editingTemplateId === template.id) cancelEditTemplate();
+        } catch (e) {
+          failures.push(
+            `${template.name}: ${e instanceof Error ? e.message : "delete failed"}`,
+          );
+        }
+      }
+      setSelectedIds(new Set());
+      if (deleted > 0) {
+        setNotice(
+          `Deleted ${deleted} template${deleted === 1 ? "" : "s"}.` +
+            (failures.length ? ` ${failures.length} failed.` : ""),
+        );
+      }
+      if (failures.length) {
+        onError(failures.slice(0, 3).join(" · "));
+      }
+      await refresh();
+    } finally {
+      setBulkDeleting(false);
     }
   }
 
@@ -327,6 +408,12 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
       return haystack.includes(q);
     });
   }, [templateSearch, templates]);
+
+  const allFilteredSelected =
+    filteredTemplates.length > 0 && filteredTemplates.every((t) => selectedIds.has(t.id));
+  const someFilteredSelected =
+    filteredTemplates.some((t) => selectedIds.has(t.id)) && !allFilteredSelected;
+  const selectedCount = selectedIds.size;
 
   return (
     <section className="space-y-6 w-full min-w-0">
@@ -606,26 +693,68 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
 
       <div className="rounded-xl border border-slate-800 bg-slate-900/50 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-800 space-y-2">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <h3 className="text-sm font-medium text-slate-300">Templates</h3>
             <span className="text-xs text-slate-500">
               {templateSearch.trim()
                 ? `${filteredTemplates.length} / ${templates.length}`
                 : `${templates.length} total`}
+              {selectedCount > 0 ? ` · ${selectedCount} selected` : ""}
             </span>
           </div>
-          <label className="relative block max-w-md">
-            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">
-              <IconSearch size="sm" />
-            </span>
-            <input
-              type="search"
-              value={templateSearch}
-              onChange={(e) => setTemplateSearch(e.target.value)}
-              placeholder="Search templates by name, status, body…"
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 pl-8 pr-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600"
-            />
-          </label>
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none shrink-0">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500/40"
+                checked={allFilteredSelected}
+                ref={(el) => {
+                  if (el) el.indeterminate = someFilteredSelected;
+                }}
+                onChange={() =>
+                  toggleSelectAllFiltered(filteredTemplates.map((t) => t.id))
+                }
+                disabled={loading || filteredTemplates.length === 0}
+                aria-label="Select all templates"
+              />
+              Select all
+              {templateSearch.trim() && filteredTemplates.length > 0
+                ? ` (${filteredTemplates.length})`
+                : ""}
+            </label>
+            {selectedCount > 0 ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedIds(new Set())}
+                  className="text-xs px-2.5 py-1 rounded-md border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800"
+                >
+                  Clear selection
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleBulkDeleteSelected()}
+                  disabled={bulkDeleting}
+                  className="text-xs px-2.5 py-1 rounded-md border border-red-500/40 bg-red-500/10 text-red-200 hover:bg-red-500/20 font-medium disabled:opacity-50 inline-flex items-center gap-1"
+                >
+                  <IconTrash size="xs" />
+                  {bulkDeleting ? "Deleting…" : `Delete selected (${selectedCount})`}
+                </button>
+              </div>
+            ) : null}
+            <label className="relative block max-w-md flex-1 min-w-[12rem]">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">
+                <IconSearch size="sm" />
+              </span>
+              <input
+                type="search"
+                value={templateSearch}
+                onChange={(e) => setTemplateSearch(e.target.value)}
+                placeholder="Search templates by name, status, body…"
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 pl-8 pr-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600"
+              />
+            </label>
+          </div>
         </div>
         <div className="p-4 space-y-2 max-h-[70vh] overflow-y-auto">
           {loading ? (
@@ -640,30 +769,47 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
               No templates match “{templateSearch.trim()}”.
             </p>
           ) : (
-            filteredTemplates.map((template) => (
+            filteredTemplates.map((template) => {
+              const isSelected = selectedIds.has(template.id);
+              return (
               <div key={template.id} className="space-y-2">
-                <div className="rounded-lg border border-slate-800 bg-slate-950 p-3.5 flex items-center justify-between gap-3 max-w-full">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap min-w-0">
-                      <p className="font-semibold text-slate-100 text-sm break-words whitespace-normal min-w-0">{template.name}</p>
-                      <StatusBadge status={template.status} />
-                      {template.category && (
-                        <span className="px-2 py-0.5 rounded text-xs border border-slate-700 bg-slate-800 text-slate-300">
-                          {template.category}
-                        </span>
-                      )}
-                      <span className="text-xs text-slate-400 font-mono">{template.language}</span>
-                      {template.variable_count > 0 && (
-                        <span className="text-xs text-slate-500">
-                          · {template.variable_count} variable{template.variable_count === 1 ? "" : "s"}
-                        </span>
+                <div
+                  className={`rounded-lg border p-3.5 flex items-center justify-between gap-3 max-w-full ${
+                    isSelected
+                      ? "border-emerald-500/40 bg-emerald-950/20"
+                      : "border-slate-800 bg-slate-950"
+                  }`}
+                >
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500/40"
+                      checked={isSelected}
+                      onChange={() => toggleTemplateSelected(template.id)}
+                      aria-label={`Select ${template.name}`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap min-w-0">
+                        <p className="font-semibold text-slate-100 text-sm break-words whitespace-normal min-w-0">{template.name}</p>
+                        <StatusBadge status={template.status} />
+                        {template.category && (
+                          <span className="px-2 py-0.5 rounded text-xs border border-slate-700 bg-slate-800 text-slate-300">
+                            {template.category}
+                          </span>
+                        )}
+                        <span className="text-xs text-slate-400 font-mono">{template.language}</span>
+                        {template.variable_count > 0 && (
+                          <span className="text-xs text-slate-500">
+                            · {template.variable_count} variable{template.variable_count === 1 ? "" : "s"}
+                          </span>
+                        )}
+                      </div>
+                      {template.rejection_reason && (
+                        <p className="text-xs text-red-300/90 mt-1.5 break-words">
+                          Rejection reason: {template.rejection_reason}
+                        </p>
                       )}
                     </div>
-                    {template.rejection_reason && (
-                      <p className="text-xs text-red-300/90 mt-1.5 break-words">
-                        Rejection reason: {template.rejection_reason}
-                      </p>
-                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-1.5 shrink-0 w-[12.5rem]">
                     <button
@@ -703,7 +849,7 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
                     <button
                       type="button"
                       onClick={() => void handleDeleteTemplate(template)}
-                      disabled={deletingTemplateId === template.id}
+                      disabled={deletingTemplateId === template.id || bulkDeleting}
                       className="text-xs px-2.5 py-1.5 rounded-md border border-red-500/40 bg-red-500/10 text-red-200 hover:bg-red-500/20 font-medium flex items-center justify-center gap-1 transition disabled:opacity-50"
                       title="Delete this template from Meta and this list"
                     >
@@ -788,7 +934,8 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
                   </form>
                 ) : null}
               </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
