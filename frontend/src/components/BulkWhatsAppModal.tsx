@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import {
   client,
   type WhatsAppCampaignDraftResponse,
+  type WhatsAppPersonalTemplate,
   type WhatsAppTemplate,
 } from "../api/client";
 
@@ -26,7 +27,7 @@ function WhatsAppIcon({ className = "" }: { className?: string }) {
   );
 }
 
-type BulkWhatsAppTab = "personal" | "template";
+type BulkWhatsAppTab = "personal" | "template" | "personal_template";
 
 export function BulkWhatsAppModal({
   buyerIds,
@@ -37,7 +38,7 @@ export function BulkWhatsAppModal({
   const [tab, setTab] = useState<BulkWhatsAppTab>("personal");
   const [sending, setSending] = useState(false);
 
-  // Personal message state
+  // Personal free-text message state
   const [personalMessage, setPersonalMessage] = useState(
     "Dear {{name}},\n\n" +
       "I hope this message finds you well. We at Kafi Commodities would like to connect with {{company}} regarding our ESSENCE product range.\n\n" +
@@ -45,13 +46,20 @@ export function BulkWhatsAppModal({
       "Best regards,\nKafi Commodities Export Team",
   );
 
-  // Template state
+  // Meta template state
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [templateId, setTemplateId] = useState("");
   const [templateSearch, setTemplateSearch] = useState("");
   const [variables, setVariables] = useState<string[]>([]);
-  const [requireOptIn, setRequireOptIn] = useState(false); // Default false so test sends and bulk sends are not blocked
+  const [requireOptIn, setRequireOptIn] = useState(false);
+
+  // Personal WhatsApp templates state
+  const [personalTemplates, setPersonalTemplates] = useState<WhatsAppPersonalTemplate[]>([]);
+  const [loadingPersonalTemplates, setLoadingPersonalTemplates] = useState(false);
+  const [personalTemplateId, setPersonalTemplateId] = useState("");
+  const [personalTemplateSearch, setPersonalTemplateSearch] = useState("");
+  const [personalTemplateBody, setPersonalTemplateBody] = useState("");
 
   const refreshTemplates = useCallback(async () => {
     setLoadingTemplates(true);
@@ -69,11 +77,29 @@ export function BulkWhatsAppModal({
     }
   }, [onError]);
 
+  const refreshPersonalTemplates = useCallback(async () => {
+    setLoadingPersonalTemplates(true);
+    try {
+      const rows = await client.listWhatsAppPersonalTemplates();
+      setPersonalTemplates(rows);
+      setPersonalTemplateId((current) => {
+        if (current && rows.some((t) => String(t.id) === current)) return current;
+        return rows.length > 0 ? String(rows[0].id) : "";
+      });
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to load personal WhatsApp templates");
+    } finally {
+      setLoadingPersonalTemplates(false);
+    }
+  }, [onError]);
+
   useEffect(() => {
     if (tab === "template") {
       void refreshTemplates();
+    } else if (tab === "personal_template") {
+      void refreshPersonalTemplates();
     }
-  }, [tab, refreshTemplates]);
+  }, [tab, refreshTemplates, refreshPersonalTemplates]);
 
   const selectedTemplate = templates.find((t) => String(t.id) === templateId);
   const filteredTemplates = useMemo(() => {
@@ -88,9 +114,29 @@ export function BulkWhatsAppModal({
     });
   }, [templateSearch, templates]);
 
+  const selectedPersonalTemplate = personalTemplates.find(
+    (t) => String(t.id) === personalTemplateId,
+  );
+  const filteredPersonalTemplates = useMemo(() => {
+    const q = personalTemplateSearch.trim().toLowerCase();
+    if (!q) return personalTemplates;
+    return personalTemplates.filter((t) => {
+      const haystack = `${t.name} ${t.body}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [personalTemplateSearch, personalTemplates]);
+
   useEffect(() => {
     setVariables(Array(selectedTemplate?.variable_count ?? 0).fill(""));
   }, [selectedTemplate]);
+
+  useEffect(() => {
+    if (selectedPersonalTemplate) {
+      setPersonalTemplateBody(selectedPersonalTemplate.body);
+    } else {
+      setPersonalTemplateBody("");
+    }
+  }, [selectedPersonalTemplate]);
 
   async function handleSendPersonal() {
     if (!personalMessage.trim()) {
@@ -119,6 +165,34 @@ export function BulkWhatsAppModal({
     }
   }
 
+  async function handleSendPersonalTemplate() {
+    const message = personalTemplateBody.trim();
+    if (!message) {
+      onError("Select a personal template (or edit its body) before sending.");
+      return;
+    }
+    setSending(true);
+    try {
+      const result = await client.sendWhatsAppPersonalBulk({
+        buyer_ids: buyerIds,
+        message,
+      });
+      onCreated({
+        created_count: result.sent_count,
+        sent_count: result.sent_count,
+        failed_count: result.failed_count,
+        skipped_count: result.skipped_count || 0,
+        created: [],
+        skipped: [],
+      });
+      onClose();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Personal template bulk send failed");
+    } finally {
+      setSending(false);
+    }
+  }
+
   async function handleSendTemplate() {
     if (!templateId) {
       onError("Select an approved template first");
@@ -141,6 +215,20 @@ export function BulkWhatsAppModal({
     }
   }
 
+  const tabBtn = (id: BulkWhatsAppTab, label: string) => (
+    <button
+      type="button"
+      onClick={() => setTab(id)}
+      className={`pb-2.5 px-3 text-xs sm:text-sm font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap ${
+        tab === id
+          ? "border-emerald-500 text-emerald-300 shadow-sm"
+          : "border-transparent text-slate-400 hover:text-slate-200"
+      }`}
+    >
+      <span>{label}</span>
+    </button>
+  );
+
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-0 sm:p-4 backdrop-blur-sm"
@@ -156,7 +244,6 @@ export function BulkWhatsAppModal({
         aria-modal="true"
         aria-labelledby="bulk-compose-whatsapp-title"
       >
-        {/* Header */}
         <div className="p-5 border-b border-slate-800 flex items-start justify-between gap-3 shrink-0 bg-slate-950/60">
           <div className="min-w-0">
             <h3
@@ -183,30 +270,10 @@ export function BulkWhatsAppModal({
           </button>
         </div>
 
-        {/* Tab switcher: Personal QR vs Meta Verified */}
-        <div className="flex border-b border-slate-800 bg-slate-950/80 px-5 pt-3 gap-3 shrink-0">
-          <button
-            type="button"
-            onClick={() => setTab("personal")}
-            className={`pb-2.5 px-3 text-xs sm:text-sm font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
-              tab === "personal"
-                ? "border-emerald-500 text-emerald-300 shadow-sm"
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <span>📱 Personal WhatsApp (QR Scanned)</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("template")}
-            className={`pb-2.5 px-3 text-xs sm:text-sm font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
-              tab === "template"
-                ? "border-emerald-500 text-emerald-300 shadow-sm"
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <span>🏢 Meta Verified (Templates)</span>
-          </button>
+        <div className="flex border-b border-slate-800 bg-slate-950/80 px-5 pt-3 gap-2 sm:gap-3 shrink-0 overflow-x-auto">
+          {tabBtn("personal", "📱 Personal WhatsApp (QR Scanned)")}
+          {tabBtn("template", "🏢 Meta Verified (Templates)")}
+          {tabBtn("personal_template", "📝 Personal WhatsApp Templates")}
         </div>
 
         <div className="p-5 overflow-y-auto flex-1 space-y-4">
@@ -261,11 +328,81 @@ export function BulkWhatsAppModal({
                 </button>
               </div>
             </div>
+          ) : tab === "personal_template" ? (
+            <div className="space-y-4">
+              <p className="text-xs text-slate-400">
+                Choose a saved Personal WhatsApp template (from{" "}
+                <strong className="text-slate-300">WhatsApp templates → WhatsApp Personal</strong>
+                ). Sent via your scanned WhatsApp — no Meta approval needed. You can tweak the body
+                before sending.
+              </p>
+
+              {loadingPersonalTemplates ? (
+                <p className="text-sm text-slate-400 py-4 text-center">Loading personal templates…</p>
+              ) : personalTemplates.length === 0 ? (
+                <p className="text-sm text-slate-500 rounded-lg border border-dashed border-slate-700 p-4">
+                  No personal templates yet. Open{" "}
+                  <strong className="text-slate-300">WhatsApp templates → WhatsApp Personal</strong>{" "}
+                  and create one.
+                </p>
+              ) : (
+                <>
+                  <input
+                    type="search"
+                    value={personalTemplateSearch}
+                    onChange={(e) => setPersonalTemplateSearch(e.target.value)}
+                    placeholder="Search personal templates by name or body…"
+                    className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200 placeholder-slate-500"
+                  />
+                  <ul className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                    {filteredPersonalTemplates.map((template) => {
+                      const selected = String(template.id) === personalTemplateId;
+                      return (
+                        <li key={template.id}>
+                          <button
+                            type="button"
+                            onClick={() => setPersonalTemplateId(String(template.id))}
+                            className={`w-full rounded-lg border p-3 text-left transition ${
+                              selected
+                                ? "border-emerald-500/60 bg-emerald-500/10 text-white"
+                                : "border-slate-800 bg-slate-950 hover:border-slate-700 text-slate-300"
+                            }`}
+                          >
+                            <p className="font-semibold text-sm">{template.name}</p>
+                            <p className="text-xs text-slate-400 truncate mt-0.5">{template.body}</p>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {filteredPersonalTemplates.length === 0 && (
+                    <p className="text-sm text-slate-500">No templates match your search.</p>
+                  )}
+
+                  {selectedPersonalTemplate && (
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                        Message to send (editable):
+                      </label>
+                      <textarea
+                        rows={7}
+                        value={personalTemplateBody}
+                        onChange={(e) => setPersonalTemplateBody(e.target.value)}
+                        className="w-full rounded-xl bg-slate-950 border border-slate-700 p-3.5 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 leading-relaxed font-sans"
+                      />
+                      <p className="text-[11px] text-slate-500 mt-1.5">
+                        {"{{name}}"} and {"{{company}}"} are filled per recipient when sending.
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           ) : (
             <div className="space-y-4">
               <p className="text-xs text-slate-400">
                 Only Meta-approved templates can be sent via Meta Cloud API. Manage templates in{" "}
-                <strong className="text-slate-300">WhatsApp templates</strong>.
+                <strong className="text-slate-300">WhatsApp templates → WhatsApp Meta</strong>.
               </p>
 
               {loadingTemplates ? (
@@ -358,7 +495,6 @@ export function BulkWhatsAppModal({
           )}
         </div>
 
-        {/* Footer */}
         <div className="p-4 sm:p-5 border-t border-slate-800 flex justify-end gap-3 shrink-0 bg-slate-950/60">
           <button
             type="button"
@@ -375,6 +511,17 @@ export function BulkWhatsAppModal({
               className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs sm:text-sm font-bold text-white shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition cursor-pointer"
             >
               {sending ? "Sending…" : `Send to ${buyerIds.length} contact(s)`}
+            </button>
+          ) : tab === "personal_template" ? (
+            <button
+              type="button"
+              onClick={() => void handleSendPersonalTemplate()}
+              disabled={
+                sending || !personalTemplateBody.trim() || personalTemplates.length === 0
+              }
+              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs sm:text-sm font-bold text-white shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition cursor-pointer"
+            >
+              {sending ? "Sending…" : `Send ${buyerIds.length} message(s)`}
             </button>
           ) : (
             <button

@@ -973,6 +973,15 @@ export interface EmailTemplate {
   updated_at: string;
 }
 
+export interface WhatsAppPersonalTemplate {
+  id: number;
+  name: string;
+  body: string;
+  created_by_user_id?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AvailablePhoneOption {
   phone: string;
   raw?: string;
@@ -3139,6 +3148,25 @@ export const client = {
     request<WhatsAppCampaignDraftResponse>("/whatsapp-personal/bulk-send", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  listWhatsAppPersonalTemplates: () =>
+    request<WhatsAppPersonalTemplate[]>("/whatsapp-personal/templates"),
+  createWhatsAppPersonalTemplate: (data: { name: string; body: string }) =>
+    request<WhatsAppPersonalTemplate>("/whatsapp-personal/templates", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateWhatsAppPersonalTemplate: (
+    id: number,
+    data: { name?: string; body?: string },
+  ) =>
+    request<WhatsAppPersonalTemplate>(`/whatsapp-personal/templates/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteWhatsAppPersonalTemplate: (id: number) =>
+    request<{ ok: boolean }>(`/whatsapp-personal/templates/${id}`, {
+      method: "DELETE",
     }),
   listWhatsAppPersonalConversations: (params: { page?: number; page_size?: number } = {}) => {
     const query = new URLSearchParams();

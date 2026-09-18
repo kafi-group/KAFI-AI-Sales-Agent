@@ -17,14 +17,104 @@ from api.schemas import (
     InteractionRead,
     WhatsAppConversationListResponse,
     WhatsAppConversationRead,
+    WhatsAppPersonalTemplateCreate,
+    WhatsAppPersonalTemplateRead,
+    WhatsAppPersonalTemplateUpdate,
 )
 from config import settings
 from db.models import AppUser, Buyer, Channel, Direction, HandledBy, Interaction, InteractionStatus
 from integrations import whatsapp_bridge_client as bridge
 from modules.comms_generator import get_comms
+from modules import whatsapp_personal_templates as personal_templates_module
+from modules.audit import log_action
 
 router = APIRouter(prefix="/whatsapp-personal", tags=["whatsapp-personal"])
 comms = get_comms()
+
+
+def _personal_template_read(record) -> WhatsAppPersonalTemplateRead:
+    return WhatsAppPersonalTemplateRead.model_validate(record)
+
+
+@router.get("/templates", response_model=list[WhatsAppPersonalTemplateRead])
+def list_personal_whatsapp_templates(
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> list[WhatsAppPersonalTemplateRead]:
+    _ = user
+    return [_personal_template_read(t) for t in personal_templates_module.list_templates(db)]
+
+
+@router.post("/templates", response_model=WhatsAppPersonalTemplateRead, status_code=201)
+def create_personal_whatsapp_template(
+    payload: WhatsAppPersonalTemplateCreate,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> WhatsAppPersonalTemplateRead:
+    try:
+        record = personal_templates_module.create_template(
+            db,
+            name=payload.name,
+            body=payload.body,
+            created_by_user_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    log_action(
+        db,
+        entity_type="whatsapp_personal_template",
+        entity_id=record.id,
+        action="created",
+        actor=user.username,
+    )
+    return _personal_template_read(record)
+
+
+@router.put("/templates/{template_id}", response_model=WhatsAppPersonalTemplateRead)
+def update_personal_whatsapp_template(
+    template_id: int,
+    payload: WhatsAppPersonalTemplateUpdate,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> WhatsAppPersonalTemplateRead:
+    try:
+        record = personal_templates_module.update_template(
+            db,
+            template_id,
+            name=payload.name,
+            body=payload.body,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not record:
+        raise HTTPException(404, "Personal WhatsApp template not found")
+    log_action(
+        db,
+        entity_type="whatsapp_personal_template",
+        entity_id=record.id,
+        action="updated",
+        actor=user.username,
+    )
+    return _personal_template_read(record)
+
+
+@router.delete("/templates/{template_id}")
+def delete_personal_whatsapp_template(
+    template_id: int,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, bool]:
+    ok = personal_templates_module.delete_template(db, template_id)
+    if not ok:
+        raise HTTPException(404, "Personal WhatsApp template not found")
+    log_action(
+        db,
+        entity_type="whatsapp_personal_template",
+        entity_id=template_id,
+        action="deleted",
+        actor=user.username,
+    )
+    return {"ok": True}
 
 
 class WhatsAppPersonalSendRequest(BaseModel):

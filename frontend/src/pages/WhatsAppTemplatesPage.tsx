@@ -8,6 +8,7 @@ import {
 } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { IconChevronDown, IconCopy, IconEdit, IconEye, IconSearch, IconTrash } from "../components/icons/AppIcons";
+import { WhatsAppPersonalTemplatesPanel } from "../components/WhatsAppPersonalTemplatesPanel";
 import { WhatsAppTemplatePreviewModal } from "../components/WhatsAppTemplatePreviewModal";
 import { capitalizeFirstLetter } from "../utils/spelling";
 
@@ -15,6 +16,8 @@ interface WhatsAppTemplatesPageProps {
   onError: (message: string) => void;
   onCountChange?: (count: number) => void;
 }
+
+type LibraryTab = "meta" | "personal";
 
 const STATUS_STYLES: Record<string, string> = {
   approved: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300",
@@ -65,6 +68,7 @@ function notificationStyle(eventType: string): string {
 
 export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTemplatesPageProps) {
   const { isAdmin } = useAuth();
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>("meta");
   const [config, setConfig] = useState<WhatsAppConfig | null>(null);
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
   const [notifications, setNotifications] = useState<WhatsAppTemplateNotification[]>([]);
@@ -421,36 +425,73 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-lg font-medium text-slate-100">WhatsApp templates</h2>
-          <p className="text-sm text-slate-500 mt-1 max-w-2xl">
-            Create templates here and submit them to Meta for review. Duplicate copies a template
-            as a new submission. Edit resubmits rejected, paused, or disabled templates. Delete
-            removes a template from Meta and this list. Approved wording cannot be changed in
-            place — duplicate it with a new name instead.
-          </p>
+          <div className="mt-3 flex gap-1 border-b border-slate-800">
+            <button
+              type="button"
+              onClick={() => setLibraryTab("meta")}
+              className={`px-3 pb-2 text-sm font-semibold border-b-2 transition ${
+                libraryTab === "meta"
+                  ? "border-emerald-500 text-emerald-300"
+                  : "border-transparent text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              WhatsApp Meta
+            </button>
+            <button
+              type="button"
+              onClick={() => setLibraryTab("personal")}
+              className={`px-3 pb-2 text-sm font-semibold border-b-2 transition ${
+                libraryTab === "personal"
+                  ? "border-emerald-500 text-emerald-300"
+                  : "border-transparent text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              WhatsApp Personal
+            </button>
+          </div>
+          {libraryTab === "meta" ? (
+            <p className="text-sm text-slate-500 mt-3 max-w-2xl">
+              Create templates here and submit them to Meta for review. Duplicate copies a template
+              as a new submission. Edit resubmits rejected, paused, or disabled templates. Delete
+              removes a template from Meta and this list. Approved wording cannot be changed in
+              place — duplicate it with a new name instead.
+            </p>
+          ) : (
+            <p className="text-sm text-slate-500 mt-3 max-w-2xl">
+              Save reusable messages for Personal WhatsApp (QR scanned). Select them later from Bulk
+              WhatsApp → Personal WhatsApp Templates.
+            </p>
+          )}
         </div>
-        <div className="flex flex-wrap gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              setShowCreator((open) => !open);
-              setNotice(null);
-            }}
-            disabled={!config?.configured}
-            className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-medium disabled:opacity-50"
-          >
-            {showCreator ? "Close creator" : "Create template"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleSync()}
-            disabled={syncing || !config?.configured}
-            className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium disabled:opacity-50"
-          >
-            {syncing ? "Syncing…" : "Sync from Meta"}
-          </button>
-        </div>
+        {libraryTab === "meta" ? (
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setShowCreator((open) => !open);
+                setNotice(null);
+              }}
+              disabled={!config?.configured}
+              className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-medium disabled:opacity-50"
+            >
+              {showCreator ? "Close creator" : "Create template"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSync()}
+              disabled={syncing || !config?.configured}
+              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium disabled:opacity-50"
+            >
+              {syncing ? "Syncing…" : "Sync from Meta"}
+            </button>
+          </div>
+        ) : null}
       </div>
 
+      {libraryTab === "personal" ? (
+        <WhatsAppPersonalTemplatesPanel onError={onError} />
+      ) : (
+        <>
       {unreadCount > 0 && notifications.length > 0 && (
         <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4 space-y-2">
           <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -963,6 +1004,8 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
           )}
         </div>
       </div>
+        </>
+      )}
 
       <WhatsAppTemplatePreviewModal
         template={viewingTemplate}
