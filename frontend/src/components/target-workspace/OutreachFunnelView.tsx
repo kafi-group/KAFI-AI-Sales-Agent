@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { CallLeadButton } from "../CallLeadButton";
 import { CallRecommendationBadge } from "../CallRecommendationBadge";
 import { ClientHistoryPanel } from "../ClientHistoryPanel";
+import { KnowYourCustomerModal } from "../KnowYourCustomerModal";
 import { IconX } from "../icons/AppIcons";
 import {
   LeadWhatsAppComposeModal,
@@ -75,6 +76,55 @@ function workspaceLeadAsComposeRow(lead: WorkspaceLeadItem): LeadTableRow {
   } as LeadTableRow;
 }
 
+function workspaceLeadAsKycRow(lead: WorkspaceLeadItem): LeadTableRow {
+  const phones = workspaceLeadPhones(lead);
+  const primary = phones[0]?.number || lead.primary_phone || null;
+  const secondary = phones[1]?.number || null;
+  return {
+    id: lead.id,
+    company_name: lead.company_name,
+    country: lead.country,
+    city: lead.city,
+    industry: lead.industry ?? null,
+    website_url: lead.website_url ?? null,
+    company_grading: lead.company_grading ?? null,
+    product_interest: lead.product_interest,
+    contact_id: lead.contact_id ?? phones[0]?.contact_id ?? null,
+    contact_name: lead.contact_person || phones[0]?.contact_name || null,
+    contact_designation: lead.designation,
+    contact_phone: primary,
+    contact_primary_phone: primary,
+    contact_secondary_phone: secondary,
+    contact_secondary_mobile: secondary,
+    contact_email: lead.primary_email,
+    contact_secondary_email: null,
+    remarks: lead.remarks ?? null,
+    call_remarks: null,
+    assigned_to: lead.assigned_to_name || "",
+    assigned_to_user_id: lead.assigned_to_user_id,
+    follow_up_at: null,
+    created_at: "",
+    latest_score: null,
+    score_reasoning: null,
+    scored_at: null,
+    call_recommended: lead.call_recommended ?? null,
+    call_local_time: lead.call_local_time ?? null,
+    call_timezone: null,
+    call_reason: lead.call_reason ?? null,
+    linkedin_company_url: null,
+    facebook_company_url: null,
+    instagram_company_url: null,
+    source: null,
+    legacy_serial_no: null,
+    address: null,
+    market_role: null,
+    market_role_reasoning: null,
+    producer_tier: null,
+    producer_conversion_pct: null,
+    producer_tier_reasoning: null,
+  };
+}
+
 export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
   currentUser,
   isAdmin,
@@ -102,6 +152,10 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
   // Modal states
   const [proofModalLead, setProofModalLead] = useState<WorkspaceLeadItem | null>(null);
   const [remarksLead, setRemarksLead] = useState<WorkspaceLeadItem | null>(null);
+  const [kycLead, setKycLead] = useState<WorkspaceLeadItem | null>(null);
+  const [kycRow, setKycRow] = useState<LeadTableRow | null>(null);
+  const [kycLoading, setKycLoading] = useState(false);
+  const [kycError, setKycError] = useState<string | null>(null);
   const [whatsappTarget, setWhatsappTarget] = useState<WhatsAppComposeTarget | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   /** leadId -> selected phone number for Call / WhatsApp */
@@ -203,6 +257,42 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
       prev.includes(country) ? prev.filter((c) => c !== country) : [...prev, country],
     );
   };
+
+  async function openKnowYourCustomer(lead: WorkspaceLeadItem) {
+    setKycLead(lead);
+    setKycRow(workspaceLeadAsKycRow(lead));
+    setKycLoading(true);
+    setKycError(null);
+    try {
+      const res = await client.listLeadsTable({
+        q: lead.company_name,
+        page: 1,
+        page_size: 50,
+        master_type: masterType || "fmcg",
+        all_contacts: true,
+      });
+      const match =
+        res.rows.find((row) => row.id === lead.id) ||
+        res.rows.find(
+          (row) =>
+            row.company_name.trim().toLowerCase() === lead.company_name.trim().toLowerCase(),
+        );
+      if (match) {
+        setKycRow(match);
+      }
+    } catch {
+      // Workspace card already seeded a usable fallback profile.
+    } finally {
+      setKycLoading(false);
+    }
+  }
+
+  function closeKnowYourCustomer() {
+    setKycLead(null);
+    setKycRow(null);
+    setKycError(null);
+    setKycLoading(false);
+  }
 
   const countryFilterLabel = useMemo(() => {
     if (selectedCountries.length === 0) {
@@ -609,7 +699,14 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                 <div className="space-y-1.5 flex-1 min-w-0">
                   <div className="flex items-center gap-2.5 flex-wrap">
                     <h3 className="text-base font-bold text-slate-50 tracking-tight">
-                      {lead.company_name}
+                      <button
+                        type="button"
+                        onClick={() => void openKnowYourCustomer(lead)}
+                        className="text-left hover:text-emerald-300 hover:underline decoration-emerald-500/50 transition"
+                        title="Know Your Customer"
+                      >
+                        {lead.company_name}
+                      </button>
                     </h3>
                     <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-800 text-slate-200 border border-slate-600">
                       🌍 {lead.country || "Global"} {lead.city ? `• ${lead.city}` : ""}
@@ -641,6 +738,14 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                         ✎ Edit
                       </button>
                     ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void openKnowYourCustomer(lead)}
+                      className="px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-teal-950/70 text-teal-200 border border-teal-600/50 hover:border-teal-400/70 hover:bg-teal-900/50 transition"
+                      title="Know Your Customer — view contact and company details before or during a call"
+                    >
+                      👤 KYC
+                    </button>
                   </div>
 
                   <div className="flex items-center gap-4 text-xs text-slate-300 flex-wrap">
@@ -983,6 +1088,14 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                   <div className="flex items-center gap-1.5 flex-wrap justify-end">
                     <button
                       type="button"
+                      onClick={() => void openKnowYourCustomer(lead)}
+                      className="px-2.5 py-1 rounded-lg bg-teal-500/10 text-teal-200 border border-teal-500/40 hover:bg-teal-500/20 text-xs font-medium transition"
+                      title="Know Your Customer — view contact and company details"
+                    >
+                      👤 Know Your Customer
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setRemarksLead(lead)}
                       className="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-200 border border-amber-500/40 hover:bg-amber-500/20 text-xs font-medium transition"
                       title="View / add client remarks and history"
@@ -1249,6 +1362,15 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
             document.body,
           )
         : null}
+
+      <KnowYourCustomerModal
+        open={Boolean(kycLead)}
+        onClose={closeKnowYourCustomer}
+        companyName={kycLead?.company_name}
+        row={kycRow}
+        loading={kycLoading}
+        error={kycError}
+      />
     </div>
   );
 };
