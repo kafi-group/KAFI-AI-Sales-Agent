@@ -265,6 +265,23 @@ function messageListLabel(message: InboxMessageSummary, section: MailSection): s
   return senderLabel(message.from_name, message.from_email);
 }
 
+/** Simple exact substring match on visible mail fields (no fuzzy IMAP body noise). */
+function messageMatchesExactQuery(message: InboxMessageSummary, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const parts: string[] = [
+    message.from_email || "",
+    message.from_name || "",
+    message.subject || "",
+    message.preview || "",
+    ...(message.to || []),
+    ...(message.cc || []),
+    ...(message.bcc || []),
+  ];
+  const haystack = parts.join(" \n ").toLowerCase();
+  return haystack.includes(q);
+}
+
 const _MEM_THREAD_CACHE = new Map<string, { items: InboxThreadSummary[]; total: number; has_more: boolean }>();
 const _MEM_MESSAGE_CACHE = new Map<string, { items: InboxMessageSummary[]; total: number; has_more: boolean }>();
 
@@ -399,6 +416,7 @@ export function InboxPage({
     section === "all" ? "all" : section === "junk" ? "junk" : "inbox",
   );
   const [searchActive, setSearchActive] = useState(false);
+  const searchActiveRef = useRef(false);
   const [mailAiOpen, setMailAiOpen] = useState(false);
   const [mailAiQuestion, setMailAiQuestion] = useState("");
   const [mailAiAnswer, setMailAiAnswer] = useState<string | null>(null);
@@ -579,6 +597,9 @@ export function InboxPage({
 
   const loadList = useCallback(
     async (options?: { silent?: boolean }) => {
+      // Never overwrite an active search with the normal folder list / poll.
+      if (searchActiveRef.current) return;
+
       const generation = ++loadGenerationRef.current;
       const mailboxId = mailboxUserIdRef.current;
       const mailboxKey = mailboxId != null ? String(mailboxId) : "self";
@@ -843,6 +864,7 @@ export function InboxPage({
     setThreadPage(1);
     setMessagePage(1);
     setSearchActive(false);
+    searchActiveRef.current = false;
     setTriageFilter("");
     // Default search to All mail when opening All emails (finds Spam like Outlook).
     if (section === "all") {
@@ -1337,19 +1359,36 @@ export function InboxPage({
     const q = searchQuery.trim();
     if (!q) return;
     setLoading(true);
+    setNotice(null);
     try {
       const result = await client.searchInboxMail(
         {
           query: q,
           scope: searchScope,
-          limit: PAGE_SIZE,
+          limit: Math.max(PAGE_SIZE, 100),
           offset: 0,
         },
         mailboxUserIdRef.current,
       );
+      const matched = (result.items || []).filter((item) =>
+        messageMatchesExactQuery(item, q),
+      );
+      searchActiveRef.current = true;
       setSearchActive(true);
       setThreads([]);
-      setMessages(result.items);
+      setDrafts([]);
+      setMessages(matched);
+      setMessageTotal(matched.length);
+      setMessageHasMore(false);
+      setSelectedThreadId(null);
+      setMessageDetail(null);
+      if (matched.length === 0) {
+        setNotice(`No emails match “${q}”.`);
+      } else {
+        setNotice(
+          `Found ${matched.length} email${matched.length === 1 ? "" : "s"} matching “${q}”.`,
+        );
+      }
     } catch (e) {
       onError(e instanceof Error ? e.message : "Search failed");
     } finally {
@@ -1370,6 +1409,7 @@ export function InboxPage({
       setMailAiAnswer(result.answer);
       if (result.suggested_threads?.length && section === "inbox") {
         setThreads(result.suggested_threads);
+        searchActiveRef.current = false;
         setSearchActive(false);
       }
     } catch (e) {
@@ -1781,7 +1821,9 @@ export function InboxPage({
                 variant="ghost"
                 size="md"
                 onClick={() => {
+                  searchActiveRef.current = false;
                   setSearchActive(false);
+                  setNotice(null);
                   void loadList();
                 }}
               >
@@ -2062,7 +2104,11 @@ export function InboxPage({
                 })
               )
             ) : messages.length === 0 ? (
-              <p className="py-10 text-center text-slate-500 text-sm">{emptyListMessage(section)}</p>
+              <p className="py-10 text-center text-slate-500 text-sm">
+                {searchActive
+                  ? `No emails match “${searchQuery.trim()}”.`
+                  : emptyListMessage(section)}
+              </p>
             ) : (
               messages.map((item) => {
                 const folder = item.folder || "INBOX";
