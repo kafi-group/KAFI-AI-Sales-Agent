@@ -7,7 +7,7 @@ import {
   type WhatsAppTemplateNotification,
 } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { IconCopy, IconEdit, IconEye, IconSearch, IconTrash } from "../components/icons/AppIcons";
+import { IconChevronDown, IconCopy, IconEdit, IconEye, IconSearch, IconTrash } from "../components/icons/AppIcons";
 import { WhatsAppTemplatePreviewModal } from "../components/WhatsAppTemplatePreviewModal";
 import { capitalizeFirstLetter } from "../utils/spelling";
 
@@ -91,6 +91,7 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
   const [deletingTemplateId, setDeletingTemplateId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [notificationsExpanded, setNotificationsExpanded] = useState(false);
 
   const refreshNotifications = useCallback(async () => {
     try {
@@ -453,9 +454,25 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
       {unreadCount > 0 && notifications.length > 0 && (
         <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4 space-y-2">
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            <h3 className="text-sm font-medium text-slate-200">
-              Template review updates ({unreadCount} unread)
-            </h3>
+            <button
+              type="button"
+              onClick={() => setNotificationsExpanded((open) => !open)}
+              className="inline-flex items-center gap-2 text-sm font-medium text-slate-200 hover:text-white transition"
+              aria-expanded={notificationsExpanded}
+            >
+              <IconChevronDown
+                size="sm"
+                className={`shrink-0 text-slate-400 transition-transform ${
+                  notificationsExpanded ? "rotate-0" : "-rotate-90"
+                }`}
+              />
+              <span>
+                Template review updates ({unreadCount} unread)
+              </span>
+              <span className="text-xs font-normal text-slate-500">
+                {notificationsExpanded ? "Hide" : "Show"}
+              </span>
+            </button>
             <button
               type="button"
               onClick={() => void dismissNotifications()}
@@ -464,28 +481,35 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
               Mark all read
             </button>
           </div>
-          <ul className="space-y-2">
-            {notifications.map((item) => (
-              <li
-                key={item.id}
-                className={`rounded-lg border px-3 py-2 text-sm flex items-start justify-between gap-3 ${notificationStyle(item.event_type)}`}
-              >
-                <div>
-                  <p>{item.message}</p>
-                  <p className="text-xs opacity-70 mt-1">
-                    {item.created_at ? new Date(item.created_at).toLocaleString() : ""}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void dismissNotifications([item.id])}
-                  className="text-xs opacity-80 hover:opacity-100 shrink-0"
+          {notificationsExpanded ? (
+            <ul className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {notifications.map((item) => (
+                <li
+                  key={item.id}
+                  className={`rounded-lg border px-3 py-2 text-sm flex items-start justify-between gap-3 ${notificationStyle(item.event_type)}`}
                 >
-                  Dismiss
-                </button>
-              </li>
-            ))}
-          </ul>
+                  <div>
+                    <p>{item.message}</p>
+                    <p className="text-xs opacity-70 mt-1">
+                      {item.created_at ? new Date(item.created_at).toLocaleString() : ""}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void dismissNotifications([item.id])}
+                    className="text-xs opacity-80 hover:opacity-100 shrink-0"
+                  >
+                    Dismiss
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-slate-500">
+              Collapsed — click the header to expand {notifications.length} update
+              {notifications.length === 1 ? "" : "s"}.
+            </p>
+          )}
         </div>
       )}
 
