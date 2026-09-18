@@ -486,7 +486,7 @@ export function InboxPage({
     section === "junk" ||
     section === "archive" ||
     isLabelView;
-  const isThreadView = section === "inbox" && !isLabelView;
+  const isThreadView = section === "inbox" && !isLabelView && !searchActive;
 
   useEffect(() => {
     if (!mailAiOpen) return;
@@ -716,6 +716,7 @@ export function InboxPage({
         ]);
 
         if (generation !== loadGenerationRef.current) return;
+        if (searchActiveRef.current) return;
 
         if (s) {
           setStatus(s);
@@ -805,6 +806,7 @@ export function InboxPage({
             }
           }
           if (generation !== loadGenerationRef.current) return;
+          if (searchActiveRef.current) return;
           setMessages([...fromScan, ...hydrated]);
           setThreads([]);
           setDrafts([]);
@@ -1360,6 +1362,15 @@ export function InboxPage({
     if (!q) return;
     setLoading(true);
     setNotice(null);
+    // Cancel any in-flight folder load so it cannot wipe search results.
+    loadGenerationRef.current += 1;
+    searchActiveRef.current = true;
+    setSearchActive(true);
+    setThreads([]);
+    setDrafts([]);
+    setSelectedThreadId(null);
+    setMessageDetail(null);
+    setThread(null);
     try {
       const result = await client.searchInboxMail(
         {
@@ -1370,18 +1381,14 @@ export function InboxPage({
         },
         mailboxUserIdRef.current,
       );
+      if (!searchActiveRef.current) return;
       const matched = (result.items || []).filter((item) =>
         messageMatchesExactQuery(item, q),
       );
-      searchActiveRef.current = true;
-      setSearchActive(true);
-      setThreads([]);
-      setDrafts([]);
       setMessages(matched);
       setMessageTotal(matched.length);
       setMessageHasMore(false);
-      setSelectedThreadId(null);
-      setMessageDetail(null);
+      setThreads([]);
       if (matched.length === 0) {
         setNotice(`No emails match “${q}”.`);
       } else {
@@ -1390,7 +1397,9 @@ export function InboxPage({
         );
       }
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Search failed");
+      if (searchActiveRef.current) {
+        onError(e instanceof Error ? e.message : "Search failed");
+      }
     } finally {
       setLoading(false);
     }
@@ -2129,29 +2138,63 @@ export function InboxPage({
                         {initialsFrom(label)}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          {item.unread && (
-                            <span className="shrink-0 w-2 h-2 rounded-full bg-emerald-400" />
-                          )}
-                          <span
-                            className={`truncate text-sm ${
-                              item.unread ? "text-slate-100 font-semibold" : "text-slate-300"
-                            }`}
-                          >
-                            {label}
-                          </span>
-                          <span className="ml-auto shrink-0 text-[11px] text-slate-500">
-                            {formatDate(item.date)}
-                          </span>
-                        </div>
-                        <div
-                          className={`truncate text-sm ${
-                            item.unread ? "text-slate-200" : "text-slate-400"
-                          }`}
-                        >
-                          {item.subject}
-                        </div>
-                        <div className="truncate text-xs text-slate-500">{item.preview}</div>
+                        {searchActive ? (
+                          <>
+                            <div className="flex items-center gap-2">
+                              {item.unread && (
+                                <span className="shrink-0 w-2 h-2 rounded-full bg-emerald-400" />
+                              )}
+                              <span
+                                className={`truncate text-sm ${
+                                  item.unread
+                                    ? "text-slate-100 font-semibold"
+                                    : "text-slate-200 font-medium"
+                                }`}
+                              >
+                                {item.subject || "(no subject)"}
+                              </span>
+                              <span className="ml-auto shrink-0 text-[11px] text-slate-500">
+                                {formatDate(item.date)}
+                              </span>
+                            </div>
+                            <div className="truncate text-xs text-slate-400 mt-0.5">
+                              {label}
+                              {item.from_email ? ` · ${item.from_email}` : ""}
+                              {item.folder ? ` · ${item.folder}` : ""}
+                            </div>
+                            {item.preview ? (
+                              <div className="truncate text-xs text-slate-500 mt-0.5">
+                                {item.preview}
+                              </div>
+                            ) : null}
+                          </>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-2">
+                              {item.unread && (
+                                <span className="shrink-0 w-2 h-2 rounded-full bg-emerald-400" />
+                              )}
+                              <span
+                                className={`truncate text-sm ${
+                                  item.unread ? "text-slate-100 font-semibold" : "text-slate-300"
+                                }`}
+                              >
+                                {label}
+                              </span>
+                              <span className="ml-auto shrink-0 text-[11px] text-slate-500">
+                                {formatDate(item.date)}
+                              </span>
+                            </div>
+                            <div
+                              className={`truncate text-sm ${
+                                item.unread ? "text-slate-200" : "text-slate-400"
+                              }`}
+                            >
+                              {item.subject}
+                            </div>
+                            <div className="truncate text-xs text-slate-500">{item.preview}</div>
+                          </>
+                        )}
                       </div>
                     </div>
                   </button>
