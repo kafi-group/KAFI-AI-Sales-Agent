@@ -329,7 +329,7 @@ def resubmit_template_for_meta(
         raise ValueError("Template not found")
     if record.status == WhatsAppTemplateStatus.approved:
         raise ValueError(
-            "Approved templates cannot be changed on Meta. Use Duplicate & submit with a new name."
+            "Approved templates cannot be changed on Meta. Use Duplicate to submit a new name."
         )
     if record.status == WhatsAppTemplateStatus.pending:
         raise ValueError(
@@ -476,6 +476,39 @@ def list_templates(db: Session, *, approved_only: bool = False) -> list[WhatsApp
 
 def get_template(db: Session, template_id: int) -> WhatsAppTemplate | None:
     return db.get(WhatsAppTemplate, template_id)
+
+
+def delete_template_from_meta(db: Session, *, template_id: int) -> dict[str, Any]:
+    """Delete a template on Meta (when configured) and remove the local row."""
+    record = get_template(db, template_id)
+    if not record:
+        raise ValueError("Template not found")
+
+    name = record.name
+    meta_result = whatsapp_client.delete_message_template(
+        name=name,
+        hsm_id=record.meta_template_id,
+    )
+    status = str(meta_result.get("status") or "")
+    if status not in {"deleted", "already_gone", "not_configured"}:
+        raise ValueError(meta_result.get("message") or "Failed to delete template on Meta")
+
+    db.query(WhatsAppTemplateStatusEvent).filter(
+        WhatsAppTemplateStatusEvent.template_id == record.id
+    ).delete(synchronize_session=False)
+    db.delete(record)
+    db.commit()
+
+    if status == "not_configured":
+        message = (
+            f"Deleted '{name}' from this list. Meta is not configured, so it was not "
+            "removed from WhatsApp Business Manager."
+        )
+    elif status == "already_gone":
+        message = f"Deleted '{name}' from this list. It was already gone on Meta."
+    else:
+        message = f"Deleted WhatsApp template '{name}' from Meta and this list."
+    return {"status": "ok", "message": message}
 
 
 def resolve_contact_salutation_name(

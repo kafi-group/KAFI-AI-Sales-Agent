@@ -3761,6 +3761,10 @@ export const client = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+  deleteWhatsAppTemplate: (templateId: number) =>
+    request<{ status: string; message: string }>(`/whatsapp/templates/${templateId}`, {
+      method: "DELETE",
+    }),
   listWhatsAppTemplateNotifications: (params: { unreadOnly?: boolean; limit?: number } = {}) => {
     const query = new URLSearchParams();
     if (params.unreadOnly === false) query.set("unread_only", "false");

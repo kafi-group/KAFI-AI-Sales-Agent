@@ -356,6 +356,65 @@ class WhatsAppClient:
 
         return {"status": "ok", "templates": body.get("data") or []}
 
+    def delete_message_template(
+        self,
+        *,
+        name: str,
+        hsm_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Delete a message template on the WABA (by template id when known, else by name)."""
+        if not settings.whatsapp_access_token or not settings.whatsapp_business_account_id:
+            return {
+                "status": "not_configured",
+                "message": "Set WHATSAPP_BUSINESS_ACCOUNT_ID and WHATSAPP_ACCESS_TOKEN "
+                "in backend/.env to delete templates on Meta.",
+            }
+        params: dict[str, str] = {}
+        if hsm_id:
+            params["hsm_id"] = str(hsm_id)
+        elif name:
+            params["name"] = name
+        else:
+            return {"status": "error", "message": "Template name or Meta template id is required"}
+
+        url = f"{self._base_url()}/{settings.whatsapp_business_account_id}/message_templates"
+        try:
+            response = httpx.delete(url, headers=self._headers(), params=params, timeout=30.0)
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "message": f"WhatsApp template delete failed: {exc}"}
+
+        try:
+            body = response.json()
+        except Exception:  # noqa: BLE001
+            body = {}
+
+        if response.status_code in {200, 201} or body.get("success") is True:
+            return {
+                "status": "deleted",
+                "message": "Template deleted on Meta",
+                "raw": body,
+            }
+
+        detail = ((body.get("error") or {}).get("message")) or response.text or ""
+        lower = str(detail).lower()
+        code = ((body.get("error") or {}).get("code"))
+        already_gone = (
+            response.status_code == 404
+            or code == 33
+            or "does not exist" in lower
+            or "could not be found" in lower
+            or "not found" in lower
+        )
+        if already_gone:
+            return {
+                "status": "already_gone",
+                "message": detail or "Template was already deleted on Meta",
+                "raw": body,
+            }
+
+        friendly = _friendly_whatsapp_api_error(response.status_code, str(detail), body)
+        return {"status": "error", "message": friendly, "raw": body}
+
     def verify_webhook_signature(self, *, payload: bytes, signature_header: str | None) -> bool:
         """Validate X-Hub-Signature-256 using the Meta app secret."""
         if not settings.whatsapp_validate_webhooks:

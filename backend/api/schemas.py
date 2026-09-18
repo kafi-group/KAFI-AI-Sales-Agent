@@ -1681,6 +1681,11 @@ class WhatsAppTemplateSyncResponse(BaseModel):
     synced_count: int = 0
 
 
+class WhatsAppTemplateDeleteResponse(BaseModel):
+    status: str
+    message: str
+
+
 class WhatsAppCampaignDraftRequest(BaseModel):
     template_id: int
     buyer_ids: list[int] = Field(min_length=1)

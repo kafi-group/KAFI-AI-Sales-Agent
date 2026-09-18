@@ -22,6 +22,7 @@ from api.schemas import (
     WhatsAppReplyResponse,
     WhatsAppTemplateCreateRequest,
     WhatsAppTemplateCreateResponse,
+    WhatsAppTemplateDeleteResponse,
     WhatsAppTemplateResubmitRequest,
     WhatsAppTemplateNotificationsReadRequest,
     WhatsAppTemplateNotificationsResponse,
@@ -280,6 +281,31 @@ def resubmit_whatsapp_template(
         },
     )
     return WhatsAppTemplateCreateResponse(**result)
+
+
+@router.delete("/templates/{template_id}", response_model=WhatsAppTemplateDeleteResponse)
+def delete_whatsapp_template(
+    template_id: int,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """Delete a WhatsApp template from Meta and the local list."""
+    from modules import whatsapp_templates as templates_module
+
+    try:
+        result = templates_module.delete_template_from_meta(db, template_id=template_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    log_action(
+        db,
+        entity_type="whatsapp_template",
+        entity_id=template_id,
+        action="deleted",
+        actor=user.username,
+        details={"message": result.get("message")},
+    )
+    return WhatsAppTemplateDeleteResponse(**result)
 
 
 @router.get("/templates/notifications", response_model=WhatsAppTemplateNotificationsResponse)

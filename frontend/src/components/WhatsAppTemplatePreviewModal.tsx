@@ -5,7 +5,7 @@ import {
   suggestWhatsAppTemplateVariables,
   type WhatsAppLeadContext,
 } from "../utils/whatsappTemplateVariables";
-import { IconCopy, IconSparkles, IconX } from "./icons/AppIcons";
+import { IconCopy, IconEdit, IconSparkles, IconTrash, IconX } from "./icons/AppIcons";
 import { ActionButton } from "./ui/ActionButton";
 
 interface WhatsAppTemplatePreviewModalProps {
@@ -14,6 +14,9 @@ interface WhatsAppTemplatePreviewModalProps {
   leadContext?: WhatsAppLeadContext | null;
   onSelectTemplate?: (template: WhatsAppTemplate) => void;
   onDuplicateTemplate?: (template: WhatsAppTemplate) => void;
+  onEditTemplate?: (template: WhatsAppTemplate) => void;
+  onDeleteTemplate?: (template: WhatsAppTemplate) => void;
+  deleting?: boolean;
 }
 
 export function WhatsAppTemplatePreviewModal({
@@ -22,6 +25,9 @@ export function WhatsAppTemplatePreviewModal({
   leadContext,
   onSelectTemplate,
   onDuplicateTemplate,
+  onEditTemplate,
+  onDeleteTemplate,
+  deleting = false,
 }: WhatsAppTemplatePreviewModalProps) {
   const [copied, setCopied] = useState(false);
   const initialVars = useMemo(() => {
@@ -201,21 +207,48 @@ export function WhatsAppTemplatePreviewModal({
         </div>
 
         {/* Modal Footer */}
-        <div className="border-t border-slate-800 bg-slate-950/80 px-6 py-4 flex items-center justify-between gap-3">
-          {onDuplicateTemplate ? (
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onDuplicateTemplate(template);
-              }}
-              className="px-3.5 py-2 rounded-lg border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 text-xs font-semibold transition"
-            >
-              Duplicate & Edit
-            </button>
-          ) : (
-            <div />
-          )}
+        <div className="border-t border-slate-800 bg-slate-950/80 px-6 py-4 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            {onDuplicateTemplate ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onDuplicateTemplate(template);
+                }}
+                className="px-3.5 py-2 rounded-lg border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 text-xs font-semibold transition inline-flex items-center gap-1.5"
+              >
+                <IconCopy size="xs" />
+                Duplicate
+              </button>
+            ) : null}
+            {onEditTemplate ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onEditTemplate(template);
+                }}
+                disabled={template.status === "pending"}
+                className="px-3.5 py-2 rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 text-xs font-semibold transition inline-flex items-center gap-1.5 disabled:opacity-40"
+              >
+                <IconEdit size="xs" />
+                Edit
+              </button>
+            ) : null}
+            {onDeleteTemplate ? (
+              <button
+                type="button"
+                onClick={() => void onDeleteTemplate(template)}
+                disabled={deleting}
+                className="px-3.5 py-2 rounded-lg border border-red-500/40 bg-red-500/10 text-red-200 hover:bg-red-500/20 text-xs font-semibold transition inline-flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <IconTrash size="xs" />
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            ) : null}
+            {!onDuplicateTemplate && !onEditTemplate && !onDeleteTemplate ? <div /> : null}
+          </div>
 
           <div className="flex items-center gap-2">
             <ActionButton icon={IconX} size="md" variant="ghost" onClick={onClose}>

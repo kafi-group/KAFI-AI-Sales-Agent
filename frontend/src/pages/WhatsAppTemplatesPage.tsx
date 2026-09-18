@@ -7,7 +7,7 @@ import {
   type WhatsAppTemplateNotification,
 } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { IconEye, IconSearch } from "../components/icons/AppIcons";
+import { IconCopy, IconEdit, IconEye, IconSearch, IconTrash } from "../components/icons/AppIcons";
 import { WhatsAppTemplatePreviewModal } from "../components/WhatsAppTemplatePreviewModal";
 import { capitalizeFirstLetter } from "../utils/spelling";
 
@@ -88,6 +88,7 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
   const [editForm, setEditForm] = useState<WhatsAppTemplateCreateForm | null>(null);
   const [resubmitting, setResubmitting] = useState(false);
   const [viewingTemplate, setViewingTemplate] = useState<WhatsAppTemplate | null>(null);
+  const [deletingTemplateId, setDeletingTemplateId] = useState<number | null>(null);
 
   const refreshNotifications = useCallback(async () => {
     try {
@@ -194,9 +195,8 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
 
   function startEditTemplate(template: WhatsAppTemplate) {
     if (template.status === "approved") {
-      startDuplicateFromTemplate(template);
-      setNotice(
-        "Approved templates cannot be edited on Meta — duplicate opened with a new name. Submit when ready.",
+      onError(
+        "Approved templates cannot be edited on Meta. Use Duplicate to create a new version with a new name.",
       );
       return;
     }
@@ -247,8 +247,24 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
     }
   }
 
-  function canResubmitStatus(status: string): boolean {
-    return status === "rejected" || status === "paused" || status === "disabled";
+  async function handleDeleteTemplate(template: WhatsAppTemplate) {
+    const confirmed = window.confirm(
+      `Delete WhatsApp template "${template.name}"?\n\nThis removes it from Meta and this list. This cannot be undone.`,
+    );
+    if (!confirmed) return;
+    setDeletingTemplateId(template.id);
+    setNotice(null);
+    try {
+      const result = await client.deleteWhatsAppTemplate(template.id);
+      if (viewingTemplate?.id === template.id) setViewingTemplate(null);
+      if (editingTemplateId === template.id) cancelEditTemplate();
+      setNotice(result.message || `Deleted ${template.name}.`);
+      await refresh();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to delete template");
+    } finally {
+      setDeletingTemplateId(null);
+    }
   }
 
   async function dismissNotifications(ids?: number[]) {
@@ -318,10 +334,10 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
         <div>
           <h2 className="text-lg font-medium text-slate-100">WhatsApp templates</h2>
           <p className="text-sm text-slate-500 mt-1 max-w-2xl">
-            Create templates here and submit them to Meta for review. Rejected templates can be
-            edited and resubmitted from the list below. Approved templates must be duplicated with
-            a new name to change wording. When Meta approves or rejects a template, you&apos;ll
-            see a notification on this page.
+            Create templates here and submit them to Meta for review. Duplicate copies a template
+            as a new submission. Edit resubmits rejected, paused, or disabled templates. Delete
+            removes a template from Meta and this list. Approved wording cannot be changed in
+            place — duplicate it with a new name instead.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 shrink-0">
@@ -649,7 +665,7 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
                       </p>
                     )}
                   </div>
-                  <div className="flex flex-col gap-1.5 shrink-0">
+                  <div className="grid grid-cols-2 gap-1.5 shrink-0 w-[12.5rem]">
                     <button
                       type="button"
                       onClick={() => setViewingTemplate(template)}
@@ -659,25 +675,41 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
                       <IconEye size="xs" />
                       View
                     </button>
-                    {canResubmitStatus(template.status) ? (
-                      <button
-                        type="button"
-                        onClick={() => startEditTemplate(template)}
-                        className="text-xs px-2.5 py-1.5 rounded-md border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 font-medium"
-                      >
-                        Edit & resubmit
-                      </button>
-                    ) : template.status === "approved" ? (
-                      <button
-                        type="button"
-                        onClick={() => startDuplicateFromTemplate(template)}
-                        className="text-xs px-2.5 py-1.5 rounded-md border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 font-medium"
-                      >
-                        Duplicate & edit
-                      </button>
-                    ) : template.status === "pending" ? (
-                      <span className="text-xs text-slate-500 px-1 text-center">Awaiting Meta</span>
-                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => startDuplicateFromTemplate(template)}
+                      className="text-xs px-2.5 py-1.5 rounded-md border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 font-medium flex items-center justify-center gap-1 transition"
+                      title="Duplicate as a new Meta template"
+                    >
+                      <IconCopy size="xs" />
+                      Duplicate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => startEditTemplate(template)}
+                      disabled={template.status === "pending"}
+                      className="text-xs px-2.5 py-1.5 rounded-md border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 font-medium flex items-center justify-center gap-1 transition disabled:opacity-40 disabled:hover:bg-sky-500/10"
+                      title={
+                        template.status === "pending"
+                          ? "Awaiting Meta review"
+                          : template.status === "approved"
+                            ? "Approved templates cannot be edited on Meta — use Duplicate"
+                            : "Edit and resubmit to Meta"
+                      }
+                    >
+                      <IconEdit size="xs" />
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteTemplate(template)}
+                      disabled={deletingTemplateId === template.id}
+                      className="text-xs px-2.5 py-1.5 rounded-md border border-red-500/40 bg-red-500/10 text-red-200 hover:bg-red-500/20 font-medium flex items-center justify-center gap-1 transition disabled:opacity-50"
+                      title="Delete this template from Meta and this list"
+                    >
+                      <IconTrash size="xs" />
+                      {deletingTemplateId === template.id ? "Deleting…" : "Delete"}
+                    </button>
                   </div>
                 </div>
                 {editingTemplateId === template.id && editForm ? (
@@ -765,12 +797,15 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
         template={viewingTemplate}
         onClose={() => setViewingTemplate(null)}
         onDuplicateTemplate={(tmpl) => {
-          if (canResubmitStatus(tmpl.status)) {
-            startEditTemplate(tmpl);
-          } else {
-            startDuplicateFromTemplate(tmpl);
-          }
+          startDuplicateFromTemplate(tmpl);
         }}
+        onEditTemplate={(tmpl) => {
+          startEditTemplate(tmpl);
+        }}
+        onDeleteTemplate={(tmpl) => {
+          void handleDeleteTemplate(tmpl);
+        }}
+        deleting={Boolean(viewingTemplate && deletingTemplateId === viewingTemplate.id)}
       />
     </section>
   );
