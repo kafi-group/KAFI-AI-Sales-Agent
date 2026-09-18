@@ -1765,6 +1765,7 @@ function DashboardApp() {
             )}
             {tab === "target-workspace" && (
               <TargetWorkspacePage
+                masterType={masterType}
                 onOpenCall={(phone, company) => {
                   pushNumberToFloatingDialpad({
                     phone,

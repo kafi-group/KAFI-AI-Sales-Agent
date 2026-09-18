@@ -109,6 +109,7 @@ def get_workspace_leads(
     country: Optional[str] = Query(None),
     stage: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    master_type: Optional[str] = Query("fmcg"),
     user_id: Optional[int] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
@@ -119,6 +120,7 @@ def get_workspace_leads(
 
     Sales users always get their own assigned leads only (My Assigned Leads pool).
     Admins default to team view; pass user_id to preview one rep's assigned pool.
+    Scoped to Active Master List (``master_type``, default ``fmcg``).
     """
     target_user = user_id if (user.role == AppUserRole.admin and user_id is not None) else user.id
     if user.role == AppUserRole.admin and user_id is None:
@@ -131,6 +133,7 @@ def get_workspace_leads(
         stage=stage,
         user_id=target_user,
         search=search,
+        master_type=master_type or "fmcg",
         page=page,
         limit=limit,
     )

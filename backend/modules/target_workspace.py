@@ -341,6 +341,7 @@ def list_workspace_leads(
     stage: str | None = None,
     user_id: int | None = None,
     search: str | None = None,
+    master_type: str | None = "fmcg",
     page: int = 1,
     limit: int = 50,
 ) -> dict[str, Any]:
@@ -369,6 +370,19 @@ def list_workspace_leads(
         db.query(Buyer)
         .options(joinedload(Buyer.contacts))
     )
+
+    # Same master-list scoping as Master Table / My Assigned.
+    mt = (master_type or "fmcg").strip().lower() or "fmcg"
+    if mt == "fmcg":
+        q = q.filter(
+            or_(
+                func.lower(Buyer.master_type) == "fmcg",
+                Buyer.master_type.is_(None),
+                Buyer.master_type == "",
+            )
+        )
+    else:
+        q = q.filter(func.lower(Buyer.master_type) == mt)
 
     if filter_countries:
         # Match country case-insensitively with trim and substring flexibility
@@ -553,6 +567,7 @@ def list_workspace_leads(
                 "call_reason": call_timing.get("call_reason"),
                 "remarks": latest_remarks,
                 "remarks_history_count": remarks_history_count,
+                "company_grading": getattr(b, "company_grading", None) or None,
                 "stage": current_stage,
                 "not_interested_reason": lc.not_interested_reason if lc else None,
                 "not_interested_remarks": lc.not_interested_remarks if lc else None,
@@ -599,6 +614,7 @@ def list_workspace_leads(
         "target_countries": assigned_countries,
         "assigned_countries": assigned_countries,
         "selected_country": country,
+        "master_type": mt,
         "counts": stage_counts,
         "stage_counts": stage_counts,
         "dead_lead_count": dead_lead_count,

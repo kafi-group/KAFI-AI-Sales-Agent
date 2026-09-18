@@ -4227,6 +4227,7 @@ export const client = {
     country?: string;
     stage?: string;
     search?: string;
+    master_type?: string;
     user_id?: number;
     page?: number;
     limit?: number;
@@ -4236,6 +4237,7 @@ export const client = {
     if (params.country) search.set("country", params.country);
     if (params.stage) search.set("stage", params.stage);
     if (params.search) search.set("search", params.search);
+    if (params.master_type) search.set("master_type", params.master_type);
     if (params.user_id != null) search.set("user_id", String(params.user_id));
     if (params.page) search.set("page", String(params.page));
     if (params.limit) search.set("limit", String(params.limit));
@@ -4347,6 +4349,9 @@ export interface WorkspaceLeadItem {
   /** Latest client remarks (same field as contact list / profile). */
   remarks?: string | null;
   remarks_history_count?: number;
+  industry?: string | null;
+  website_url?: string | null;
+  company_grading?: string | null;
   stage: "fresh" | "needs_follow_up" | "not_interested" | "no_response";
   not_interested_reason: string | null;
   not_interested_remarks: string | null;

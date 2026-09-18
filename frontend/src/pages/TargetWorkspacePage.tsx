@@ -9,6 +9,8 @@ interface TargetWorkspacePageProps {
   onOpenEmailComposer?: (email: string, companyName: string, contactName?: string) => void;
   onEditLead?: (leadId: number, companyName: string) => void;
   onError?: (message: string) => void;
+  /** Active Master List — workspace outreach is scoped to this pool. */
+  masterType?: string;
 }
 
 export const TargetWorkspacePage: React.FC<TargetWorkspacePageProps> = ({
@@ -16,6 +18,7 @@ export const TargetWorkspacePage: React.FC<TargetWorkspacePageProps> = ({
   onOpenEmailComposer,
   onEditLead,
   onError,
+  masterType = "fmcg",
 }) => {
   const { user, isAdmin } = useAuth();
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<"outreach" | "inbound" | "admin">("outreach");
@@ -96,6 +99,7 @@ export const TargetWorkspacePage: React.FC<TargetWorkspacePageProps> = ({
           isAdmin={isAdmin}
           selectedDay={selectedDay}
           onSelectDay={setSelectedDay}
+          masterType={masterType}
           onOpenCall={onOpenCall}
           onOpenEmailComposer={onOpenEmailComposer}
           onEditLead={onEditLead}

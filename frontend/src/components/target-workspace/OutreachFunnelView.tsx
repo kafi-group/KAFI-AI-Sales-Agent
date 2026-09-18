@@ -1,14 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import {
-  client,
-  type WorkspaceLeadItem,
-  type WorkspaceLeadPhone,
-  type DayCountryTarget,
-  type WorkspaceReviewOptionItem,
-  type AppUser,
-  type LeadTableRow,
-} from "../../api/client";
 import { CallLeadButton } from "../CallLeadButton";
 import { CallRecommendationBadge } from "../CallRecommendationBadge";
 import { ClientHistoryPanel } from "../ClientHistoryPanel";
@@ -19,6 +10,15 @@ import {
 } from "../WhatsAppComposeLink";
 import { WhatsAppProofModal } from "./WhatsAppProofModal";
 import { pushNumberToFloatingDialpad } from "../../utils/dialpadEvents";
+import {
+  client,
+  type WorkspaceLeadItem,
+  type WorkspaceLeadPhone,
+  type DayCountryTarget,
+  type WorkspaceReviewOptionItem,
+  type AppUser,
+  type LeadTableRow,
+} from "../../api/client";
 
 const DAYS_OF_WEEK = [
   { id: "monday", label: "Monday" },
@@ -35,6 +35,8 @@ interface OutreachFunnelViewProps {
   isAdmin: boolean;
   selectedDay: string;
   onSelectDay: (day: string) => void;
+  /** Active Master List scope (fmcg / minerals_ores / other_items). */
+  masterType?: string;
   onOpenCall?: (phone: string, companyName: string, leadId?: number) => void;
   onOpenEmailComposer?: (email: string, companyName: string, contactName?: string) => void;
   /** Jump to Assigned/Master table in edit mode for this lead. */
@@ -78,6 +80,7 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
   isAdmin,
   selectedDay,
   onSelectDay,
+  masterType = "fmcg",
   onOpenCall: _onOpenCall,
   onOpenEmailComposer,
   onEditLead,
@@ -158,6 +161,7 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
         stage: selectedStage,
         country: selectedCountries.length > 0 ? selectedCountries.join(",") : undefined,
         search: searchQuery.trim() || undefined,
+        master_type: masterType || "fmcg",
         user_id: isAdmin ? undefined : currentUser?.id,
         limit: 100,
       });
@@ -181,7 +185,7 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
 
   useEffect(() => {
     loadLeads();
-  }, [selectedDay, selectedStage, selectedCountries, searchQuery]);
+  }, [selectedDay, selectedStage, selectedCountries, searchQuery, masterType]);
 
   useEffect(() => {
     if (!countryMenuOpen) return;
@@ -303,6 +307,13 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
               </h2>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                 {selectedDay.toUpperCase()}
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-200 border border-slate-600">
+                {masterType === "minerals_ores"
+                  ? "Minerals & Ores"
+                  : masterType === "other_items"
+                    ? "Other Items"
+                    : "Master FMCG"}
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-1">
