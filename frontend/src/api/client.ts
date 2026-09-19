@@ -3238,6 +3238,11 @@ export const client = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  rephraseWhatsAppMessage: (message: string) =>
+    request<{ message: string }>("/whatsapp-personal/rephrase", {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
   listWhatsAppPersonalTemplates: () =>
     request<WhatsAppPersonalTemplate[]>("/whatsapp-personal/templates"),
   createWhatsAppPersonalTemplate: (data: { name: string; body: string }) =>
@@ -4302,7 +4307,17 @@ export const client = {
     buyer_ids: number[];
     contact_ids?: (number | null)[];
   }) =>
-    request<{ tasks: AiSalesAgentTask[] }>("/ai-sales-agent/tasks/assign", {
+    request<{
+      tasks: AiSalesAgentTask[];
+      skipped?: Array<{
+        buyer_id: number;
+        contact_id?: number | null;
+        company_name?: string;
+        reason?: string;
+        other_task_id?: number;
+      }>;
+      notice?: string | null;
+    }>("/ai-sales-agent/tasks/assign", {
       method: "POST",
       headers: aiSalesAgentHeaders(),
       body: JSON.stringify(data),
@@ -4398,6 +4413,13 @@ export const client = {
     request<AiSalesAutoModeSettings>("/ai-sales-agent/auto-mode"),
   updateAiSalesAutoMode: (data: Partial<AiSalesAutoModeSettings>) =>
     request<AiSalesAutoModeSettings>("/ai-sales-agent/auto-mode", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  getWorkspaceAiAutopilot: () =>
+    request<WorkspaceAiAutopilotSettings>("/ai-sales-agent/workspace-autopilot"),
+  updateWorkspaceAiAutopilot: (data: Partial<WorkspaceAiAutopilotSettings>) =>
+    request<WorkspaceAiAutopilotSettings>("/ai-sales-agent/workspace-autopilot", {
       method: "PUT",
       body: JSON.stringify(data),
     }),
@@ -4872,6 +4894,15 @@ export interface AiSalesAutoModeSettings {
   bulk_email_when_no_call: boolean;
   study_products: boolean;
   product_brief: string;
+}
+
+export interface WorkspaceAiAutopilotSettings {
+  enabled: boolean;
+  auto_remarks: boolean;
+  auto_interested: boolean;
+  auto_not_interested: boolean;
+  auto_no_response: boolean;
+  auto_follow_up: boolean;
 }
 
 export interface AiSalesProcess {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { LeadTableRow } from "../api/client";
 import { CallPhonePicker } from "./CallPhonePicker";
@@ -23,7 +23,8 @@ interface SelectedContactQuickActionsProps {
   row: LeadTableRow;
   disabled?: boolean;
   onError: (message: string) => void;
-  onWhatsApp: (phone: string, mode: WhatsAppComposeMode) => void;
+  /** Opens the same Bulk WhatsApp Message flow as Action → WhatsApp. */
+  onWhatsApp: () => void;
   onTelegram?: (phone: string, mode?: TelegramComposeMode) => void;
 }
 
@@ -63,7 +64,7 @@ function uniqueEmails(row: LeadTableRow): EmailOption[] {
   return out;
 }
 
-function WhatsAppPhonePicker({
+function TelegramPhonePicker({
   companyName,
   mode,
   phones,
@@ -71,13 +72,11 @@ function WhatsAppPhonePicker({
   onPick,
 }: {
   companyName: string;
-  mode: WhatsAppComposeMode;
+  mode: TelegramComposeMode;
   phones: PhoneOption[];
   onClose: () => void;
   onPick: (phone: string) => void;
 }) {
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -94,18 +93,17 @@ function WhatsAppPhonePicker({
       }}
     >
       <div
-        ref={dialogRef}
         role="dialog"
-        aria-labelledby="wa-phone-picker-title"
+        aria-labelledby="tg-phone-picker-title"
         className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 shadow-2xl p-5 space-y-4"
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 id="wa-phone-picker-title" className="text-base font-medium text-slate-100">
-              Choose WhatsApp number
+            <h3 id="tg-phone-picker-title" className="text-base font-medium text-slate-100">
+              Choose Telegram number
             </h3>
             <p className="text-sm text-slate-400 mt-1">
-              {companyName} · {mode === "template" ? "Template" : "Personal"}
+              {companyName} · {mode === "template" ? "Template" : "Message"}
             </p>
           </div>
           <button
@@ -118,18 +116,15 @@ function WhatsAppPhonePicker({
           </button>
         </div>
         <ul className="space-y-2">
-          {phones.map((option) => (
-            <li key={option.phone}>
+          {phones.map((p) => (
+            <li key={p.phone}>
               <button
                 type="button"
-                onClick={() => onPick(option.phone)}
-                className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2.5 text-left hover:border-emerald-500/50 hover:bg-slate-900"
+                onClick={() => onPick(p.phone)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-left hover:border-sky-500/50 hover:bg-slate-900"
               >
-                <div className="min-w-0">
-                  <p className="text-sm text-slate-200">{option.label}</p>
-                  <p className="text-sm text-emerald-300 tabular-nums truncate">{option.phone}</p>
-                </div>
-                <span className="shrink-0 text-xs font-medium text-emerald-300">Use</span>
+                <span className="block text-sm font-medium text-slate-100">{p.label}</span>
+                <span className="block text-xs font-mono text-slate-400 mt-0.5">{p.phone}</span>
               </button>
             </li>
           ))}
@@ -140,7 +135,6 @@ function WhatsAppPhonePicker({
   );
 }
 
-/** Toolbar box when exactly one lead is selected: Call / WhatsApp / Email with sub-picks. */
 export function SelectedContactQuickActions({
   row,
   disabled = false,
@@ -151,20 +145,7 @@ export function SelectedContactQuickActions({
   const phones = uniquePhones(row);
   const emails = uniqueEmails(row);
   const [showCallPicker, setShowCallPicker] = useState(false);
-  const [waPhonePick, setWaPhonePick] = useState<WhatsAppComposeMode | null>(null);
   const [tgPhonePick, setTgPhonePick] = useState<TelegramComposeMode | null>(null);
-
-  function startWhatsApp(mode: WhatsAppComposeMode) {
-    if (phones.length === 0) {
-      onError("This contact has no phone number for WhatsApp.");
-      return;
-    }
-    if (phones.length === 1) {
-      onWhatsApp(phones[0].phone, mode);
-      return;
-    }
-    setWaPhonePick(mode);
-  }
 
   function startTelegram(mode: TelegramComposeMode = "message") {
     if (!onTelegram) return;
@@ -208,26 +189,22 @@ export function SelectedContactQuickActions({
           Call
         </button>
 
-        <ToolbarDropdown label="WhatsApp" icon={IconWhatsApp} variant="emerald">
-          <ToolbarMenuItem
-            icon={IconWhatsApp}
-            tone="emerald"
-            disabled={disabled || phones.length === 0}
-            title="Send via your connected WhatsApp (personal)"
-            onClick={() => startWhatsApp("personal")}
-          >
-            WhatsApp personal
-          </ToolbarMenuItem>
-          <ToolbarMenuItem
-            icon={IconWhatsApp}
-            tone="emerald"
-            disabled={disabled || phones.length === 0}
-            title="Send an approved Meta template"
-            onClick={() => startWhatsApp("template")}
-          >
-            WhatsApp template
-          </ToolbarMenuItem>
-        </ToolbarDropdown>
+        <button
+          type="button"
+          disabled={disabled || phones.length === 0}
+          onClick={() => {
+            if (phones.length === 0) {
+              onError("This contact has no phone number for WhatsApp.");
+              return;
+            }
+            onWhatsApp();
+          }}
+          className="inline-flex items-center justify-center font-medium transition px-2.5 py-1.5 text-xs gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white border border-emerald-600/50 disabled:opacity-40 disabled:cursor-not-allowed"
+          title="Open Bulk WhatsApp Message (same as Action → WhatsApp)"
+        >
+          <IconWhatsApp size="xs" className="shrink-0 opacity-95" />
+          WhatsApp
+        </button>
 
         {onTelegram ? (
           <ToolbarDropdown label="Telegram" icon={IconTelegram} variant="sky">
@@ -289,24 +266,10 @@ export function SelectedContactQuickActions({
         />
       ) : null}
 
-      {waPhonePick ? (
-        <WhatsAppPhonePicker
-          companyName={row.company_name || "Contact"}
-          mode={waPhonePick}
-          phones={phones}
-          onClose={() => setWaPhonePick(null)}
-          onPick={(phone) => {
-            const mode = waPhonePick;
-            setWaPhonePick(null);
-            onWhatsApp(phone, mode);
-          }}
-        />
-      ) : null}
-
       {tgPhonePick && onTelegram ? (
-        <WhatsAppPhonePicker
+        <TelegramPhonePicker
           companyName={row.company_name || "Contact"}
-          mode="personal"
+          mode={tgPhonePick}
           phones={phones}
           onClose={() => setTgPhonePick(null)}
           onPick={(phone) => {

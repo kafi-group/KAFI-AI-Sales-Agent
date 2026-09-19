@@ -37,6 +37,7 @@ export function BulkWhatsAppModal({
 }: BulkWhatsAppModalProps) {
   const [tab, setTab] = useState<BulkWhatsAppTab>("personal");
   const [sending, setSending] = useState(false);
+  const [draftingAi, setDraftingAi] = useState(false);
 
   // Personal free-text message state
   const [personalMessage, setPersonalMessage] = useState(
@@ -137,6 +138,25 @@ export function BulkWhatsAppModal({
       setPersonalTemplateBody("");
     }
   }, [selectedPersonalTemplate]);
+
+  async function handleDraftWithAi() {
+    const source = personalMessage.trim();
+    if (!source) {
+      onError("Write or edit the message first, then click Draft with AI.");
+      return;
+    }
+    setDraftingAi(true);
+    try {
+      const result = await client.rephraseWhatsAppMessage(source);
+      if (result.message?.trim()) {
+        setPersonalMessage(result.message.trim());
+      }
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Draft with AI failed");
+    } finally {
+      setDraftingAi(false);
+    }
+  }
 
   async function handleSendPersonal() {
     if (!personalMessage.trim()) {
@@ -327,6 +347,22 @@ export function BulkWhatsAppModal({
                   + {"{{company}}"}
                 </button>
               </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => void handleDraftWithAi()}
+                  disabled={draftingAi || sending || !personalMessage.trim()}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-violet-500/50 bg-violet-600/20 hover:bg-violet-600/30 text-violet-100 text-xs font-semibold disabled:opacity-50 transition"
+                  title="Rephrase the message with AI — keeps {{name}} and {{company}}"
+                >
+                  {draftingAi ? "Drafting…" : "✨ Draft with AI"}
+                </button>
+                <p className="text-[10px] text-slate-500 max-w-xs text-right leading-snug">
+                  Edit the text above, then Draft with AI to rephrase. Tags{" "}
+                  {"{{name}}"} / {"{{company}}"} stay intact.
+                </p>
+              </div>
             </div>
           ) : tab === "personal_template" ? (
             <div className="space-y-4">
@@ -507,7 +543,7 @@ export function BulkWhatsAppModal({
             <button
               type="button"
               onClick={() => void handleSendPersonal()}
-              disabled={sending || !personalMessage.trim()}
+              disabled={sending || draftingAi || !personalMessage.trim()}
               className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs sm:text-sm font-bold text-white shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition cursor-pointer"
             >
               {sending ? "Sending…" : `Send to ${buyerIds.length} contact(s)`}

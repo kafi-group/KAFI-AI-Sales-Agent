@@ -9,6 +9,7 @@ from typing import Any
 from config import settings
 
 _FOURTH_RING_SECONDS = 24
+_MAX_RING_ATTEMPTS = 2  # hang up ~4 rings, auto-redial once → ~8 rings, no voicemail
 _RINGING_STATUSES = {
     "queued",
     "ringing",
@@ -16,6 +17,14 @@ _RINGING_STATUSES = {
     "initiated",
     "dialing",
     "scheduled",
+}
+_NO_CONNECT_STATUSES = {
+    "no-answer",
+    "no_answer",
+    "busy",
+    "canceled",
+    "cancelled",
+    "failed",
 }
 
 
@@ -71,9 +80,8 @@ LANGUAGE_CONFIGS: dict[str, dict[str, str]] = {
         "voice_male": "en-US-GuyNeural",
         "greeting": "Hello, am I speaking with {c_name}?",
         "instruction": (
-            "Start the call in English. If the customer speaks Urdu, Hindi, Arabic, or another "
-            "language — or mixes languages (e.g. English + Urdu) — immediately continue in THEIR "
-            "language with the same natural sales tone. Do not ask permission to switch; just switch."
+            "Start the call in English. The customer's phone country code does NOT determine language — "
+            "a US number may speak French, Arabic, Urdu, etc. Mirror whatever language they use."
         ),
     },
     "ur": {
@@ -82,8 +90,8 @@ LANGUAGE_CONFIGS: dict[str, dict[str, str]] = {
         "voice_male": "ur-PK-AsadNeural",
         "greeting": "سلام! کیا میری بات {c_name} سے ہو رہی ہے؟",
         "instruction": (
-            "Start the call in Urdu (اردو). If the customer replies in English or mixes Urdu and "
-            "English, match their language immediately and keep the conversation natural."
+            "Start the call in Urdu (اردو). If they reply in English, French, Arabic, or any other "
+            "language — or mix — match them immediately. Phone number country is irrelevant."
         ),
     },
     "fr": {
@@ -92,7 +100,8 @@ LANGUAGE_CONFIGS: dict[str, dict[str, str]] = {
         "voice_male": "fr-FR-HenriNeural",
         "greeting": "Bonjour, est-ce que je parle à {c_name} ?",
         "instruction": (
-            "Start in French. If the customer switches language mid-call, continue in their language."
+            "Start in French. If they switch to English, Arabic, Urdu, or another language mid-call, "
+            "continue in their language. Do not assume English from a US or other phone number."
         ),
     },
     "ar": {
@@ -101,7 +110,8 @@ LANGUAGE_CONFIGS: dict[str, dict[str, str]] = {
         "voice_male": "ar-SA-HamedNeural",
         "greeting": "مرحباً، هل أتحدث مع {c_name}؟",
         "instruction": (
-            "Start in formal B2B Arabic. If the customer switches language mid-call, continue in their language."
+            "Start in formal B2B Arabic. If they switch language mid-call (English, French, Urdu, etc.), "
+            "continue in their language. Phone country code does not decide the language."
         ),
     },
     "de": {
@@ -110,7 +120,8 @@ LANGUAGE_CONFIGS: dict[str, dict[str, str]] = {
         "voice_male": "de-DE-ConradNeural",
         "greeting": "Hallo, spreche ich mit {c_name}?",
         "instruction": (
-            "Start in German. If the customer switches language mid-call, continue in their language."
+            "Start in German. If the customer switches language mid-call, continue in their language. "
+            "Do not infer language from the phone number."
         ),
     },
     "ru": {
@@ -119,7 +130,8 @@ LANGUAGE_CONFIGS: dict[str, dict[str, str]] = {
         "voice_male": "ru-RU-DmitryNeural",
         "greeting": "Здравствуйте, я говорю с {c_name}?",
         "instruction": (
-            "Start in Russian. If the customer switches language mid-call, continue in their language."
+            "Start in Russian. If the customer switches language mid-call, continue in their language. "
+            "Do not infer language from the phone number."
         ),
     },
     "zh": {
@@ -128,7 +140,8 @@ LANGUAGE_CONFIGS: dict[str, dict[str, str]] = {
         "voice_male": "zh-CN-YunxiNeural",
         "greeting": "您好，请问是 {c_name} 先生/女士吗？",
         "instruction": (
-            "Start in Mandarin Chinese. If the customer switches language mid-call, continue in their language."
+            "Start in Mandarin Chinese. If the customer switches language mid-call, continue in their language. "
+            "Do not infer language from the phone number."
         ),
     },
     "ja": {
@@ -137,7 +150,8 @@ LANGUAGE_CONFIGS: dict[str, dict[str, str]] = {
         "voice_male": "ja-JP-KeitaNeural",
         "greeting": "こんにちは、{c_name}様でしょうか？",
         "instruction": (
-            "Start in Japanese. If the customer switches language mid-call, continue in their language."
+            "Start in Japanese. If the customer switches language mid-call, continue in their language. "
+            "Do not infer language from the phone number."
         ),
     },
     "fil": {
@@ -146,10 +160,17 @@ LANGUAGE_CONFIGS: dict[str, dict[str, str]] = {
         "voice_male": "fil-PH-AngeloNeural",
         "greeting": "Hello po, kausap ko ba si {c_name}?",
         "instruction": (
-            "Start in Filipino (Tagalog). If the customer switches language mid-call, continue in their language."
+            "Start in Filipino (Tagalog). If the customer switches language mid-call, continue in their language. "
+            "Do not infer language from the phone number."
         ),
     },
 }
+
+_SWITCHABLE_LANGUAGES = (
+    "English, Urdu (اردو), Hindi, French (Français), Arabic (العربية), German (Deutsch), "
+    "Russian (Русский), Mandarin Chinese (中文), Japanese (日本語), Filipino/Tagalog, "
+    "and natural mixes (e.g. English+Urdu, English+French)"
+)
 
 
 class VoiceClient:
@@ -272,8 +293,19 @@ class VoiceClient:
             f"<Response><Say voice=\"alice\">{text}</Say><Hangup/></Response>"
         )
 
-    def client_dial_twiml(self, lead_phone: str, interaction_id: int) -> str:
-        """TwiML for browser-initiated outbound calls — dials the lead directly."""
+    def client_dial_twiml(
+        self,
+        lead_phone: str,
+        interaction_id: int,
+        *,
+        attempt: int = 1,
+    ) -> str:
+        """TwiML for browser-initiated outbound calls — dials the lead directly.
+
+        When hang-up-after-4th-ring is ON, Dial times out ~24s. The Dial action
+        webhook may return a second Dial (attempt 2) so the lead hears ~8 rings
+        without voicemail.
+        """
         import html
 
         lead = normalize_e164(lead_phone)
@@ -293,9 +325,11 @@ class VoiceClient:
         # so the call can ring — omit callbacks rather than crashing TwiML fetch.
         status_url = ""
         recording_url = ""
+        safe_attempt = max(1, int(attempt or 1))
         if settings.twilio_webhook_base_url:
             status_url = self.webhook_url(
                 f"/api/webhooks/twilio/voice/status?interaction_id={interaction_id}"
+                f"&attempt={safe_attempt}"
             )
             recording_url = self.webhook_url(
                 f"/api/webhooks/twilio/voice/recording?interaction_id={interaction_id}"
@@ -400,17 +434,42 @@ class VoiceClient:
             seconds = _FOURTH_RING_SECONDS
         return max(8, min(seconds, 60))
 
-    def schedule_fourth_ring_hangup(self, call_sid: str | None) -> None:
-        """If still ringing after ~4 rings, hang up so voicemail does not consume credits."""
+    def max_ring_attempts(self) -> int:
+        """When 4th-ring hangup is ON: dial twice (~4 + ~4 rings). Otherwise one continuous ring."""
+        if not self.hangup_after_fourth_ring_enabled():
+            return 1
+        return _MAX_RING_ATTEMPTS
+
+    def should_auto_redial(self, *, attempt: int, status: str | None) -> bool:
+        """True when this unanswered attempt should be followed by one more dial."""
+        blob = (status or "").lower().replace("_", "-")
+        if attempt >= self.max_ring_attempts():
+            return False
+        if any(tok in blob for tok in _NO_CONNECT_STATUSES):
+            return True
+        if blob in _RINGING_STATUSES:
+            return True
+        return False
+
+    def schedule_fourth_ring_hangup(
+        self,
+        call_sid: str | None,
+        *,
+        attempt: int = 1,
+        on_hangup_redial: Any | None = None,
+    ) -> None:
+        """If still ringing after ~4 rings, hang up; optionally auto-redial once (~8 rings total)."""
         seconds = self.ring_timeout_seconds()
         sid = (call_sid or "").strip()
         if not seconds or not sid:
             return
+        safe_attempt = max(1, int(attempt or 1))
 
         def _watch() -> None:
             import time
 
             time.sleep(seconds)
+            hung_up = False
             try:
                 info = self.fetch_outbound_status(sid)
                 status = str(info.get("status") or "").lower().replace("_", "-")
@@ -418,12 +477,25 @@ class VoiceClient:
                     return
                 if status in _RINGING_STATUSES:
                     print(
-                        f"Fourth-ring hangup call={sid[-8:]} status={status or 'unknown'}",
+                        f"Fourth-ring hangup call={sid[-8:]} attempt={safe_attempt} status={status or 'unknown'}",
                         flush=True,
                     )
                     self.end_call(sid)
+                    hung_up = True
             except Exception as exc:  # noqa: BLE001
                 print(f"Fourth-ring hangup skipped: {exc}", flush=True)
+
+            # Optional explicit redial hook (browser path uses Dial action TwiML instead).
+            if hung_up and on_hangup_redial and safe_attempt < self.max_ring_attempts():
+                time.sleep(1.5)
+                try:
+                    print(
+                        f"Auto-redial after 4th-ring hangup attempt={safe_attempt}→{safe_attempt + 1}",
+                        flush=True,
+                    )
+                    on_hangup_redial()
+                except Exception as exc:  # noqa: BLE001
+                    print(f"Auto-redial failed: {exc}", flush=True)
 
         threading.Thread(
             target=_watch,
@@ -457,11 +529,21 @@ class VoiceClient:
         task_id: int | None = None,
         company_name: str | None = None,
         designation: str | None = None,
+        ring_attempt: int = 1,
     ) -> dict[str, Any]:
-        """Initiate an outbound PSTN call via Vapi AI Voice Engine (or Twilio fallback)."""
+        """Initiate an outbound PSTN call via Vapi AI Voice Engine (or Twilio fallback).
+
+        When hang-up-after-4th-ring is ON, unanswered dials auto-redial once (~8 rings total).
+        """
         normalized = normalize_e164(to_phone)
         if not normalized:
             return {"ok": False, "error": f"Invalid destination phone number: '{to_phone}'. Must be in E.164 format (e.g. +923142867152)."}
+
+        safe_attempt = max(1, int(ring_attempt or 1))
+
+        def _arm_ring_limit(call_id: str | None) -> None:
+            # Hang up while still ringing; auto-redial is handled in call-status webhooks.
+            self.schedule_fourth_ring_hangup(call_id, attempt=safe_attempt)
 
         # Try Vapi Voice Engine first for sub-second conversational AI calling (if enabled)
         vapi_key = settings.vapi_api_key if getattr(settings, "vapi_enabled", True) else None
@@ -481,13 +563,14 @@ class VoiceClient:
                 eleven_key = getattr(settings, "elevenlabs_api_key", None)
                 eleven_on = getattr(settings, "elevenlabs_enabled", False)
                 if eleven_on and eleven_key and eleven_key.strip():
-                    # ElevenLabs multilingual voices handle EN↔Urdu code-switching well.
+                    # Multilingual TTS so mid-call French/Arabic/Urdu/etc. sound natural.
                     voice_config = {
                         "provider": "11labs",
                         "voiceId": "21m00Tcm4TlvDq8ikWAM" if persona == "female" else "ErXwobaYiN019PkySvjV",
+                        "model": "eleven_multilingual_v2",
                     }
                 else:
-                    # Vapi Voices v2 auto language — required for mid-call Urdu/English switching.
+                    # Vapi Voices v2 auto language — mid-call switch across supported languages.
                     voice_config = {
                         "provider": "vapi",
                         "voiceId": "Savannah" if persona == "female" else "Elliot",
@@ -534,18 +617,24 @@ class VoiceClient:
                 system_prompt = (
                     f"You are {agent_name}, a friendly, natural, and sharp B2B AI Sales Representative for Kafi Commodities. "
                     "Kafi Commodities is a leading global exporter of White Rice (Basmati 1121 & 5% Broken), Sesame Seeds (99% Purity), Yellow Corn, Spices, and Edible Oils.\n\n"
-                    f"LANGUAGE INSTRUCTION:\n{lang_cfg['instruction']}\n"
-                    "Supported languages you speak fluently: English, Urdu (اردو), Hindi, Arabic, and common "
-                    "business English–Urdu mix (Hinglish/Urdish). When the customer changes language mid-call, "
-                    "YOU MUST reply in that new language from the next sentence onward. Never say you only "
-                    "speak one language. Never force English if they are speaking Urdu.\n\n"
+                    f"LANGUAGE INSTRUCTION (starting language):\n{lang_cfg['instruction']}\n\n"
+                    f"You speak fluently: {_SWITCHABLE_LANGUAGES}.\n"
+                    "CRITICAL — MID-CALL LANGUAGE SWITCHING:\n"
+                    "- Never decide language from the phone number or country code. A +1 US number may speak French; "
+                    "a Gulf number may speak English; etc.\n"
+                    "- When the customer speaks or switches to ANY language you know (French, Arabic, Urdu, English, "
+                    "German, Russian, Chinese, Japanese, Filipino, Hindi, or a mix), YOU MUST reply in that language "
+                    "from the next sentence onward.\n"
+                    "- Do not ask permission to switch. Do not say you only speak one language. Do not force English "
+                    "if they are speaking French, Arabic, Urdu, or another language.\n"
+                    "- If they mix languages, you may mix naturally. Mirror their language every turn.\n\n"
                     "STRICT CONVERSATIONAL PROTOCOL & RULES:\n"
                     f"1. OPENING GREETING: You start the call by asking '{first_msg}'. Once the customer confirms, introduce {agent_name} from Kafi Commodities and offer our product catalogue and price list.\n"
                     "2. DO NOT REPEAT THE CUSTOMER'S NAME: You already asked for their name in the greeting. NEVER repeat their name in every sentence during the call.\n"
                     "3. DO NOT ASK FOR EMAIL OR PHONE NUMBER: We ALREADY have the customer's email and phone number in our system. NEVER ask the buyer to give you their email or phone number.\n"
                     "4. CATALOGUE & PRICE LIST DELIVERY: Tell the buyer you will send the full product catalogue and CNF price list to WhatsApp and email — say this in whatever language the call is currently in.\n"
                     "5. SHORT SPOKEN RESPONSES: Speak concisely in 1 to 2 spoken sentences so the conversation feels natural over the phone.\n"
-                    "6. LANGUAGE SWITCHING: If they speak Urdu, answer in Urdu. If they mix, you may mix naturally. Mirror their language every turn.\n\n"
+                    "6. LANGUAGE SWITCHING: Always mirror the customer's current language (French, Arabic, Urdu, English, etc.), not the dialed country.\n\n"
                     f"LEARNED SALES PLAYBOOK:\n{insights_txt}\n\n"
                     f"CUSTOM SALES RULES:\n{rules_txt}"
                     f"{contact_block}"
@@ -568,7 +657,7 @@ class VoiceClient:
                             ],
                         },
                         "voice": voice_config,
-                        # Auto-detect language changes mid-call (EN ↔ Urdu, etc.).
+                        # Auto-detect language changes mid-call (FR, AR, UR, EN, etc.).
                         "transcriber": {
                             "provider": "deepgram",
                             "model": "nova-3",
@@ -580,7 +669,11 @@ class VoiceClient:
                 if vapi_phone_id:
                     payload["phoneNumberId"] = vapi_phone_id
                 if task_id is not None:
-                    payload["metadata"] = {"task_id": task_id, "persona": persona}
+                    payload["metadata"] = {
+                        "task_id": task_id,
+                        "persona": persona,
+                        "ring_attempt": safe_attempt,
+                    }
                 if settings.twilio_webhook_base_url:
                     try:
                         payload["assistant"]["serverUrl"] = self.webhook_url(
@@ -606,12 +699,13 @@ class VoiceClient:
                 with urllib.request.urlopen(req, timeout=12) as res:
                     resp_data = json.loads(res.read().decode("utf-8"))
                     call_id = resp_data.get("id")
-                    self.schedule_fourth_ring_hangup(call_id)
+                    _arm_ring_limit(call_id)
                     return {
                         "ok": True,
                         "call_sid": call_id,
                         "status": resp_data.get("status", "queued"),
                         "engine": "vapi",
+                        "ring_attempt": safe_attempt,
                     }
             except Exception as exc:
                 print(f"Vapi call failed, falling back to Twilio TwiML: {exc}", flush=True)
@@ -645,7 +739,8 @@ class VoiceClient:
                     create_kwargs["timeout"] = ring_timeout
                 if task_id is not None:
                     create_kwargs["status_callback"] = self.webhook_url(
-                        f"/api/webhooks/twilio/ai-agent/status?task_id={int(task_id)}"
+                        f"/api/webhooks/twilio/ai-agent/status"
+                        f"?task_id={int(task_id)}&ring_attempt={safe_attempt}"
                     )
                     create_kwargs["status_callback_event"] = ["answered", "completed"]
                     create_kwargs["status_callback_method"] = "POST"
@@ -662,8 +757,14 @@ class VoiceClient:
                 if ring_timeout:
                     fallback_kwargs["timeout"] = ring_timeout
                 call = client.calls.create(**fallback_kwargs)
-            self.schedule_fourth_ring_hangup(getattr(call, "sid", None))
-            return {"ok": True, "call_sid": call.sid, "status": call.status, "engine": "twilio"}
+            _arm_ring_limit(getattr(call, "sid", None))
+            return {
+                "ok": True,
+                "call_sid": call.sid,
+                "status": call.status,
+                "engine": "twilio",
+                "ring_attempt": safe_attempt,
+            }
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

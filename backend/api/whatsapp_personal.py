@@ -128,6 +128,10 @@ class WhatsAppPersonalBulkSendRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4096)
 
 
+class WhatsAppRephraseRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4096)
+
+
 class WhatsAppPersonalInboundRequest(BaseModel):
     session_id: str | None = None
     from_phone: str
@@ -495,6 +499,32 @@ def whatsapp_personal_send(
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Personal WhatsApp send failed: {exc}") from exc
+
+
+@router.post("/rephrase")
+def rephrase_whatsapp_message(
+    body: WhatsAppRephraseRequest,
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, str]:
+    """AI-rephrase a personal WhatsApp draft (preserves {{name}} / {{company}})."""
+    _ = user
+    from modules import email_templates as templates_module
+
+    if not templates_module.template_llm_enabled():
+        raise HTTPException(
+            503,
+            "AI draft is not configured. Set EMAIL_TEMPLATE_GEMINI_API_KEY "
+            "(or GEMINI_API_KEY) on the backend.",
+        )
+    try:
+        message = templates_module.rephrase_whatsapp_message(body.message)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"AI rephrase failed: {exc}") from exc
+    return {"message": message}
 
 
 @router.post("/bulk-send")

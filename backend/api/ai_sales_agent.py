@@ -105,17 +105,18 @@ def _persist_queue() -> None:
 def _load_persisted_queue() -> None:
     global _TASKS
     try:
-        from modules.ai_sales_queue_store import load_queue_state
+        from modules.ai_sales_queue_store import ensure_state_table, load_queue_state
 
+        ensure_state_table()
         data = load_queue_state()
         tasks = [t for t in (data.get("tasks") or []) if isinstance(t, dict)]
-        # Interrupted dials become queued again.
+        # Interrupted dials stay assigned; mark ready to dial again.
         for t in tasks:
             if t.get("status") == "in_progress":
                 t["status"] = "queued"
                 t["call_sid"] = None
                 t["outcome"] = None
-                t["remarks"] = "Re-queued after server restart (call was interrupted)."
+                t["remarks"] = "Still assigned — call interrupted by server restart; ready to dial again."
                 t.pop("started_at", None)
         _TASKS = tasks
         saved_runners = {
@@ -453,6 +454,7 @@ def _dial_task(
         task_id=task.get("id"),
         company_name=task.get("company_name"),
         designation=task.get("designation"),
+        ring_attempt=1,
     )
     if not call_result.get("ok"):
         task["status"] = "failed"
@@ -462,6 +464,7 @@ def _dial_task(
     task["status"] = "in_progress"
     task["call_sid"] = call_result.get("call_sid")
     task["call_engine"] = call_result.get("engine")
+    task["ring_attempt"] = int(call_result.get("ring_attempt") or 1)
     task["started_at"] = _now_iso()
     task["operator_user_id"] = user.id
     task["outcome"] = "Calling"
@@ -559,6 +562,8 @@ def _finish_task(
     outcome_label: str | None = None,
     user: AppUser | None = None,
     hangup: bool = False,
+    call_summary: str | None = None,
+    call_transcript: str | None = None,
 ) -> dict[str, Any]:
     from integrations.voice_client import voice_client
 
@@ -585,6 +590,28 @@ def _finish_task(
     followup = _send_task_followup(db, task, outcome=outcome, user=user)
     persona = str(task.get("persona") or "")
     operator = user or _load_operator(db, task.get("operator_user_id"))
+    agent_name = _agent_name(persona) if persona else "Sara"
+
+    # Target & Workspace autopilot — remarks + funnel stage without human clicks.
+    try:
+        from modules.ai_workspace_autopilot import apply_workspace_autopilot
+
+        ws = apply_workspace_autopilot(
+            db,
+            buyer_id=task.get("buyer_id"),
+            user=operator,
+            no_answer=no_answer,
+            summary=call_summary or task.get("call_summary"),
+            transcript=call_transcript or task.get("call_transcript"),
+            ended_reason=ended_reason,
+            outcome_label=str(task.get("outcome") or outcome_label or ""),
+            agent_name=agent_name,
+        )
+        if ws:
+            task["workspace_autopilot"] = ws
+    except Exception as exc:  # noqa: BLE001
+        print(f"Workspace autopilot hook failed: {exc}", flush=True)
+
     _advance_sequence(db, persona, operator)
     _refresh_runner_counts()
     return followup
@@ -597,8 +624,13 @@ def handle_ai_call_status(
     status: str | None,
     duration: Any = None,
     ended_reason: str | None = None,
+    call_summary: str | None = None,
+    call_transcript: str | None = None,
+    ring_attempt: int | None = None,
 ) -> dict[str, Any]:
     """Twilio / Vapi terminal status — send follow-up and dial the next queued lead."""
+    from integrations.voice_client import voice_client
+
     terminal = {
         "completed",
         "busy",
@@ -621,6 +653,48 @@ def handle_ai_call_status(
     if task is None or task.get("status") not in ("in_progress", "running"):
         return {"ok": True, "ignored": True}
 
+    # Ignore stale status from attempt 1 after we already moved to attempt 2.
+    if call_sid and task.get("call_sid") and str(call_sid) != str(task.get("call_sid")):
+        return {"ok": True, "ignored": "stale_call_sid"}
+
+    if call_summary:
+        task["call_summary"] = call_summary
+    if call_transcript:
+        task["call_transcript"] = call_transcript
+
+    attempt = int(ring_attempt or task.get("ring_attempt") or 1)
+    no_answer = _is_no_answer(status, ended_reason, duration)
+    if no_answer and attempt < voice_client.max_ring_attempts():
+        phone = task.get("contact_phone")
+        if phone:
+            next_attempt = attempt + 1
+            task["remarks"] = (
+                f"No answer after ~4 rings (attempt {attempt}) — auto-redialing "
+                f"for ~8 rings total without voicemail…"
+            )
+            task["outcome"] = "Re-dialing"
+            redial = voice_client.place_outbound_ai_call(
+                phone,
+                persona=str(task.get("persona") or "female"),
+                contact_name=task.get("contact_name") or "Purchasing Manager",
+                language=str(task.get("language") or "en"),
+                task_id=task.get("id"),
+                company_name=task.get("company_name"),
+                designation=task.get("designation"),
+                ring_attempt=next_attempt,
+            )
+            if redial.get("ok"):
+                task["call_sid"] = redial.get("call_sid")
+                task["call_engine"] = redial.get("engine")
+                task["ring_attempt"] = next_attempt
+                task["started_at"] = _now_iso()
+                task["status"] = "in_progress"
+                _refresh_runner_counts()
+                return {"ok": True, "redialed": True, "ring_attempt": next_attempt}
+            task["remarks"] = (
+                f"Auto-redial failed after attempt {attempt}: {redial.get('error')}"
+            )
+
     db = SessionLocal()
     try:
         _finish_task(
@@ -629,6 +703,8 @@ def handle_ai_call_status(
             status=status,
             ended_reason=ended_reason,
             duration=duration,
+            call_summary=call_summary,
+            call_transcript=call_transcript,
         )
         return {"ok": True, "task_id": task.get("id")}
     finally:
@@ -669,12 +745,13 @@ def _reconcile_live_calls(db: Session) -> None:
         ended_reason = str(info.get("ended_reason") or "")
 
         if info.get("ended"):
-            _finish_task(
-                db,
-                task,
+            handle_ai_call_status(
+                task_id=task.get("id"),
+                call_sid=str(call_sid),
                 status=str(info.get("status") or ""),
-                ended_reason=ended_reason,
                 duration=info.get("duration"),
+                ended_reason=ended_reason,
+                ring_attempt=task.get("ring_attempt"),
             )
             continue
 
@@ -766,17 +843,21 @@ def assign_tasks(
     if payload.persona not in ("male", "female"):
         raise HTTPException(400, "Persona must be male (Rayan) or female (Sara).")
     created = []
+    skipped: list[dict[str, Any]] = []
+    other_persona = "male" if payload.persona == "female" else "female"
+    other_label = "Rayan" if other_persona == "male" else "Sara"
+    self_label = "Sara" if payload.persona == "female" else "Rayan"
     contact_ids = payload.contact_ids or []
-    queued_keys = {
-        (
-            t.get("persona"),
-            t.get("buyer_id"),
-            t.get("contact_id"),
-            t.get("contact_phone"),
-        )
-        for t in _TASKS
-        if t.get("status") in ("queued", "in_progress")
-    }
+
+    def _same_contact(t: dict[str, Any], bid: int, cid: int | None, phone: str | None) -> bool:
+        if t.get("buyer_id") == bid and cid is not None and t.get("contact_id") == cid:
+            return True
+        if phone and t.get("contact_phone") and str(t.get("contact_phone")) == str(phone):
+            return True
+        if cid is None and phone is None and t.get("buyer_id") == bid and t.get("contact_id") is None:
+            return True
+        return False
+
     for index, bid in enumerate(payload.buyer_ids):
         buyer = db.get(Buyer, bid)
         wanted_cid = contact_ids[index] if index < len(contact_ids) else None
@@ -791,15 +872,66 @@ def assign_tasks(
         contact_name = (contact.full_name if contact else None) or "Purchasing Manager"
         contact_phone = _contact_phone(contact) or getattr(buyer, "phone", None)
         contact_email = _contact_email(contact)
-        key = (payload.persona, bid, contact.id if contact else None, contact_phone)
-        if key in queued_keys:
+        contact_id = contact.id if contact else None
+
+        # Already on the other agent — never duplicate across Sara/Rayan.
+        on_other = next(
+            (
+                t
+                for t in _TASKS
+                if t.get("persona") == other_persona
+                and _same_contact(t, bid, contact_id, contact_phone)
+            ),
+            None,
+        )
+        if on_other:
+            skipped.append(
+                {
+                    "buyer_id": bid,
+                    "contact_id": contact_id,
+                    "company_name": company_name,
+                    "reason": f"Already assigned to {other_label} — remove from {other_label} first.",
+                    "other_task_id": on_other.get("id"),
+                }
+            )
             continue
-        queued_keys.add(key)
+
+        # Keep one row per agent+buyer+contact until manually removed.
+        existing = next(
+            (
+                t
+                for t in _TASKS
+                if t.get("persona") == payload.persona
+                and _same_contact(t, bid, contact_id, contact_phone)
+            ),
+            None,
+        )
+        if existing:
+            if existing.get("status") in ("queued", "in_progress"):
+                created.append(existing)
+                continue
+            # Already assigned historically — put back in queue for another dial; never drop.
+            existing["status"] = "queued"
+            existing["ready"] = bool(contact_phone or existing.get("contact_phone"))
+            existing["contact_phone"] = contact_phone or existing.get("contact_phone")
+            existing["contact_email"] = contact_email or existing.get("contact_email")
+            existing["contact_name"] = contact_name or existing.get("contact_name")
+            existing["company_name"] = company_name or existing.get("company_name")
+            existing["call_sid"] = None
+            existing["outcome"] = None
+            existing["followup_sent"] = False
+            existing["followup"] = {}
+            existing["remarks"] = "Re-queued — still assigned until manually removed."
+            existing.pop("started_at", None)
+            existing.pop("completed_at", None)
+            created.append(existing)
+            continue
+
         task = {
             "id": _next_task_id(),
             "persona": payload.persona,
             "buyer_id": bid,
-            "contact_id": contact.id if contact else None,
+            "contact_id": contact_id,
             "company_name": company_name,
             "contact_name": contact_name,
             "contact_phone": contact_phone,
@@ -816,7 +948,17 @@ def assign_tasks(
         _TASKS.append(task)
         created.append(task)
     _refresh_runner_counts()
-    return {"tasks": created}
+    notice = None
+    if skipped:
+        names = ", ".join(
+            (s.get("company_name") or f"#{s.get('buyer_id')}") for s in skipped[:5]
+        )
+        extra = f" (+{len(skipped) - 5} more)" if len(skipped) > 5 else ""
+        notice = (
+            f"{len(skipped)} contact(s) already on {other_label} and were not added to {self_label}: "
+            f"{names}{extra}. Remove them from {other_label} first to reassign."
+        )
+    return {"tasks": created, "skipped": skipped, "notice": notice}
 
 
 @router.post("/tasks/self-test")
@@ -1243,6 +1385,34 @@ def put_ai_auto_mode(
     return update_auto_mode_settings(patch)
 
 
+class WorkspaceAutopilotUpdate(BaseModel):
+    enabled: bool | None = None
+    auto_remarks: bool | None = None
+    auto_interested: bool | None = None
+    auto_not_interested: bool | None = None
+    auto_no_response: bool | None = None
+    auto_follow_up: bool | None = None
+
+
+@router.get("/workspace-autopilot")
+def get_workspace_autopilot(user: AppUser = Depends(get_current_user)):
+    _ = user
+    from modules.ai_workspace_autopilot import get_workspace_autopilot_settings
+
+    return get_workspace_autopilot_settings()
+
+
+@router.put("/workspace-autopilot")
+def put_workspace_autopilot(
+    payload: WorkspaceAutopilotUpdate,
+    user: AppUser = Depends(get_current_user),
+):
+    _ = user
+    from modules.ai_workspace_autopilot import update_workspace_autopilot_settings
+
+    return update_workspace_autopilot_settings(payload.model_dump(exclude_none=True))
+
+
 class ProcessScheduleModel(BaseModel):
     kind: str = "daily"
     time: str = "09:45"
@@ -1527,18 +1697,65 @@ async def vapi_ai_agent_status(request: Request) -> dict[str, Any]:
         or message.get("duration")
         or (call.get("duration") if isinstance(call, dict) else None)
     )
+
+    # Pull summary / transcript for Target & Workspace autopilot classification.
+    call_summary = None
+    call_transcript = None
+    analysis = message.get("analysis") if isinstance(message.get("analysis"), dict) else {}
+    artifact = message.get("artifact") if isinstance(message.get("artifact"), dict) else {}
+    for candidate in (
+        message.get("summary"),
+        analysis.get("summary") if isinstance(analysis, dict) else None,
+        analysis.get("successEvaluation") if isinstance(analysis, dict) else None,
+        message.get("successEvaluation"),
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            call_summary = candidate.strip()
+            break
+    for candidate in (
+        message.get("transcript"),
+        artifact.get("transcript") if isinstance(artifact, dict) else None,
+        call.get("transcript") if isinstance(call, dict) else None,
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            call_transcript = candidate.strip()[:8000]
+            break
+        if isinstance(candidate, list):
+            # Vapi sometimes sends message array transcript
+            parts = []
+            for row in candidate[:80]:
+                if isinstance(row, dict):
+                    role = row.get("role") or row.get("speaker") or ""
+                    text = row.get("message") or row.get("text") or ""
+                    if text:
+                        parts.append(f"{role}: {text}".strip())
+                elif isinstance(row, str):
+                    parts.append(row)
+            if parts:
+                call_transcript = "\n".join(parts)[:8000]
+                break
+
     if msg_type == "status-update" and str(status or "").lower() not in {
         "ended",
         "completed",
         "failed",
     }:
         return {"ok": True, "ignored": True}
+    ring_attempt = None
+    if isinstance(metadata, dict) and metadata.get("ring_attempt") is not None:
+        try:
+            ring_attempt = int(metadata.get("ring_attempt"))
+        except (TypeError, ValueError):
+            ring_attempt = None
     return handle_ai_call_status(
         task_id=task_id_int,
         call_sid=str(call_sid) if call_sid else None,
         status=str(status or ""),
         duration=duration,
         ended_reason=str(ended_reason or ""),
+        call_summary=call_summary,
+        call_transcript=call_transcript,
+        ring_attempt=ring_attempt,
     )
 
 

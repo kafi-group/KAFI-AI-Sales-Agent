@@ -514,12 +514,12 @@ export function SettingsPage({ onError }: SettingsPageProps) {
 
         <div className="mt-4 rounded-lg border border-emerald-500/25 bg-emerald-950/20 p-4 flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-[220px] flex-1">
-            <p className="text-sm font-medium text-slate-100">Hang up after 4th ring</p>
+            <p className="text-sm font-medium text-slate-100">Hang up after 4th ring + auto redial</p>
             <p className="mt-1 text-xs text-slate-400 leading-relaxed">
               Default <strong className="text-slate-300">ON</strong> for every caller — Sara, Rayan,
-              and all dashboard users (Asim, Usman, Sadia, and anyone else). Unanswered calls drop
-              after about {ringSeconds} seconds (~4 rings) so voicemail does not pick up and Twilio
-              credits are not used.
+              and all dashboard users (Asim, Usman, Sadia, and anyone else). Unanswered calls hang up
+              after about {ringSeconds} seconds (~4 rings), then the system auto-dials again once
+              (~8 rings total) so voicemail does not pick up and Twilio credits are not wasted.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -530,7 +530,7 @@ export function SettingsPage({ onError }: SettingsPageProps) {
                   : "bg-slate-800 text-slate-400 border-slate-700"
               }`}
             >
-              {hangupAfterFourthRing ? "ON (saves credits)" : "OFF (may hit voicemail)"}
+              {hangupAfterFourthRing ? "ON (4+4 rings)" : "OFF (may hit voicemail)"}
             </span>
             <button
               type="button"
@@ -541,7 +541,7 @@ export function SettingsPage({ onError }: SettingsPageProps) {
               }`}
               role="switch"
               aria-checked={hangupAfterFourthRing}
-              title="Hang up unanswered calls after the 4th ring"
+              title="Hang up after 4 rings, then auto-redial once for ~8 rings total"
             >
               <span
                 className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${

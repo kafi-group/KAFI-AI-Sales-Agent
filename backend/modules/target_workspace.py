@@ -643,11 +643,14 @@ def update_workspace_lead_stage(
     searched_internet_phone: bool | None = None,
     linkedin_request_sent: bool | None = None,
     linkedin_msg_sent: bool | None = None,
+    force_ai_autopilot: bool = False,
 ) -> dict[str, Any]:
     """Update outreach stage, objection reasons, follow-up parameters, or audit verification proof.
 
     Stage ``interested`` removes the lead from the 4-stage outreach funnel and places it
     into the Interested/Potential (AI company lifecycle) deals pipeline.
+
+    ``force_ai_autopilot`` lets Sara/Rayan apply stages without human assignment checks.
     """
     buyer = db.get(Buyer, buyer_id)
     if not buyer:
@@ -661,7 +664,7 @@ def update_workspace_lead_stage(
 
     # Non-admins may only update leads assigned to them (workspace = assigned pool).
     role = user.role.value if hasattr(user.role, "value") else str(user.role)
-    if role != "admin" and buyer.assigned_to_user_id != user.id:
+    if not force_ai_autopilot and role != "admin" and buyer.assigned_to_user_id != user.id:
         raise ValueError("This lead is not assigned to you")
 
     lc = _ensure_lead_lifecycle(db, buyer_id, user_id=user.id)

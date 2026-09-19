@@ -400,3 +400,38 @@ def generate_compose_draft_from_prompt(
         raise RuntimeError("AI returned an incomplete draft — try again.")
 
     return {"subject": subject[:500], "body": body}
+
+
+def rephrase_whatsapp_message(message: str) -> str:
+    """Rephrase a WhatsApp outreach body while preserving {{name}} / {{company}} tags."""
+    cleaned = (message or "").strip()
+    if len(cleaned) < 12:
+        raise ValueError("Write or paste a message before drafting with AI.")
+
+    system = (
+        "You rephrase B2B WhatsApp outreach for Kafi Commodities (Pvt) Ltd, "
+        "a Pakistani food exporter (ESSENCE brand: rice, Himalayan pink salt, "
+        "chutneys, sauces, pickles, spices, honey). Tone: professional, concise, "
+        "warm — suitable for WhatsApp, not spammy."
+    )
+    prompt = (
+        "Rephrase the WhatsApp message below.\n"
+        "Rules:\n"
+        "- Keep the same intent and facts; improve clarity and natural flow.\n"
+        "- Keep it short enough for WhatsApp (roughly same length).\n"
+        "- Preserve merge tags EXACTLY as written if present: {{name}} and {{company}} "
+        "(do not expand, remove, or rename them).\n"
+        "- Plain text only. No markdown. No subject line.\n"
+        "- Sign off as Kafi Commodities Export Team if a sign-off is present.\n"
+        "- Do not invent prices, MOQs, or certifications.\n\n"
+        "Respond with ONLY valid JSON:\n"
+        '{"message":"..."}\n\n'
+        f"Original message:\n{cleaned}"
+    )
+
+    raw = _generate_template_text(system=system, prompt=prompt)
+    data = _parse_json_object(raw)
+    out = str(data.get("message") or data.get("body") or "").strip()
+    if not out:
+        raise RuntimeError("AI returned an empty rephrase — try again.")
+    return out

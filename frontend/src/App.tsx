@@ -27,6 +27,7 @@ import { mailLabelSectionId } from "./lib/mailLabelRules";
 import { displayDashboardUserLabel } from "./utils/displayUserName";
 import { InboxAlertToasts } from "./components/InboxAlertToasts";
 import { UrgentEmailAlertModal, isGenuineNewInquiry } from "./components/UrgentEmailAlertModal";
+import { WorkspaceAiAutopilotButton } from "./components/WorkspaceAiAutopilotButton";
 import { ManageModulesModal } from "./components/ManageModulesModal";
 import type { UrgentEmailItem } from "./api/client";
 import { WhatsAppAlertToasts } from "./components/WhatsAppAlertToasts";
@@ -1636,6 +1637,9 @@ function DashboardApp() {
               {isWhatsAppMobile ? <IconWhatsApp className="w-5 h-5 text-emerald-400 shrink-0" /> : null}
               {pageHeading}
             </h1>
+            {tab === "target-workspace" ? (
+              <WorkspaceAiAutopilotButton compact onError={setError} />
+            ) : null}
             {urgentHeaderButton}
             {asimMailboxSwitcher}
             <AppTopActions
@@ -1671,6 +1675,9 @@ function DashboardApp() {
               {isWhatsAppMobile ? <IconWhatsApp className="w-5 h-5 text-emerald-400 shrink-0" /> : null}
               {pageHeading}
             </h1>
+            {tab === "target-workspace" ? (
+              <WorkspaceAiAutopilotButton onError={setError} />
+            ) : null}
             {urgentHeaderButton}
             {asimMailboxSwitcher ? (
               <div className="flex-1 min-w-0 flex items-center">{asimMailboxSwitcher}</div>

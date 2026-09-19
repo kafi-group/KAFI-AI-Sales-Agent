@@ -2178,12 +2178,14 @@ export function LeadsTablePage({
         contact_ids: contactIds,
       });
       const added = result.tasks?.length ?? 0;
+      const skipNote = result.notice ? ` ${result.notice}` : "";
       setSaveNotice(
         added > 0
-          ? `Assigned ${added} contact${added === 1 ? "" : "s"} to ${agentName}. Open Call Center → AI Sales Agent → Sara / Rayan pipeline.`
-          : `No new contacts added for ${agentName} (already queued or missing).`,
+          ? `Assigned ${added} contact${added === 1 ? "" : "s"} to ${agentName}. Open Call Center → AI Sales Agent → Sara / Rayan pipeline.${skipNote}`
+          : result.notice ||
+              `No new contacts added for ${agentName} (already queued on the other agent, already on ${agentName}, or missing).`,
       );
-      window.setTimeout(() => setSaveNotice(null), 8000);
+      window.setTimeout(() => setSaveNotice(null), result.notice ? 14000 : 8000);
       clearSelection();
       onOpenAiSalesAgent?.();
     } catch (e) {
@@ -2509,11 +2511,27 @@ export function LeadsTablePage({
     phone: string,
     initialTab?: "personal" | "template",
   ) {
-    setWhatsappComposeTarget({
-      row,
-      phone: phone.trim(),
-      initialTab,
-    });
+    // Same flow as Action → WhatsApp: Bulk WhatsApp Message (personal / Meta / templates).
+    // Meta template-only shortcut from toolbar can still open the single-lead compose.
+    if (initialTab === "template") {
+      setWhatsappComposeTarget({
+        row,
+        phone: phone.trim(),
+        initialTab,
+      });
+      return;
+    }
+    setWhatsappTargetIds([row.id]);
+    setShowBulkWhatsApp(true);
+  }
+
+  function openBulkWhatsAppForRows(ids: number[]) {
+    if (!ids.length) {
+      onError("Select at least one contact for WhatsApp.");
+      return;
+    }
+    setWhatsappTargetIds(ids);
+    setShowBulkWhatsApp(true);
   }
 
   function openTelegramCompose(
@@ -3346,7 +3364,7 @@ export function LeadsTablePage({
                       editMode
                     }
                     onError={onError}
-                    onWhatsApp={(phone, mode) => openWhatsAppCompose(row, phone, mode)}
+                    onWhatsApp={() => openBulkWhatsAppForRows([row.id])}
                     onTelegram={(phone, mode) => openTelegramCompose(row, phone, mode)}
                   />
                 );

@@ -1150,4 +1150,20 @@ class WorkspaceReviewOption(Base):
     )
 
 
+class AiSalesAgentState(Base):
+    """Single-row JSON snapshot of Sara/Rayan assigned pipeline (survives redeploys)."""
+
+    __tablename__ = "ai_sales_agent_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tasks: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    runners: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 

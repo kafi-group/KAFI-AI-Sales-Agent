@@ -1,65 +1,122 @@
-"""Persist Sara/Rayan AI Sales Agent queue across process restarts."""
+"""Persist Sara/Rayan AI Sales Agent queue in Postgres (survives Railway redeploys).
+
+Assigned contacts remain until DELETE /tasks/{id} (manual Remove).
+"""
 
 from __future__ import annotations
 
-import json
+import copy
 import threading
-from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any
 
-_DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "ai_sales_agent_queue.json"
+from sqlalchemy.orm import Session, attributes
+
+from db.models import AiSalesAgentState
+from db.session import SessionLocal
+
 _LOCK = threading.Lock()
-_MAX_TASKS = 300
+_STATE_ID = 1
+_MAX_TASKS = 500
 
 
-def _ensure_file() -> None:
-    _DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if not _DATA_PATH.exists():
-        _DATA_PATH.write_text(
-            json.dumps({"tasks": [], "runners": []}, indent=2),
-            encoding="utf-8",
+def _runner_snap(runners: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for r in runners:
+        out.append(
+            {
+                "persona": r.get("persona"),
+                "operator_user_id": r.get("operator_user_id"),
+                "pending_count": r.get("pending_count") or 0,
+            }
         )
+    return out
+
+
+def _tasks_for_persist(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deep-copy so we never mutate live in-memory task dicts."""
+    trimmed = tasks[-_MAX_TASKS:] if len(tasks) > _MAX_TASKS else tasks
+    snap: list[dict[str, Any]] = []
+    for t in trimmed:
+        row = copy.deepcopy(t)
+        # Active dials are saved as queued so a restart does not leave ghost in_progress.
+        if row.get("status") == "in_progress":
+            row["status"] = "queued"
+            row["outcome"] = None
+            row["call_sid"] = None
+            row["remarks"] = "Still assigned — call interrupted by server restart; ready to dial again."
+            row.pop("started_at", None)
+        snap.append(row)
+    return snap
 
 
 def load_queue_state() -> dict[str, Any]:
-    _ensure_file()
+    db = SessionLocal()
     try:
-        raw = json.loads(_DATA_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        row = db.get(AiSalesAgentState, _STATE_ID)
+        if not row:
+            return {"tasks": [], "runners": []}
+        tasks = row.tasks if isinstance(row.tasks, list) else []
+        runners = row.runners if isinstance(row.runners, list) else []
+        return {"tasks": list(tasks), "runners": list(runners)}
+    except Exception as exc:  # noqa: BLE001
+        print(f"AI Sales queue DB load failed: {exc}", flush=True)
         return {"tasks": [], "runners": []}
-    if not isinstance(raw, dict):
-        return {"tasks": [], "runners": []}
-    tasks = raw.get("tasks") if isinstance(raw.get("tasks"), list) else []
-    runners = raw.get("runners") if isinstance(raw.get("runners"), list) else []
-    return {"tasks": tasks, "runners": runners}
+    finally:
+        db.close()
 
 
 def save_queue_state(*, tasks: list[dict[str, Any]], runners: list[dict[str, Any]]) -> None:
-    """Write queue atomically. Keeps newest tasks within _MAX_TASKS."""
-    trimmed = list(tasks[-_MAX_TASKS:]) if len(tasks) > _MAX_TASKS else list(tasks)
-    # Do not persist live dial locks across restart as in_progress — re-queue them.
-    for t in trimmed:
-        if t.get("status") == "in_progress":
-            t["status"] = "queued"
-            t["outcome"] = None
-            t["call_sid"] = None
-            t["remarks"] = "Re-queued after server restart (call was interrupted)."
-            t.pop("started_at", None)
-    runner_snap = []
-    for r in runners:
-        snap = {
-            "persona": r.get("persona"),
-            "status": "idle",
-            "sequence_mode": False,
-            "operator_user_id": r.get("operator_user_id"),
-            "pending_count": r.get("pending_count") or 0,
-            "current_task_id": None,
-            "current_task": None,
-        }
-        runner_snap.append(snap)
-    payload = {"tasks": trimmed, "runners": runner_snap}
+    payload_tasks = _tasks_for_persist(tasks)
+    payload_runners = _runner_snap(runners)
     with _LOCK:
-        _ensure_file()
-        tmp = _DATA_PATH.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
-        tmp.replace(_DATA_PATH)
+        db = SessionLocal()
+        try:
+            row = db.get(AiSalesAgentState, _STATE_ID)
+            if row is None:
+                row = AiSalesAgentState(
+                    id=_STATE_ID,
+                    tasks=payload_tasks,
+                    runners=payload_runners,
+                    updated_at=datetime.now(timezone.utc),
+                )
+                db.add(row)
+            else:
+                row.tasks = payload_tasks
+                row.runners = payload_runners
+                row.updated_at = datetime.now(timezone.utc)
+                attributes.flag_modified(row, "tasks")
+                attributes.flag_modified(row, "runners")
+            db.commit()
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            print(f"AI Sales queue DB save failed: {exc}", flush=True)
+        finally:
+            db.close()
+
+
+def ensure_state_table(db: Session | None = None) -> None:
+    """Create table if migration has not run yet (idempotent)."""
+    owns = db is None
+    session = db or SessionLocal()
+    try:
+        AiSalesAgentState.__table__.create(bind=session.get_bind(), checkfirst=True)
+        # Ensure singleton row exists
+        if session.get(AiSalesAgentState, _STATE_ID) is None:
+            session.add(
+                AiSalesAgentState(
+                    id=_STATE_ID,
+                    tasks=[],
+                    runners=[],
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+        if owns:
+            session.commit()
+    except Exception as exc:  # noqa: BLE001
+        if owns:
+            session.rollback()
+        print(f"AI Sales queue table ensure failed: {exc}", flush=True)
+    finally:
+        if owns:
+            session.close()

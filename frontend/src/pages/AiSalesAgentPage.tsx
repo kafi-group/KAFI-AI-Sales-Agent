@@ -225,8 +225,12 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         buyer_ids: ids,
       });
       setBuyerIdsRaw("");
-      setQueueNotice(`Added ${result.tasks.length} contact(s) to the queue.`);
-      setTimeout(() => setQueueNotice(null), 8000);
+      setQueueNotice(
+        result.notice
+          ? `Added ${result.tasks.length}. ${result.notice}`
+          : `Added ${result.tasks.length} contact(s) to the queue.`,
+      );
+      setTimeout(() => setQueueNotice(null), result.notice ? 14000 : 8000);
       await load();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Assign failed");
@@ -248,12 +252,11 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         contact_ids: contacts.map((row) => row.contact_id),
       });
       setFilterPersona(assignPersona);
-      setQueueNotice(
-        `Added ${result.tasks.length} Master Table contact(s) to ${
-          assignPersona === "female" ? "Sara" : "Rayan"
-        }'s queue. Use Start calling (all in sequence) or Start Sara/Rayan so every contact is dialled — Call this only does one number.`,
-      );
-      setTimeout(() => setQueueNotice(null), 8000);
+      const base = `Added ${result.tasks.length} Master Table contact(s) to ${
+        assignPersona === "female" ? "Sara" : "Rayan"
+      }'s queue. Use Start calling (all in sequence) or Start Sara/Rayan so every contact is dialled — Call this only does one number.`;
+      setQueueNotice(result.notice ? `${base} ${result.notice}` : base);
+      setTimeout(() => setQueueNotice(null), result.notice ? 16000 : 8000);
       await load();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Could not add contacts to the queue");
@@ -684,11 +687,12 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         <div className="flex flex-wrap items-center gap-3">
           <h3 className="font-medium text-slate-100">Sara / Rayan pipeline</h3>
           <p className="w-full text-xs text-slate-500">
-            Contacts stay here across server restarts. Use{" "}
+            Assigned contacts stay here until you click <strong className="text-slate-300">Remove</strong>{" "}
+            — including after calls complete or the server restarts. A contact on Sara cannot also be
+            on Rayan (and vice versa). Use{" "}
             <strong className="text-slate-300">Start calling (all in sequence)</strong> or{" "}
-            <strong className="text-slate-300">Start Sara / Rayan</strong> so every queued contact
-            is dialled, then WhatsApp + email after each call. &quot;Call this only&quot; does one
-            number and stops.
+            <strong className="text-slate-300">Start Sara / Rayan</strong> to dial everyone still
+            queued. &quot;Call this only&quot; does one number and stops.
           </p>
           <select
             value={filterPersona}
@@ -861,6 +865,16 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                             {endingCall ? "Ending…" : "End / clear"}
                           </button>
                         ) : null}
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => void handleRemove(task.id)}
+                            className="text-xs text-red-400 hover:underline px-1"
+                            title="Remove from assigned pipeline permanently"
+                          >
+                            Remove
+                          </button>
+                        )}
                         {isAdmin && (task.status === "queued" || task.status === "pending") && (
                           <>
                             <button
@@ -878,13 +892,6 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                               className="text-xs text-amber-400 hover:underline px-1"
                             >
                               Skip
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleRemove(task.id)}
-                              className="text-xs text-red-400 hover:underline px-1"
-                            >
-                              Remove
                             </button>
                           </>
                         )}

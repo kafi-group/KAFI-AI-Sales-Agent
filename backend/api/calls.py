@@ -184,7 +184,7 @@ def toggle_hangup_after_fourth_ring(
     payload: ToggleHangupAfterFourthRingRequest,
     _admin: AppUser = Depends(require_admin),
 ):
-    """Default ON: unanswered calls drop after the 4th ring so voicemail does not use credits."""
+    """Default ON: unanswered calls drop after the 4th ring, then auto-redial once (~8 rings) so voicemail does not use credits."""
     settings.hangup_after_fourth_ring = bool(payload.enabled)
     seconds = int(getattr(settings, "ring_timeout_seconds", 24) or 24)
     return {
@@ -192,7 +192,7 @@ def toggle_hangup_after_fourth_ring(
         "hangup_after_fourth_ring": settings.hangup_after_fourth_ring,
         "ring_timeout_seconds": seconds,
         "message": (
-            "Calls will hang up after the 4th ring if nobody answers."
+            "Calls hang up after the 4th ring, then auto-dial again once (~8 rings total) without voicemail."
             if settings.hangup_after_fourth_ring
             else "Calls can ring through to voicemail (Twilio credits will be used if voicemail answers)."
         ),
@@ -822,6 +822,11 @@ async def twilio_call_status(request: Request):
     except ValueError:
         return _twiml_response("<Response><Hangup/></Response>")
 
+    try:
+        attempt = int(request.query_params.get("attempt") or "1")
+    except ValueError:
+        attempt = 1
+
     # Dial action webhook uses DialCallStatus; parent call uses CallStatus
     status = str(
         form.get("DialCallStatus") or form.get("CallStatus") or "unknown"
@@ -848,6 +853,25 @@ async def twilio_call_status(request: Request):
                     "the account. Also enable the country under Voice Geographic Permissions."
                 )
             )
+
+        # Hang up after ~4 rings, then auto Dial again once (~8 rings, no voicemail).
+        no_connect = dial_status in {
+            "no-answer",
+            "busy",
+            "canceled",
+            "cancelled",
+        }
+        if no_connect and attempt < voice_client.max_ring_attempts():
+            phone = calls_module.get_prepared_dial_phone(db, iid)
+            if phone:
+                return _twiml_response(
+                    voice_client.client_dial_twiml(
+                        str(phone),
+                        iid,
+                        attempt=attempt + 1,
+                    )
+                )
+
         return _twiml_response("<Response><Hangup/></Response>")
     except SATimeoutError:
         logging.getLogger("twilio.webhook").warning(
@@ -915,6 +939,11 @@ async def twilio_ai_agent_status(request: Request):
         task_id = int(task_id_raw) if task_id_raw else None
     except ValueError:
         task_id = None
+    ring_attempt_raw = request.query_params.get("ring_attempt")
+    try:
+        ring_attempt = int(ring_attempt_raw) if ring_attempt_raw else None
+    except ValueError:
+        ring_attempt = None
     status = str(form.get("CallStatus") or form.get("DialCallStatus") or "")
     duration = form.get("CallDuration") or form.get("DialCallDuration")
     call_sid = str(form.get("CallSid") or "") or None
@@ -926,6 +955,7 @@ async def twilio_ai_agent_status(request: Request):
         status=status,
         duration=duration,
         ended_reason=status,
+        ring_attempt=ring_attempt,
     )
     return {"ok": True}
 
