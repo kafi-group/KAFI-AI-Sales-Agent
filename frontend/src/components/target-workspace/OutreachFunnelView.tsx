@@ -9,6 +9,10 @@ import {
   LeadWhatsAppComposeModal,
   type WhatsAppComposeTarget,
 } from "../WhatsAppComposeLink";
+import {
+  LeadTelegramComposeModal,
+  type TelegramComposeTarget,
+} from "../TelegramComposeLink";
 import { WhatsAppProofModal } from "./WhatsAppProofModal";
 import { pushNumberToFloatingDialpad } from "../../utils/dialpadEvents";
 import {
@@ -157,6 +161,7 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
   const [kycLoading, setKycLoading] = useState(false);
   const [kycError, setKycError] = useState<string | null>(null);
   const [whatsappTarget, setWhatsappTarget] = useState<WhatsAppComposeTarget | null>(null);
+  const [telegramTarget, setTelegramTarget] = useState<TelegramComposeTarget | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   /** leadId -> selected phone number for Call / WhatsApp */
   const [selectedPhoneByLead, setSelectedPhoneByLead] = useState<Record<number, string>>({});
@@ -1063,6 +1068,19 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                           >
                             💬 WhatsApp
                           </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setTelegramTarget({
+                                row: workspaceLeadAsComposeRow(lead),
+                                phone: selectedPhone,
+                              })
+                            }
+                            className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow-md shadow-sky-950/40 transition flex items-center gap-1"
+                            title="Send Telegram to the selected number"
+                          >
+                            ✈️ Telegram
+                          </button>
                         </>
                       );
                     })()}
@@ -1279,6 +1297,22 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
           onSent={(message) => {
             setActionNotice(message);
             setWhatsappTarget(null);
+            window.setTimeout(() => setActionNotice(null), 5000);
+          }}
+        />
+      ) : null}
+
+      {telegramTarget ? (
+        <LeadTelegramComposeModal
+          target={telegramTarget}
+          onClose={() => setTelegramTarget(null)}
+          onError={(msg) => {
+            onError?.(msg);
+            setError(msg);
+          }}
+          onSent={(message) => {
+            setActionNotice(message);
+            setTelegramTarget(null);
             window.setTimeout(() => setActionNotice(null), 5000);
           }}
         />

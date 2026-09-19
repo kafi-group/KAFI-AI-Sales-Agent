@@ -389,6 +389,27 @@ class WhatsAppPersonalTemplateRead(BaseModel):
     updated_at: datetime
 
 
+class TelegramPersonalTemplateCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    body: str = Field(min_length=1, max_length=4096)
+
+
+class TelegramPersonalTemplateUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    body: Optional[str] = Field(default=None, min_length=1, max_length=4096)
+
+
+class TelegramPersonalTemplateRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    body: str
+    created_by_user_id: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class EmailTemplateRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -16,6 +16,10 @@ import {
   LeadWhatsAppComposeModal,
   type WhatsAppComposeTarget,
 } from "../components/WhatsAppComposeLink";
+import {
+  LeadTelegramComposeModal,
+  type TelegramComposeTarget,
+} from "../components/TelegramComposeLink";
 import { ComposeMailModal } from "../components/ComposeMailModal";
 
 interface AiSalesAgentPageProps {
@@ -48,6 +52,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   const [endingCall, setEndingCall] = useState(false);
   const [callingTaskId, setCallingTaskId] = useState<number | null>(null);
   const [whatsAppModalTarget, setWhatsAppModalTarget] = useState<WhatsAppComposeTarget | null>(null);
+  const [telegramModalTarget, setTelegramModalTarget] = useState<TelegramComposeTarget | null>(null);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailModalInitial, setEmailModalInitial] = useState<{ to: string; subject: string } | null>(null);
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
@@ -357,6 +362,21 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       return;
     }
     setWhatsAppModalTarget({
+      phone: task.contact_phone,
+      row: {
+        id: task.buyer_id || 0,
+        company_name: task.company_name || "Lead",
+        country: task.country || null,
+      } as unknown as any,
+    });
+  }
+
+  function openTelegramForTask(task: AiSalesAgentTask) {
+    if (!task.contact_phone) {
+      onError("No phone number available for this contact.");
+      return;
+    }
+    setTelegramModalTarget({
       phone: task.contact_phone,
       row: {
         id: task.buyer_id || 0,
@@ -1039,6 +1059,17 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                             <span>WhatsApp</span>
                           </button>
                         )}
+                        {task.contact_phone && (
+                          <button
+                            type="button"
+                            onClick={() => openTelegramForTask(task)}
+                            className="px-2 py-1 rounded bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 text-xs font-semibold flex items-center gap-1 transition"
+                            title={`Send Telegram message to ${task.contact_phone}`}
+                          >
+                            <span>✈️</span>
+                            <span>Telegram</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => openEmailForTask(task)}
@@ -1089,6 +1120,18 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         <LeadWhatsAppComposeModal
           target={whatsAppModalTarget}
           onClose={() => setWhatsAppModalTarget(null)}
+          onError={onError}
+          onSent={(msg) => {
+            setQueueNotice(msg);
+            setTimeout(() => setQueueNotice(null), 8000);
+          }}
+        />
+      )}
+
+      {telegramModalTarget && (
+        <LeadTelegramComposeModal
+          target={telegramModalTarget}
+          onClose={() => setTelegramModalTarget(null)}
           onError={onError}
           onSent={(msg) => {
             setQueueNotice(msg);

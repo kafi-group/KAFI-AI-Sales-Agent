@@ -1007,6 +1007,15 @@ export interface WhatsAppPersonalTemplate {
   updated_at: string;
 }
 
+export interface TelegramPersonalTemplate {
+  id: number;
+  name: string;
+  body: string;
+  created_by_user_id?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AvailablePhoneOption {
   phone: string;
   raw?: string;
@@ -3194,6 +3203,35 @@ export const client = {
     request<Record<string, unknown>>("/telegram-personal/send", {
       method: "POST",
       body: JSON.stringify({ to_phone, message }),
+    }),
+  sendTelegramPersonalBulk: (payload: { buyer_ids: number[]; message: string; phones?: string[] }) =>
+    request<{
+      sent_count: number;
+      failed_count: number;
+      skipped_count: number;
+      results: Array<{ phone: string; status: string; error?: string; company?: string }>;
+    }>("/telegram-personal/bulk-send", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  listTelegramPersonalTemplates: () =>
+    request<TelegramPersonalTemplate[]>("/telegram-personal/templates"),
+  createTelegramPersonalTemplate: (data: { name: string; body: string }) =>
+    request<TelegramPersonalTemplate>("/telegram-personal/templates", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateTelegramPersonalTemplate: (
+    id: number,
+    data: { name?: string; body?: string },
+  ) =>
+    request<TelegramPersonalTemplate>(`/telegram-personal/templates/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteTelegramPersonalTemplate: (id: number) =>
+    request<{ ok: boolean }>(`/telegram-personal/templates/${id}`, {
+      method: "DELETE",
     }),
   sendWhatsAppPersonalBulk: (payload: { buyer_ids: number[]; message: string }) =>
     request<WhatsAppCampaignDraftResponse>("/whatsapp-personal/bulk-send", {

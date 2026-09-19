@@ -4,9 +4,10 @@ import type { LeadTableRow } from "../api/client";
 import { CallPhonePicker } from "./CallPhonePicker";
 import { openMailerComposeForLead } from "./EmailLeadButton";
 import { ToolbarDropdown, ToolbarMenuItem } from "./ui/ToolbarDropdown";
-import { IconMail, IconPhone, IconWhatsApp, IconX } from "./icons/AppIcons";
+import { IconMail, IconPhone, IconTelegram, IconWhatsApp, IconX } from "./icons/AppIcons";
 
 export type WhatsAppComposeMode = "personal" | "template";
+export type TelegramComposeMode = "message" | "template";
 
 interface PhoneOption {
   label: string;
@@ -23,6 +24,7 @@ interface SelectedContactQuickActionsProps {
   disabled?: boolean;
   onError: (message: string) => void;
   onWhatsApp: (phone: string, mode: WhatsAppComposeMode) => void;
+  onTelegram?: (phone: string, mode?: TelegramComposeMode) => void;
 }
 
 function uniquePhones(row: LeadTableRow): PhoneOption[] {
@@ -144,11 +146,13 @@ export function SelectedContactQuickActions({
   disabled = false,
   onError,
   onWhatsApp,
+  onTelegram,
 }: SelectedContactQuickActionsProps) {
   const phones = uniquePhones(row);
   const emails = uniqueEmails(row);
   const [showCallPicker, setShowCallPicker] = useState(false);
   const [waPhonePick, setWaPhonePick] = useState<WhatsAppComposeMode | null>(null);
+  const [tgPhonePick, setTgPhonePick] = useState<TelegramComposeMode | null>(null);
 
   function startWhatsApp(mode: WhatsAppComposeMode) {
     if (phones.length === 0) {
@@ -160,6 +164,19 @@ export function SelectedContactQuickActions({
       return;
     }
     setWaPhonePick(mode);
+  }
+
+  function startTelegram(mode: TelegramComposeMode = "message") {
+    if (!onTelegram) return;
+    if (phones.length === 0) {
+      onError("This contact has no phone number for Telegram.");
+      return;
+    }
+    if (phones.length === 1) {
+      onTelegram(phones[0].phone, mode);
+      return;
+    }
+    setTgPhonePick(mode);
   }
 
   return (
@@ -212,6 +229,29 @@ export function SelectedContactQuickActions({
           </ToolbarMenuItem>
         </ToolbarDropdown>
 
+        {onTelegram ? (
+          <ToolbarDropdown label="Telegram" icon={IconTelegram} variant="sky">
+            <ToolbarMenuItem
+              icon={IconTelegram}
+              tone="sky"
+              disabled={disabled || phones.length === 0}
+              title="Send via your connected Telegram Mobile"
+              onClick={() => startTelegram("message")}
+            >
+              Telegram message
+            </ToolbarMenuItem>
+            <ToolbarMenuItem
+              icon={IconTelegram}
+              tone="sky"
+              disabled={disabled || phones.length === 0}
+              title="Send a saved Telegram template"
+              onClick={() => startTelegram("template")}
+            >
+              Telegram template
+            </ToolbarMenuItem>
+          </ToolbarDropdown>
+        ) : null}
+
         <ToolbarDropdown label="Email" icon={IconMail} variant="sky">
           {emails.length === 0 ? (
             <ToolbarMenuItem disabled title="No email on file" onClick={() => undefined}>
@@ -259,6 +299,20 @@ export function SelectedContactQuickActions({
             const mode = waPhonePick;
             setWaPhonePick(null);
             onWhatsApp(phone, mode);
+          }}
+        />
+      ) : null}
+
+      {tgPhonePick && onTelegram ? (
+        <WhatsAppPhonePicker
+          companyName={row.company_name || "Contact"}
+          mode="personal"
+          phones={phones}
+          onClose={() => setTgPhonePick(null)}
+          onPick={(phone) => {
+            const mode = tgPhonePick;
+            setTgPhonePick(null);
+            onTelegram(phone, mode);
           }}
         />
       ) : null}

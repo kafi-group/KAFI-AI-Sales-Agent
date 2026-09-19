@@ -623,6 +623,8 @@ export function NavIcon({
     return <IconActivity size={size} className="text-emerald-400" />;
   if (navId === "whatsapp-inbox" || navId.startsWith("whatsapp"))
     return <LogoWhatsApp size={size} />;
+  if (navId === "telegram-templates")
+    return <IconTemplate size={size} className="text-sky-400" />;
   if (navId === "telegram-mobile" || navId.startsWith("telegram"))
     return <LogoTelegram size={size} />;
   if (navId === "leads") return <IconSearch {...props} />;

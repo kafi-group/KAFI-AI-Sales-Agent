@@ -42,6 +42,7 @@ import { WhatsAppTemplatesPage } from "./pages/WhatsAppTemplatesPage";
 import { WhatsAppInboxPage } from "./pages/WhatsAppInboxPage";
 import { WhatsAppMobilePage } from "./pages/WhatsAppMobilePage";
 import { TelegramMobilePage } from "./pages/TelegramMobilePage";
+import { TelegramTemplatesPage } from "./pages/TelegramTemplatesPage";
 import { BuyerProfile } from "./pages/BuyerProfile";
 import { CallsPage } from "./pages/CallsPage";
 import { InboxPage } from "./pages/InboxPage";
@@ -1357,6 +1358,11 @@ function DashboardApp() {
           label: "Telegram Mobile",
           count: 0,
         },
+        {
+          id: "telegram-templates",
+          label: "Telegram templates",
+          count: 0,
+        },
       ],
     },
     // #3 Call Center (dropdown)
@@ -1500,6 +1506,7 @@ function DashboardApp() {
     if ((tab === "leads" || tab === "calls") && selectedLeadId != null) return "Lead profile";
     if (tab === "whatsapp-qr" || tab === "whatsapp-mobile") return "WhatsApp Mobile";
     if (tab === "telegram-mobile") return "Telegram Mobile";
+    if (tab === "telegram-templates") return "Telegram templates";
     if (tab === "settings") return "Settings";
     for (const item of navItems) {
       const children = "children" in item ? item.children : undefined;
@@ -1751,6 +1758,7 @@ function DashboardApp() {
               <WhatsAppMobilePage onError={setError} />
             )}
             {tab === "telegram-mobile" && <TelegramMobilePage onError={setError} />}
+            {tab === "telegram-templates" && <TelegramTemplatesPage onError={setError} />}
             {tab === "whatsapp-inbox" && (
               <WhatsAppInboxPage
                 onError={setError}

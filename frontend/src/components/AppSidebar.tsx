@@ -22,6 +22,7 @@ export type Tab =
   | "whatsapp-inbox"
   | "whatsapp-mobile"
   | "telegram-mobile"
+  | "telegram-templates"
   | "leads"
   | "data-synthesis"
   | "target-workspace"
@@ -223,7 +224,9 @@ export function AppSidebar({
     activeTab === "whatsapp-activity" ||
     activeTab === "whatsapp-mobile",
   );
-  const [telegramMenuOpen, setTelegramMenuOpen] = useState(activeTab === "telegram-mobile");
+  const [telegramMenuOpen, setTelegramMenuOpen] = useState(
+    activeTab === "telegram-mobile" || activeTab === "telegram-templates",
+  );
   const [callsMenuOpen, setCallsMenuOpen] = useState(
     activeTab === "calls" || activeTab === "ai-sales-agent",
   );
@@ -275,7 +278,7 @@ export function AppSidebar({
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab === "telegram-mobile") {
+    if (activeTab === "telegram-mobile" || activeTab === "telegram-templates") {
       setTelegramMenuOpen(true);
     }
   }, [activeTab]);
@@ -475,7 +478,8 @@ export function AppSidebar({
                       activeTab === "whatsapp-activity" ||
                       activeTab === "whatsapp-mobile"
                     : item.id === "telegram-mobile"
-                      ? activeTab === "telegram-mobile"
+                      ? activeTab === "telegram-mobile" ||
+                        activeTab === "telegram-templates"
                     : item.id === "calls"
                       ? activeTab === "calls" || activeTab === "ai-sales-agent"
                       : item.id === "ai"
@@ -594,7 +598,9 @@ export function AppSidebar({
                           ? "whatsapp-mobile"
                           : "whatsapp-inbox"
                     : isTelegramParent
-                      ? "telegram-mobile"
+                      ? activeTab === "telegram-templates"
+                        ? "telegram-templates"
+                        : "telegram-mobile"
                     : isCallsParent
                       ? activeTab === "ai-sales-agent"
                         ? "ai-sales-agent"
@@ -806,7 +812,7 @@ export function AppSidebar({
                                   }
                                 } else if (isTelegramParent) {
                                   setTelegramMenuOpen(true);
-                                  onSelectTab("telegram-mobile");
+                                  onSelectTab(child.id as Tab);
                                 } else if (isCallsParent) {
                                   setCallsMenuOpen(true);
                                   onSelectTab(child.id as Tab);

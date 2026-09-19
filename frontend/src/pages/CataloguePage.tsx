@@ -13,6 +13,7 @@ import {
   IconRefresh,
   IconSend,
   IconWhatsApp,
+  IconTelegram,
 } from "../components/icons/AppIcons";
 
 interface CataloguePageProps {
@@ -67,8 +68,9 @@ export function CataloguePage({
   const [composeSubject, setComposeSubject] = useState("");
   const [composeBody, setComposeBody] = useState("");
 
-  // WhatsApp send modal state
+  // WhatsApp / Telegram send modal state
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [shareChannel, setShareChannel] = useState<"whatsapp" | "telegram">("whatsapp");
   const [whatsAppRecipient, setWhatsAppRecipient] = useState("");
   const [whatsAppMessage, setWhatsAppMessage] = useState("");
   const [whatsAppSending, setWhatsAppSending] = useState(false);
@@ -164,9 +166,33 @@ export function CataloguePage({
       })
       .join("\n");
 
+    setShareChannel("whatsapp");
+    setWhatsAppRecipient("");
     setWhatsAppMessage(
       `Hello! 👋 Greetings from *Kafi Commodities (Pvt.) Ltd. (Brand: ESSENCE)*.\n\n` +
       `Here is our official *${titles}*.\n\n` +
+      (links ? `Download PDF:\n${links}\n\n` : "") +
+      `Our range covers Basmati Rice, Himalayan Pink Salt, Spices, Pickles, Chutneys, Pastes, Sauces, and Desserts.\n\n` +
+      `Let us know your destination port and quantity requirements so we can share instant CNF/FOB quotations.`
+    );
+    setShowWhatsAppModal(true);
+  }
+
+  function handleOpenTelegram(specificCatId?: string) {
+    const idsToAttach = specificCatId ? [specificCatId] : selectedCatIds;
+    const selected = catalogues.filter((c) => idsToAttach.includes(c.id));
+    const titles = selected.map((c) => c.title).join(" & ") || "product catalogue";
+    const links = selected
+      .map((c) => {
+        return `• ${c.title}: ${cataloguePublicUrl(c)}`;
+      })
+      .join("\n");
+
+    setShareChannel("telegram");
+    setWhatsAppRecipient("");
+    setWhatsAppMessage(
+      `Hello! Greetings from Kafi Commodities (Pvt.) Ltd. (Brand: ESSENCE).\n\n` +
+      `Here is our official ${titles}.\n\n` +
       (links ? `Download PDF:\n${links}\n\n` : "") +
       `Our range covers Basmati Rice, Himalayan Pink Salt, Spices, Pickles, Chutneys, Pastes, Sauces, and Desserts.\n\n` +
       `Let us know your destination port and quantity requirements so we can share instant CNF/FOB quotations.`
@@ -186,14 +212,25 @@ export function CataloguePage({
     }
     setWhatsAppSending(true);
     try {
-      await client.sendWhatsAppPersonal({
-        to_phone: phone,
-        message: whatsAppMessage.trim(),
-      });
+      if (shareChannel === "telegram") {
+        await client.sendTelegramPersonal(phone, whatsAppMessage.trim());
+        setNotice("Catalogue sent via Telegram Mobile.");
+      } else {
+        await client.sendWhatsAppPersonal({
+          to_phone: phone,
+          message: whatsAppMessage.trim(),
+        });
+        setNotice("Catalogue sent from your scanned personal WhatsApp.");
+      }
       setShowWhatsAppModal(false);
-      setNotice("Catalogue sent from your scanned personal WhatsApp.");
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Failed to send catalogue via personal WhatsApp");
+      onError(
+        err instanceof Error
+          ? err.message
+          : shareChannel === "telegram"
+            ? "Failed to send catalogue via Telegram"
+            : "Failed to send catalogue via personal WhatsApp",
+      );
     } finally {
       setWhatsAppSending(false);
     }
@@ -243,6 +280,15 @@ export function CataloguePage({
             >
               <IconWhatsApp size="xs" />
               <span>Share on WhatsApp ({selectedCatIds.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleOpenTelegram()}
+              disabled={selectedCatIds.length === 0}
+              className="px-4 py-2 rounded-xl bg-sky-700/80 hover:bg-sky-600 border border-sky-500/40 text-xs font-semibold text-white transition shadow-sm cursor-pointer disabled:opacity-40 flex items-center gap-1.5"
+            >
+              <IconTelegram size="xs" />
+              <span>Share on Telegram ({selectedCatIds.length})</span>
             </button>
           </div>
         </div>
@@ -396,6 +442,14 @@ export function CataloguePage({
                       <IconWhatsApp size="xs" />
                       <span>WhatsApp</span>
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenTelegram(cat.id)}
+                      className="px-3 py-1.5 rounded-lg bg-sky-700/80 hover:bg-sky-600 border border-sky-500/40 text-xs font-semibold text-white transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <IconTelegram size="xs" />
+                      <span>Telegram</span>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -435,8 +489,12 @@ export function CataloguePage({
           <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
-                <IconWhatsApp size="sm" />
-                <span>Share Catalogue on WhatsApp</span>
+                {shareChannel === "telegram" ? <IconTelegram size="sm" /> : <IconWhatsApp size="sm" />}
+                <span>
+                  {shareChannel === "telegram"
+                    ? "Share Catalogue on Telegram"
+                    : "Share Catalogue on WhatsApp"}
+                </span>
               </div>
               <button
                 type="button"
@@ -449,7 +507,9 @@ export function CataloguePage({
 
             <div className="space-y-3 text-xs">
               <p className="text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2">
-                Sends from your scanned WhatsApp Mobile session — not WhatsApp Web.
+                {shareChannel === "telegram"
+                  ? "Sends from your connected Telegram Mobile account."
+                  : "Sends from your scanned WhatsApp Mobile session — not WhatsApp Web."}
               </p>
               <label className="block space-y-1">
                 <span className="text-slate-400">Recipient Phone Number (e.g. +971501234567 or +923330313518)</span>
@@ -487,8 +547,14 @@ export function CataloguePage({
                 disabled={whatsAppSending || !whatsAppRecipient.trim() || !whatsAppMessage.trim()}
                 className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-xs font-semibold text-white flex items-center gap-1.5 shadow-sm"
               >
-                <IconWhatsApp size="xs" />
-                <span>{whatsAppSending ? "Sending…" : "Send from personal"}</span>
+                {shareChannel === "telegram" ? <IconTelegram size="xs" /> : <IconWhatsApp size="xs" />}
+                <span>
+                  {whatsAppSending
+                    ? "Sending…"
+                    : shareChannel === "telegram"
+                      ? "Send via Telegram"
+                      : "Send from personal"}
+                </span>
               </button>
             </div>
           </div>

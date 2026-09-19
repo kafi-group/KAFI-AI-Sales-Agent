@@ -21,8 +21,8 @@ Links a **real Telegram user account** (the one on your phone) to Sales Agent â€
 ### Sales Agent backend env
 
 ```
-TELEGRAM_BRIDGE_URL=https://your-telegram-bridge.up.railway.app
-TELEGRAM_BRIDGE_SECRET=<same secret>
+TELEGRAM_BRIDGE_URL=https://telegram-bridge-production-780a.up.railway.app
+TELEGRAM_BRIDGE_SECRET=<same as Railway service TELEGRAM_BRIDGE_SECRET>
 ```
 
 ## Connect flow (dashboard)

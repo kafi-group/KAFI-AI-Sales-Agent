@@ -13,6 +13,7 @@ import {
   IconSend,
   IconSparkles,
   IconWhatsApp,
+  IconTelegram,
   IconX,
 } from "../components/icons/AppIcons";
 import { EmailBodyEditor } from "../components/EmailBodyEditor";
@@ -28,6 +29,7 @@ interface PersonalizedEmailsPageProps {
 }
 
 type SendChannel = "email" | "whatsapp" | "whatsapp_personal" | "all";
+type SendingState = SendChannel | "telegram" | null;
 
 const STATUS_LABELS: Record<string, string> = {
   awaiting_transcript: "Waiting for captions",
@@ -90,7 +92,7 @@ export function PersonalizedEmailsPage({
   const [subject, setSubject] = useState("");
   const [emailBody, setEmailBody] = useState("");
   const [saving, setSaving] = useState(false);
-  const [sending, setSending] = useState<SendChannel | null>(null);
+  const [sending, setSending] = useState<SendingState>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [filter, setFilter] = useState<"active" | "ready" | "sent">("active");
@@ -210,6 +212,29 @@ export function PersonalizedEmailsPage({
       onError(e instanceof Error ? e.message : "Failed to regenerate");
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function handleSendTelegram() {
+    if (!selected?.contact_phone) {
+      onError("No phone number on this draft.");
+      return;
+    }
+    const text = (selected.whatsapp_body || emailBody || "").trim();
+    if (!text) {
+      onError("Message body is empty.");
+      return;
+    }
+    if (!window.confirm("Send via your Telegram Mobile account?")) return;
+    setSending("telegram");
+    setNotice(null);
+    try {
+      await client.sendTelegramPersonal(selected.contact_phone, text);
+      setNotice(`Telegram sent to ${selected.contact_phone}.`);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to send Telegram");
+    } finally {
+      setSending(null);
     }
   }
 
@@ -636,6 +661,20 @@ export function PersonalizedEmailsPage({
                       {sending === "whatsapp_personal" ? "Sending…" : "WhatsApp Mobile"}
                     </ActionButton>
                   )}
+                  <ActionButton
+                    icon={IconTelegram}
+                    size="md"
+                    onClick={() => void handleSendTelegram()}
+                    disabled={
+                      !!sending ||
+                      !emailBody.trim() ||
+                      selected.status === "generating" ||
+                      !selected.contact_phone
+                    }
+                    title="Send via your Telegram Mobile account"
+                  >
+                    {sending === "telegram" ? "Sending…" : "Telegram"}
+                  </ActionButton>
                   {!emailAlreadySent && !waAlreadySent && !waPersonalAlreadySent && (
                     <ActionButton
                       icon={IconSend}
