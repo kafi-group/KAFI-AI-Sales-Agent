@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { client, type EmailAttachment, type EmailTemplate, type MailComposeDraft } from "../api/client";
-import { EmailBodyEditor, emailBodyHasContent } from "./EmailBodyEditor";
+import { EmailBodyEditor, emailBodyHasContent, htmlToPlainText, plainTextToEditorHtml } from "./EmailBodyEditor";
 import { AttachedFilesList } from "./AttachedFilesList";
 import { AttachCatalogueModal } from "./AttachCatalogueModal";
 import { AttachCnfCardModal } from "./AttachCnfCardModal";
@@ -17,6 +17,29 @@ interface ComposeMailModalProps {
   initialDraft?: (Partial<MailComposeDraft> & { attachments?: EmailAttachment[] }) | null;
   onDraftSaved?: () => void;
   onDraftDiscarded?: () => void;
+}
+
+const MANUAL_EMAIL_SIGNATURE = [
+  "Khalid Paracha",
+  "KAFI Commodities Pvt Ltd.",
+  "Cell: +92-300-8206633",
+  "www.kafi-group.com",
+].join("\n");
+
+function bodyAlreadyHasSignature(html: string): boolean {
+  const plain = htmlToPlainText(html);
+  return (
+    plain.includes("Khalid Paracha") &&
+    plain.includes("+92-300-8206633") &&
+    plain.includes("www.kafi-group.com")
+  );
+}
+
+function appendManualSignature(html: string): string {
+  if (bodyAlreadyHasSignature(html)) return html;
+  const sigHtml = plainTextToEditorHtml(MANUAL_EMAIL_SIGNATURE);
+  const spacer = html.trim() ? "<p><br></p>" : "";
+  return `${html}${spacer}${sigHtml}`;
 }
 
 function hasDraftContent(to: string, cc: string, subject: string, body: string): boolean {
@@ -409,6 +432,15 @@ export function ComposeMailModal({
             )}
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setBody((prev) => appendManualSignature(prev))}
+              disabled={sending || discarding || bodyAlreadyHasSignature(body)}
+              title="Paste Khalid Paracha signature at the bottom of the body"
+              className="px-3 py-2 rounded-lg border border-slate-700 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+            >
+              {bodyAlreadyHasSignature(body) ? "Signature added" : "Add signature"}
+            </button>
             <button
               type="button"
               onClick={() => void closeWithDraftSave()}

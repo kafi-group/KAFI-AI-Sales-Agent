@@ -12,6 +12,7 @@ import {
 import {
   EmailBodyEditor,
   emailBodyHasContent,
+  htmlToPlainText,
   plainTextToEditorHtml,
 } from "@/components/EmailBodyEditor";
 import { ensureDearSalutation } from "@/lib/personalizeEmail";
@@ -31,10 +32,34 @@ import {
   htmlHasDataUriImages,
 } from "@/lib/hostInlineImagesClient";
 
+/** Manual (non-bulk) compose signature — appended on demand. */
+const MANUAL_EMAIL_SIGNATURE = [
+  "Khalid Paracha",
+  "KAFI Commodities Pvt Ltd.",
+  "Cell: +92-300-8206633",
+  "www.kafi-group.com",
+].join("\n");
+
 function defaultComposeBody(contactName: string, companyName: string): string {
   const name = contactName.trim() || "[Contact Name]";
   void companyName;
   return plainTextToEditorHtml(`Dear ${name},\n\n`);
+}
+
+function bodyAlreadyHasSignature(html: string): boolean {
+  const plain = htmlToPlainText(html);
+  return (
+    plain.includes("Khalid Paracha") &&
+    plain.includes("+92-300-8206633") &&
+    plain.includes("www.kafi-group.com")
+  );
+}
+
+function appendManualSignature(html: string): string {
+  if (bodyAlreadyHasSignature(html)) return html;
+  const sigHtml = plainTextToEditorHtml(MANUAL_EMAIL_SIGNATURE);
+  const spacer = html.trim() ? "<p><br></p>" : "";
+  return `${html}${spacer}${sigHtml}`;
 }
 
 function ComposeInner() {
@@ -398,6 +423,15 @@ function ComposeInner() {
         </button>
         <button type="button" className="btn ghost" disabled={saving} onClick={() => void saveDraft()}>
           {saving ? "Saving…" : "Save draft"}
+        </button>
+        <button
+          type="button"
+          className="btn ghost"
+          disabled={sending || saving || bodyAlreadyHasSignature(body)}
+          title="Paste Khalid Paracha signature at the bottom of the body"
+          onClick={() => setBody((prev) => appendManualSignature(prev))}
+        >
+          {bodyAlreadyHasSignature(body) ? "Signature added" : "Add signature"}
         </button>
       </div>
     </div>
