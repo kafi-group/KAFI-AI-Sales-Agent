@@ -84,11 +84,23 @@ from modules.email_attachments import resolve_attachment_list
 
 
 def create_template(db: Session, data: dict) -> EmailTemplate:
+    raw_attachments = data.get("attachments") or []
+    resolved = resolve_attachment_list(raw_attachments)
+    if raw_attachments and not resolved:
+        raise ValueError(
+            "Attachment file(s) could not be found on the server. "
+            "Re-upload the file(s) and save the template again."
+        )
+    if len(raw_attachments) > len(resolved):
+        raise ValueError(
+            "Some attachment file(s) could not be found on the server. "
+            "Re-upload missing file(s) and save again."
+        )
     record = EmailTemplate(
         name=data["name"],
         subject=data["subject"],
         body=data["body"],
-        attachments=resolve_attachment_list(data.get("attachments") or []),
+        attachments=resolved,
     )
     db.add(record)
     db.commit()
@@ -104,7 +116,18 @@ def update_template(db: Session, template_id: int, data: dict) -> EmailTemplate 
         if key in data and data[key] is not None:
             value = data[key]
             if key == "attachments":
-                value = resolve_attachment_list(value, record.attachments)
+                raw = value or []
+                value = resolve_attachment_list(raw, record.attachments)
+                if raw and not value:
+                    raise ValueError(
+                        "Attachment file(s) could not be found on the server. "
+                        "Re-upload the file(s) and save the template again."
+                    )
+                if len(raw) > len(value):
+                    raise ValueError(
+                        "Some attachment file(s) could not be found on the server. "
+                        "Re-upload missing file(s) and save again."
+                    )
             setattr(record, key, value)
     db.commit()
     db.refresh(record)

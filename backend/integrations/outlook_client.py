@@ -1546,11 +1546,11 @@ class OutlookClient:
         if not to:
             return {"status": "error", "message": "Recipient email is missing"}
         if not self._use_oauth():
-            # Prefer Vercel mailer (SMTP off Railway Hobby) when configured.
+            # Prefer Vercel mailer (SMTP off Railway Hobby) when configured —
+            # including messages with attachments (mailer fetches files by id/url).
             from integrations.mailer_client import mailer_configured, send_via_mailer
 
-            if mailer_configured() and not attachments:
-                # Tracking pixels still applied when sending via mailer HTML body.
+            if mailer_configured():
                 from modules.email_tracking import build_tracked_bodies
 
                 plain_body, html_body = build_tracked_bodies(
@@ -1566,6 +1566,7 @@ class OutlookClient:
                     html=bool(html_body),
                     cc=cc,
                     bcc=bcc,
+                    attachments=attachments,
                 )
             if self._use_resend():
                 return self._send_resend(

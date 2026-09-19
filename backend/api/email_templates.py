@@ -47,7 +47,10 @@ def create_email_template(
 ):
     from modules import activity as activity_module
 
-    record = templates_module.create_template(db, payload.model_dump())
+    try:
+        record = templates_module.create_template(db, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     log_action(
         db,
         entity_type="email_template",
@@ -144,9 +147,12 @@ def update_email_template(
     payload: EmailTemplateUpdate,
     db: Session = Depends(get_db),
 ):
-    record = templates_module.update_template(
-        db, template_id, payload.model_dump(exclude_unset=True)
-    )
+    try:
+        record = templates_module.update_template(
+            db, template_id, payload.model_dump(exclude_unset=True)
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     if not record:
         raise HTTPException(404, "Template not found")
     log_action(db, entity_type="email_template", entity_id=record.id, action="updated")

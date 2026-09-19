@@ -1660,10 +1660,19 @@ class CommsGenerator:
 
         subject = render_template_text(template.subject, buyer=buyer, contact=contact)
         body = render_template_text(template.body, buyer=buyer, contact=contact)
-        attachments = merge_attachments(
-            resolve_attachment_list(template.attachments),
-            resolve_attachment_list(extra_attachments),
-        )
+        try:
+            attachments = merge_attachments(
+                resolve_attachment_list(template.attachments),
+                resolve_attachment_list(extra_attachments),
+            )
+            draft_attachments = copy_attachments(resolve_attachment_list(attachments))
+        except FileNotFoundError as exc:
+            raise ValueError(str(exc)) from exc
+        if (template.attachments or extra_attachments) and not draft_attachments:
+            raise ValueError(
+                "Template attachments could not be loaded from disk. "
+                "Re-attach the file on the email template and save again."
+            )
 
         draft = Interaction(
             contact_id=contact.id,
@@ -1674,7 +1683,7 @@ class CommsGenerator:
             language=contact.preferred_language or "en",
             handled_by=HandledBy.agent,
             status=InteractionStatus.draft,
-            attachments=copy_attachments(resolve_attachment_list(attachments)),
+            attachments=draft_attachments,
         )
         db.add(draft)
         db.commit()

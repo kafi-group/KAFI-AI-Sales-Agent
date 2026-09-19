@@ -50,6 +50,7 @@ def send_via_mailer(
     html: bool = True,
     cc: str | None = None,
     bcc: str | None = None,
+    attachments: list[dict] | None = None,
 ) -> dict[str, Any]:
     """POST one message to the Vercel mailer /api/send endpoint."""
     secret = (settings.mailer_handoff_secret or "").strip()
@@ -79,6 +80,39 @@ def send_via_mailer(
             ),
         }
 
+    attachment_refs: list[dict[str, Any]] = []
+    if attachments:
+        from modules.email_tracking import public_api_base
+
+        base = (public_api_base() or "").rstrip("/")
+        if not base:
+            return {
+                "status": "error",
+                "message": (
+                    "Cannot send attachments via mailer: PUBLIC_API_BASE_URL is not set "
+                    "so the mailer cannot download the files."
+                ),
+            }
+        for meta in attachments:
+            if not isinstance(meta, dict):
+                continue
+            att_id = str(meta.get("id") or "").strip()
+            filename = str(meta.get("filename") or "attachment").strip() or "attachment"
+            if not att_id:
+                return {
+                    "status": "error",
+                    "message": f"Attachment “{filename}” is missing an id — re-upload it.",
+                }
+            attachment_refs.append(
+                {
+                    "id": att_id,
+                    "filename": filename,
+                    "contentType": str(meta.get("content_type") or "application/octet-stream"),
+                    "size": int(meta.get("size") or 0),
+                    "url": f"{base}/api/mailer/inline-media/{att_id}",
+                }
+            )
+
     now = datetime.now(timezone.utc)
     token = jwt.encode(
         {
@@ -96,19 +130,25 @@ def send_via_mailer(
     if isinstance(token, bytes):
         token = token.decode("ascii")
 
+    payload: dict[str, Any] = {
+        "token": token,
+        "to": to,
+        "subject": subject,
+        "body": body,
+        "html": html,
+    }
+    if (cc or "").strip():
+        payload["cc"] = cc
+    if (bcc or "").strip():
+        payload["bcc"] = bcc
+    if attachment_refs:
+        payload["attachments"] = attachment_refs
+
     try:
-        with httpx.Client(timeout=55.0) as client:
+        with httpx.Client(timeout=90.0) as client:
             res = client.post(
                 f"{public_url}/api/send",
-                json={
-                    "token": token,
-                    "to": to,
-                    "subject": subject,
-                    "body": body,
-                    "html": html,
-                    **({"cc": cc} if (cc or "").strip() else {}),
-                    **({"bcc": bcc} if (bcc or "").strip() else {}),
-                },
+                json=payload,
             )
     except httpx.HTTPError as exc:
         return {

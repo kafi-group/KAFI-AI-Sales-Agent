@@ -31,7 +31,7 @@ def _resolve_storage_dir() -> Path:
 
 STORAGE_DIR = _resolve_storage_dir()
 
-MAX_FILE_BYTES = 100 * 1024 * 1024
+MAX_FILE_BYTES = 24 * 1024 * 1024
 MAX_FILES_PER_EMAIL = 8
 
 ALLOWED_CONTENT_TYPES = {
@@ -272,12 +272,18 @@ def copy_attachments(items: list | None) -> list[dict]:
         return []
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     copied: list[dict] = []
+    missing: list[str] = []
     for item in items:
-        if not isinstance(item, dict) or not item.get("storage_path"):
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("filename") or item.get("id") or "attachment")
+        if not item.get("storage_path") and not item.get("id"):
+            missing.append(label)
             continue
         try:
             data, filename, content_type = load_bytes(item)
         except FileNotFoundError:
+            missing.append(label)
             continue
         att_id = str(uuid.uuid4())
         storage_name = f"{att_id}_{_sanitize_filename(filename)}"
@@ -291,6 +297,18 @@ def copy_attachments(items: list | None) -> list[dict]:
                 "size": len(data),
                 "storage_path": f"email_attachments/{storage_name}",
             }
+        )
+    if missing and not copied:
+        raise FileNotFoundError(
+            "Attachment file(s) missing on the server: "
+            + ", ".join(missing[:5])
+            + ". Re-attach the file on the email template and save again."
+        )
+    if missing:
+        raise FileNotFoundError(
+            "Some attachment file(s) are missing on the server: "
+            + ", ".join(missing[:5])
+            + ". Re-attach them on the email template and save again."
         )
     return copied
 

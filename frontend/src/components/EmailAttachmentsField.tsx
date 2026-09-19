@@ -23,7 +23,7 @@ export function EmailAttachmentsField({
   onChange,
   disabled = false,
   label = "Attachments",
-  hint = "Images, PDF, Word, Excel, TXT, CSV — up to 10 MB each, max 8 files.",
+  hint = "Any PDF, Word, Excel, image, TXT, or CSV — up to 24 MB each, max 8 files per email. (+ Catalogue is only a shortcut for official Kafi PDFs already on the server.)",
 }: EmailAttachmentsFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);

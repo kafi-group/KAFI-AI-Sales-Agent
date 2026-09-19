@@ -133,9 +133,23 @@ export function sanitizeUserFacingError(message: unknown): string {
 
 function messageForHttpError(status: number, text: string, statusText: string): string {
   if (status === 500) return HARD_RESTART_MESSAGE;
+  if (status === 413) {
+    return (
+      "File is too large for the upload gateway. Keep each attachment under 24 MB " +
+      "(Gmail and most mailboxes reject messages around 25 MB total)."
+    );
+  }
   const parsed = parseErrorDetail(text, statusText || `Request failed (${status})`);
   return sanitizeUserFacingError(parsed);
 }
+
+/** Direct Railway API — bypasses Vercel rewrite body limit (~4.5 MB) for large file uploads. */
+const RAILWAY_API_BASE = "https://kafi-sales-agent-production.up.railway.app/api";
+
+/** Email providers reject ~25 MB total messages; keep each file under this. */
+export const EMAIL_ATTACHMENT_MAX_BYTES = 24 * 1024 * 1024;
+
+const ATTACHMENT_UPLOAD_TIMEOUT_MS = 180_000;
 
 export interface VoiceEngineSettings {
   vapi_enabled: boolean;
@@ -3463,26 +3477,59 @@ export const client = {
     }),
 
   uploadEmailAttachment: async (file: File) => {
-    const form = new FormData();
-    form.append("file", file);
-    const res = await fetch(`${API_BASE}/email/attachments`, {
-      method: "POST",
-      body: form,
-      headers: authHeaders(),
-      credentials: "include",
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      const detail = (err as { detail?: string }).detail;
+    if (file.size > EMAIL_ATTACHMENT_MAX_BYTES) {
+      const mb = (file.size / (1024 * 1024)).toFixed(1);
       throw new Error(
-        messageForHttpError(
-          res.status,
-          detail ? JSON.stringify({ detail }) : "",
-          res.statusText,
-        ),
+        `"${file.name}" is ${mb} MB. Keep each attachment under ${
+          EMAIL_ATTACHMENT_MAX_BYTES / (1024 * 1024)
+        } MB — email providers (Gmail, Outlook, etc.) reject messages around 25 MB total.`,
       );
     }
-    return res.json() as Promise<EmailAttachment>;
+
+    // Prefer direct Railway upload so PDFs aren't capped by the Vercel /api rewrite (~4.5 MB).
+    // Fall back to same-origin /api when Railway is unreachable (local/dev).
+    const endpoints = [RAILWAY_API_BASE, API_BASE].filter(
+      (base, index, all) => all.indexOf(base) === index,
+    );
+
+    let lastError: Error | null = null;
+    for (const base of endpoints) {
+      const form = new FormData();
+      form.append("file", file);
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), ATTACHMENT_UPLOAD_TIMEOUT_MS);
+      try {
+        const res = await fetch(`${base}/email/attachments`, {
+          method: "POST",
+          body: form,
+          headers: authHeaders(),
+          credentials: base === API_BASE ? "include" : "omit",
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(messageForHttpError(res.status, text, res.statusText));
+        }
+        return (await res.json()) as EmailAttachment;
+      } catch (err) {
+        const isAbort = err instanceof DOMException && err.name === "AbortError";
+        if (isAbort) {
+          throw new Error(
+            "Upload timed out. Check your connection and try a smaller file (under 24 MB).",
+          );
+        }
+        lastError = err instanceof Error ? err : new Error(String(err));
+        // Retry next endpoint only for network failures, not for HTTP 4xx/413 messages.
+        const msg = lastError.message || "";
+        if (/too large|under \d+ MB|Request failed|not allowed|empty|gateway/i.test(msg)) {
+          throw lastError;
+        }
+        continue;
+      } finally {
+        window.clearTimeout(timer);
+      }
+    }
+    throw lastError || new Error("Attachment upload failed");
   },
 
   compareEnrichmentFile: async (file: File, userId?: number, tableSource = "master_table", masterType = "fmcg") => {
