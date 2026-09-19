@@ -123,10 +123,6 @@ export function AiAutoModePanel({ onError, compact = false }: AiAutoModePanelPro
               "bulk_email_when_no_call",
               "If call mode is OFF — bulk email assigned contacts instead of dialling",
             ],
-            [
-              "study_products",
-              "Study our products (quality & packaging) so agents can pitch and answer questions",
-            ],
           ] as const
         ).map(([key, label]) => (
           <label
@@ -143,18 +139,10 @@ export function AiAutoModePanel({ onError, compact = false }: AiAutoModePanelPro
           </label>
         ))}
 
-        {settings.study_products ? (
-          <div className="pt-1 space-y-1">
-            <label className="text-xs text-slate-400">Product brief (injected into call prompts)</label>
-            <textarea
-              rows={compact ? 3 : 5}
-              value={settings.product_brief || ""}
-              onChange={(e) => setSettings((s) => ({ ...s, product_brief: e.target.value }))}
-              onBlur={() => void save({ product_brief: settings.product_brief })}
-              className="w-full text-xs rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-200"
-            />
-          </div>
-        ) : null}
+        <p className="text-[11px] text-slate-500 pt-1">
+          Product study &amp; brief live under{" "}
+          <span className="text-slate-300">Call Center → AI Train</span>.
+        </p>
       </fieldset>
     </div>
   );

@@ -3618,36 +3618,6 @@ export function LeadsTablePage({
                   {movingToPool ? "Moving…" : "→ Khalid Focused"}
                 </ActionButton>
               ) : null}
-              {section !== "hyperstore_targeted" ? (
-                <ActionButton
-                  icon={IconSearch}
-                  onClick={() => void moveSelectedToTargetPool("hyperstore_targeted")}
-                  disabled={movingToPool || bulkOnboarding || editMode}
-                  title="Add to Hyperstore Target"
-                >
-                  {movingToPool ? "Moving…" : "→ Hyperstore"}
-                </ActionButton>
-              ) : null}
-              {section !== "targeted_distributor" ? (
-                <ActionButton
-                  icon={IconSearch}
-                  onClick={() => void moveSelectedToTargetPool("targeted_distributor")}
-                  disabled={movingToPool || bulkOnboarding || editMode}
-                  title="Add to Targeted Distributors"
-                >
-                  → Distributors
-                </ActionButton>
-              ) : null}
-              {section !== "targeted_client" ? (
-                <ActionButton
-                  icon={IconSearch}
-                  onClick={() => void moveSelectedToTargetPool("targeted_client")}
-                  disabled={movingToPool || bulkOnboarding || editMode}
-                  title="Add to Targeted Client"
-                >
-                  → Targeted Client
-                </ActionButton>
-              ) : null}
             </>
           ) : null}
 

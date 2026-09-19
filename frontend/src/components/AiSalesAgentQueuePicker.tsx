@@ -5,6 +5,7 @@ import {
   type DialableContactSuggestion,
 } from "../api/client";
 import { findCountry } from "../data/countries";
+import { SearchableSelect } from "./SearchableSelect";
 
 function contactKey(item: DialableContactSuggestion): string {
   return `${item.buyer_id}:${item.contact_id ?? "x"}:${item.phone}`;
@@ -193,57 +194,49 @@ export function AiSalesAgentQueuePicker({
         </div>
 
         <div className="grid grid-cols-2 gap-1.5">
-          <div>
-            <label className="block text-[11px] font-medium text-slate-400 mb-1">Filter Country</label>
-            <select
-              value={countryFilter}
-              onChange={(e) => setCountryFilter(e.target.value)}
-              className="w-full rounded-md bg-slate-900 border border-slate-700 px-2 py-1.5 text-xs text-slate-200"
-            >
-              <option value="">🌍 All Countries</option>
-              {availableCountries.map((c) => {
-                const info = findCountry(c);
-                return (
-                  <option key={c} value={c}>
-                    {info ? `${info.flag} ${c}` : c}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[11px] font-medium text-slate-400 mb-1">Filter Grade</label>
-            <select
-              value={gradeFilter}
-              onChange={(e) => setGradeFilter(e.target.value)}
-              className="w-full rounded-md bg-slate-900 border border-slate-700 px-2 py-1.5 text-xs text-slate-200"
-            >
-              <option value="">⭐ All Grades</option>
-              {availableGrades.map((g) => (
-                <option key={g} value={g}>
-                  Grade {g}
-                </option>
-              ))}
-              {!availableGrades.includes("Ungraded") && <option value="Ungraded">Ungraded</option>}
-            </select>
-          </div>
+          <SearchableSelect
+            label="Filter Country"
+            labelClassName="block text-[11px] font-medium text-slate-400 mb-1"
+            value={countryFilter}
+            onChange={setCountryFilter}
+            options={availableCountries.map((c) => {
+              const info = findCountry(c);
+              return { value: c, label: info ? `${info.flag} ${c}` : c };
+            })}
+            allowEmpty
+            emptyLabel="🌍 All Countries"
+            placeholder="Search countries…"
+            multiSelect={false}
+          />
+          <SearchableSelect
+            label="Filter Grade"
+            labelClassName="block text-[11px] font-medium text-slate-400 mb-1"
+            value={gradeFilter}
+            onChange={setGradeFilter}
+            options={[
+              ...availableGrades.map((g) => ({ value: g, label: `Grade ${g}` })),
+              ...(!availableGrades.includes("Ungraded")
+                ? [{ value: "Ungraded", label: "Ungraded" }]
+                : []),
+            ]}
+            allowEmpty
+            emptyLabel="⭐ All Grades"
+            placeholder="Search grades…"
+            multiSelect={false}
+          />
         </div>
 
-        <div>
-          <label className="block text-[11px] font-medium text-slate-400 mb-1">Filter Designation</label>
-          <select
-            value={designationFilter}
-            onChange={(e) => setDesignationFilter(e.target.value)}
-            className="w-full rounded-md bg-slate-900 border border-slate-700 px-2 py-1.5 text-xs text-slate-200"
-          >
-            <option value="">👔 All Designations</option>
-            {availableDesignations.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
-        </div>
+        <SearchableSelect
+          label="Filter Designation"
+          labelClassName="block text-[11px] font-medium text-slate-400 mb-1"
+          value={designationFilter}
+          onChange={setDesignationFilter}
+          options={availableDesignations.map((d) => ({ value: d, label: d }))}
+          allowEmpty
+          emptyLabel="👔 All Designations"
+          placeholder="Search designations…"
+          multiSelect={false}
+        />
 
         <div className="relative">
           <div className="flex items-center justify-between mb-1">

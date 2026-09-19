@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { client, type AiTrainingData, type AiTrainingSelectedCall } from "../api/client";
+import {
+  client,
+  type AiSalesAutoModeSettings,
+  type AiTrainingData,
+  type AiTrainingSelectedCall,
+} from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 
 interface AiTrainPageProps {
@@ -18,6 +23,9 @@ export function AiTrainPage({ onError }: AiTrainPageProps) {
   const [selectedTrainingLoading, setSelectedTrainingLoading] = useState(false);
   const [trainingCallFilter, setTrainingCallFilter] = useState<"all" | "female" | "male">("all");
   const [checkedTrainingIds, setCheckedTrainingIds] = useState<Set<number>>(new Set());
+  const [studyProducts, setStudyProducts] = useState(true);
+  const [productBrief, setProductBrief] = useState("");
+  const [savingProduct, setSavingProduct] = useState(false);
 
   const loadTraining = useCallback(async () => {
     try {
@@ -42,10 +50,37 @@ export function AiTrainPage({ onError }: AiTrainPageProps) {
     }
   }, []);
 
+  const loadProductStudy = useCallback(async () => {
+    try {
+      const data = await client.getAiSalesAutoMode();
+      setStudyProducts(Boolean(data.study_products));
+      setProductBrief(data.product_brief || "");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   useEffect(() => {
     void loadTraining();
     void loadSelectedTrainingCalls();
-  }, [loadTraining, loadSelectedTrainingCalls]);
+    void loadProductStudy();
+  }, [loadTraining, loadSelectedTrainingCalls, loadProductStudy]);
+
+  async function saveProductStudy(patch: Partial<AiSalesAutoModeSettings>) {
+    setSavingProduct(true);
+    setTrainingNotice(null);
+    try {
+      const next = await client.updateAiSalesAutoMode(patch);
+      setStudyProducts(Boolean(next.study_products));
+      setProductBrief(next.product_brief || "");
+      setTrainingNotice("Product study settings saved.");
+      setTimeout(() => setTrainingNotice(null), 4000);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to save product study");
+    } finally {
+      setSavingProduct(false);
+    }
+  }
 
   async function handleTrainFromHistory(source: "curated" | "history" | "ids") {
     setTrainingLoading(true);
@@ -103,17 +138,12 @@ export function AiTrainPage({ onError }: AiTrainPageProps) {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-          <span>🧠 AI Train</span>
-          <span className="text-xs px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-mono">
-            Gemini RAG Engine
-          </span>
-        </h2>
+        <h2 className="text-lg font-semibold text-slate-100">🧠 AI Train</h2>
         <p className="text-sm text-slate-400 mt-1">
           Train Sara &amp; Rayan outside the dialer. Tick{" "}
           <span className="text-violet-300">Train Sara &amp; Rayan</span> after good calls, then
-          train from those ticks or full history. Product confidence also feeds from AI Auto Mode
-          when product study is enabled.
+          train from those ticks or full history. Teach product knowledge below so they can pitch
+          quality, packaging, and answer buyer questions.
         </p>
       </div>
 
@@ -132,7 +162,7 @@ export function AiTrainPage({ onError }: AiTrainPageProps) {
           disabled={trainingLoading}
           className="px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50"
         >
-          {trainingLoading ? "Gemini Analyzing…" : "⚡ Auto-Train from Call History"}
+          {trainingLoading ? "Analyzing…" : "⚡ Auto-Train from Call History"}
         </button>
       </div>
 
@@ -141,6 +171,36 @@ export function AiTrainPage({ onError }: AiTrainPageProps) {
           {trainingNotice}
         </p>
       )}
+
+      <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-4 space-y-3">
+        <label className="flex items-start gap-2.5 text-sm text-slate-200 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={studyProducts}
+            disabled={savingProduct}
+            onChange={() => void saveProductStudy({ study_products: !studyProducts })}
+            className="mt-0.5 rounded border-slate-600 text-emerald-500 focus:ring-emerald-500"
+          />
+          <span>
+            Study our products (quality &amp; packaging) so agents can pitch and answer questions
+          </span>
+        </label>
+        {studyProducts ? (
+          <div className="space-y-1 pl-6">
+            <label className="text-xs text-slate-400">Product brief (injected into call prompts)</label>
+            <textarea
+              rows={5}
+              value={productBrief}
+              disabled={savingProduct}
+              onChange={(e) => setProductBrief(e.target.value)}
+              onBlur={(e) => {
+                void saveProductStudy({ product_brief: e.currentTarget.value });
+              }}
+              className="w-full text-xs rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-200"
+            />
+          </div>
+        ) : null}
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-4 space-y-2">
