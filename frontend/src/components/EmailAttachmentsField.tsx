@@ -27,6 +27,7 @@ export function EmailAttachmentsField({
 }: EmailAttachmentsFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAttachCatalogue, setShowAttachCatalogue] = useState(false);
   const [showAttachCnf, setShowAttachCnf] = useState(false);
@@ -35,6 +36,7 @@ export function EmailAttachmentsField({
     if (!fileList?.length || disabled) return;
     setError(null);
     setUploading(true);
+    setUploadProgress("Preparing upload…");
     const next = [...attachments];
     try {
       for (const file of Array.from(fileList)) {
@@ -42,7 +44,9 @@ export function EmailAttachmentsField({
           setError("Maximum 8 attachments per email.");
           break;
         }
-        const uploaded = await client.uploadEmailAttachment(file);
+        const uploaded = await client.uploadEmailAttachment(file, {
+          onProgress: setUploadProgress,
+        });
         next.push(uploaded);
       }
       onChange(next);
@@ -50,6 +54,7 @@ export function EmailAttachmentsField({
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setUploading(false);
+      setUploadProgress(null);
       if (inputRef.current) inputRef.current.value = "";
     }
   }
@@ -110,9 +115,9 @@ export function EmailAttachmentsField({
       {hint && <p className="text-xs text-slate-500">{hint}</p>}
       {error && <p className="text-xs text-red-300">{error}</p>}
       {uploading && (
-        <div className="flex items-center gap-2 p-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-200 animate-pulse">
+        <div className="flex items-center gap-2 p-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-200">
           <div className="w-3.5 h-3.5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin shrink-0" />
-          <span>Uploading attachment(s)… Please wait</span>
+          <span>{uploadProgress || "Uploading attachment(s)… Please wait"}</span>
         </div>
       )}
       {attachments.length > 0 && (

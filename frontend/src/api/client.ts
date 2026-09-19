@@ -152,7 +152,8 @@ export const EMAIL_ATTACHMENT_MAX_BYTES = 24 * 1024 * 1024;
 /** Chunk size for uploads through the Vercel /api rewrite (~4.5 MB body limit). */
 const ATTACHMENT_CHUNK_BYTES = 2.5 * 1024 * 1024;
 
-const ATTACHMENT_UPLOAD_TIMEOUT_MS = 120_000;
+/** Per-chunk / single-shot upload timeout (fail fast instead of hanging forever). */
+const ATTACHMENT_UPLOAD_TIMEOUT_MS = 60_000;
 
 export interface VoiceEngineSettings {
   vapi_enabled: boolean;
@@ -3486,7 +3487,11 @@ export const client = {
       body: JSON.stringify({ buyer_id: buyerId, subject, body }),
     }),
 
-  uploadEmailAttachment: async (file: File) => {
+  uploadEmailAttachment: async (
+    file: File,
+    options?: { onProgress?: (label: string) => void },
+  ) => {
+    const onProgress = options?.onProgress;
     if (file.size > EMAIL_ATTACHMENT_MAX_BYTES) {
       const mb = (file.size / (1024 * 1024)).toFixed(1);
       throw new Error(
@@ -3496,69 +3501,126 @@ export const client = {
       );
     }
 
-    // Large files: chunked upload through same-origin /api (cookie auth, ~2.5 MB per request).
-    // Avoids Vercel 4.5 MB rewrite limit and long single-request timeouts.
+    // Large files: chunked upload direct to Railway (bypass Vercel rewrite), then fall back to /api.
     if (file.size > ATTACHMENT_CHUNK_BYTES) {
       const totalChunks = Math.ceil(file.size / ATTACHMENT_CHUNK_BYTES);
-      const init = await request<{ upload_id: string; total_chunks: number }>(
-        "/email/attachments/chunk-init",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            filename: file.name,
-            content_type: file.type || null,
-            size: file.size,
-            total_chunks: totalChunks,
-          }),
-        },
+      const chunkBases = [RAILWAY_API_BASE, API_BASE].filter(
+        (base, index, all) => all.indexOf(base) === index,
       );
 
-      for (let index = 0; index < totalChunks; index++) {
-        const start = index * ATTACHMENT_CHUNK_BYTES;
-        const end = Math.min(file.size, start + ATTACHMENT_CHUNK_BYTES);
-        const blob = file.slice(start, end);
-        const form = new FormData();
-        form.append("upload_id", init.upload_id);
-        form.append("index", String(index));
-        form.append("file", blob, `${file.name}.part${index}`);
-
-        const controller = new AbortController();
-        const timer = window.setTimeout(
-          () => controller.abort(),
-          ATTACHMENT_UPLOAD_TIMEOUT_MS,
-        );
+      let lastError: Error | null = null;
+      for (const base of chunkBases) {
         try {
-          const res = await fetch(`${API_BASE}/email/attachments/chunk`, {
-            method: "POST",
-            body: form,
-            headers: authHeaders(),
-            credentials: "include",
-            signal: controller.signal,
-          });
-          if (!res.ok) {
-            const text = await res.text().catch(() => "");
-            throw new Error(messageForHttpError(res.status, text, res.statusText));
+          onProgress?.(`Starting upload… (0/${totalChunks})`);
+          const initHeaders = new Headers(authHeaders({ "Content-Type": "application/json" }));
+          const initController = new AbortController();
+          const initTimer = window.setTimeout(
+            () => initController.abort(),
+            ATTACHMENT_UPLOAD_TIMEOUT_MS,
+          );
+          let init: { upload_id: string; total_chunks: number };
+          try {
+            const initRes = await fetch(`${base}/email/attachments/chunk-init`, {
+              method: "POST",
+              headers: initHeaders,
+              credentials: base === API_BASE ? "include" : "omit",
+              signal: initController.signal,
+              body: JSON.stringify({
+                filename: file.name,
+                content_type: file.type || null,
+                size: file.size,
+                total_chunks: totalChunks,
+              }),
+            });
+            if (!initRes.ok) {
+              const text = await initRes.text().catch(() => "");
+              throw new Error(messageForHttpError(initRes.status, text, initRes.statusText));
+            }
+            init = (await initRes.json()) as { upload_id: string; total_chunks: number };
+          } finally {
+            window.clearTimeout(initTimer);
+          }
+
+          for (let index = 0; index < totalChunks; index++) {
+            onProgress?.(
+              `Uploading ${file.name}… chunk ${index + 1}/${totalChunks}`,
+            );
+            const start = index * ATTACHMENT_CHUNK_BYTES;
+            const end = Math.min(file.size, start + ATTACHMENT_CHUNK_BYTES);
+            const blob = file.slice(start, end);
+            const form = new FormData();
+            form.append("upload_id", init.upload_id);
+            form.append("index", String(index));
+            form.append("file", blob, `${file.name}.part${index}`);
+
+            const controller = new AbortController();
+            const timer = window.setTimeout(
+              () => controller.abort(),
+              ATTACHMENT_UPLOAD_TIMEOUT_MS,
+            );
+            try {
+              const res = await fetch(`${base}/email/attachments/chunk`, {
+                method: "POST",
+                body: form,
+                headers: authHeaders(),
+                credentials: base === API_BASE ? "include" : "omit",
+                signal: controller.signal,
+              });
+              if (!res.ok) {
+                const text = await res.text().catch(() => "");
+                throw new Error(messageForHttpError(res.status, text, res.statusText));
+              }
+            } catch (err) {
+              const isAbort = err instanceof DOMException && err.name === "AbortError";
+              if (isAbort) {
+                throw new Error(
+                  `Upload timed out on chunk ${index + 1}/${totalChunks}. Close other upload tabs and try again.`,
+                );
+              }
+              throw err instanceof Error ? err : new Error(String(err));
+            } finally {
+              window.clearTimeout(timer);
+            }
+          }
+
+          onProgress?.(`Finishing upload…`);
+          const doneHeaders = new Headers(authHeaders({ "Content-Type": "application/json" }));
+          const doneController = new AbortController();
+          const doneTimer = window.setTimeout(
+            () => doneController.abort(),
+            ATTACHMENT_UPLOAD_TIMEOUT_MS,
+          );
+          try {
+            const doneRes = await fetch(`${base}/email/attachments/chunk-complete`, {
+              method: "POST",
+              headers: doneHeaders,
+              credentials: base === API_BASE ? "include" : "omit",
+              signal: doneController.signal,
+              body: JSON.stringify({ upload_id: init.upload_id }),
+            });
+            if (!doneRes.ok) {
+              const text = await doneRes.text().catch(() => "");
+              throw new Error(messageForHttpError(doneRes.status, text, doneRes.statusText));
+            }
+            return (await doneRes.json()) as EmailAttachment;
+          } finally {
+            window.clearTimeout(doneTimer);
           }
         } catch (err) {
-          const isAbort = err instanceof DOMException && err.name === "AbortError";
-          if (isAbort) {
-            throw new Error(
-              `Upload timed out on chunk ${index + 1}/${totalChunks}. Check your connection and try again.`,
-            );
+          lastError = err instanceof Error ? err : new Error(String(err));
+          const msg = lastError.message || "";
+          if (/too large|under \d+ MB|not allowed|empty/i.test(msg)) {
+            throw lastError;
           }
-          throw err instanceof Error ? err : new Error(String(err));
-        } finally {
-          window.clearTimeout(timer);
+          // Try next base (Railway → same-origin /api).
+          continue;
         }
       }
-
-      return request<EmailAttachment>("/email/attachments/chunk-complete", {
-        method: "POST",
-        body: JSON.stringify({ upload_id: init.upload_id }),
-      });
+      throw lastError || new Error("Attachment upload failed");
     }
 
     // Small files: single POST (prefer Railway direct, fall back to same-origin /api).
+    onProgress?.(`Uploading ${file.name}…`);
     const endpoints = [RAILWAY_API_BASE, API_BASE].filter(
       (base, index, all) => all.indexOf(base) === index,
     );
@@ -3585,7 +3647,7 @@ export const client = {
       } catch (err) {
         const isAbort = err instanceof DOMException && err.name === "AbortError";
         lastError = isAbort
-          ? new Error("Upload timed out. Check your connection and try again.")
+          ? new Error("Upload timed out. Close other upload tabs and try again.")
           : err instanceof Error
             ? err
             : new Error(String(err));
