@@ -1854,7 +1854,13 @@ function DashboardApp() {
                 onFolderCountsChange={handleMailCountsChange}
                 onMailExtrasChange={() => void loadMailExtras()}
                 onSelectMailSection={handleSelectMailSection}
-                onOpenMailerCompose={() => void openMailerApp("/compose")}
+                onOpenMailerCompose={(opts) => {
+                  const params = new URLSearchParams();
+                  if (opts?.to?.trim()) params.set("to", opts.to.trim());
+                  if (opts?.cc?.trim()) params.set("cc", opts.cc.trim());
+                  const qs = params.toString();
+                  void openMailerApp(qs ? `/compose?${qs}` : "/compose");
+                }}
                 initialThreadId={targetThreadId}
                 initialMailboxUserId={targetMailboxUserId}
                 activeMailboxUserId={isAsimUser ? asimActiveMailboxUserId : null}

@@ -21,6 +21,7 @@ import {
 } from "../components/AppSidebar";
 import { CreateLabelModal } from "../components/CreateLabelModal";
 import { ComposeMailModal } from "../components/ComposeMailModal";
+import { ComposeRecipientsPickerModal } from "../components/ComposeRecipientsPickerModal";
 import { AttachedFilesList } from "../components/AttachedFilesList";
 import { AttachCatalogueModal } from "../components/AttachCatalogueModal";
 import {
@@ -69,8 +70,8 @@ interface InboxPageProps {
   }) => void;
   onMailExtrasChange?: () => void;
   onSelectMailSection?: (section: MailSection) => void;
-  /** Open Vercel mailer compose (mailer-pied). */
-  onOpenMailerCompose?: () => void;
+  /** Open Vercel mailer compose (mailer-pied), optionally with To/Cc prefilled. */
+  onOpenMailerCompose?: (opts?: { to?: string; cc?: string }) => void;
   initialThreadId?: string | null;
   initialMailboxUserId?: number | null;
   /** Asim shared mailbox (marketing/info/essence) — switched from header only. */
@@ -393,6 +394,7 @@ export function InboxPage({
   const [aiAnalysis, setAiAnalysis] = useState<InboxAnalyzeResponse | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [showCompose, setShowCompose] = useState(false);
+  const [showComposeRecipients, setShowComposeRecipients] = useState(false);
   const [composeDraft, setComposeDraft] = useState<MailComposeDraft | null>(null);
   const [drafts, setDrafts] = useState<MailComposeDraft[]>([]);
   const [labels, setLabels] = useState<MailLabel[]>([]);
@@ -1742,17 +1744,8 @@ export function InboxPage({
             icon={IconPlus}
             variant="primary"
             size="md"
-            onClick={() => {
-              // Localhost: in-app compose logs Email Activity to this backend.
-              // Live: open Vercel mailer (SMTP off Railway Hobby).
-              if (onOpenMailerCompose && !import.meta.env.DEV) {
-                onOpenMailerCompose();
-                return;
-              }
-              setComposeDraft(null);
-              setShowCompose(true);
-            }}
-            title="Compose"
+            onClick={() => setShowComposeRecipients(true)}
+            title="Choose To / Cc contacts, then compose"
           >
             Compose
           </ActionButton>
@@ -3108,6 +3101,34 @@ export function InboxPage({
           onClose={() => setShowAttachCatalogue(false)}
           onAttach={(newAtts) => setReplyAttachments((prev) => [...prev, ...newAtts])}
           onError={onError}
+        />
+      )}
+
+      {showComposeRecipients && (
+        <ComposeRecipientsPickerModal
+          onClose={() => setShowComposeRecipients(false)}
+          onError={onError}
+          onContinue={({ to, cc }) => {
+            setShowComposeRecipients(false);
+            const toStr = to.join(", ");
+            const ccStr = cc.join(", ");
+            // Live: open Vercel mailer with To/Cc prefilled.
+            // Localhost: in-app compose so Email Activity logs to this backend.
+            if (onOpenMailerCompose && !import.meta.env.DEV) {
+              onOpenMailerCompose({ to: toStr, cc: ccStr });
+              return;
+            }
+            setComposeDraft({
+              id: 0,
+              to_addrs: toStr,
+              cc_addrs: ccStr,
+              subject: "",
+              body: "",
+              created_at: "",
+              updated_at: "",
+            });
+            setShowCompose(true);
+          }}
         />
       )}
 
