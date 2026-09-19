@@ -426,10 +426,11 @@ function ComposeInner() {
         </button>
         <button
           type="button"
-          className="btn ghost"
+          className="btn"
           disabled={sending || saving || bodyAlreadyHasSignature(body)}
           title="Paste Khalid Paracha signature at the bottom of the body"
           onClick={() => setBody((prev) => appendManualSignature(prev))}
+          style={{ background: bodyAlreadyHasSignature(body) ? undefined : "#047857" }}
         >
           {bodyAlreadyHasSignature(body) ? "Signature added" : "Add signature"}
         </button>
