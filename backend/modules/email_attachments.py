@@ -34,18 +34,43 @@ STORAGE_DIR = _resolve_storage_dir()
 MAX_FILE_BYTES = 18 * 1024 * 1024  # ~24 MB on the wire after SMTP base64
 MAX_FILES_PER_EMAIL = 8
 
-ALLOWED_CONTENT_TYPES = {
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "image/webp",
-    "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "text/plain",
-    "text/csv",
+# Block malware-prone types; allow other business files (PDF, Office, ZIP, images, …).
+BLOCKED_EXTENSIONS = {
+    ".exe",
+    ".msi",
+    ".msp",
+    ".bat",
+    ".cmd",
+    ".com",
+    ".scr",
+    ".dll",
+    ".sys",
+    ".ps1",
+    ".psd1",
+    ".psm1",
+    ".vbs",
+    ".vbe",
+    ".js",
+    ".jse",
+    ".wsf",
+    ".wsh",
+    ".hta",
+    ".cpl",
+    ".msc",
+    ".jar",
+    ".apk",
+    ".dmg",
+    ".app",
+    ".deb",
+    ".rpm",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".reg",
+    ".inf",
+    ".lnk",
+    ".iso",
+    ".img",
 }
 
 _EXTENSION_TO_TYPE = {
@@ -54,13 +79,35 @@ _EXTENSION_TO_TYPE = {
     ".png": "image/png",
     ".gif": "image/gif",
     ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".svg": "image/svg+xml",
     ".pdf": "application/pdf",
     ".doc": "application/msword",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".xls": "application/vnd.ms-excel",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".rtf": "application/rtf",
+    ".odt": "application/vnd.oasis.opendocument.text",
+    ".ods": "application/vnd.oasis.opendocument.spreadsheet",
+    ".odp": "application/vnd.oasis.opendocument.presentation",
     ".txt": "text/plain",
     ".csv": "text/csv",
+    ".json": "application/json",
+    ".xml": "application/xml",
+    ".zip": "application/zip",
+    ".rar": "application/vnd.rar",
+    ".7z": "application/x-7z-compressed",
+    ".gz": "application/gzip",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".eml": "message/rfc822",
+    ".msg": "application/vnd.ms-outlook",
 }
 
 
@@ -71,11 +118,26 @@ def _sanitize_filename(name: str) -> str:
 
 
 def _guess_content_type(filename: str, content_type: str | None) -> str:
-    if content_type and content_type in ALLOWED_CONTENT_TYPES:
-        return content_type
     ext = Path(filename).suffix.lower()
-    return _EXTENSION_TO_TYPE.get(ext, content_type or "application/octet-stream")
+    if ext in _EXTENSION_TO_TYPE:
+        return _EXTENSION_TO_TYPE[ext]
+    if content_type and content_type.strip() and content_type != "application/octet-stream":
+        return content_type.split(";")[0].strip().lower()
+    return "application/octet-stream"
 
+
+def _assert_attachment_allowed(filename: str, content_type: str | None = None) -> str:
+    """Reject executables/scripts; return a safe content type for everything else."""
+    clean = _sanitize_filename(filename)
+    ext = Path(clean).suffix.lower()
+    if ext in BLOCKED_EXTENSIONS:
+        raise ValueError(
+            f"File type not allowed for '{clean}'. "
+            "Executables and scripts cannot be emailed — use PDF, Office, ZIP, images, etc."
+        )
+    # Double-extension tricks: report.evil.exe.pdf still ends with .pdf — OK.
+    # report.pdf.exe is blocked via .exe.
+    return _guess_content_type(clean, content_type)
 
 def public_attachment(meta: dict) -> dict:
     res = {
@@ -128,12 +190,7 @@ def resolve_catalogue_file(identifier: str) -> Path | None:
 
 async def save_upload(file: UploadFile) -> dict:
     filename = _sanitize_filename(file.filename or "attachment")
-    content_type = _guess_content_type(filename, file.content_type)
-    if content_type not in ALLOWED_CONTENT_TYPES:
-        allowed = ", ".join(sorted(ALLOWED_CONTENT_TYPES))
-        raise ValueError(
-            f"File type not allowed for '{filename}'. Supported: images, PDF, Word, Excel, TXT, CSV."
-        )
+    content_type = _assert_attachment_allowed(filename, file.content_type)
 
     data = await file.read()
     if not data:
@@ -171,11 +228,7 @@ def init_chunked_upload(
     total_chunks: int,
 ) -> dict:
     clean_name = _sanitize_filename(filename)
-    guessed = _guess_content_type(clean_name, content_type)
-    if guessed not in ALLOWED_CONTENT_TYPES:
-        raise ValueError(
-            f"File type not allowed for '{clean_name}'. Supported: images, PDF, Word, Excel, TXT, CSV."
-        )
+    guessed = _assert_attachment_allowed(clean_name, content_type)
     if size <= 0 or size > MAX_FILE_BYTES:
         raise ValueError(
             f"File '{clean_name}' must be between 1 byte and {MAX_FILE_BYTES // (1024 * 1024)} MB"
