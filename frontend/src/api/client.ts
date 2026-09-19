@@ -143,13 +143,16 @@ function messageForHttpError(status: number, text: string, statusText: string): 
   return sanitizeUserFacingError(parsed);
 }
 
-/** Direct Railway API — bypasses Vercel rewrite body limit (~4.5 MB) for large file uploads. */
+/** Direct Railway API — used for small single-shot uploads when same-origin proxy is fine to skip. */
 const RAILWAY_API_BASE = "https://kafi-sales-agent-production.up.railway.app/api";
 
 /** Email providers reject ~25 MB total messages; keep each file under this. */
 export const EMAIL_ATTACHMENT_MAX_BYTES = 24 * 1024 * 1024;
 
-const ATTACHMENT_UPLOAD_TIMEOUT_MS = 180_000;
+/** Chunk size for uploads through the Vercel /api rewrite (~4.5 MB body limit). */
+const ATTACHMENT_CHUNK_BYTES = 2.5 * 1024 * 1024;
+
+const ATTACHMENT_UPLOAD_TIMEOUT_MS = 120_000;
 
 export interface VoiceEngineSettings {
   vapi_enabled: boolean;
@@ -302,6 +305,13 @@ function timeoutForPath(path: string): number {
   }
   if (/^\/leads\/\d+\/(onboard|research|score)(\?|$)/.test(path)) {
     return LEAD_ONBOARD_TIMEOUT_MS;
+  }
+  if (
+    path.startsWith("/email/attachments/chunk") ||
+    path.startsWith("/email/attachments/chunk-init") ||
+    path.startsWith("/email/attachments/chunk-complete")
+  ) {
+    return 120_000;
   }
   if (path.startsWith("/data-synthesis/start")) {
     return SYNTHESIS_UPLOAD_TIMEOUT_MS;
@@ -3486,8 +3496,69 @@ export const client = {
       );
     }
 
-    // Prefer direct Railway upload so PDFs aren't capped by the Vercel /api rewrite (~4.5 MB).
-    // Fall back to same-origin /api when Railway is unreachable (local/dev).
+    // Large files: chunked upload through same-origin /api (cookie auth, ~2.5 MB per request).
+    // Avoids Vercel 4.5 MB rewrite limit and long single-request timeouts.
+    if (file.size > ATTACHMENT_CHUNK_BYTES) {
+      const totalChunks = Math.ceil(file.size / ATTACHMENT_CHUNK_BYTES);
+      const init = await request<{ upload_id: string; total_chunks: number }>(
+        "/email/attachments/chunk-init",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            filename: file.name,
+            content_type: file.type || null,
+            size: file.size,
+            total_chunks: totalChunks,
+          }),
+        },
+      );
+
+      for (let index = 0; index < totalChunks; index++) {
+        const start = index * ATTACHMENT_CHUNK_BYTES;
+        const end = Math.min(file.size, start + ATTACHMENT_CHUNK_BYTES);
+        const blob = file.slice(start, end);
+        const form = new FormData();
+        form.append("upload_id", init.upload_id);
+        form.append("index", String(index));
+        form.append("file", blob, `${file.name}.part${index}`);
+
+        const controller = new AbortController();
+        const timer = window.setTimeout(
+          () => controller.abort(),
+          ATTACHMENT_UPLOAD_TIMEOUT_MS,
+        );
+        try {
+          const res = await fetch(`${API_BASE}/email/attachments/chunk`, {
+            method: "POST",
+            body: form,
+            headers: authHeaders(),
+            credentials: "include",
+            signal: controller.signal,
+          });
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(messageForHttpError(res.status, text, res.statusText));
+          }
+        } catch (err) {
+          const isAbort = err instanceof DOMException && err.name === "AbortError";
+          if (isAbort) {
+            throw new Error(
+              `Upload timed out on chunk ${index + 1}/${totalChunks}. Check your connection and try again.`,
+            );
+          }
+          throw err instanceof Error ? err : new Error(String(err));
+        } finally {
+          window.clearTimeout(timer);
+        }
+      }
+
+      return request<EmailAttachment>("/email/attachments/chunk-complete", {
+        method: "POST",
+        body: JSON.stringify({ upload_id: init.upload_id }),
+      });
+    }
+
+    // Small files: single POST (prefer Railway direct, fall back to same-origin /api).
     const endpoints = [RAILWAY_API_BASE, API_BASE].filter(
       (base, index, all) => all.indexOf(base) === index,
     );
@@ -3513,15 +3584,13 @@ export const client = {
         return (await res.json()) as EmailAttachment;
       } catch (err) {
         const isAbort = err instanceof DOMException && err.name === "AbortError";
-        if (isAbort) {
-          throw new Error(
-            "Upload timed out. Check your connection and try a smaller file (under 24 MB).",
-          );
-        }
-        lastError = err instanceof Error ? err : new Error(String(err));
-        // Retry next endpoint only for network failures, not for HTTP 4xx/413 messages.
+        lastError = isAbort
+          ? new Error("Upload timed out. Check your connection and try again.")
+          : err instanceof Error
+            ? err
+            : new Error(String(err));
         const msg = lastError.message || "";
-        if (/too large|under \d+ MB|Request failed|not allowed|empty|gateway/i.test(msg)) {
+        if (/too large|under \d+ MB|not allowed|empty|gateway/i.test(msg) && !isAbort) {
           throw lastError;
         }
         continue;

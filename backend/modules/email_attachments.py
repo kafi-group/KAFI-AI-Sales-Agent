@@ -158,6 +158,143 @@ async def save_upload(file: UploadFile) -> dict:
     }
 
 
+# Chunked uploads — stay under Vercel/proxy ~4.5 MB body limits while assembling up to MAX_FILE_BYTES.
+CHUNK_UPLOAD_DIR = STORAGE_DIR / "_chunks"
+CHUNK_META_SUFFIX = "meta.json"
+
+
+def init_chunked_upload(
+    *,
+    filename: str,
+    content_type: str | None,
+    size: int,
+    total_chunks: int,
+) -> dict:
+    clean_name = _sanitize_filename(filename)
+    guessed = _guess_content_type(clean_name, content_type)
+    if guessed not in ALLOWED_CONTENT_TYPES:
+        raise ValueError(
+            f"File type not allowed for '{clean_name}'. Supported: images, PDF, Word, Excel, TXT, CSV."
+        )
+    if size <= 0 or size > MAX_FILE_BYTES:
+        raise ValueError(
+            f"File '{clean_name}' must be between 1 byte and {MAX_FILE_BYTES // (1024 * 1024)} MB"
+        )
+    if total_chunks < 1 or total_chunks > 64:
+        raise ValueError("Invalid chunk count")
+
+    upload_id = str(uuid.uuid4())
+    chunk_dir = CHUNK_UPLOAD_DIR / upload_id
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "upload_id": upload_id,
+        "filename": clean_name,
+        "content_type": guessed,
+        "size": int(size),
+        "total_chunks": int(total_chunks),
+        "received": [],
+    }
+    (chunk_dir / CHUNK_META_SUFFIX).write_text(
+        __import__("json").dumps(meta), encoding="utf-8"
+    )
+    return {"upload_id": upload_id, "total_chunks": int(total_chunks)}
+
+
+async def save_upload_chunk(upload_id: str, index: int, file: UploadFile) -> dict:
+    clean_id = (upload_id or "").strip()
+    if not clean_id or "/" in clean_id or "\\" in clean_id or ".." in clean_id:
+        raise ValueError("Invalid upload id")
+    if index < 0 or index > 63:
+        raise ValueError("Invalid chunk index")
+
+    chunk_dir = CHUNK_UPLOAD_DIR / clean_id
+    meta_path = chunk_dir / CHUNK_META_SUFFIX
+    if not meta_path.is_file():
+        raise ValueError("Upload session not found or expired — start the upload again")
+
+    import json
+
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    total = int(meta.get("total_chunks") or 0)
+    if index >= total:
+        raise ValueError("Chunk index out of range")
+
+    data = await file.read()
+    if not data:
+        raise ValueError(f"Chunk {index} is empty")
+    # Soft per-chunk ceiling (~3 MB) so each request fits proxy limits.
+    if len(data) > 3 * 1024 * 1024 + 64_000:
+        raise ValueError("Chunk too large — use smaller chunks")
+
+    (chunk_dir / f"{index:04d}.part").write_bytes(data)
+    received = set(meta.get("received") or [])
+    received.add(index)
+    meta["received"] = sorted(received)
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    return {"upload_id": clean_id, "index": index, "received": len(received), "total_chunks": total}
+
+
+def complete_chunked_upload(upload_id: str) -> dict:
+    clean_id = (upload_id or "").strip()
+    if not clean_id or "/" in clean_id or "\\" in clean_id or ".." in clean_id:
+        raise ValueError("Invalid upload id")
+
+    import json
+    import shutil
+
+    chunk_dir = CHUNK_UPLOAD_DIR / clean_id
+    meta_path = chunk_dir / CHUNK_META_SUFFIX
+    if not meta_path.is_file():
+        raise ValueError("Upload session not found or expired — start the upload again")
+
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    total = int(meta.get("total_chunks") or 0)
+    received = set(meta.get("received") or [])
+    missing = [i for i in range(total) if i not in received]
+    if missing:
+        raise ValueError(f"Missing chunks: {missing[:8]}")
+
+    parts: list[bytes] = []
+    for i in range(total):
+        part_path = chunk_dir / f"{i:04d}.part"
+        if not part_path.is_file():
+            raise ValueError(f"Missing chunk file {i}")
+        parts.append(part_path.read_bytes())
+    data = b"".join(parts)
+    expected = int(meta.get("size") or 0)
+    if expected and abs(len(data) - expected) > 0:
+        # Allow slight mismatch only if meta size was approximate; require exact.
+        if len(data) != expected:
+            raise ValueError(
+                f"Assembled size {len(data)} does not match declared size {expected}"
+            )
+    if len(data) > MAX_FILE_BYTES:
+        raise ValueError(
+            f"File exceeds {MAX_FILE_BYTES // (1024 * 1024)} MB limit"
+        )
+
+    filename = str(meta.get("filename") or "attachment")
+    content_type = str(meta.get("content_type") or "application/octet-stream")
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    att_id = str(uuid.uuid4())
+    storage_name = f"{att_id}_{_sanitize_filename(filename)}"
+    abs_path = STORAGE_DIR / storage_name
+    abs_path.write_bytes(data)
+
+    try:
+        shutil.rmtree(chunk_dir, ignore_errors=True)
+    except Exception:
+        pass
+
+    return {
+        "id": att_id,
+        "filename": _sanitize_filename(filename),
+        "content_type": content_type,
+        "size": len(data),
+        "storage_path": f"email_attachments/{storage_name}",
+    }
+
+
 def register_attachment_from_path(
     source_path: Path, filename: str | None = None, content_type: str = "application/pdf"
 ) -> dict:
