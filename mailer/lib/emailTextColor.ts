@@ -68,8 +68,40 @@ function parseRgb(color: string): [number, number, number] | null {
   if (rgb) {
     return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
   }
-  if (raw === "black" || raw === "windowtext" || raw === "text") return [0, 0, 0];
-  if (raw === "white") return [255, 255, 255];
+
+  const hsl = /^hsla?\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%/i.exec(raw);
+  if (hsl) {
+    const h = Number(hsl[1]) / 360;
+    const s = Number(hsl[2]) / 100;
+    const l = Number(hsl[3]) / 100;
+    const hue2rgb = (p: number, q: number, t: number) => {
+      let tt = t;
+      if (tt < 0) tt += 1;
+      if (tt > 1) tt -= 1;
+      if (tt < 1 / 6) return p + (q - p) * 6 * tt;
+      if (tt < 1 / 2) return q;
+      if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
+      return p;
+    };
+    let r: number;
+    let g: number;
+    let b: number;
+    if (s === 0) {
+      r = g = b = l;
+    } else {
+      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+      const p = 2 * l - q;
+      r = hue2rgb(p, q, h + 1 / 3);
+      g = hue2rgb(p, q, h);
+      b = hue2rgb(p, q, h - 1 / 3);
+    }
+    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+  }
+
+  if (raw === "black" || raw === "windowtext" || raw === "text" || raw === "canvastext") {
+    return [0, 0, 0];
+  }
+  if (raw === "white" || raw === "canvas") return [255, 255, 255];
   return null;
 }
 
@@ -84,16 +116,16 @@ function luminance(color: string): number | null {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-function isDarkColor(color: string): boolean {
-  const lum = luminance(color);
-  if (lum == null) return false;
-  return lum < 0.55;
-}
-
 function isLightColor(color: string): boolean {
   const lum = luminance(color);
   if (lum == null) return false;
   return lum > 0.72;
+}
+
+function isDarkColor(color: string): boolean {
+  const lum = luminance(color);
+  if (lum == null) return false;
+  return lum < 0.55;
 }
 
 /** Detect mailer chrome theme from CSS variables / color-scheme. */
@@ -111,7 +143,6 @@ export function getMailerUiTheme(): MailerUiTheme {
     const lum = luminance(bg);
     if (lum != null) return lum < 0.45 ? "dark" : "light";
   }
-  // Mailer ships dark by default.
   return "dark";
 }
 
@@ -120,20 +151,40 @@ export function getComposeDefaultTextColor(theme?: MailerUiTheme): string {
   return t === "dark" ? DARK_TEXT : LIGHT_TEXT;
 }
 
+/**
+ * Dark UI: force anything that isn't already light to white (incl. unknown tokens).
+ * Light UI: force light/unknown to black.
+ */
 function shouldForceColor(cssColor: string, theme: MailerUiTheme): boolean {
   const v = cleanColorToken(cssColor);
   if (!v || v === "inherit" || v === "currentcolor" || v === "transparent") {
     return false;
   }
-  if (theme === "dark") return isDarkColor(v);
-  return isLightColor(v);
+  if (theme === "dark") {
+    if (isLightColor(v)) return false;
+    return true;
+  }
+  if (isDarkColor(v)) return false;
+  return true;
 }
 
-function rewriteInlineColor(style: string, theme: MailerUiTheme, target: string): string {
-  return style.replace(/(^|;)\s*color\s*:\s*([^;]+)/gi, (full, lead: string, value: string) => {
-    if (!shouldForceColor(value, theme)) return full;
-    return `${lead} color: ${target}`;
-  });
+function rewriteColorProps(style: string, theme: MailerUiTheme, target: string): string {
+  let next = style.replace(
+    /(^|;)\s*(-webkit-text-fill-)?color\s*:\s*([^;]+)/gi,
+    (full, lead: string, webkit: string | undefined, value: string) => {
+      if (!shouldForceColor(value, theme)) return full;
+      const prop = webkit ? "-webkit-text-fill-color" : "color";
+      return `${lead} ${prop}: ${target}`;
+    },
+  );
+  // Drop fill that would hide white text on dark chrome
+  if (theme === "dark") {
+    next = next.replace(/(^|;)\s*-webkit-text-fill-color\s*:\s*([^;]+)/gi, (full, lead, value) => {
+      if (!shouldForceColor(value, theme)) return full;
+      return `${lead} -webkit-text-fill-color: ${target}`;
+    });
+  }
+  return next;
 }
 
 function unwrapComposeWrappers(root: HTMLElement) {
@@ -145,6 +196,16 @@ function unwrapComposeWrappers(root: HTMLElement) {
     }
     break;
   }
+}
+
+function forceElementColor(el: Element, target: string, theme: MailerUiTheme) {
+  const st = el.getAttribute("style") || "";
+  const rewritten = rewriteColorProps(st, theme, target);
+  if (/color\s*:/i.test(rewritten)) {
+    el.setAttribute("style", rewritten);
+    return;
+  }
+  el.setAttribute("style", `color:${target}${rewritten ? `;${rewritten}` : ""}`);
 }
 
 /**
@@ -161,13 +222,13 @@ export function normalizeEditorTextColor(
 
   if (typeof DOMParser === "undefined") {
     if (ui === "dark") {
-      return html
-        .replace(/color\s*:\s*#0{3,8}\b/gi, `color:${target}`)
-        .replace(/color\s*:\s*#111827\b/gi, `color:${target}`)
-        .replace(/color\s*:\s*#1f2937\b/gi, `color:${target}`)
-        .replace(/color\s*:\s*#374151\b/gi, `color:${target}`)
-        .replace(/color\s*:\s*black\b/gi, `color:${target}`)
-        .replace(/color\s*:\s*rgb\(\s*0\s*,\s*0\s*,\s*0\s*\)/gi, `color:${target}`);
+      return (
+        `<div ${WRAP_ATTR}="${target}" style="color:${target}">` +
+        html
+          .replace(/color\s*:\s*[^;)"']+/gi, `color:${target}`)
+          .replace(/color\s*=\s*["']?[^"'\s>]+/gi, `color="${target}"`) +
+        `</div>`
+      );
     }
     return html;
   }
@@ -181,34 +242,37 @@ export function normalizeEditorTextColor(
 
   unwrapComposeWrappers(root);
 
+  // Embedded <style> blocks from Word/Gmail often force black body text.
+  root.querySelectorAll("style").forEach((node) => node.remove());
+
   const walk = (el: Element) => {
     if (el.hasAttribute("style")) {
       el.setAttribute(
         "style",
-        rewriteInlineColor(el.getAttribute("style") || "", ui, target),
+        rewriteColorProps(el.getAttribute("style") || "", ui, target),
       );
     }
     if (el.tagName === "FONT" && el.hasAttribute("color")) {
       const c = el.getAttribute("color") || "";
-      if (shouldForceColor(c, ui)) el.setAttribute("color", target);
+      if (shouldForceColor(c, ui) || (ui === "dark" && !isLightColor(c))) {
+        el.setAttribute("color", target);
+      }
     }
     if (TEXT_TAGS.has(el.tagName)) {
-      const st = el.getAttribute("style") || "";
-      if (!/color\s*:/i.test(st)) {
-        el.setAttribute("style", `color:${target}${st ? `;${st}` : ""}`);
-      }
+      forceElementColor(el, target, ui);
     }
     for (const child of Array.from(el.children)) walk(child);
   };
   walk(root);
 
-  return `<div ${WRAP_ATTR}="${target}" style="color:${target}">${root.innerHTML}</div>`;
+  return `<div ${WRAP_ATTR}="${target}" style="color:${target} !important">${root.innerHTML}</div>`;
 }
 
 /** Outbound email: white compose color must become dark for recipient inboxes. */
 export function normalizeOutboundTextColor(html: string): string {
   if (!html) return html;
   return html
+    .replace(/color\s*:\s*#ffffff\s*!important/gi, "color:#111827")
     .replace(/color\s*:\s*#ffffff\b/gi, "color:#111827")
     .replace(/color\s*:\s*#fff\b/gi, "color:#111827")
     .replace(/color\s*:\s*#f8fafc\b/gi, "color:#111827")

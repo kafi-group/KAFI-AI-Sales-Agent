@@ -590,8 +590,14 @@ select.template-select {
   min-height: 160px;
 }
 
-.rte-editor [data-kafi-compose-color] {
-  color: inherit;
+.rte-editor [data-kafi-compose-color],
+.rte-editor [data-kafi-compose-color] p,
+.rte-editor [data-kafi-compose-color] div,
+.rte-editor [data-kafi-compose-color] span,
+.rte-editor [data-kafi-compose-color] li,
+.rte-editor [data-kafi-compose-color] td {
+  /* Fallback when inline template colors were stripped; inline style still wins. */
+  color: var(--rte-text, #ffffff);
 }
 
 .rte-editor:empty:before {
