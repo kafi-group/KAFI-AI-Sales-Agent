@@ -93,6 +93,48 @@ _RUNNERS = [
 _TASKS: list[dict[str, Any]] = []
 
 
+def _persist_queue() -> None:
+    try:
+        from modules.ai_sales_queue_store import save_queue_state
+
+        save_queue_state(tasks=_TASKS, runners=_RUNNERS)
+    except Exception as exc:  # noqa: BLE001
+        print(f"AI Sales queue persist failed: {exc}", flush=True)
+
+
+def _load_persisted_queue() -> None:
+    global _TASKS
+    try:
+        from modules.ai_sales_queue_store import load_queue_state
+
+        data = load_queue_state()
+        tasks = [t for t in (data.get("tasks") or []) if isinstance(t, dict)]
+        # Interrupted dials become queued again.
+        for t in tasks:
+            if t.get("status") == "in_progress":
+                t["status"] = "queued"
+                t["call_sid"] = None
+                t["outcome"] = None
+                t["remarks"] = "Re-queued after server restart (call was interrupted)."
+                t.pop("started_at", None)
+        _TASKS = tasks
+        saved_runners = {
+            str(r.get("persona")): r
+            for r in (data.get("runners") or [])
+            if isinstance(r, dict) and r.get("persona")
+        }
+        for r in _RUNNERS:
+            snap = saved_runners.get(str(r["persona"])) or {}
+            if snap.get("operator_user_id") is not None:
+                r["operator_user_id"] = snap.get("operator_user_id")
+            r["status"] = "idle"
+            r["sequence_mode"] = False
+            r["current_task_id"] = None
+            r["current_task"] = None
+    except Exception as exc:  # noqa: BLE001
+        print(f"AI Sales queue load failed: {exc}", flush=True)
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -384,6 +426,7 @@ def _refresh_runner_counts() -> None:
             if r.get("status") == "running":
                 r["status"] = "idle"
                 r["sequence_mode"] = False
+    _persist_queue()
 
 
 def _dial_task(
@@ -431,6 +474,7 @@ def _dial_task(
         runner["current_task_id"] = task["id"]
         runner["current_task"] = task
         runner["operator_user_id"] = user.id
+    _persist_queue()
     return call_result
 
 
@@ -467,11 +511,16 @@ def _advance_sequence_locked(
     persona: str,
     user: AppUser | None,
 ) -> None:
-    if runner.get("status") != "running" or not runner.get("sequence_mode"):
+    if runner.get("status") == "paused":
+        _persist_queue()
+        return
+    # Single-number "Call this" — do not auto-dial the rest of the queue.
+    if not runner.get("sequence_mode"):
         if runner.get("status") == "running":
             runner["status"] = "idle"
             runner["current_task_id"] = None
             runner["current_task"] = None
+        _persist_queue()
         return
     if any(
         t.get("persona") == persona and t.get("status") == "in_progress" for t in _TASKS
@@ -483,15 +532,20 @@ def _advance_sequence_locked(
         runner["sequence_mode"] = False
         runner["current_task_id"] = None
         runner["current_task"] = None
+        _persist_queue()
         return
     operator = user or _load_operator(db, runner.get("operator_user_id") or nxt.get("operator_user_id"))
     if not operator:
         runner["status"] = "idle"
+        _persist_queue()
         return
+    runner["status"] = "running"
     try:
         _dial_task(db, task=nxt, user=operator)
     except HTTPException:
         nxt["status"] = "failed"
+        nxt["outcome"] = "Dial failed"
+        _persist_queue()
         _advance_sequence_locked(db, runner, persona, operator)
 
 
@@ -1486,3 +1540,11 @@ async def vapi_ai_agent_status(request: Request) -> dict[str, Any]:
         duration=duration,
         ended_reason=str(ended_reason or ""),
     )
+
+
+# Restore queue after all helpers exist (survives Railway redeploys).
+_load_persisted_queue()
+try:
+    _refresh_runner_counts()
+except Exception:
+    pass

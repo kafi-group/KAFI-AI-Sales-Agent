@@ -251,7 +251,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       setQueueNotice(
         `Added ${result.tasks.length} Master Table contact(s) to ${
           assignPersona === "female" ? "Sara" : "Rayan"
-        }'s queue.`,
+        }'s queue. Use Start calling (all in sequence) or Start Sara/Rayan so every contact is dialled — Call this only does one number.`,
       );
       setTimeout(() => setQueueNotice(null), 8000);
       await load();
@@ -684,8 +684,11 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         <div className="flex flex-wrap items-center gap-3">
           <h3 className="font-medium text-slate-100">Sara / Rayan pipeline</h3>
           <p className="w-full text-xs text-slate-500">
-            Contacts assigned from any Master list (or below) appear here — call, email, and WhatsApp
-            status per row.
+            Contacts stay here across server restarts. Use{" "}
+            <strong className="text-slate-300">Start calling (all in sequence)</strong> or{" "}
+            <strong className="text-slate-300">Start Sara / Rayan</strong> so every queued contact
+            is dialled, then WhatsApp + email after each call. &quot;Call this only&quot; does one
+            number and stops.
           </p>
           <select
             value={filterPersona}
@@ -865,9 +868,9 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                               disabled={callingTaskId === task.id || !task.contact_phone}
                               onClick={() => void handleCallOne(task)}
                               className="px-2 py-1 rounded bg-violet-600/20 hover:bg-violet-600/30 text-violet-200 border border-violet-500/30 text-xs font-semibold disabled:opacity-40"
-                              title="Call only this number"
+                              title="Call only this number (does not continue to the rest of the queue)"
                             >
-                              {callingTaskId === task.id ? "Calling…" : "Call this"}
+                              {callingTaskId === task.id ? "Calling…" : "Call this only"}
                             </button>
                             <button
                               type="button"
