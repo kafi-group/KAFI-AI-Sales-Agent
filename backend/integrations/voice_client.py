@@ -70,56 +70,75 @@ LANGUAGE_CONFIGS: dict[str, dict[str, str]] = {
         "voice_female": "en-US-JennyNeural",
         "voice_male": "en-US-GuyNeural",
         "greeting": "Hello, am I speaking with {c_name}?",
-        "instruction": "Conduct this conversation fluently and naturally in English.",
+        "instruction": (
+            "Start the call in English. If the customer speaks Urdu, Hindi, Arabic, or another "
+            "language — or mixes languages (e.g. English + Urdu) — immediately continue in THEIR "
+            "language with the same natural sales tone. Do not ask permission to switch; just switch."
+        ),
     },
     "ur": {
         "name": "Urdu",
         "voice_female": "ur-PK-UzmaNeural",
         "voice_male": "ur-PK-AsadNeural",
         "greeting": "سلام! کیا میری بات {c_name} سے ہو رہی ہے؟",
-        "instruction": "Conduct this entire conversation fluently, politely, and naturally in Urdu (اردو).",
+        "instruction": (
+            "Start the call in Urdu (اردو). If the customer replies in English or mixes Urdu and "
+            "English, match their language immediately and keep the conversation natural."
+        ),
     },
     "fr": {
         "name": "French",
         "voice_female": "fr-FR-DeniseNeural",
         "voice_male": "fr-FR-HenriNeural",
         "greeting": "Bonjour, est-ce que je parle à {c_name} ?",
-        "instruction": "Conduct this entire conversation fluently and naturally in French (Français).",
+        "instruction": (
+            "Start in French. If the customer switches language mid-call, continue in their language."
+        ),
     },
     "ar": {
         "name": "Arabic",
         "voice_female": "ar-SA-ZariyahNeural",
         "voice_male": "ar-SA-HamedNeural",
         "greeting": "مرحباً، هل أتحدث مع {c_name}؟",
-        "instruction": "Conduct this entire conversation fluently and naturally in formal B2B Arabic (العربية).",
+        "instruction": (
+            "Start in formal B2B Arabic. If the customer switches language mid-call, continue in their language."
+        ),
     },
     "de": {
         "name": "German",
         "voice_female": "de-DE-KatjaNeural",
         "voice_male": "de-DE-ConradNeural",
         "greeting": "Hallo, spreche ich mit {c_name}?",
-        "instruction": "Conduct this entire conversation fluently and naturally in German (Deutsch).",
+        "instruction": (
+            "Start in German. If the customer switches language mid-call, continue in their language."
+        ),
     },
     "ru": {
         "name": "Russian",
         "voice_female": "ru-RU-SvetlanaNeural",
         "voice_male": "ru-RU-DmitryNeural",
         "greeting": "Здравствуйте, я говорю с {c_name}?",
-        "instruction": "Conduct this entire conversation fluently and naturally in Russian (Русский).",
+        "instruction": (
+            "Start in Russian. If the customer switches language mid-call, continue in their language."
+        ),
     },
     "zh": {
         "name": "Chinese",
         "voice_female": "zh-CN-XiaoxiaoNeural",
         "voice_male": "zh-CN-YunxiNeural",
         "greeting": "您好，请问是 {c_name} 先生/女士吗？",
-        "instruction": "Conduct this entire conversation fluently and naturally in Mandarin Chinese (中文).",
+        "instruction": (
+            "Start in Mandarin Chinese. If the customer switches language mid-call, continue in their language."
+        ),
     },
     "ja": {
         "name": "Japanese",
         "voice_female": "ja-JP-NanamiNeural",
         "voice_male": "ja-JP-KeitaNeural",
         "greeting": "こんにちは、{c_name}様でしょうか？",
-        "instruction": "Conduct this entire conversation fluently, politely, and naturally in Japanese (日本語).",
+        "instruction": (
+            "Start in Japanese. If the customer switches language mid-call, continue in their language."
+        ),
     },
     "fil": {
         "name": "Filipino",
@@ -127,8 +146,7 @@ LANGUAGE_CONFIGS: dict[str, dict[str, str]] = {
         "voice_male": "fil-PH-AngeloNeural",
         "greeting": "Hello po, kausap ko ba si {c_name}?",
         "instruction": (
-            "Conduct this entire conversation fluently, politely, and naturally in Filipino "
-            "(Tagalog), suitable for Philippines B2B callers."
+            "Start in Filipino (Tagalog). If the customer switches language mid-call, continue in their language."
         ),
     },
 }
@@ -463,14 +481,17 @@ class VoiceClient:
                 eleven_key = getattr(settings, "elevenlabs_api_key", None)
                 eleven_on = getattr(settings, "elevenlabs_enabled", False)
                 if eleven_on and eleven_key and eleven_key.strip():
+                    # ElevenLabs multilingual voices handle EN↔Urdu code-switching well.
                     voice_config = {
                         "provider": "11labs",
                         "voiceId": "21m00Tcm4TlvDq8ikWAM" if persona == "female" else "ErXwobaYiN019PkySvjV",
                     }
                 else:
+                    # Vapi Voices v2 auto language — required for mid-call Urdu/English switching.
                     voice_config = {
-                        "provider": "azure",
-                        "voiceId": lang_cfg["voice_female"] if persona == "female" else lang_cfg["voice_male"],
+                        "provider": "vapi",
+                        "voiceId": "Savannah" if persona == "female" else "Elliot",
+                        "language": "auto",
                     }
 
                 try:
@@ -513,13 +534,18 @@ class VoiceClient:
                 system_prompt = (
                     f"You are {agent_name}, a friendly, natural, and sharp B2B AI Sales Representative for Kafi Commodities. "
                     "Kafi Commodities is a leading global exporter of White Rice (Basmati 1121 & 5% Broken), Sesame Seeds (99% Purity), Yellow Corn, Spices, and Edible Oils.\n\n"
-                    f"LANGUAGE INSTRUCTION:\n{lang_cfg['instruction']}\n\n"
+                    f"LANGUAGE INSTRUCTION:\n{lang_cfg['instruction']}\n"
+                    "Supported languages you speak fluently: English, Urdu (اردو), Hindi, Arabic, and common "
+                    "business English–Urdu mix (Hinglish/Urdish). When the customer changes language mid-call, "
+                    "YOU MUST reply in that new language from the next sentence onward. Never say you only "
+                    "speak one language. Never force English if they are speaking Urdu.\n\n"
                     "STRICT CONVERSATIONAL PROTOCOL & RULES:\n"
                     f"1. OPENING GREETING: You start the call by asking '{first_msg}'. Once the customer confirms, introduce {agent_name} from Kafi Commodities and offer our product catalogue and price list.\n"
                     "2. DO NOT REPEAT THE CUSTOMER'S NAME: You already asked for their name in the greeting. NEVER repeat their name in every sentence during the call.\n"
                     "3. DO NOT ASK FOR EMAIL OR PHONE NUMBER: We ALREADY have the customer's email and phone number in our system. NEVER ask the buyer to give you their email or phone number.\n"
-                    "4. CATALOGUE & PRICE LIST DELIVERY: Tell the buyer: 'I am going to send our full product catalogue and CNF price list directly to your WhatsApp and email so you can go through it. Please take a look when you get a chance!'\n"
-                    "5. SHORT SPOKEN RESPONSES: Speak concisely in 1 to 2 spoken sentences so the conversation feels natural over the phone.\n\n"
+                    "4. CATALOGUE & PRICE LIST DELIVERY: Tell the buyer you will send the full product catalogue and CNF price list to WhatsApp and email — say this in whatever language the call is currently in.\n"
+                    "5. SHORT SPOKEN RESPONSES: Speak concisely in 1 to 2 spoken sentences so the conversation feels natural over the phone.\n"
+                    "6. LANGUAGE SWITCHING: If they speak Urdu, answer in Urdu. If they mix, you may mix naturally. Mirror their language every turn.\n\n"
                     f"LEARNED SALES PLAYBOOK:\n{insights_txt}\n\n"
                     f"CUSTOM SALES RULES:\n{rules_txt}"
                     f"{contact_block}"
@@ -542,6 +568,12 @@ class VoiceClient:
                             ],
                         },
                         "voice": voice_config,
+                        # Auto-detect language changes mid-call (EN ↔ Urdu, etc.).
+                        "transcriber": {
+                            "provider": "deepgram",
+                            "model": "nova-3",
+                            "language": "multi",
+                        },
                     },
                 }
 
