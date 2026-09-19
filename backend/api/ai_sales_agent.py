@@ -1137,6 +1137,256 @@ def put_ai_auto_mode(
     return update_auto_mode_settings(patch)
 
 
+class ProcessScheduleModel(BaseModel):
+    kind: str = "daily"
+    time: str = "09:45"
+    weekdays: list[str] | None = None
+
+
+class ProcessActionsModel(BaseModel):
+    call: bool = False
+    email: bool = True
+    whatsapp: bool = True
+
+
+class ProcessCreateRequest(BaseModel):
+    name: str
+    persona: str = "female"
+    enabled: bool = True
+    schedule: ProcessScheduleModel | None = None
+    actions: ProcessActionsModel | None = None
+    buyer_ids: list[int] = []
+    contact_ids: list[int | None] | None = None
+
+
+class ProcessUpdateRequest(BaseModel):
+    name: str | None = None
+    persona: str | None = None
+    enabled: bool | None = None
+    schedule: ProcessScheduleModel | None = None
+    actions: ProcessActionsModel | None = None
+    buyer_ids: list[int] | None = None
+    contact_ids: list[int | None] | None = None
+
+
+def execute_recurring_process(
+    db: Session,
+    *,
+    process: dict[str, Any],
+    user: AppUser,
+) -> dict[str, Any]:
+    """Assign process contacts to Sara/Rayan queue and run ticked actions."""
+    personas: list[str] = []
+    persona = str(process.get("persona") or "female")
+    if persona == "both":
+        personas = ["female", "male"]
+    elif persona in ("male", "female"):
+        personas = [persona]
+    else:
+        personas = ["female"]
+
+    actions = process.get("actions") or {}
+    buyer_ids = [int(b) for b in (process.get("buyer_ids") or []) if int(b) > 0]
+    contact_ids = process.get("contact_ids") or []
+    assigned_total = 0
+    for p in personas:
+        created = assign_tasks(
+            AssignTaskRequest(persona=p, buyer_ids=buyer_ids, contact_ids=contact_ids or None),
+            db=db,
+            user=user,
+        )
+        assigned_total += len(created.get("tasks") or [])
+
+    email_sent = 0
+    wa_sent = 0
+    call_started = False
+
+    # Call mode: start sequence for each persona that has queued ready tasks.
+    if actions.get("call"):
+        for p in personas:
+            runner = _get_runner(p)
+            if not runner:
+                continue
+            try:
+                start_runner(
+                    RunnerControlRequest(persona=p, sequence=True, task_id=None),
+                    db=db,
+                    user=user,
+                )
+                call_started = True
+            except HTTPException:
+                continue
+
+    # If not calling (or call failed to start), still honor email/WhatsApp for queued contacts.
+    if not actions.get("call") or actions.get("email") or actions.get("whatsapp"):
+        from integrations import whatsapp_bridge_client as bridge
+        from integrations.mail_client import mail_client
+
+        for p in personas:
+            agent_name = _agent_name(p)
+            queued = [
+                t
+                for t in _TASKS
+                if t.get("persona") == p
+                and t.get("status") == "queued"
+                and t.get("buyer_id") in set(buyer_ids)
+            ]
+            for task in queued:
+                greet = (task.get("contact_name") or "there").strip() or "there"
+                company = (task.get("company_name") or "").strip()
+                email = (task.get("contact_email") or "").strip()
+                phone = (task.get("contact_phone") or "").strip()
+                followup: dict[str, Any] = dict(task.get("followup") or {})
+
+                if actions.get("email") and not actions.get("call") and email:
+                    subject = f"Introduction — {agent_name}, Kafi Commodities"
+                    body = (
+                        f"<p>Dear {greet},</p>"
+                        f"<p>This is <strong>{agent_name}</strong> from "
+                        "<strong>Kafi Commodities (Pvt.) Ltd. (Brand: ESSENCE)</strong>"
+                        f"{f' regarding {company}' if company else ''}.</p>"
+                        "<p>We would like to share catalogues and CNF/FOB pricing for your market.</p>"
+                        f"<p>Best regards,<br/><strong>{agent_name}</strong><br/>"
+                        "Kafi Commodities Export Team</p>"
+                    )
+                    try:
+                        send_result = mail_client.send_approved(
+                            to=email,
+                            subject=subject,
+                            body=body,
+                            mailbox_user=user,
+                        )
+                        status = send_result.get("status") or "error"
+                        followup["email_status"] = status
+                        followup["email_to"] = email
+                        if status in ("sent", "queued", "ok", "success"):
+                            email_sent += 1
+                    except Exception as exc:  # noqa: BLE001
+                        followup["email_status"] = "error"
+                        followup["email_message"] = str(exc)[:200]
+
+                if actions.get("whatsapp") and phone:
+                    wa_text = (
+                        f"Hello {greet}, this is {agent_name} from Kafi Commodities "
+                        "(Brand: ESSENCE).\n\n"
+                        "Sharing a quick note — happy to send catalogues, packaging details, "
+                        "and CNF/FOB pricing whenever you are ready.\n\n"
+                        f"Best regards,\n{agent_name}\nKafi Commodities Export Team"
+                    )
+                    try:
+                        status = bridge.bridge_status(user.id, username=user.username)
+                        if not status.get("connected"):
+                            followup["whatsapp_status"] = "not_connected"
+                        else:
+                            wa_res = bridge.bridge_send(
+                                user.id,
+                                to_phone=phone,
+                                message=wa_text,
+                                username=user.username,
+                            )
+                            st = wa_res.get("status") or ("sent" if wa_res.get("ok") else "error")
+                            followup["whatsapp_status"] = st
+                            if st == "sent" or wa_res.get("ok"):
+                                wa_sent += 1
+                    except Exception as exc:  # noqa: BLE001
+                        followup["whatsapp_status"] = "error"
+                        followup["whatsapp_message"] = str(exc)[:200]
+
+                task["followup"] = followup
+                if not actions.get("call"):
+                    task["status"] = "completed"
+                    task["outcome"] = "process_outreach"
+                    task["completed_at"] = _now_iso()
+
+    _refresh_runner_counts()
+    return {
+        "assigned": assigned_total,
+        "email_sent": email_sent,
+        "whatsapp_sent": wa_sent,
+        "call_started": call_started,
+        "personas": personas,
+    }
+
+
+@router.get("/processes")
+def list_ai_processes(user: AppUser = Depends(get_current_user)):
+    _ = user
+    from modules.ai_sales_processes import list_processes
+
+    return {"processes": list_processes()}
+
+
+@router.post("/processes")
+def create_ai_process(
+    payload: ProcessCreateRequest,
+    user: AppUser = Depends(get_current_user),
+):
+    _ = user
+    from modules.ai_sales_processes import create_process
+
+    body = payload.model_dump()
+    if payload.schedule:
+        body["schedule"] = payload.schedule.model_dump()
+    if payload.actions:
+        body["actions"] = payload.actions.model_dump()
+    return create_process(body)
+
+
+@router.put("/processes/{process_id}")
+def update_ai_process(
+    process_id: str,
+    payload: ProcessUpdateRequest,
+    user: AppUser = Depends(get_current_user),
+):
+    _ = user
+    from modules.ai_sales_processes import update_process
+
+    patch = payload.model_dump(exclude_none=True)
+    if payload.schedule is not None:
+        patch["schedule"] = payload.schedule.model_dump()
+    if payload.actions is not None:
+        patch["actions"] = payload.actions.model_dump()
+    updated = update_process(process_id, patch)
+    if not updated:
+        raise HTTPException(404, "Process not found")
+    return updated
+
+
+@router.delete("/processes/{process_id}")
+def delete_ai_process(
+    process_id: str,
+    user: AppUser = Depends(get_current_user),
+):
+    _ = user
+    from modules.ai_sales_processes import delete_process
+
+    if not delete_process(process_id):
+        raise HTTPException(404, "Process not found")
+    return {"ok": True}
+
+
+@router.post("/processes/{process_id}/run-now")
+def run_ai_process_now(
+    process_id: str,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    from modules.ai_sales_processes import get_process, mark_process_ran
+
+    proc = get_process(process_id)
+    if not proc:
+        raise HTTPException(404, "Process not found")
+    if not proc.get("buyer_ids"):
+        raise HTTPException(400, "Assign at least one contact (buyer ID) to this process first.")
+    result = execute_recurring_process(db, process=proc, user=user)
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    run_key = datetime.now(ZoneInfo("Asia/Karachi")).strftime("%Y-%m-%dT%H:%M") + "-manual"
+    mark_process_ran(process_id, run_key, result)
+    return {"ok": True, "result": result, "process": get_process(process_id)}
+
+
 @webhooks_router.post("/ai-agent")
 async def vapi_ai_agent_status(request: Request) -> dict[str, Any]:
     """Vapi end-of-call / status-update — auto WhatsApp + email, then next in queue."""

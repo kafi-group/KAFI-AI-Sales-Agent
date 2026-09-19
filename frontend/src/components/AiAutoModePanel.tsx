@@ -5,6 +5,8 @@ interface AiAutoModePanelProps {
   onError: (message: string) => void;
   /** When true, show compact panel suitable under unlock / above runners. */
   compact?: boolean;
+  onStartAgent?: (persona: "female" | "male") => void;
+  startingPersona?: "female" | "male" | null;
 }
 
 const DEFAULTS: AiSalesAutoModeSettings = {
@@ -18,7 +20,12 @@ const DEFAULTS: AiSalesAutoModeSettings = {
   product_brief: "",
 };
 
-export function AiAutoModePanel({ onError, compact = false }: AiAutoModePanelProps) {
+export function AiAutoModePanel({
+  onError,
+  compact = false,
+  onStartAgent,
+  startingPersona = null,
+}: AiAutoModePanelProps) {
   const [settings, setSettings] = useState<AiSalesAutoModeSettings>(DEFAULTS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -46,7 +53,7 @@ export function AiAutoModePanel({ onError, compact = false }: AiAutoModePanelPro
     try {
       const next = await client.updateAiSalesAutoMode(patch);
       setSettings({ ...DEFAULTS, ...next });
-      setNotice("AI Auto Mode saved.");
+      setNotice("AI Auto Mode settings saved (does not start outreach by itself).");
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to save AI Auto Mode");
     } finally {
@@ -74,30 +81,67 @@ export function AiAutoModePanel({ onError, compact = false }: AiAutoModePanelPro
         compact ? "" : "shadow-lg shadow-violet-950/20"
       }`}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <h3 className="text-base font-semibold text-slate-100">AI Auto Mode</h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            When ON, ticked actions run for assigned queue contacts (Sara / Rayan). When OFF, use
-            manual Start / Call this as before.
+            The toggle only saves which actions are allowed. Use <strong className="text-slate-300">Start</strong>{" "}
+            to run now on that agent&apos;s queue, or <strong className="text-slate-300">Schedule</strong> to
+            create recurring processes below.
           </p>
         </div>
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => void save({ enabled: !settings.enabled })}
-          className={`relative inline-flex h-8 w-14 items-center rounded-full transition ${
-            settings.enabled ? "bg-emerald-500" : "bg-slate-700"
-          }`}
-          aria-pressed={settings.enabled}
-          title="Toggle AI Auto Mode"
-        >
-          <span
-            className={`inline-block h-6 w-6 transform rounded-full bg-white transition ${
-              settings.enabled ? "translate-x-7" : "translate-x-1"
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void save({ enabled: !settings.enabled })}
+            className={`relative inline-flex h-8 w-14 items-center rounded-full transition ${
+              settings.enabled ? "bg-emerald-500" : "bg-slate-700"
             }`}
-          />
-        </button>
+            aria-pressed={settings.enabled}
+            title="Toggle AI Auto Mode settings"
+          >
+            <span
+              className={`inline-block h-6 w-6 transform rounded-full bg-white transition ${
+                settings.enabled ? "translate-x-7" : "translate-x-1"
+              }`}
+            />
+          </button>
+          {!compact && onStartAgent ? (
+            <>
+              <button
+                type="button"
+                disabled={!settings.enabled || startingPersona === "female"}
+                onClick={() => onStartAgent("female")}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40"
+                title="Start Sara now using Auto Mode actions on her queue"
+              >
+                {startingPersona === "female" ? "Starting…" : "Start Sara"}
+              </button>
+              <button
+                type="button"
+                disabled={!settings.enabled || startingPersona === "male"}
+                onClick={() => onStartAgent("male")}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40"
+                title="Start Rayan now using Auto Mode actions on his queue"
+              >
+                {startingPersona === "male" ? "Starting…" : "Start Rayan"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  document.getElementById("ai-sales-processes")?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                  });
+                }}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-violet-400/50 text-violet-100 hover:bg-violet-500/20"
+              >
+                Schedule
+              </button>
+            </>
+          ) : null}
+        </div>
       </div>
 
       {notice ? <p className="text-xs text-emerald-300">{notice}</p> : null}
@@ -107,7 +151,7 @@ export function AiAutoModePanel({ onError, compact = false }: AiAutoModePanelPro
         className={`space-y-2 ${settings.enabled ? "" : "opacity-50"}`}
       >
         <legend className="text-xs font-semibold uppercase tracking-wide text-violet-300 mb-1">
-          Actions when Auto Mode is ON
+          Actions used when you Start (or when a process runs)
         </legend>
 
         {(

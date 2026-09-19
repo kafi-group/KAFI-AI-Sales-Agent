@@ -21,6 +21,7 @@ import {
 } from "../components/TelegramComposeLink";
 import { ComposeMailModal } from "../components/ComposeMailModal";
 import { AiAutoModePanel } from "../components/AiAutoModePanel";
+import { AiSalesProcessesPanel } from "../components/AiSalesProcessesPanel";
 
 interface AiSalesAgentPageProps {
   onError: (message: string) => void;
@@ -51,6 +52,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   const [selfTesting, setSelfTesting] = useState(false);
   const [endingCall, setEndingCall] = useState(false);
   const [callingTaskId, setCallingTaskId] = useState<number | null>(null);
+  const [startingAutoPersona, setStartingAutoPersona] = useState<"female" | "male" | null>(null);
   const [whatsAppModalTarget, setWhatsAppModalTarget] = useState<WhatsAppComposeTarget | null>(null);
   const [telegramModalTarget, setTelegramModalTarget] = useState<TelegramComposeTarget | null>(null);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
@@ -260,6 +262,23 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     }
   }
 
+  async function handleAutoModeStart(persona: "female" | "male") {
+    setStartingAutoPersona(persona);
+    try {
+      await client.startAiSalesAgentRunner(persona, { sequence: true });
+      const name = persona === "female" ? "Sara" : "Rayan";
+      setQueueNotice(
+        `${name} started with AI Auto Mode actions on the queue. Check the Sara / Rayan pipeline below.`,
+      );
+      setTimeout(() => setQueueNotice(null), 10000);
+      await load();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Could not start agent");
+    } finally {
+      setStartingAutoPersona(null);
+    }
+  }
+
   async function handleCallOne(task: AiSalesAgentTask) {
     setCallingTaskId(task.id);
     try {
@@ -422,7 +441,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   }
 
   return (
-    <section className="space-y-6 max-w-5xl">
+    <section className="space-y-6 w-full min-w-0">
       <div>
         <h2 className="text-lg font-medium text-slate-100">AI Sales Agent</h2>
         <p className="text-sm text-slate-400 mt-1">
@@ -434,7 +453,13 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         </p>
       </div>
 
-      <AiAutoModePanel onError={onError} />
+      <AiAutoModePanel
+        onError={onError}
+        onStartAgent={(persona) => void handleAutoModeStart(persona)}
+        startingPersona={startingAutoPersona}
+      />
+
+      <AiSalesProcessesPanel onError={onError} />
 
       {queueNotice ? (
         <p className="text-sm text-emerald-300 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2">
@@ -686,29 +711,41 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
             to Sara or Rayan.
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-700/80">
-            <table className="w-full text-sm text-left">
+          <div className="rounded-xl border border-slate-700/80 overflow-hidden">
+            <table className="w-full table-fixed text-sm text-left">
+              <colgroup>
+                <col className="w-[9%]" />
+                <col className="w-[16%]" />
+                <col className="w-[14%]" />
+                <col className="w-[7%]" />
+                <col className="w-[7%]" />
+                <col className="w-[8%]" />
+                <col className="w-[9%]" />
+                <col className="w-[7%]" />
+                <col className="w-[8%]" />
+                <col className="w-[15%]" />
+              </colgroup>
               <thead className="bg-slate-900/60 text-slate-400">
                 <tr>
-                  <th className="px-3 py-2">Agent</th>
-                  <th className="px-3 py-2">Company</th>
-                  <th className="px-3 py-2">Contact / phone</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2">Call</th>
-                  <th className="px-3 py-2">Email sent</th>
-                  <th className="px-3 py-2">WhatsApp sent</th>
-                  <th className="px-3 py-2">Email reply</th>
-                  <th className="px-3 py-2">Outcome</th>
-                  <th className="px-3 py-2">Actions</th>
+                  <th className="px-3 py-2.5 font-medium">Agent</th>
+                  <th className="px-3 py-2.5 font-medium">Company</th>
+                  <th className="px-3 py-2.5 font-medium">Contact / phone</th>
+                  <th className="px-3 py-2.5 font-medium">Status</th>
+                  <th className="px-3 py-2.5 font-medium">Call</th>
+                  <th className="px-3 py-2.5 font-medium">Email sent</th>
+                  <th className="px-3 py-2.5 font-medium">WhatsApp sent</th>
+                  <th className="px-3 py-2.5 font-medium">Email reply</th>
+                  <th className="px-3 py-2.5 font-medium">Outcome</th>
+                  <th className="px-3 py-2.5 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
                 {tasks.map((task) => (
-                  <tr key={task.id} className="text-slate-200">
-                    <td className="px-3 py-2">
+                  <tr key={task.id} className="text-slate-200 align-top">
+                    <td className="px-3 py-2.5">
                       {PERSONA_LABELS[task.persona] ?? task.persona}
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2.5 break-words">
                       {task.company_name ?? `#${task.buyer_id}`}
                       {task.country ? (
                         <span className="text-slate-500 text-xs ml-1">
@@ -716,16 +753,16 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                         </span>
                       ) : null}
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2.5 break-words">
                       {task.contact_name ?? "—"}
                       {task.contact_phone ? (
-                        <div className="text-xs text-sky-300/90 font-mono">{task.contact_phone}</div>
+                        <div className="text-xs text-sky-300/90 font-mono break-all">{task.contact_phone}</div>
                       ) : (
                         <div className="text-xs text-amber-400">No phone on lead</div>
                       )}
                     </td>
-                    <td className="px-3 py-2 capitalize">{task.status}</td>
-                    <td className="px-3 py-2 text-xs">
+                    <td className="px-3 py-2.5 capitalize">{task.status}</td>
+                    <td className="px-3 py-2.5 text-xs">
                       {task.status === "completed" || task.status === "in_progress" || task.call_sid ? (
                         <span className="text-emerald-400">
                           {task.status === "in_progress" ? "In progress" : "Made"}
@@ -738,7 +775,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                         <span className="text-slate-500">Queued</span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-xs">
+                    <td className="px-3 py-2.5 text-xs">
                       {task.followup?.email_status === "sent" ||
                       task.followup?.email_status === "ok" ||
                       task.followup?.email_status === "success" ? (
@@ -753,7 +790,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                         <span className="text-slate-600">—</span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-xs">
+                    <td className="px-3 py-2.5 text-xs">
                       {task.followup?.whatsapp_status === "sent" ? (
                         <span className="text-emerald-400">Sent</span>
                       ) : task.followup?.whatsapp_status === "skipped" ? (
@@ -766,14 +803,14 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                         <span className="text-slate-600">—</span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-xs text-slate-500" title="Tracked when inbound email matching is wired">
+                    <td className="px-3 py-2.5 text-xs text-slate-500" title="Tracked when inbound email matching is wired">
                       —
                     </td>
-                    <td className="px-3 py-2 text-xs text-slate-400">
+                    <td className="px-3 py-2.5 text-xs text-slate-400 break-words">
                       {task.outcome ?? "—"}
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <div className="flex items-center gap-1.5">
+                    <td className="px-3 py-2.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         {task.contact_phone && (
                           <button
                             type="button"

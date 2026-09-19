@@ -4401,6 +4401,27 @@ export const client = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+  listAiSalesProcesses: () =>
+    request<{ processes: AiSalesProcess[] }>("/ai-sales-agent/processes"),
+  createAiSalesProcess: (data: Partial<AiSalesProcess> & { name: string }) =>
+    request<AiSalesProcess>("/ai-sales-agent/processes", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateAiSalesProcess: (id: string, data: Partial<AiSalesProcess>) =>
+    request<AiSalesProcess>(`/ai-sales-agent/processes/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteAiSalesProcess: (id: string) =>
+    request<{ ok: boolean }>(`/ai-sales-agent/processes/${id}`, {
+      method: "DELETE",
+    }),
+  runAiSalesProcessNow: (id: string) =>
+    request<{ ok: boolean; result: Record<string, unknown>; process: AiSalesProcess }>(
+      `/ai-sales-agent/processes/${id}/run-now`,
+      { method: "POST" },
+    ),
 
   // ── Catalogues ─────────────────────────────────────────────────────────────
   listCatalogues: () => request<CatalogueItem[]>("/catalogues"),
@@ -4851,6 +4872,30 @@ export interface AiSalesAutoModeSettings {
   bulk_email_when_no_call: boolean;
   study_products: boolean;
   product_brief: string;
+}
+
+export interface AiSalesProcess {
+  id: string;
+  name: string;
+  persona: "male" | "female" | "both";
+  enabled: boolean;
+  schedule: {
+    kind: "daily" | "weekly";
+    time: string;
+    weekdays: string[];
+  };
+  actions: {
+    call: boolean;
+    email: boolean;
+    whatsapp: boolean;
+  };
+  buyer_ids: number[];
+  contact_ids?: (number | null)[];
+  last_run_at?: string | null;
+  last_run_key?: string | null;
+  last_result?: Record<string, unknown> | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface AiSalesAgentFollowup {

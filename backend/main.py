@@ -120,6 +120,17 @@ def _keepalive_ping():
         pass
 
 
+def _run_ai_sales_processes_job():
+    try:
+        from jobs.ai_sales_process_runner import run_due_processes
+
+        result = run_due_processes()
+        if result.get("ran"):
+            print(f"AI Sales processes job: ran {result.get('ran')} process(es).", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"AI Sales processes job failed: {exc}", flush=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import os
@@ -260,6 +271,14 @@ async def lifespan(app: FastAPI):
             "interval",
             minutes=2,
             id="keepalive_ping",
+            max_instances=1,
+            coalesce=True,
+        )
+        apscheduler.add_job(
+            _run_ai_sales_processes_job,
+            "interval",
+            minutes=1,
+            id="ai_sales_processes",
             max_instances=1,
             coalesce=True,
         )
