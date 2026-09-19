@@ -582,30 +582,77 @@ def handle_ai_call_status(
 
 
 def _reconcile_live_calls(db: Session) -> None:
-    """If webhooks were missed, poll Vapi/Twilio for ended calls."""
+    """If webhooks were missed, poll Vapi/Twilio for ended calls; clear stale dials."""
     from integrations.voice_client import voice_client
 
-    live = [t for t in _TASKS if t.get("status") == "in_progress" and t.get("call_sid")]
+    live = [t for t in _TASKS if t.get("status") == "in_progress"]
     for task in live:
         started = task.get("started_at")
-        if started:
-            try:
-                started_dt = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
-                age = (datetime.now(timezone.utc) - started_dt).total_seconds()
-            except Exception:
-                age = 999
-            if age < 25:
-                continue
-        info = voice_client.fetch_outbound_status(task.get("call_sid"))
-        if not info.get("ended"):
+        try:
+            started_dt = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+            age = (datetime.now(timezone.utc) - started_dt).total_seconds()
+        except Exception:
+            age = 999
+
+        call_sid = task.get("call_sid")
+        if not call_sid:
+            if age >= 20:
+                _finish_task(
+                    db,
+                    task,
+                    status="failed",
+                    ended_reason="no-call-sid",
+                    outcome_label="Dial failed (no call id)",
+                )
             continue
-        _finish_task(
-            db,
-            task,
-            status=str(info.get("status") or ""),
-            ended_reason=str(info.get("ended_reason") or ""),
-            duration=info.get("duration"),
-        )
+
+        # Give the network a few seconds before polling.
+        if age < 20:
+            continue
+
+        info = voice_client.fetch_outbound_status(call_sid)
+        status = str(info.get("status") or "").lower().replace("_", "-")
+        ended_reason = str(info.get("ended_reason") or "")
+
+        if info.get("ended"):
+            _finish_task(
+                db,
+                task,
+                status=str(info.get("status") or ""),
+                ended_reason=ended_reason,
+                duration=info.get("duration"),
+            )
+            continue
+
+        # Vapi/Twilio accepted the job but never reached the handset.
+        never_rang = status in {"", "queued", "queued-for-outbound"} or not info.get("ok")
+        if age >= 90 and never_rang:
+            try:
+                voice_client.end_call(str(call_sid))
+            except Exception:
+                pass
+            _finish_task(
+                db,
+                task,
+                status="failed",
+                ended_reason="did-not-ring",
+                outcome_label="Did not ring — dial never reached phone",
+            )
+            continue
+
+        # Hard timeout for any stuck live call (missed webhook).
+        if age >= 180:
+            try:
+                voice_client.end_call(str(call_sid))
+            except Exception:
+                pass
+            _finish_task(
+                db,
+                task,
+                status=status or "ended",
+                ended_reason=ended_reason or "stale-timeout",
+                outcome_label="Call timed out (no status update)",
+            )
 
 
 @router.post("/unlock")
@@ -639,9 +686,14 @@ def list_tasks(
     persona: str | None = Query(default=None),
     status: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=500),
+    db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     _ = user
+    try:
+        _reconcile_live_calls(db)
+    except Exception:
+        pass
     filtered = _TASKS
     if persona:
         filtered = [t for t in filtered if t.get("persona") == persona]

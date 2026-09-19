@@ -774,6 +774,11 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                       ) : (
                         <span className="text-slate-500">Queued</span>
                       )}
+                      {task.status === "in_progress" && task.remarks ? (
+                        <div className="text-[10px] text-slate-500 mt-0.5 break-words" title={task.remarks}>
+                          {task.remarks}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="px-3 py-2.5 text-xs">
                       {task.followup?.email_status === "sent" ||
@@ -842,6 +847,17 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                           <span>✉️</span>
                           <span>Email</span>
                         </button>
+                        {isAdmin && task.status === "in_progress" ? (
+                          <button
+                            type="button"
+                            disabled={endingCall}
+                            onClick={() => void handleEndCall(task.persona)}
+                            className="px-2 py-1 rounded bg-rose-600/20 hover:bg-rose-600/30 text-rose-200 border border-rose-500/30 text-xs font-semibold disabled:opacity-40"
+                            title="Hang up / clear stuck in-progress call"
+                          >
+                            {endingCall ? "Ending…" : "End / clear"}
+                          </button>
+                        ) : null}
                         {isAdmin && (task.status === "queued" || task.status === "pending") && (
                           <>
                             <button
