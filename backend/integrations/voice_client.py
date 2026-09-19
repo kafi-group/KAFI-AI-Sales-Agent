@@ -8,7 +8,7 @@ from typing import Any
 
 from config import settings
 
-_FOURTH_RING_SECONDS = 24
+_FOURTH_RING_SECONDS = 12  # ~3s per ring × 4 rings
 _MAX_RING_ATTEMPTS = 2  # hang up ~4 rings, auto-redial once → ~8 rings, no voicemail
 _RINGING_STATUSES = {
     "queued",
@@ -302,7 +302,7 @@ class VoiceClient:
     ) -> str:
         """TwiML for browser-initiated outbound calls — dials the lead directly.
 
-        When hang-up-after-4th-ring is ON, Dial times out ~24s. The Dial action
+        When hang-up-after-4th-ring is ON, Dial times out ~12s (~3s/ring). The Dial action
         webhook may return a second Dial (attempt 2) so the lead hears ~8 rings
         without voicemail.
         """

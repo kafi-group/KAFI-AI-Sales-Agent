@@ -186,7 +186,7 @@ def toggle_hangup_after_fourth_ring(
 ):
     """Default ON: unanswered calls drop after the 4th ring, then auto-redial once (~8 rings) so voicemail does not use credits."""
     settings.hangup_after_fourth_ring = bool(payload.enabled)
-    seconds = int(getattr(settings, "ring_timeout_seconds", 24) or 24)
+    seconds = int(getattr(settings, "ring_timeout_seconds", 12) or 12)
     return {
         "ok": True,
         "hangup_after_fourth_ring": settings.hangup_after_fourth_ring,

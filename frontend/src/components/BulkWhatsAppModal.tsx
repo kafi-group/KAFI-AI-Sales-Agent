@@ -6,6 +6,8 @@ import {
   type WhatsAppPersonalTemplate,
   type WhatsAppTemplate,
 } from "../api/client";
+import { IconEye } from "./icons/AppIcons";
+import { WhatsAppTemplatePreviewModal } from "./WhatsAppTemplatePreviewModal";
 
 interface BulkWhatsAppModalProps {
   buyerIds: number[];
@@ -61,6 +63,11 @@ export function BulkWhatsAppModal({
   const [personalTemplateId, setPersonalTemplateId] = useState("");
   const [personalTemplateSearch, setPersonalTemplateSearch] = useState("");
   const [personalTemplateBody, setPersonalTemplateBody] = useState("");
+  const [viewingTemplate, setViewingTemplate] = useState<WhatsAppTemplate | null>(null);
+  const [viewingPersonalBody, setViewingPersonalBody] = useState<{
+    name: string;
+    body: string;
+  } | null>(null);
 
   const refreshTemplates = useCallback(async () => {
     setLoadingTemplates(true);
@@ -394,18 +401,31 @@ export function BulkWhatsAppModal({
                     {filteredPersonalTemplates.map((template) => {
                       const selected = String(template.id) === personalTemplateId;
                       return (
-                        <li key={template.id}>
+                        <li key={template.id} className="flex items-stretch gap-2">
                           <button
                             type="button"
                             onClick={() => setPersonalTemplateId(String(template.id))}
-                            className={`w-full rounded-lg border p-3 text-left transition ${
+                            className={`min-w-0 flex-1 rounded-lg border p-3 text-left transition ${
                               selected
                                 ? "border-emerald-500/60 bg-emerald-500/10 text-white"
                                 : "border-slate-800 bg-slate-950 hover:border-slate-700 text-slate-300"
                             }`}
                           >
                             <p className="font-semibold text-sm">{template.name}</p>
-                            <p className="text-xs text-slate-400 truncate mt-0.5">{template.body}</p>
+                            <p className="text-xs text-slate-400 line-clamp-2 mt-0.5 whitespace-pre-wrap">
+                              {template.body}
+                            </p>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setViewingPersonalBody({ name: template.name, body: template.body })
+                            }
+                            className="px-3 py-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 text-xs font-semibold shrink-0 flex items-center gap-1 self-stretch"
+                            title="View full template"
+                          >
+                            <IconEye size="xs" />
+                            View
                           </button>
                         </li>
                       );
@@ -438,7 +458,8 @@ export function BulkWhatsAppModal({
             <div className="space-y-4">
               <p className="text-xs text-slate-400">
                 Only Meta-approved templates can be sent via Meta Cloud API. Manage templates in{" "}
-                <strong className="text-slate-300">WhatsApp templates → WhatsApp Meta</strong>.
+                <strong className="text-slate-300">WhatsApp templates → WhatsApp Meta</strong>. Use{" "}
+                <strong className="text-cyan-300">View</strong> to read the full message before sending.
               </p>
 
               {loadingTemplates ? (
@@ -458,15 +479,15 @@ export function BulkWhatsAppModal({
                     placeholder="Search templates by name, category, body…"
                     className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200 placeholder-slate-500"
                   />
-                  <ul className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  <ul className="space-y-2 max-h-64 overflow-y-auto pr-1">
                     {filteredTemplates.map((template) => {
                       const selected = String(template.id) === templateId;
                       return (
-                        <li key={template.id}>
+                        <li key={template.id} className="flex items-stretch gap-2">
                           <button
                             type="button"
                             onClick={() => setTemplateId(String(template.id))}
-                            className={`w-full rounded-lg border p-3 text-left transition ${
+                            className={`min-w-0 flex-1 rounded-lg border p-3 text-left transition ${
                               selected
                                 ? "border-emerald-500/60 bg-emerald-500/10 text-white"
                                 : "border-slate-800 bg-slate-950 hover:border-slate-700 text-slate-300"
@@ -479,10 +500,19 @@ export function BulkWhatsAppModal({
                               </span>
                             </p>
                             {template.body_text && (
-                              <p className="text-xs text-slate-400 truncate mt-0.5">
+                              <p className="text-xs text-slate-400 line-clamp-2 mt-0.5 whitespace-pre-wrap">
                                 {template.body_text}
                               </p>
                             )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setViewingTemplate(template)}
+                            className="px-3 py-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 text-xs font-semibold shrink-0 flex items-center gap-1 self-stretch"
+                            title="View full template content"
+                          >
+                            <IconEye size="xs" />
+                            View
                           </button>
                         </li>
                       );
@@ -491,6 +521,27 @@ export function BulkWhatsAppModal({
                   {filteredTemplates.length === 0 && (
                     <p className="text-sm text-slate-500">No templates match your search.</p>
                   )}
+
+                  {selectedTemplate?.body_text ? (
+                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 p-3.5 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                          Selected template (full text)
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setViewingTemplate(selectedTemplate)}
+                          className="text-xs text-cyan-300 hover:text-cyan-200 font-semibold inline-flex items-center gap-1"
+                        >
+                          <IconEye size="xs" />
+                          Open preview
+                        </button>
+                      </div>
+                      <pre className="whitespace-pre-wrap break-words text-sm text-slate-200 leading-relaxed font-sans max-h-48 overflow-y-auto">
+                        {selectedTemplate.body_text}
+                      </pre>
+                    </div>
+                  ) : null}
                 </>
               )}
 
@@ -571,6 +622,46 @@ export function BulkWhatsAppModal({
           )}
         </div>
       </div>
+
+      <WhatsAppTemplatePreviewModal
+        template={viewingTemplate}
+        onClose={() => setViewingTemplate(null)}
+        onSelectTemplate={(t) => {
+          setTemplateId(String(t.id));
+          setTab("template");
+          setViewingTemplate(null);
+        }}
+      />
+
+      {viewingPersonalBody
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setViewingPersonalBody(null);
+              }}
+            >
+              <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden">
+                <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
+                  <h3 className="text-base font-semibold text-slate-100 truncate pr-2">
+                    {viewingPersonalBody.name}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setViewingPersonalBody(null)}
+                    className="text-slate-400 hover:text-slate-200 text-sm font-medium"
+                  >
+                    Close
+                  </button>
+                </div>
+                <pre className="p-5 whitespace-pre-wrap break-words text-sm text-slate-200 leading-relaxed font-sans max-h-[70vh] overflow-y-auto">
+                  {viewingPersonalBody.body}
+                </pre>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>,
     document.body,
   );
