@@ -9,6 +9,13 @@ export type EmailTemplate = {
   name: string;
   subject: string;
   body: string;
+  attachments?: Array<{
+    id: string;
+    filename: string;
+    content_type?: string;
+    size?: number;
+    storage_path?: string | null;
+  }>;
 };
 
 type Props = {
@@ -88,6 +95,9 @@ export function TemplatePicker({ value, onChange, hint }: Props) {
           {templates.map((t) => (
             <option key={t.id} value={String(t.id)}>
               {t.name}
+              {t.attachments?.length
+                ? ` (${t.attachments.length} attachment${t.attachments.length === 1 ? "" : "s"})`
+                : ""}
             </option>
           ))}
         </select>

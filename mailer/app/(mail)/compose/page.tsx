@@ -21,6 +21,7 @@ import {
 } from "@/lib/parseSendResponse";
 import {
   formatAttachmentSize,
+  hostedFromTemplateAttachments,
   uploadAttachmentToSalesAgent,
   type HostedAttachment,
 } from "@/lib/hostAttachments";
@@ -107,6 +108,7 @@ function ComposeInner() {
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Attachment upload failed");
+      setNotice(null);
     } finally {
       setUploadingAttachments(false);
     }
@@ -225,7 +227,17 @@ function ComposeInner() {
             const salutationName = mergeContact.trim() || "[Contact Name]";
             setBody(ensureDearSalutation(tpl.body, salutationName));
             setWriteMode("free");
-            setNotice(`Loaded template “${tpl.name}” — edit before send if needed`);
+            const fromTemplate = hostedFromTemplateAttachments(tpl.attachments);
+            setAttachments(fromTemplate);
+            setNotice(
+              fromTemplate.length
+                ? `Loaded template “${tpl.name}” with ${fromTemplate.length} attachment${
+                    fromTemplate.length === 1 ? "" : "s"
+                  } — edit before send if needed`
+                : `Loaded template “${tpl.name}” — edit before send if needed`,
+            );
+          } else {
+            setAttachments([]);
           }
         }}
       />

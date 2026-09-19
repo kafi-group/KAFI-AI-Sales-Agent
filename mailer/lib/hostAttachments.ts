@@ -9,6 +9,9 @@ import { getApiBase, getStoredToken } from "./api";
 /** Practical per-file ceiling (email providers reject ~25 MB total). */
 export const EMAIL_ATTACHMENT_MAX_BYTES = 24 * 1024 * 1024;
 
+/** Stay under Vercel/proxy body limits when uploading from the browser. */
+const CHUNK_BYTES = 2.5 * 1024 * 1024;
+
 export type HostedAttachment = {
   id: string;
   url: string;
@@ -27,23 +30,46 @@ export type SendAttachmentRef = {
   size?: number;
 };
 
+/** Template attachment metadata from Sales Agent `/email-templates`. */
+export type TemplateAttachmentMeta = {
+  id: string;
+  filename: string;
+  content_type?: string;
+  size?: number;
+  storage_path?: string | null;
+};
+
 export function formatAttachmentSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export async function uploadAttachmentToSalesAgent(
+/** Turn template default attachments into hosted refs the mailer can send. */
+export function hostedFromTemplateAttachments(
+  items: TemplateAttachmentMeta[] | null | undefined,
+): HostedAttachment[] {
+  const base = getApiBase().replace(/\/$/, "");
+  if (!base || !items?.length) return [];
+  const out: HostedAttachment[] = [];
+  for (const item of items) {
+    const id = String(item.id || "").trim();
+    if (!id) continue;
+    out.push({
+      id,
+      url: `${base}/mailer/inline-media/${id}`,
+      filename: item.filename || "attachment",
+      contentType: item.content_type || "application/octet-stream",
+      size: typeof item.size === "number" ? item.size : 0,
+    });
+  }
+  return out;
+}
+
+async function uploadSmallFile(
   file: File,
   options?: { authToken?: string | null; handoffToken?: string },
 ): Promise<HostedAttachment> {
-  if (file.size > EMAIL_ATTACHMENT_MAX_BYTES) {
-    throw new Error(
-      `${file.name} is ${formatAttachmentSize(file.size)} — keep each file under ${
-        EMAIL_ATTACHMENT_MAX_BYTES / (1024 * 1024)
-      } MB (email providers reject ~25 MB messages).`,
-    );
-  }
   const base = getApiBase();
   if (!base) {
     throw new Error("Sales Agent API URL is not configured — cannot upload attachment.");
@@ -56,12 +82,19 @@ export async function uploadAttachmentToSalesAgent(
   const headers: Record<string, string> = {};
   if (auth) headers.Authorization = `Bearer ${auth}`;
 
-  const res = await fetch(`${base}/mailer/attachment-upload`, {
-    method: "POST",
-    headers,
-    body: form,
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${base}/mailer/attachment-upload`, {
+      method: "POST",
+      headers,
+      body: form,
+      cache: "no-store",
+    });
+  } catch {
+    throw new Error(
+      "Could not reach Sales Agent to upload the attachment (network/CORS). Try again, or hard-refresh the mailer.",
+    );
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     let detail = text.slice(0, 300);
@@ -90,6 +123,126 @@ export async function uploadAttachmentToSalesAgent(
     contentType: data.content_type || file.type || "application/octet-stream",
     size: typeof data.size === "number" ? data.size : file.size,
   };
+}
+
+/** Chunked upload via Sales Agent so large PDFs never hit one big Railway POST. */
+async function uploadChunkedFile(
+  file: File,
+  options?: { authToken?: string | null },
+): Promise<HostedAttachment> {
+  const base = getApiBase().replace(/\/$/, "");
+  if (!base) {
+    throw new Error("Sales Agent API URL is not configured — cannot upload attachment.");
+  }
+  const auth = options?.authToken ?? getStoredToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (auth) headers.Authorization = `Bearer ${auth}`;
+
+  const totalChunks = Math.ceil(file.size / CHUNK_BYTES);
+  let initRes: Response;
+  try {
+    initRes = await fetch(`${base}/email/attachments/chunk-init`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        filename: file.name,
+        content_type: file.type || null,
+        size: file.size,
+        total_chunks: totalChunks,
+      }),
+      cache: "no-store",
+    });
+  } catch {
+    throw new Error(
+      "Could not start chunked upload to Sales Agent (network). Hard-refresh and try again.",
+    );
+  }
+  if (!initRes.ok) {
+    const text = await initRes.text().catch(() => "");
+    throw new Error(text.slice(0, 300) || `Chunk init failed (${initRes.status})`);
+  }
+  const init = (await initRes.json()) as { upload_id: string };
+
+  for (let index = 0; index < totalChunks; index++) {
+    const start = index * CHUNK_BYTES;
+    const end = Math.min(file.size, start + CHUNK_BYTES);
+    const blob = file.slice(start, end);
+    const form = new FormData();
+    form.append("upload_id", init.upload_id);
+    form.append("index", String(index));
+    form.append("file", blob, `${file.name}.part${index}`);
+    const chunkHeaders: Record<string, string> = {};
+    if (auth) chunkHeaders.Authorization = `Bearer ${auth}`;
+
+    let chunkRes: Response;
+    try {
+      chunkRes = await fetch(`${base}/email/attachments/chunk`, {
+        method: "POST",
+        headers: chunkHeaders,
+        body: form,
+        cache: "no-store",
+      });
+    } catch {
+      throw new Error(
+        `Network error uploading chunk ${index + 1}/${totalChunks}. Try again.`,
+      );
+    }
+    if (!chunkRes.ok) {
+      const text = await chunkRes.text().catch(() => "");
+      throw new Error(
+        text.slice(0, 300) || `Chunk ${index + 1}/${totalChunks} failed (${chunkRes.status})`,
+      );
+    }
+  }
+
+  let doneRes: Response;
+  try {
+    doneRes = await fetch(`${base}/email/attachments/chunk-complete`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ upload_id: init.upload_id }),
+      cache: "no-store",
+    });
+  } catch {
+    throw new Error("Network error finishing upload. Try again.");
+  }
+  if (!doneRes.ok) {
+    const text = await doneRes.text().catch(() => "");
+    throw new Error(text.slice(0, 300) || `Upload complete failed (${doneRes.status})`);
+  }
+  const meta = (await doneRes.json()) as {
+    id: string;
+    filename: string;
+    content_type: string;
+    size: number;
+  };
+  return {
+    id: meta.id,
+    url: `${base}/mailer/inline-media/${meta.id}`,
+    filename: meta.filename || file.name,
+    contentType: meta.content_type || file.type || "application/octet-stream",
+    size: meta.size || file.size,
+  };
+}
+
+export async function uploadAttachmentToSalesAgent(
+  file: File,
+  options?: { authToken?: string | null; handoffToken?: string },
+): Promise<HostedAttachment> {
+  if (file.size > EMAIL_ATTACHMENT_MAX_BYTES) {
+    throw new Error(
+      `${file.name} is ${formatAttachmentSize(file.size)} — keep each file under ${
+        EMAIL_ATTACHMENT_MAX_BYTES / (1024 * 1024)
+      } MB (email providers reject ~25 MB messages).`,
+    );
+  }
+  // Large files: chunked path (avoids Failed to fetch on ~20+ MB single POSTs).
+  if (file.size > CHUNK_BYTES) {
+    return uploadChunkedFile(file, options);
+  }
+  return uploadSmallFile(file, options);
 }
 
 /** Resolve attachment refs to base64 buffers for nodemailer (server-side). */
