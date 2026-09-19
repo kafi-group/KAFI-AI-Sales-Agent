@@ -31,7 +31,7 @@ def _resolve_storage_dir() -> Path:
 
 STORAGE_DIR = _resolve_storage_dir()
 
-MAX_FILE_BYTES = 18 * 1024 * 1024  # ~24 MB on the wire after SMTP base64
+MAX_FILE_BYTES = 10 * 1024 * 1024  # ~13 MB on the wire; safer vs spam (554) + size (552)
 MAX_FILES_PER_EMAIL = 8
 
 # Block malware-prone types; allow other business files (PDF, Office, ZIP, images, …).

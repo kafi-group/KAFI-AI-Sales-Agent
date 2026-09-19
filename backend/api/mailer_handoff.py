@@ -143,9 +143,8 @@ class MailerInlineUploadResponse(BaseModel):
     size: int
 
 
-# Raw-file ceiling: SMTP base64 expands ~33%; recipients reject ~25 MB messages.
-# 18 MB file ≈ 24 MB on the wire (a 23.5 MB file becomes ~31–33 MB and bounces).
-MAILER_ATTACHMENT_MAX_BYTES = 18 * 1024 * 1024
+# 10 MB raw ≈ 13–14 MB encoded — under 25 MB caps and less likely to hit spam filters.
+MAILER_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 
 
 class MailerAttachmentUploadResponse(BaseModel):

@@ -349,9 +349,9 @@ function ComposeInner() {
         }}
       />
       <p className="muted small">
-        PDFs and files upload to Sales Agent first (up to ~18 MB total — email encoding
-        adds ~33%, and most inboxes reject ~25 MB messages). Not limited by Vercel&apos;s
-        4 MB request size.
+        PDFs and files upload to Sales Agent first (up to ~10 MB total — encoding adds
+        ~33%; larger files often bounce as spam or size-reject). Not limited by
+        Vercel&apos;s 4 MB request size.
       </p>
       {uploadingAttachments && (
         <div className="upload-progress" role="status" aria-live="polite">

@@ -147,7 +147,7 @@ function messageForHttpError(status: number, text: string, statusText: string): 
 const RAILWAY_API_BASE = "https://kafi-sales-agent-production.up.railway.app/api";
 
 /** Email providers reject ~25 MB total messages; keep each file under this. */
-export const EMAIL_ATTACHMENT_MAX_BYTES = 24 * 1024 * 1024;
+export const EMAIL_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 
 /** Chunk size for uploads through the Vercel /api rewrite (~4.5 MB body limit). */
 const ATTACHMENT_CHUNK_BYTES = 2.5 * 1024 * 1024;

@@ -7,11 +7,11 @@
 import { getApiBase, getStoredToken } from "./api";
 
 /**
- * Max raw file bytes. SMTP base64 expands ~33%, and most recipients reject
- * ~25 MB *messages* (552). 18 MB file ≈ 24 MB on the wire — stays under that.
- * (A 23.5 MB file becomes ~31–33 MB and bounces.)
+ * Max raw file bytes for reliable SMTP delivery.
+ * Base64 expands ~33%; many hosts also spam-score large attachments (554).
+ * 10 MB file ≈ 13–14 MB on the wire — under typical 25 MB caps and safer than 12–18 MB.
  */
-export const EMAIL_ATTACHMENT_MAX_BYTES = 18 * 1024 * 1024;
+export const EMAIL_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 
 /** Rough MIME size after base64 + small header/body overhead. */
 export function estimateEncodedMessageBytes(attachmentBytes: number): number {

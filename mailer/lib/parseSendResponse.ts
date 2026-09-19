@@ -6,7 +6,7 @@ import {
 
 /**
  * Blocking check — returns an error string when attachments will likely bounce
- * (recipient 552 / ~25 MB message cap after base64).
+ * (size 552 or spam 554 from large MIME payloads).
  */
 export function attachmentSizeMessage(totalBytes: number): string | null {
   if (totalBytes <= EMAIL_ATTACHMENT_MAX_BYTES) return null;
@@ -15,8 +15,8 @@ export function attachmentSizeMessage(totalBytes: number): string | null {
   return (
     `This email is too large (${formatAttachmentSize(totalBytes)} files ≈ ` +
     `${formatAttachmentSize(wire)} on the wire). ` +
-    `Keep attachments under ${maxMb} MB total — SMTP encoding adds ~33%, ` +
-    "and recipient servers reject around 25 MB (error 552)."
+    `Keep attachments under ${maxMb} MB total — larger files often bounce as ` +
+    "size exceeded (552) or spam (554) even when upload succeeds."
   );
 }
 

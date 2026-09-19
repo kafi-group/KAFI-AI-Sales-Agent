@@ -699,10 +699,11 @@ def get_thread(
         threads = group_messages_into_threads(stamped, mailbox_email=account.email)
         match = next((t for t in threads if t["thread_id"] == thread_id), None)
         if not match:
-            # Fallback: inbox-only grouping (same as list) when Sent merge shifts ids.
-            inbox_only = outlook_client.list_messages(limit=120, unread_only=False)
+            # Same window as list_threads so bounce/daemon mail on page 1 still resolves.
+            inbox_only = outlook_client.list_messages(limit=250, unread_only=False)
+            inbox_stamped = [{**m, "provider": _mailbox_provider()} for m in inbox_only]
             inbox_threads = group_messages_into_threads(
-                [{**m, "provider": _mailbox_provider()} for m in inbox_only],
+                inbox_stamped,
                 mailbox_email=account.email,
             )
             match = next((t for t in inbox_threads if t["thread_id"] == thread_id), None)
@@ -718,6 +719,16 @@ def get_thread(
                     if inbound_keys & keys:
                         match = t
                         break
+            if not match:
+                # Last resort: solo-group each recent inbox message (bounce Message-IDs
+                # often don't match conversation merges used on open).
+                for msg in inbox_stamped:
+                    solo = group_messages_into_threads(
+                        [msg], mailbox_email=account.email
+                    )
+                    if solo and solo[0].get("thread_id") == thread_id:
+                        match = solo[0]
+                        break
         if not match:
             return None
 
@@ -726,10 +737,13 @@ def get_thread(
             message_key(m): {**m, "provider": _mailbox_provider()} for m in details
         }
         ordered = [detail_by_key[k] for k in match["message_keys"] if k in detail_by_key]
-        ordered = filter_messages_for_open_conversation(
+        filtered = filter_messages_for_open_conversation(
             ordered, mailbox_email=account.email
         )
-        if not ordered:
+        # Bounces / mailer-daemon can fail the inbound filter — still show the mail.
+        if filtered:
+            ordered = filtered
+        elif not ordered:
             return None
 
         if mark_seen:

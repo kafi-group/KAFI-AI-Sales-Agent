@@ -23,7 +23,7 @@ export function EmailAttachmentsField({
   onChange,
   disabled = false,
   label = "Attachments",
-  hint = "PDF, Office, ZIP, images, and most business files — up to ~18 MB each (email encoding adds ~33%). Executables blocked. Max 8 files.",
+  hint = "PDF, Office, ZIP, images — up to ~10 MB each (email encoding adds ~33%). Larger files often bounce as spam even when upload works. Executables blocked. Max 8 files.",
 }: EmailAttachmentsFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
