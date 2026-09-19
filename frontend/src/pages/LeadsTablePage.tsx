@@ -67,6 +67,7 @@ import {
   IconTelegram,
   IconX,
   IconXCircle,
+  IconRobot,
 } from "../components/icons/AppIcons";
 import {
   useColumnVisibility,
@@ -153,6 +154,8 @@ interface LeadsTablePageProps {
   focusEditLeadId?: number | null;
   focusEditCompany?: string | null;
   onFocusEditConsumed?: () => void;
+  /** After assigning to Sara/Rayan queue — open AI Sales Agent pipeline. */
+  onOpenAiSalesAgent?: () => void;
 }
 
 type SortField =
@@ -900,26 +903,6 @@ function sectionDescription(
   return "AI-discovered leads from Discover Leads only (web search & scraping). Upload or import spreadsheets in Old clients or Incomplete Data from Archives — not here.";
 }
 
-function targetPoolIntakeMethod(section: LeadsTableSection): "upload" | "discover" {
-  if (section === "old_clients" || section === "incomplete_archives" || section === "master")
-    return "upload";
-  if (section === "all") return "discover";
-  if (isTargetedPoolSection(section)) return "upload";
-  return "discover";
-}
-
-function targetPoolLabels(): Record<
-  "hyperstore_targeted" | "targeted_distributor" | "targeted_client" | "khalid_focused_sales",
-  string
-> {
-  return {
-    hyperstore_targeted: "Hyperstore Target",
-    targeted_distributor: "Targeted Distributors",
-    targeted_client: "Targeted Client",
-    khalid_focused_sales: "Khalid Focused Sales",
-  };
-}
-
 function sectionEmptyMessage(section: LeadsTableSection): string | null {
   if (section === "master") {
     return "No leads in the system yet.";
@@ -1119,6 +1102,7 @@ export function LeadsTablePage({
   focusEditLeadId = null,
   focusEditCompany = null,
   onFocusEditConsumed,
+  onOpenAiSalesAgent,
 }: LeadsTablePageProps) {
   const { isAdmin, user } = useAuth();
   const initialTableViewRef = useRef(readStoredTableView(user?.id, section));
@@ -1167,8 +1151,8 @@ export function LeadsTablePage({
   const [scheduleMeetingRow, setScheduleMeetingRow] = useState<LeadTableRow | null>(null);
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [intakeMethodFilter, setIntakeMethodFilter] = useState<"all" | "upload" | "discover">("all");
-  const [movingToPool, setMovingToPool] = useState(false);
   const [movingToModule, setMovingToModule] = useState(false);
+  const [assigningToAi, setAssigningToAi] = useState(false);
   const [moveConfirmTarget, setMoveConfirmTarget] = useState<{
     moduleKey: string;
     moduleLabel: string;
@@ -2172,39 +2156,40 @@ export function LeadsTablePage({
     }
   }
 
-  async function moveSelectedToTargetPool(
-    pool: "hyperstore_targeted" | "targeted_distributor" | "targeted_client" | "khalid_focused_sales",
-  ) {
-    if (!isAdmin || selected.size === 0 || movingToPool) return;
-    const leadIds = [...selected];
-    const labels = targetPoolLabels();
-    const count = leadIds.length;
-    const intake = targetPoolIntakeMethod(section);
+  async function assignSelectedToAiSalesAgent(persona: "female" | "male") {
+    if (selected.size === 0 || assigningToAi) return;
+    const buyerIds = [...selected];
+    const contactIds = buyerIds.map((id) => {
+      const row = rows.find((r) => r.id === id) ?? drafts[id];
+      return row?.contact_id ?? null;
+    });
+    const agentName = persona === "female" ? "Sara" : "Rayan";
     const confirmed = window.confirm(
-      `Move ${count} selected lead${count === 1 ? "" : "s"} to ${labels[pool]}?`,
+      `Assign ${buyerIds.length} contact${buyerIds.length === 1 ? "" : "s"} to ${agentName}'s AI Sales Agent queue?`,
     );
     if (!confirmed) return;
 
-    setMovingToPool(true);
+    setAssigningToAi(true);
     setSaveNotice(null);
     try {
-      const result = await client.setTargetPool(leadIds, pool, intake);
-      const movedIds = new Set(result.updated_ids);
-      if (movedIds.size > 0) {
-        setRows((prev) => prev.filter((row) => !movedIds.has(row.id)));
-        setTotal((prev) => Math.max(0, prev - movedIds.size));
-        setFilteredCount((prev) => Math.max(0, prev - movedIds.size));
-        clearSelection();
-      }
-      await loadSectionCounts();
+      const result = await client.assignAiSalesAgentTasks({
+        persona,
+        buyer_ids: buyerIds,
+        contact_ids: contactIds,
+      });
+      const added = result.tasks?.length ?? 0;
       setSaveNotice(
-        `Moved ${result.updated_count} lead${result.updated_count === 1 ? "" : "s"} to ${labels[pool]}.`,
+        added > 0
+          ? `Assigned ${added} contact${added === 1 ? "" : "s"} to ${agentName}. Open Call Center → AI Sales Agent → Sara / Rayan pipeline.`
+          : `No new contacts added for ${agentName} (already queued or missing).`,
       );
-      window.setTimeout(() => setSaveNotice(null), 5000);
+      window.setTimeout(() => setSaveNotice(null), 8000);
+      clearSelection();
+      onOpenAiSalesAgent?.();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to move leads to targeted pool");
+      onError(e instanceof Error ? e.message : "Failed to assign to AI Sales Agent");
     } finally {
-      setMovingToPool(false);
+      setAssigningToAi(false);
     }
   }
 
@@ -3658,6 +3643,34 @@ export function LeadsTablePage({
             >
               {movingToModule ? "Adding…" : "SCHEDULE MEETING"}
             </ActionButton>
+          ) : null}
+          {selected.size > 0 ? (
+            <ToolbarDropdown
+              label={assigningToAi ? "Assigning…" : "Assign to AI Sales Agent"}
+              icon={IconRobot}
+              variant="sky"
+              menuClassName="min-w-[220px]"
+            >
+              <ToolbarMenuLabel>Add selected to agent queue</ToolbarMenuLabel>
+              <ToolbarMenuItem
+                icon={IconRobot}
+                tone="emerald"
+                disabled={assigningToAi}
+                title="Queue for Sara (female voice agent)"
+                onClick={() => void assignSelectedToAiSalesAgent("female")}
+              >
+                Sara (female)
+              </ToolbarMenuItem>
+              <ToolbarMenuItem
+                icon={IconRobot}
+                tone="sky"
+                disabled={assigningToAi}
+                title="Queue for Rayan (male voice agent)"
+                onClick={() => void assignSelectedToAiSalesAgent("male")}
+              >
+                Rayan (male)
+              </ToolbarMenuItem>
+            </ToolbarDropdown>
           ) : null}
           {selected.size === 1 && section === "schedule_meeting" ? (
             <ActionButton

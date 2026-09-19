@@ -1836,6 +1836,7 @@ function DashboardApp() {
                   setFocusEditLeadId(null);
                   setFocusEditCompany(null);
                 }}
+                onOpenAiSalesAgent={() => handleSelectTab("ai-sales-agent")}
               />
             )}
             {tab === "inbox" && (

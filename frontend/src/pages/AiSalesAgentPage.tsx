@@ -658,6 +658,10 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
           <h3 className="font-medium text-slate-100">Sara / Rayan pipeline</h3>
+          <p className="w-full text-xs text-slate-500">
+            Contacts assigned from any Master list (or below) appear here — call, email, and WhatsApp
+            status per row.
+          </p>
           <select
             value={filterPersona}
             onChange={(e) => setFilterPersona(e.target.value)}
