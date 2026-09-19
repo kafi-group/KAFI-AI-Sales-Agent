@@ -47,6 +47,7 @@ export function CallHistoryPanel({
   const [outcomeDraft, setOutcomeDraft] = useState<CallOutcome | "">("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [trainingId, setTrainingId] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const loadCalls = useCallback(async () => {
@@ -91,6 +92,24 @@ export function CallHistoryPanel({
     setEditingId(call.id);
     setRemarksDraft(call.notes ?? "");
     setOutcomeDraft((call.call_outcome as CallOutcome | undefined) ?? "");
+  }
+
+  async function toggleTrainSaraRayan(call: CallHistoryItem, next: boolean) {
+    setTrainingId(call.id);
+    try {
+      const updated = await client.setCallTrainingFlag(call.id, next);
+      setCalls((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+      setNotice(
+        next
+          ? "Marked for Sara & Rayan training — appears in Call Center → AI Sales Agent."
+          : "Removed from Sara & Rayan training set.",
+      );
+      setTimeout(() => setNotice(null), 4000);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to update training flag");
+    } finally {
+      setTrainingId(null);
+    }
   }
 
   async function deleteCall(call: CallHistoryItem) {
@@ -163,6 +182,21 @@ export function CallHistoryPanel({
                 <p className="text-xs text-slate-500">{formatDate(call.created_at)}</p>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
+                <label
+                  className="flex items-center gap-1.5 cursor-pointer select-none rounded border border-violet-500/35 bg-violet-500/10 px-2 py-0.5"
+                  title="Tick to send this call’s recording + captions to Train Sara & Rayan"
+                >
+                  <input
+                    type="checkbox"
+                    checked={Boolean(call.ai_training_selected)}
+                    disabled={trainingId === call.id}
+                    onChange={(e) => void toggleTrainSaraRayan(call, e.target.checked)}
+                    className="rounded border-slate-600 bg-slate-900 text-violet-500 focus:ring-violet-500"
+                  />
+                  <span className="text-xs font-medium text-violet-200 whitespace-nowrap">
+                    {trainingId === call.id ? "Saving…" : "Train Sara & Rayan"}
+                  </span>
+                </label>
                 {call.call_outcome && (
                   <span
                     className={`text-xs px-2 py-0.5 rounded border ${callOutcomeBadge(call.call_outcome)}`}

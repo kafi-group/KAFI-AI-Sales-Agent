@@ -852,8 +852,8 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
               </div>
             </div>
             <p className="text-[11px] text-slate-500">
-              Every post-call tick appears here. Train Sara &amp; Rayan from these, or from full
-              history.
+              Every tick from post-call or client call history appears here. Train Sara &amp; Rayan
+              from these, or from full history.
             </p>
             <div className="flex-1 max-h-56 overflow-y-auto space-y-1.5 rounded-lg border border-slate-800/80 bg-slate-950/50 p-2">
               {selectedTrainingLoading ? (
@@ -862,9 +862,10 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                   trainingCallFilter === "all" ? true : c.persona === trainingCallFilter,
                 ).length === 0 ? (
                 <p className="text-xs text-slate-500 px-1 py-3 leading-relaxed">
-                  No ticked calls yet. After a call, open the follow-up draft and tick{" "}
-                  <span className="text-violet-300">Train Sara &amp; Rayan</span> — it will show up
-                  here.
+                  No ticked calls yet. Tick{" "}
+                  <span className="text-violet-300">Train Sara &amp; Rayan</span> on a post-call
+                  draft, or on a contact&apos;s call history (Client History → open client) — it
+                  will show up here.
                 </p>
               ) : (
                 selectedTrainingCalls

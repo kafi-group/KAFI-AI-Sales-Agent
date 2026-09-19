@@ -9,7 +9,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { normalizeEditorTextColor } from "../lib/emailTextColor";
+import { normalizeEditorTextColor, getComposeDefaultTextColor, getMailerUiTheme } from "../lib/emailTextColor";
 import {
   hostDataUriImagesInBrowser,
   htmlHasDataUriImages,
@@ -120,11 +120,19 @@ export function EmailBodyEditor({
   const lastHtml = useRef<string>("");
   const reactId = useId();
   const [pasteStatus, setPasteStatus] = useState<string | null>(null);
+  const [uiTheme, setUiTheme] = useState<"dark" | "light">("dark");
+  const [activeColor, setActiveColor] = useState("#ffffff");
+
+  useEffect(() => {
+    const theme = getMailerUiTheme();
+    setUiTheme(theme);
+    setActiveColor(getComposeDefaultTextColor(theme));
+  }, []);
 
   useEffect(() => {
     const el = editorRef.current;
     if (!el) return;
-    const next = normalizeEditorTextColor(plainTextToEditorHtml(value));
+    const next = normalizeEditorTextColor(plainTextToEditorHtml(value), uiTheme);
     if (next === lastHtml.current) return;
     if (el.innerHTML === next) {
       lastHtml.current = next;
@@ -132,7 +140,7 @@ export function EmailBodyEditor({
     }
     el.innerHTML = next || "";
     lastHtml.current = next;
-  }, [value]);
+  }, [value, uiTheme]);
 
   function emitChange() {
     const el = editorRef.current;
@@ -146,10 +154,11 @@ export function EmailBodyEditor({
     const el = editorRef.current;
     if (!el) return;
     el.focus();
+    const themed = normalizeEditorTextColor(html, uiTheme);
     try {
-      document.execCommand("insertHTML", false, html);
+      document.execCommand("insertHTML", false, themed);
     } catch {
-      el.innerHTML += html;
+      el.innerHTML += themed;
     }
     emitChange();
   }
@@ -219,7 +228,13 @@ export function EmailBodyEditor({
     run(command, commandValue);
   }
 
+  function onColorChange(next: string) {
+    setActiveColor(next);
+    run("foreColor", next);
+  }
+
   const minHeight = Math.max(8, rows) * 1.5;
+  const editorColor = getComposeDefaultTextColor(uiTheme);
 
   return (
     <div className={`rte ${className}`.trim()}>
@@ -259,10 +274,10 @@ export function EmailBodyEditor({
         <select
           id={`${reactId}-color`}
           disabled={disabled}
-          defaultValue={COLORS[0].value}
+          value={activeColor}
           title="Text color"
           onMouseDown={(e) => e.stopPropagation()}
-          onChange={(e) => run("foreColor", e.target.value)}
+          onChange={(e) => onColorChange(e.target.value)}
           className="rte-select"
         >
           {COLORS.map((c) => (
@@ -327,7 +342,7 @@ export function EmailBodyEditor({
         onBlur={emitChange}
         onPaste={(e) => void onPaste(e)}
         className="rte-editor"
-        style={{ minHeight: `${minHeight}rem` }}
+        style={{ minHeight: `${minHeight}rem`, color: editorColor }}
       />
     </div>
   );

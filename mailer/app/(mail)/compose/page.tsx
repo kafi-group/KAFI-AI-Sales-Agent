@@ -15,6 +15,7 @@ import {
   plainTextToEditorHtml,
 } from "@/components/EmailBodyEditor";
 import { ensureDearSalutation } from "@/lib/personalizeEmail";
+import { normalizeEditorTextColor } from "@/lib/emailTextColor";
 import {
   attachmentSizeMessage,
   parseSendApiResponse,
@@ -225,7 +226,11 @@ function ComposeInner() {
           if (tpl) {
             setSubject(tpl.subject);
             const salutationName = mergeContact.trim() || "[Contact Name]";
-            setBody(ensureDearSalutation(tpl.body, salutationName));
+            setBody(
+              normalizeEditorTextColor(
+                ensureDearSalutation(tpl.body, salutationName),
+              ),
+            );
             setWriteMode("free");
             const fromTemplate = hostedFromTemplateAttachments(tpl.attachments);
             setAttachments(fromTemplate);
@@ -330,8 +335,9 @@ function ComposeInner() {
         }}
       />
       <p className="muted small">
-        PDFs and files upload to Sales Agent first (up to ~24 MB each), then send via SMTP —
-        not limited by Vercel&apos;s 4 MB request size.
+        PDFs and files upload to Sales Agent first (up to ~18 MB total — email encoding
+        adds ~33%, and most inboxes reject ~25 MB messages). Not limited by Vercel&apos;s
+        4 MB request size.
       </p>
       {uploadingAttachments && <p className="muted small">Uploading…</p>}
       {attachments.length > 0 && (

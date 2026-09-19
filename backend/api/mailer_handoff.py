@@ -143,8 +143,9 @@ class MailerInlineUploadResponse(BaseModel):
     size: int
 
 
-# Provider-safe ceiling for outbound email (Gmail/Outlook ~25 MB total message).
-MAILER_ATTACHMENT_MAX_BYTES = 24 * 1024 * 1024
+# Raw-file ceiling: SMTP base64 expands ~33%; recipients reject ~25 MB messages.
+# 18 MB file ≈ 24 MB on the wire (a 23.5 MB file becomes ~31–33 MB and bounces).
+MAILER_ATTACHMENT_MAX_BYTES = 18 * 1024 * 1024
 
 
 class MailerAttachmentUploadResponse(BaseModel):

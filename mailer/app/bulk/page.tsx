@@ -16,6 +16,7 @@ import {
   plainTextToEditorHtml,
 } from "@/components/EmailBodyEditor";
 import { ensureDearSalutation, personalizeEmailText } from "@/lib/personalizeEmail";
+import { normalizeEditorTextColor } from "@/lib/emailTextColor";
 import {
   hostDataUriImagesInBrowser,
   htmlHasDataUriImages,
@@ -391,7 +392,11 @@ function BulkInner() {
             setTemplateId(id);
             if (tpl) {
               setSubject(tpl.subject);
-              setBody(ensureDearSalutation(tpl.body, "{{contact_name}}"));
+              setBody(
+                normalizeEditorTextColor(
+                  ensureDearSalutation(tpl.body, "{{contact_name}}"),
+                ),
+              );
               setWriteMode("free");
               setTplNotice(`Loaded template “${tpl.name}”`);
             } else {

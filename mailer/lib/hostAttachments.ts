@@ -6,8 +6,17 @@
 
 import { getApiBase, getStoredToken } from "./api";
 
-/** Practical per-file ceiling (email providers reject ~25 MB total). */
-export const EMAIL_ATTACHMENT_MAX_BYTES = 24 * 1024 * 1024;
+/**
+ * Max raw file bytes. SMTP base64 expands ~33%, and most recipients reject
+ * ~25 MB *messages* (552). 18 MB file ≈ 24 MB on the wire — stays under that.
+ * (A 23.5 MB file becomes ~31–33 MB and bounces.)
+ */
+export const EMAIL_ATTACHMENT_MAX_BYTES = 18 * 1024 * 1024;
+
+/** Rough MIME size after base64 + small header/body overhead. */
+export function estimateEncodedMessageBytes(attachmentBytes: number): number {
+  return Math.ceil(attachmentBytes * (4 / 3)) + 64 * 1024;
+}
 
 /** Stay under Vercel/proxy body limits when uploading from the browser. */
 const CHUNK_BYTES = 2.5 * 1024 * 1024;
@@ -235,7 +244,7 @@ export async function uploadAttachmentToSalesAgent(
     throw new Error(
       `${file.name} is ${formatAttachmentSize(file.size)} — keep each file under ${
         EMAIL_ATTACHMENT_MAX_BYTES / (1024 * 1024)
-      } MB (email providers reject ~25 MB messages).`,
+      } MB (≈${formatAttachmentSize(estimateEncodedMessageBytes(file.size))} on the wire; inboxes reject ~25 MB).`,
     );
   }
   // Large files: chunked path (avoids Failed to fetch on ~20+ MB single POSTs).

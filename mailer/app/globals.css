@@ -8,6 +8,18 @@
   --accent: #0284c7;
   --ok: #34d399;
   --bad: #f87171;
+  --rte-text: #ffffff;
+}
+
+:root[data-theme="light"],
+:root.light {
+  color-scheme: light;
+  --bg: #f8fafc;
+  --panel: #ffffff;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --muted: #64748b;
+  --rte-text: #111827;
 }
 
 * {
@@ -574,8 +586,12 @@ select.template-select {
   outline: none;
   font-size: 0.9rem;
   line-height: 1.5;
-  color: #ffffff;
+  color: var(--rte-text, #ffffff);
   min-height: 160px;
+}
+
+.rte-editor [data-kafi-compose-color] {
+  color: inherit;
 }
 
 .rte-editor:empty:before {
