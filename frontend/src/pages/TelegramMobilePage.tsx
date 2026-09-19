@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { client } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ActionButton } from "../components/ui/ActionButton";
-import { IconRefresh, IconSend } from "../components/icons/AppIcons";
+import { IconCheck, IconRefresh, IconSend, IconTelegram, IconX } from "../components/icons/AppIcons";
 
 interface TelegramMobilePageProps {
   onError: (message: string) => void;
@@ -201,7 +201,13 @@ export function TelegramMobilePage({ onError }: TelegramMobilePageProps) {
                 <span className="text-slate-500"> · @{status.username}</span>
               ) : null}
             </p>
-            <ActionButton type="button" variant="secondary" onClick={() => void disconnect()} disabled={busy}>
+            <ActionButton
+              type="button"
+              variant="secondary"
+              icon={IconX}
+              onClick={() => void disconnect()}
+              disabled={busy}
+            >
               Disconnect
             </ActionButton>
           </div>
@@ -217,7 +223,12 @@ export function TelegramMobilePage({ onError }: TelegramMobilePageProps) {
               placeholder="Telegram password"
               className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
             />
-            <ActionButton type="button" onClick={() => void submitPassword()} disabled={busy || !password}>
+            <ActionButton
+              type="button"
+              icon={IconCheck}
+              onClick={() => void submitPassword()}
+              disabled={busy || !password}
+            >
               {busy ? "Checking…" : "Confirm password"}
             </ActionButton>
           </div>
@@ -240,7 +251,12 @@ export function TelegramMobilePage({ onError }: TelegramMobilePageProps) {
               className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono tracking-widest"
               autoComplete="one-time-code"
             />
-            <ActionButton type="button" onClick={() => void submitCode()} disabled={busy || !code.trim()}>
+            <ActionButton
+              type="button"
+              icon={IconCheck}
+              onClick={() => void submitCode()}
+              disabled={busy || !code.trim()}
+            >
               {busy ? "Verifying…" : "Confirm code"}
             </ActionButton>
           </div>
@@ -258,6 +274,7 @@ export function TelegramMobilePage({ onError }: TelegramMobilePageProps) {
             />
             <ActionButton
               type="button"
+              icon={IconTelegram}
               onClick={() => void startLogin()}
               disabled={busy || phone.trim().length < 8}
             >
