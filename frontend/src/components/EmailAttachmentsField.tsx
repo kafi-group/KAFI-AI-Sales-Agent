@@ -23,11 +23,12 @@ export function EmailAttachmentsField({
   onChange,
   disabled = false,
   label = "Attachments",
-  hint = "Any PDF, Word, Excel, image, TXT, or CSV — up to 24 MB each, max 8 files per email. (+ Catalogue is only a shortcut for official Kafi PDFs already on the server.)",
+  hint = "PDF, Office, ZIP, images, and most business files — up to ~18 MB each (email encoding adds ~33%). Executables blocked. Max 8 files.",
 }: EmailAttachmentsFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+  const [uploadPercent, setUploadPercent] = useState(0);
+  const [uploadLabel, setUploadLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAttachCatalogue, setShowAttachCatalogue] = useState(false);
   const [showAttachCnf, setShowAttachCnf] = useState(false);
@@ -36,7 +37,8 @@ export function EmailAttachmentsField({
     if (!fileList?.length || disabled) return;
     setError(null);
     setUploading(true);
-    setUploadProgress("Preparing upload…");
+    setUploadPercent(0);
+    setUploadLabel("Preparing upload…");
     const next = [...attachments];
     try {
       for (const file of Array.from(fileList)) {
@@ -45,7 +47,10 @@ export function EmailAttachmentsField({
           break;
         }
         const uploaded = await client.uploadEmailAttachment(file, {
-          onProgress: setUploadProgress,
+          onProgress: ({ percent, label: progressLabel }) => {
+            setUploadPercent(percent);
+            setUploadLabel(progressLabel);
+          },
         });
         next.push(uploaded);
       }
@@ -54,7 +59,8 @@ export function EmailAttachmentsField({
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setUploading(false);
-      setUploadProgress(null);
+      setUploadPercent(0);
+      setUploadLabel(null);
       if (inputRef.current) inputRef.current.value = "";
     }
   }
@@ -108,16 +114,33 @@ export function EmailAttachmentsField({
         ref={inputRef}
         type="file"
         multiple
-        accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,image/*,application/pdf"
         className="hidden"
         onChange={(e) => void handleFiles(e.target.files)}
       />
       {hint && <p className="text-xs text-slate-500">{hint}</p>}
       {error && <p className="text-xs text-red-300">{error}</p>}
       {uploading && (
-        <div className="flex items-center gap-2 p-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-200">
-          <div className="w-3.5 h-3.5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin shrink-0" />
-          <span>{uploadProgress || "Uploading attachment(s)… Please wait"}</span>
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2.5 space-y-2">
+          <div className="flex items-center justify-between gap-2 text-xs text-emerald-200">
+            <span className="truncate min-w-0">
+              {uploadLabel || "Uploading attachment(s)…"}
+            </span>
+            <span className="font-mono font-semibold shrink-0 tabular-nums">
+              {uploadPercent}%
+            </span>
+          </div>
+          <div
+            className="h-2 rounded-full bg-slate-950/60 overflow-hidden border border-emerald-500/20"
+            role="progressbar"
+            aria-valuenow={uploadPercent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <div
+              className="h-full rounded-full bg-emerald-400 transition-[width] duration-300 ease-out"
+              style={{ width: `${uploadPercent}%` }}
+            />
+          </div>
         </div>
       )}
       {attachments.length > 0 && (

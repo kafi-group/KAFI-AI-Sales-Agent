@@ -137,19 +137,29 @@ async function uploadSmallFile(
 /** Chunked upload via Sales Agent so large PDFs never hit one big Railway POST. */
 async function uploadChunkedFile(
   file: File,
-  options?: { authToken?: string | null },
+  options?: {
+    authToken?: string | null;
+    onProgress?: (info: { percent: number; label: string }) => void;
+  },
 ): Promise<HostedAttachment> {
   const base = getApiBase().replace(/\/$/, "");
   if (!base) {
     throw new Error("Sales Agent API URL is not configured — cannot upload attachment.");
   }
   const auth = options?.authToken ?? getStoredToken();
+  const report = (percent: number, label: string) => {
+    options?.onProgress?.({
+      percent: Math.max(0, Math.min(100, Math.round(percent))),
+      label,
+    });
+  };
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   if (auth) headers.Authorization = `Bearer ${auth}`;
 
   const totalChunks = Math.ceil(file.size / CHUNK_BYTES);
+  report(0, `Starting upload… ${file.name}`);
   let initRes: Response;
   try {
     initRes = await fetch(`${base}/email/attachments/chunk-init`, {
@@ -177,6 +187,11 @@ async function uploadChunkedFile(
   for (let index = 0; index < totalChunks; index++) {
     const start = index * CHUNK_BYTES;
     const end = Math.min(file.size, start + CHUNK_BYTES);
+    const pct = (end / file.size) * 95;
+    report(
+      pct,
+      `Uploading ${file.name}… ${Math.round(pct)}% (chunk ${index + 1}/${totalChunks})`,
+    );
     const blob = file.slice(start, end);
     const form = new FormData();
     form.append("upload_id", init.upload_id);
@@ -206,6 +221,7 @@ async function uploadChunkedFile(
     }
   }
 
+  report(98, `Finishing upload… ${file.name}`);
   let doneRes: Response;
   try {
     doneRes = await fetch(`${base}/email/attachments/chunk-complete`, {
@@ -227,6 +243,7 @@ async function uploadChunkedFile(
     content_type: string;
     size: number;
   };
+  report(100, `Uploaded ${file.name}`);
   return {
     id: meta.id,
     url: `${base}/mailer/inline-media/${meta.id}`,
@@ -238,7 +255,11 @@ async function uploadChunkedFile(
 
 export async function uploadAttachmentToSalesAgent(
   file: File,
-  options?: { authToken?: string | null; handoffToken?: string },
+  options?: {
+    authToken?: string | null;
+    handoffToken?: string;
+    onProgress?: (info: { percent: number; label: string }) => void;
+  },
 ): Promise<HostedAttachment> {
   if (file.size > EMAIL_ATTACHMENT_MAX_BYTES) {
     throw new Error(
@@ -251,7 +272,10 @@ export async function uploadAttachmentToSalesAgent(
   if (file.size > CHUNK_BYTES) {
     return uploadChunkedFile(file, options);
   }
-  return uploadSmallFile(file, options);
+  options?.onProgress?.({ percent: 40, label: `Uploading ${file.name}…` });
+  const result = await uploadSmallFile(file, options);
+  options?.onProgress?.({ percent: 100, label: `Uploaded ${file.name}` });
+  return result;
 }
 
 /** Resolve attachment refs to base64 buffers for nodemailer (server-side). */

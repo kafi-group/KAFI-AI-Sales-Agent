@@ -675,3 +675,40 @@ select.template-select {
   background: linear-gradient(90deg, var(--accent), #38bdf8);
   transition: width 0.25s ease;
 }
+
+.upload-progress {
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--border));
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+
+.upload-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--ok);
+  margin-bottom: 0.4rem;
+}
+
+.upload-progress-meta strong {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.upload-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 85%, transparent);
+  overflow: hidden;
+}
+
+.upload-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--ok), #34d399);
+  transition: width 0.3s ease;
+}

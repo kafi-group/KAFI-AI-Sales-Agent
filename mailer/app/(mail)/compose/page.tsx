@@ -63,6 +63,8 @@ function ComposeInner() {
   const [saving, setSaving] = useState(false);
   const [attachments, setAttachments] = useState<HostedAttachment[]>([]);
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
+  const [uploadPercent, setUploadPercent] = useState(0);
+  const [uploadLabel, setUploadLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const draftId = params.get("draft_id");
@@ -94,12 +96,22 @@ function ComposeInner() {
       return;
     }
     setUploadingAttachments(true);
+    setUploadPercent(0);
+    setUploadLabel("Preparing upload…");
     setError(null);
-    setNotice("Uploading attachment(s) to Sales Agent…");
+    setNotice(null);
     try {
       const next: HostedAttachment[] = [];
       for (const file of Array.from(files)) {
-        next.push(await uploadAttachmentToSalesAgent(file, { authToken: auth }));
+        next.push(
+          await uploadAttachmentToSalesAgent(file, {
+            authToken: auth,
+            onProgress: ({ percent, label }) => {
+              setUploadPercent(percent);
+              setUploadLabel(label);
+            },
+          }),
+        );
       }
       setAttachments((prev) => [...prev, ...next]);
       setNotice(
@@ -112,6 +124,8 @@ function ComposeInner() {
       setNotice(null);
     } finally {
       setUploadingAttachments(false);
+      setUploadPercent(0);
+      setUploadLabel(null);
     }
   }
 
@@ -339,7 +353,23 @@ function ComposeInner() {
         adds ~33%, and most inboxes reject ~25 MB messages). Not limited by Vercel&apos;s
         4 MB request size.
       </p>
-      {uploadingAttachments && <p className="muted small">Uploading…</p>}
+      {uploadingAttachments && (
+        <div className="upload-progress" role="status" aria-live="polite">
+          <div className="upload-progress-meta">
+            <span>{uploadLabel || "Uploading…"}</span>
+            <strong>{uploadPercent}%</strong>
+          </div>
+          <div
+            className="upload-progress-track"
+            role="progressbar"
+            aria-valuenow={uploadPercent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <div className="upload-progress-fill" style={{ width: `${uploadPercent}%` }} />
+          </div>
+        </div>
+      )}
       {attachments.length > 0 && (
         <>
           <ul className="small muted">
