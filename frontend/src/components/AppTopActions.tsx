@@ -20,6 +20,14 @@ import {
   unlockNotificationAudio,
   type NotificationMode,
 } from "../utils/notify";
+import {
+  loadNarratorPrefs,
+  saveNarratorPrefs,
+  type NarratorGender,
+  type NarratorPause,
+  type NarratorPrefs,
+  type NarratorSpeed,
+} from "../utils/narratorPrefs";
 
 interface AppTopActionsProps {
   onRefresh?: () => void;
@@ -82,6 +90,7 @@ export function AppTopActions({
 
   const [mode, setMode] = useState<NotificationMode>(() => getNotificationMode());
   const [notifPermission, setNotifPermission] = useState(getNotificationPermission());
+  const [narrator, setNarrator] = useState<NarratorPrefs>(() => loadNarratorPrefs());
   const panelRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -343,6 +352,69 @@ export function AppTopActions({
               );
             })}
           </fieldset>
+
+          <div className="mt-4 pt-3 border-t border-slate-800 space-y-3">
+            <p className="text-xs font-medium text-violet-200">Narrator voice</p>
+            <p className="text-[11px] text-slate-500 -mt-1">
+              Email hands-free reader and WhatsApp / alert voiceovers.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="text-[11px] text-slate-400">Speed</span>
+                <select
+                  value={narrator.speed}
+                  onChange={(e) =>
+                    setNarrator(saveNarratorPrefs({ speed: e.target.value as NarratorSpeed }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-100"
+                >
+                  <option value="slow">Slow</option>
+                  <option value="normal">Normal</option>
+                  <option value="fast">Fast</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-[11px] text-slate-400">Voice</span>
+                <select
+                  value={narrator.gender}
+                  onChange={(e) =>
+                    setNarrator(saveNarratorPrefs({ gender: e.target.value as NarratorGender }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-100"
+                >
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
+              </label>
+            </div>
+            <label className="block">
+              <span className="text-[11px] text-slate-400">Reply pause</span>
+              <select
+                value={narrator.pause}
+                onChange={(e) =>
+                  setNarrator(saveNarratorPrefs({ pause: e.target.value as NarratorPause }))
+                }
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-100"
+              >
+                <option value="short">Very short</option>
+                <option value="normal">Normal</option>
+                <option value="long">Longer</option>
+              </select>
+            </label>
+            <label className="flex items-start gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={narrator.responseBeep}
+                onChange={(e) =>
+                  setNarrator(saveNarratorPrefs({ responseBeep: e.target.checked }))
+                }
+                className="mt-0.5 rounded border-slate-600 bg-slate-900 text-violet-500"
+              />
+              <span className="text-[11px] text-slate-300 leading-snug">
+                Beep before I speak (signal to answer)
+              </span>
+            </label>
+          </div>
 
           {notifPermission !== "unsupported" && (
             <div className="mt-4 pt-3 border-t border-slate-800">

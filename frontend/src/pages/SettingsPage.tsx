@@ -8,6 +8,14 @@ import {
   RESEARCH_PATIENCE,
   type ResearchPatience,
 } from "../lib/researchPatience";
+import {
+  loadNarratorPrefs,
+  saveNarratorPrefs,
+  type NarratorGender,
+  type NarratorPause,
+  type NarratorPrefs,
+  type NarratorSpeed,
+} from "../utils/narratorPrefs";
 
 interface SettingsPageProps {
   onError: (message: string) => void;
@@ -58,6 +66,7 @@ export function SettingsPage({ onError }: SettingsPageProps) {
   const [elevenLabsDraft, setElevenLabsDraft] = useState("");
   const [savingHangup, setSavingHangup] = useState(false);
   const [researchPatience, setResearchPatience] = useState<ResearchPatience>(() => loadResearchPatience());
+  const [narrator, setNarrator] = useState<NarratorPrefs>(() => loadNarratorPrefs());
 
   const loadData = useCallback(async () => {
     try {
@@ -339,6 +348,97 @@ export function SettingsPage({ onError }: SettingsPageProps) {
             Full redeploy
           </ActionButton>
         </div>
+      </section>
+
+      <section className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-5 sm:p-6 space-y-5">
+        <div>
+          <h3 className="text-base font-medium text-slate-100">Narrator (email &amp; WhatsApp)</h3>
+          <p className="mt-1 text-sm text-slate-400">
+            Controls the browser voice that reads emails (hands-free reader) and WhatsApp / alert
+            voiceovers. Saved on this device only.
+          </p>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span className="text-xs font-medium text-slate-300">Speed</span>
+            <select
+              value={narrator.speed}
+              onChange={(e) =>
+                setNarrator(
+                  saveNarratorPrefs({
+                    speed: e.target.value as NarratorSpeed,
+                  }),
+                )
+              }
+              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+            >
+              <option value="slow">Slow</option>
+              <option value="normal">Normal</option>
+              <option value="fast">Fast (current default)</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="text-xs font-medium text-slate-300">Voice</span>
+            <select
+              value={narrator.gender}
+              onChange={(e) =>
+                setNarrator(
+                  saveNarratorPrefs({
+                    gender: e.target.value as NarratorGender,
+                  }),
+                )
+              }
+              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+            >
+              <option value="male">Male (current default)</option>
+              <option value="female">Female</option>
+            </select>
+          </label>
+
+          <label className="block sm:col-span-2">
+            <span className="text-xs font-medium text-slate-300">
+              Pause before listening for your reply
+            </span>
+            <select
+              value={narrator.pause}
+              onChange={(e) =>
+                setNarrator(
+                  saveNarratorPrefs({
+                    pause: e.target.value as NarratorPause,
+                  }),
+                )
+              }
+              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+            >
+              <option value="short">Very short (easy to miss — previous default)</option>
+              <option value="normal">Normal pause</option>
+              <option value="long">Longer pause</option>
+            </select>
+            <span className="mt-1 block text-xs text-slate-500">
+              Gives you time after the question before the mic stops waiting for yes / no.
+            </span>
+          </label>
+        </div>
+
+        <label className="flex items-start gap-3 cursor-pointer select-none rounded-lg border border-slate-700/80 bg-slate-950/40 px-3 py-3">
+          <input
+            type="checkbox"
+            checked={narrator.responseBeep}
+            onChange={(e) =>
+              setNarrator(saveNarratorPrefs({ responseBeep: e.target.checked }))
+            }
+            className="mt-0.5 rounded border-slate-600 bg-slate-900 text-violet-500 focus:ring-violet-500"
+          />
+          <span className="min-w-0">
+            <span className="block text-sm text-slate-100">Beep before I should speak</span>
+            <span className="block text-xs text-slate-500 mt-0.5">
+              Plays a short beep after the narrator asks a question so you know when to answer.
+              Off by default.
+            </span>
+          </span>
+        </label>
       </section>
 
       {/* Twilio Voice Credits Section */}

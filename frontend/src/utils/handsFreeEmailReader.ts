@@ -3,6 +3,16 @@
  * Browser SpeechSynthesis + SpeechRecognition only (no backend).
  */
 
+import {
+  applyNarratorToUtterance,
+  ensureNarratorVoicesLoaded,
+  loadNarratorPrefs,
+  narratorListenDelayMs,
+  narratorListenTimeoutMs,
+  playNarratorResponseBeep,
+  sleepMs,
+} from "./narratorPrefs";
+
 export type HandsFreePhase =
   | "idle"
   | "offering"
@@ -200,10 +210,9 @@ function speakAsync(text: string, token: number): Promise<void> {
     }
     try {
       stopSpeech();
+      const prefs = loadNarratorPrefs();
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1;
-      utterance.pitch = 1;
-      utterance.volume = 1;
+      applyNarratorToUtterance(utterance, prefs);
       utterance.onend = () => {
         if (token === sessionToken) resolve();
       };
@@ -215,6 +224,18 @@ function speakAsync(text: string, token: number): Promise<void> {
       resolve();
     }
   });
+}
+
+async function prepareListen(token: number): Promise<void> {
+  if (token !== sessionToken) return;
+  const prefs = loadNarratorPrefs();
+  if (prefs.responseBeep) {
+    statusLine = "Beep — your turn to speak…";
+    emitStatus();
+    await playNarratorResponseBeep();
+    if (token !== sessionToken) return;
+  }
+  await sleepMs(narratorListenDelayMs(prefs.pause));
 }
 
 type SpeechRecognitionCtor = new () => SpeechRecognition;
@@ -236,7 +257,7 @@ export function handsFreeSpeechSupported(): boolean {
   );
 }
 
-function listenOnce(token: number, timeoutMs = 10000): Promise<string> {
+function listenOnce(token: number, timeoutMs?: number): Promise<string> {
   return new Promise((resolve) => {
     const Ctor = getSpeechRecognitionCtor();
     if (!Ctor) {
@@ -245,6 +266,7 @@ function listenOnce(token: number, timeoutMs = 10000): Promise<string> {
     }
     stopRecognition();
     let settled = false;
+    const limit = timeoutMs ?? narratorListenTimeoutMs();
     const finish = (text: string) => {
       if (settled || token !== sessionToken) return;
       settled = true;
@@ -260,7 +282,7 @@ function listenOnce(token: number, timeoutMs = 10000): Promise<string> {
     rec.maxAlternatives = 3;
     rec.continuous = false;
 
-    const timer = window.setTimeout(() => finish(""), timeoutMs);
+    const timer = window.setTimeout(() => finish(""), limit);
 
     rec.onresult = (event: SpeechRecognitionEvent) => {
       let best = "";
@@ -322,6 +344,8 @@ async function runSession(token: number) {
   phase = "listening_offer";
   statusLine = "Listening for yes or no…";
   emitStatus();
+  await prepareListen(token);
+  if (token !== sessionToken) return;
   const heardOffer = await listenOnce(token);
   if (token !== sessionToken) return;
   lastHeard = heardOffer;
@@ -367,6 +391,8 @@ async function runSession(token: number) {
     phase = "listening_next";
     statusLine = "Listening for yes or no…";
     emitStatus();
+    await prepareListen(token);
+    if (token !== sessionToken) return;
     const heardNext = await listenOnce(token);
     if (token !== sessionToken) return;
     lastHeard = heardNext;
@@ -412,6 +438,7 @@ export async function startHandsFreeEmailReader(emails: HandsFreeEmailItem[]) {
   emitStatus();
 
   try {
+    await ensureNarratorVoicesLoaded();
     await runSession(token);
   } catch {
     if (token === sessionToken) {

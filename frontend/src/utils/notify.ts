@@ -1,5 +1,7 @@
 /** Inbox alerts — popup, chime, optional voiceover, or fully off (user preference). */
 
+import { applyNarratorToUtterance, ensureNarratorVoicesLoaded } from "./narratorPrefs";
+
 export type NotificationMode =
   | "popup_sound"
   | "popup_voiceover"
@@ -245,11 +247,11 @@ function speakAlert(text: string) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   try {
     stopAnySpeech();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1;
-    utterance.pitch = 1;
-    utterance.volume = 1;
-    window.speechSynthesis.speak(utterance);
+    void ensureNarratorVoicesLoaded().then(() => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      applyNarratorToUtterance(utterance);
+      window.speechSynthesis.speak(utterance);
+    });
   } catch {
     /* ignore */
   }
