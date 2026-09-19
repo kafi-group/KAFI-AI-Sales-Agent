@@ -219,7 +219,7 @@ export function BulkWhatsAppModal({
     <button
       type="button"
       onClick={() => setTab(id)}
-      className={`pb-2.5 px-3 text-xs sm:text-sm font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap ${
+      className={`pb-2.5 px-2 sm:px-3 text-xs sm:text-sm font-bold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
         tab === id
           ? "border-emerald-500 text-emerald-300 shadow-sm"
           : "border-transparent text-slate-400 hover:text-slate-200"
@@ -237,7 +237,7 @@ export function BulkWhatsAppModal({
       role="presentation"
     >
       <div
-        className="w-full sm:max-w-2xl max-h-[92vh] overflow-hidden flex flex-col rounded-t-2xl sm:rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+        className="w-full sm:max-w-4xl max-h-[92vh] overflow-hidden flex flex-col rounded-t-2xl sm:rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl animate-in fade-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
@@ -270,10 +270,10 @@ export function BulkWhatsAppModal({
           </button>
         </div>
 
-        <div className="flex border-b border-slate-800 bg-slate-950/80 px-5 pt-3 gap-2 sm:gap-3 shrink-0 overflow-x-auto">
-          {tabBtn("personal", "📱 Personal WhatsApp (QR Scanned)")}
-          {tabBtn("template", "🏢 Meta Verified (Templates)")}
-          {tabBtn("personal_template", "📝 Personal WhatsApp Templates")}
+        <div className="flex flex-wrap border-b border-slate-800 bg-slate-950/80 px-4 sm:px-5 pt-3 gap-x-1 sm:gap-x-2 gap-y-1 shrink-0">
+          {tabBtn("personal", "Personal WhatsApp (QR Scanned)")}
+          {tabBtn("template", "Meta Verified (Templates)")}
+          {tabBtn("personal_template", "Personal WhatsApp Templates")}
         </div>
 
         <div className="p-5 overflow-y-auto flex-1 space-y-4">
