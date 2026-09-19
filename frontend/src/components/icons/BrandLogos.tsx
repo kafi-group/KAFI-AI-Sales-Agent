@@ -2,6 +2,7 @@ import whatsappLogo from "../../assets/brands/whatsapp.svg?url";
 import outlookLogo from "../../assets/brands/outlook.svg?url";
 import twilioLogo from "../../assets/brands/twilio.svg?url";
 import linkedinLogo from "../../assets/brands/linkedin.svg?url";
+import telegramLogo from "../../assets/brands/telegram.svg?url";
 
 type BrandSize = "xs" | "sm" | "md" | "lg";
 
@@ -82,6 +83,19 @@ export function LogoLinkedIn({ size, className, title }: BrandLogoProps) {
     <BrandImg
       src={linkedinLogo}
       alt="LinkedIn"
+      size={size}
+      className={className}
+      title={title}
+    />
+  );
+}
+
+/** Telegram brand mark. */
+export function LogoTelegram({ size, className, title }: BrandLogoProps) {
+  return (
+    <BrandImg
+      src={telegramLogo}
+      alt="Telegram"
       size={size}
       className={className}
       title={title}

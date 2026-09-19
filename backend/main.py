@@ -34,6 +34,7 @@ from api import (
     track,
     whatsapp,
     whatsapp_personal,
+    telegram_personal,
     system,
 )
 from config import settings
@@ -416,6 +417,7 @@ app.include_router(kpi.router, prefix="/api")
 app.include_router(guidance.router, prefix="/api")
 app.include_router(whatsapp.router, prefix="/api")
 app.include_router(whatsapp_personal.router, prefix="/api")
+app.include_router(telegram_personal.router, prefix="/api")
 app.include_router(whatsapp.webhooks_router, prefix="/api")
 app.include_router(ai_mode.router, prefix="/api")
 app.include_router(catalogues.router, prefix="/api")

@@ -3169,6 +3169,32 @@ export const client = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  getTelegramPersonalStatus: () =>
+    request<Record<string, unknown>>("/telegram-personal/status"),
+  getTelegramPersonalSession: () =>
+    request<{ session_id: string; bridge_configured: boolean }>("/telegram-personal/session"),
+  startTelegramPersonalLogin: (phone: string) =>
+    request<Record<string, unknown>>("/telegram-personal/start-login", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+    }),
+  confirmTelegramPersonalCode: (code: string) =>
+    request<Record<string, unknown>>("/telegram-personal/confirm-code", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+  confirmTelegramPersonalPassword: (password: string) =>
+    request<Record<string, unknown>>("/telegram-personal/confirm-password", {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    }),
+  disconnectTelegramPersonal: () =>
+    request<Record<string, unknown>>("/telegram-personal/disconnect", { method: "POST" }),
+  sendTelegramPersonal: (to_phone: string, message: string) =>
+    request<Record<string, unknown>>("/telegram-personal/send", {
+      method: "POST",
+      body: JSON.stringify({ to_phone, message }),
+    }),
   sendWhatsAppPersonalBulk: (payload: { buyer_ids: number[]; message: string }) =>
     request<WhatsAppCampaignDraftResponse>("/whatsapp-personal/bulk-send", {
       method: "POST",
