@@ -3541,7 +3541,7 @@ export function LeadsTablePage({
           </ToolbarDropdown>
 
           <ToolbarDropdown
-            label="Lists and Modules"
+            label="Move to"
             icon={IconList}
             variant="violet"
             menuClassName="min-w-[260px]"
@@ -3604,21 +3604,6 @@ export function LeadsTablePage({
             >
               {promotingIncomplete ? "Promoting…" : `Promote to Old clients (${selected.size})`}
             </ActionButton>
-          ) : null}
-          {isAdmin && selected.size > 0 ? (
-            <>
-              {section !== "khalid_focused_sales" ? (
-                <ActionButton
-                  icon={IconSearch}
-                  variant="emerald"
-                  onClick={() => void moveSelectedToTargetPool("khalid_focused_sales")}
-                  disabled={movingToPool || bulkOnboarding || editMode}
-                  title="Add selected leads to Khalid Focused Sales"
-                >
-                  {movingToPool ? "Moving…" : "→ Khalid Focused"}
-                </ActionButton>
-              ) : null}
-            </>
           ) : null}
 
           {section === "sales_interested_clients" && (
