@@ -7,7 +7,6 @@ import {
   isTransientApiError,
   type AiSalesAgentRunner,
   type AiSalesAgentTask,
-  type AiTrainingSelectedCall,
   type DialableContactSuggestion,
 } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -21,6 +20,7 @@ import {
   type TelegramComposeTarget,
 } from "../components/TelegramComposeLink";
 import { ComposeMailModal } from "../components/ComposeMailModal";
+import { AiAutoModePanel } from "../components/AiAutoModePanel";
 
 interface AiSalesAgentPageProps {
   onError: (message: string) => void;
@@ -57,50 +57,9 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   const [emailModalInitial, setEmailModalInitial] = useState<{ to: string; subject: string } | null>(null);
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
 
-  // AI Agent Training & Knowledge Base State
-  const [trainingData, setTrainingData] = useState<import("../api/client").AiTrainingData | null>(null);
-  const [trainingLoading, setTrainingLoading] = useState(false);
-  const [rulesDraft, setRulesDraft] = useState("");
-  const [savingRules, setSavingRules] = useState(false);
-  const [trainingNotice, setTrainingNotice] = useState<string | null>(null);
-  const [selectedTrainingCalls, setSelectedTrainingCalls] = useState<AiTrainingSelectedCall[]>([]);
-  const [selectedTrainingLoading, setSelectedTrainingLoading] = useState(false);
-  const [trainingCallFilter, setTrainingCallFilter] = useState<"all" | "female" | "male">("all");
-  const [checkedTrainingIds, setCheckedTrainingIds] = useState<Set<number>>(new Set());
-
-  const loadTraining = useCallback(async () => {
-    try {
-      const data = await client.getAiTrainingInfo();
-      setTrainingData(data);
-      setRulesDraft(data.custom_rules || "");
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const loadSelectedTrainingCalls = useCallback(async () => {
-    setSelectedTrainingLoading(true);
-    try {
-      const res = await client.listAiTrainingSelectedCalls(80);
-      setSelectedTrainingCalls(res.rows || []);
-      setCheckedTrainingIds(new Set((res.rows || []).map((r) => r.id)));
-    } catch {
-      /* ignore */
-    } finally {
-      setSelectedTrainingLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     setUnlocked(Boolean(getAiSalesAgentAccessCode()));
   }, []);
-
-  useEffect(() => {
-    if (unlocked) {
-      void loadTraining();
-      void loadSelectedTrainingCalls();
-    }
-  }, [unlocked, loadTraining, loadSelectedTrainingCalls]);
 
   useEffect(() => {
     if (user?.full_name && !selfTestName) {
@@ -412,76 +371,9 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     }
   }
 
-  async function handleTrainFromHistory(source: "auto" | "curated" | "history" | "ids" = "auto") {
-    setTrainingLoading(true);
-    setTrainingNotice(null);
-    try {
-      const ids =
-        source === "ids"
-          ? Array.from(checkedTrainingIds)
-          : source === "curated"
-            ? undefined
-            : undefined;
-      if (source === "ids" && (!ids || ids.length === 0)) {
-        onError("Tick at least one call in the training list first.");
-        return;
-      }
-      if (source === "curated" && selectedTrainingCalls.length === 0) {
-        onError("No ticked Train Sara & Rayan calls yet. Mark good calls after dialing, then train.");
-        return;
-      }
-      const res = await client.trainAiFromHistory({
-        source,
-        interaction_ids: source === "ids" ? ids : undefined,
-      });
-      setTrainingData(res);
-      const curatedBit =
-        res.selected_calls_used && res.selected_calls_used > 0
-          ? ` (${res.selected_calls_used} ticked training calls)`
-          : "";
-      setTrainingNotice(
-        `Playbook updated for Sara & Rayan from ${res.total_calls_analyzed} call(s)${curatedBit}.`,
-      );
-      void loadSelectedTrainingCalls();
-      setTimeout(() => setTrainingNotice(null), 6000);
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to train AI from history");
-    } finally {
-      setTrainingLoading(false);
-    }
-  }
-
-  async function handleRemoveTrainingFlag(callId: number) {
-    try {
-      await client.setCallTrainingFlag(callId, false);
-      setSelectedTrainingCalls((prev) => prev.filter((c) => c.id !== callId));
-      setCheckedTrainingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(callId);
-        return next;
-      });
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to remove training flag");
-    }
-  }
-
-  async function handleSaveRules() {
-    setSavingRules(true);
-    try {
-      const res = await client.updateAiSalesRules(rulesDraft);
-      setTrainingData(res);
-      setTrainingNotice("Custom sales rules saved and applied to Sara & Rayan calls!");
-      setTimeout(() => setTrainingNotice(null), 4000);
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to save rules");
-    } finally {
-      setSavingRules(false);
-    }
-  }
-
   if (!unlocked) {
     return (
-      <section className="max-w-md space-y-4">
+      <section className="max-w-3xl space-y-5">
         <div>
           <h2 className="text-lg font-medium text-slate-100">AI Sales Agent</h2>
           <p className="text-sm text-slate-400 mt-1">
@@ -501,7 +393,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
             if (e.key === "Enter") void tryUnlock();
           }}
           placeholder="Access code"
-          className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-slate-100"
+          className="w-full max-w-md rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-slate-100"
         />
         <button
           type="button"
@@ -511,6 +403,16 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         >
           {unlocking ? "Checking… (may retry if API is restarting)" : "Unlock"}
         </button>
+
+        {isAdmin ? (
+          <div className="pt-2 space-y-2">
+            <p className="text-xs text-slate-500">
+              Configure Auto Mode below (saved even before unlock). Training lives under{" "}
+              <strong className="text-slate-300">Call Center → AI Train</strong>.
+            </p>
+            <AiAutoModePanel onError={onError} compact />
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -526,10 +428,13 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         <p className="text-sm text-slate-400 mt-1">
           Rayan and Sara dial leads from the <strong className="text-slate-300">Master Table</strong>.
           Filter by country, grade, and designation, tick contacts into the queue, then call one
-          number or the full sequence. When a call ends they send WhatsApp and email automatically
-          — no prompt. If nobody picks up, they send a missed-call email asking for a better time.
+          number or the full sequence. Use <strong className="text-slate-300">AI Auto Mode</strong>{" "}
+          below to choose call / email / WhatsApp behaviour. Training is under{" "}
+          <strong className="text-slate-300">Call Center → AI Train</strong>.
         </p>
       </div>
+
+      <AiAutoModePanel onError={onError} />
 
       {queueNotice ? (
         <p className="text-sm text-emerald-300 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2">
@@ -745,232 +650,14 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         </div>
       )}
 
-      {/* 🧠 AI Agent Training & Sales Playbook Section */}
-      <div className="rounded-xl border border-slate-700/80 bg-slate-900/40 p-5 space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="font-medium text-slate-100 flex items-center gap-2">
-              <span>🧠 AI Agent Training & Sales Playbook</span>
-              <span className="text-xs px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-mono">
-                Gemini RAG Engine
-              </span>
-            </h3>
-            <p className="text-xs text-slate-400 mt-1">
-              Tick <span className="text-violet-300">Train Sara &amp; Rayan</span> after good calls —
-              they appear in the training list on the right. Train from those ticks, or from full call
-              history.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void handleTrainFromHistory("curated")}
-              disabled={trainingLoading || selectedTrainingCalls.length === 0}
-              className="px-3 py-2 text-xs font-semibold rounded-lg bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50 transition-all shadow-lg shadow-violet-950/40"
-              title="Use only calls marked Train Sara & Rayan"
-            >
-              {trainingLoading ? "Training…" : "Train from ticked calls"}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleTrainFromHistory("history")}
-              disabled={trainingLoading}
-              className="px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 transition-all flex items-center gap-2 shadow-lg shadow-emerald-950/40"
-            >
-              {trainingLoading ? (
-                <>
-                  <span className="animate-spin">⚡</span>
-                  <span>Gemini Analyzing…</span>
-                </>
-              ) : (
-                <span>⚡ Auto-Train from Call History</span>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {trainingNotice && (
-          <p className="text-xs text-emerald-300 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2">
-            {trainingNotice}
-          </p>
-        )}
-
-        <div className="grid gap-4 lg:grid-cols-3">
-          {/* Learned Insights Card */}
-          <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Learned Insights (From Call History)
-              </h4>
-              {trainingData?.last_trained_at && (
-                <span className="text-xs text-slate-500 font-mono">
-                  {trainingData.total_calls_analyzed} calls analyzed
-                  {trainingData.selected_calls_used
-                    ? ` · ${trainingData.selected_calls_used} ticked`
-                    : ""}
-                </span>
-              )}
-            </div>
-            <div className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed bg-slate-900/60 p-3 rounded-lg border border-slate-800/80 max-h-56 overflow-y-auto font-mono">
-              {trainingData?.learned_insights || "Click 'Auto-Train' or 'Train from ticked calls' to extract insights."}
-            </div>
-          </div>
-
-          {/* Custom Sales Rules Editor */}
-          <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-4 space-y-2 flex flex-col justify-between">
-            <div>
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                Custom Sales Rules & Guidelines
-              </h4>
-              <textarea
-                rows={8}
-                value={rulesDraft}
-                onChange={(e) => setRulesDraft(e.target.value)}
-                placeholder="Type custom sales instructions for Sara & Rayan (e.g. Always pitch CNF price first, offer 1% discount on 100+ MT orders)..."
-                className="w-full text-xs rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-slate-200 placeholder:text-slate-600 focus:border-sky-500 focus:outline-none resize-none font-mono min-h-[12rem]"
-              />
-            </div>
-            <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
-              <span className="text-xs text-slate-500">Injected into voice call prompts</span>
-              <button
-                type="button"
-                onClick={() => void handleSaveRules()}
-                disabled={savingRules}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 transition-colors"
-              >
-                {savingRules ? "Saving…" : "Save Custom Rules"}
-              </button>
-            </div>
-          </div>
-
-          {/* Ticked Train Sara & Rayan calls */}
-          <div className="rounded-lg border border-violet-700/40 bg-violet-950/20 p-4 space-y-3 flex flex-col min-h-[16rem]">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-violet-300">
-                Ticked for Sara &amp; Rayan
-              </h4>
-              <div className="flex items-center gap-2">
-                <select
-                  value={trainingCallFilter}
-                  onChange={(e) =>
-                    setTrainingCallFilter(e.target.value as "all" | "female" | "male")
-                  }
-                  className="text-[11px] rounded border border-slate-700 bg-slate-950 px-1.5 py-1 text-slate-300"
-                >
-                  <option value="all">All agents</option>
-                  <option value="female">Sara</option>
-                  <option value="male">Rayan</option>
-                </select>
-                <button
-                  type="button"
-                  onClick={() => void loadSelectedTrainingCalls()}
-                  className="text-[11px] text-sky-400 hover:underline"
-                >
-                  Refresh
-                </button>
-              </div>
-            </div>
-            <p className="text-[11px] text-slate-500">
-              Every tick from post-call or client call history appears here. Train Sara &amp; Rayan
-              from these, or from full history.
-            </p>
-            <div className="flex-1 max-h-56 overflow-y-auto space-y-1.5 rounded-lg border border-slate-800/80 bg-slate-950/50 p-2">
-              {selectedTrainingLoading ? (
-                <p className="text-xs text-slate-500 px-1 py-2">Loading ticked calls…</p>
-              ) : selectedTrainingCalls.filter((c) =>
-                  trainingCallFilter === "all" ? true : c.persona === trainingCallFilter,
-                ).length === 0 ? (
-                <p className="text-xs text-slate-500 px-1 py-3 leading-relaxed">
-                  No ticked calls yet. Tick{" "}
-                  <span className="text-violet-300">Train Sara &amp; Rayan</span> on a post-call
-                  draft, or on a contact&apos;s call history (Client History → open client) — it
-                  will show up here.
-                </p>
-              ) : (
-                selectedTrainingCalls
-                  .filter((c) =>
-                    trainingCallFilter === "all" ? true : c.persona === trainingCallFilter,
-                  )
-                  .map((call) => {
-                    const checked = checkedTrainingIds.has(call.id);
-                    return (
-                      <label
-                        key={call.id}
-                        className={`flex items-start gap-2 rounded-md border px-2 py-1.5 text-xs cursor-pointer ${
-                          checked
-                            ? "border-violet-600/50 bg-violet-950/30 text-slate-100"
-                            : "border-slate-800 bg-slate-900/40 text-slate-400"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => {
-                            setCheckedTrainingIds((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(call.id)) next.delete(call.id);
-                              else next.add(call.id);
-                              return next;
-                            });
-                          }}
-                          className="mt-0.5 rounded border-slate-600 text-violet-500 focus:ring-violet-500"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 font-medium truncate">
-                            <span className="truncate">
-                              {call.company_name || call.contact_name || `Call #${call.id}`}
-                            </span>
-                            {call.persona === "female" ? (
-                              <span className="shrink-0 text-[10px] px-1 rounded bg-pink-950/60 text-pink-300 border border-pink-800/50">
-                                Sara
-                              </span>
-                            ) : call.persona === "male" ? (
-                              <span className="shrink-0 text-[10px] px-1 rounded bg-sky-950/60 text-sky-300 border border-sky-800/50">
-                                Rayan
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                            {call.contact_name || "—"}
-                            {call.call_outcome ? ` · ${call.call_outcome}` : ""}
-                            {call.transcript_status === "ready" ? " · captions" : ""}
-                            {call.recording_available ? " · recording" : ""}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            void handleRemoveTrainingFlag(call.id);
-                          }}
-                          className="shrink-0 text-[10px] text-rose-400 hover:text-rose-300"
-                          title="Remove from training set"
-                        >
-                          Remove
-                        </button>
-                      </label>
-                    );
-                  })
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-800/60">
-              <button
-                type="button"
-                disabled={trainingLoading || checkedTrainingIds.size === 0}
-                onClick={() => void handleTrainFromHistory("ids")}
-                className="px-3 py-1.5 text-[11px] font-medium rounded-lg bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50"
-              >
-                Train Sara &amp; Rayan from checked ({checkedTrainingIds.size})
-              </button>
-            </div>
-          </div>
-        </div>
+      <div className="rounded-xl border border-slate-700/80 bg-slate-900/40 p-4 text-sm text-slate-400">
+        Sara &amp; Rayan training (playbook, ticked calls, Gemini) moved to{" "}
+        <strong className="text-slate-200">Call Center → AI Train</strong>.
       </div>
 
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
-          <h3 className="font-medium text-slate-100">Task queue</h3>
+          <h3 className="font-medium text-slate-100">Sara / Rayan pipeline</h3>
           <select
             value={filterPersona}
             onChange={(e) => setFilterPersona(e.target.value)}
@@ -1003,9 +690,12 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                   <th className="px-3 py-2">Company</th>
                   <th className="px-3 py-2">Contact / phone</th>
                   <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2">Ready</th>
+                  <th className="px-3 py-2">Call</th>
+                  <th className="px-3 py-2">Email sent</th>
+                  <th className="px-3 py-2">WhatsApp sent</th>
+                  <th className="px-3 py-2">Email reply</th>
                   <th className="px-3 py-2">Outcome</th>
-                  {isAdmin && <th className="px-3 py-2">Actions</th>}
+                  <th className="px-3 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
@@ -1031,17 +721,49 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                       )}
                     </td>
                     <td className="px-3 py-2 capitalize">{task.status}</td>
-                    <td className="px-3 py-2">
-                      {task.ready ? (
-                        <span className="text-emerald-400 text-xs">Yes</span>
-                      ) : (
-                        <span
-                          className="text-amber-400 text-xs"
-                          title={(task.warnings ?? []).join("; ")}
-                        >
+                    <td className="px-3 py-2 text-xs">
+                      {task.status === "completed" || task.status === "in_progress" || task.call_sid ? (
+                        <span className="text-emerald-400">
+                          {task.status === "in_progress" ? "In progress" : "Made"}
+                        </span>
+                      ) : task.ready === false ? (
+                        <span className="text-amber-400" title={(task.warnings ?? []).join("; ")}>
                           Needs data
                         </span>
+                      ) : (
+                        <span className="text-slate-500">Queued</span>
                       )}
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {task.followup?.email_status === "sent" ||
+                      task.followup?.email_status === "ok" ||
+                      task.followup?.email_status === "success" ? (
+                        <span className="text-emerald-400" title={task.followup?.email_to || ""}>
+                          Sent
+                        </span>
+                      ) : task.followup?.email_status === "skipped" ? (
+                        <span className="text-slate-500">Skipped</span>
+                      ) : task.followup?.email_status ? (
+                        <span className="text-amber-400">{task.followup.email_status}</span>
+                      ) : (
+                        <span className="text-slate-600">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {task.followup?.whatsapp_status === "sent" ? (
+                        <span className="text-emerald-400">Sent</span>
+                      ) : task.followup?.whatsapp_status === "skipped" ? (
+                        <span className="text-slate-500">Skipped</span>
+                      ) : task.followup?.whatsapp_status === "not_connected" ? (
+                        <span className="text-amber-400">WA offline</span>
+                      ) : task.followup?.whatsapp_status ? (
+                        <span className="text-amber-400">{task.followup.whatsapp_status}</span>
+                      ) : (
+                        <span className="text-slate-600">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-slate-500" title="Tracked when inbound email matching is wired">
+                      —
                     </td>
                     <td className="px-3 py-2 text-xs text-slate-400">
                       {task.outcome ?? "—"}

@@ -48,6 +48,7 @@ import { CallsPage } from "./pages/CallsPage";
 import { InboxPage } from "./pages/InboxPage";
 import { AiModePage } from "./pages/AiModePage";
 import { AiSalesAgentPage } from "./pages/AiSalesAgentPage";
+import { AiTrainPage } from "./pages/AiTrainPage";
 import { IndexesPage } from "./pages/IndexesPage";
 import { UserManualPage } from "./pages/UserManualPage";
 import { LeadsPage } from "./pages/LeadsPage";
@@ -1373,6 +1374,7 @@ function DashboardApp() {
       children: [
         { id: "calls", label: "Manual Call Center", count: 0 },
         { id: "ai-sales-agent", label: "AI Sales Agent", count: 0 },
+        { id: "ai-train", label: "AI Train", count: 0 },
       ],
     },
     // #4 Emails (dropdown) with Bulk Email Sender inside
@@ -1912,6 +1914,7 @@ function DashboardApp() {
             {tab === "ai-sales-agent" && (
               <AiSalesAgentPage onError={setError} />
             )}
+            {tab === "ai-train" && <AiTrainPage onError={setError} />}
             {tab === "kpi" && <KpiPage onError={setError} />}
             {tab === "users" && isAdmin && (
               <UsersPage

@@ -4394,6 +4394,13 @@ export const client = {
       headers: aiSalesAgentHeaders(),
       body: JSON.stringify({ rules }),
     }),
+  getAiSalesAutoMode: () =>
+    request<AiSalesAutoModeSettings>("/ai-sales-agent/auto-mode"),
+  updateAiSalesAutoMode: (data: Partial<AiSalesAutoModeSettings>) =>
+    request<AiSalesAutoModeSettings>("/ai-sales-agent/auto-mode", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
 
   // ── Catalogues ─────────────────────────────────────────────────────────────
   listCatalogues: () => request<CatalogueItem[]>("/catalogues"),
@@ -4833,6 +4840,17 @@ export interface AiSalesAgentRunner {
   pending_count: number;
   twilio_ready: boolean;
   sequence_mode?: boolean;
+}
+
+export interface AiSalesAutoModeSettings {
+  enabled: boolean;
+  study_contacts: boolean;
+  call_mode: boolean;
+  send_email_after_call: boolean;
+  send_whatsapp_after_call: boolean;
+  bulk_email_when_no_call: boolean;
+  study_products: boolean;
+  product_brief: string;
 }
 
 export interface AiSalesAgentFollowup {

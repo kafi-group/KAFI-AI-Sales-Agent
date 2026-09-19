@@ -437,6 +437,8 @@ class VoiceClient:
         contact_name: str | None = None,
         language: str | None = "en",
         task_id: int | None = None,
+        company_name: str | None = None,
+        designation: str | None = None,
     ) -> dict[str, Any]:
         """Initiate an outbound PSTN call via Vapi AI Voice Engine (or Twilio fallback)."""
         normalized = normalize_e164(to_phone)
@@ -479,6 +481,35 @@ class VoiceClient:
                 except Exception:
                     insights_txt, rules_txt = "", ""
 
+                contact_block = ""
+                product_block = ""
+                try:
+                    from modules.ai_sales_auto_mode import get_auto_mode_settings
+
+                    auto = get_auto_mode_settings()
+                    # Contact study when Auto Mode is off (legacy) or study_contacts is ticked.
+                    study_c = (not auto.get("enabled")) or bool(auto.get("study_contacts"))
+                    if study_c:
+                        parts = [
+                            f"Contact person: {c_name}",
+                            f"Company: {(company_name or '').strip() or 'unknown'}",
+                            f"Designation: {(designation or '').strip() or 'unknown'}",
+                        ]
+                        contact_block = (
+                            "\n\nCONTACT STUDY (use naturally — do not recite as a list):\n"
+                            + "\n".join(parts)
+                        )
+                    if auto.get("enabled") and auto.get("study_products"):
+                        brief = (auto.get("product_brief") or "").strip()
+                        if brief:
+                            product_block = (
+                                "\n\nPRODUCT KNOWLEDGE (use confidently to answer quality, packaging, "
+                                f"and buying questions):\n{brief}"
+                            )
+                except Exception:
+                    contact_block = ""
+                    product_block = ""
+
                 system_prompt = (
                     f"You are {agent_name}, a friendly, natural, and sharp B2B AI Sales Representative for Kafi Commodities. "
                     "Kafi Commodities is a leading global exporter of White Rice (Basmati 1121 & 5% Broken), Sesame Seeds (99% Purity), Yellow Corn, Spices, and Edible Oils.\n\n"
@@ -491,6 +522,8 @@ class VoiceClient:
                     "5. SHORT SPOKEN RESPONSES: Speak concisely in 1 to 2 spoken sentences so the conversation feels natural over the phone.\n\n"
                     f"LEARNED SALES PLAYBOOK:\n{insights_txt}\n\n"
                     f"CUSTOM SALES RULES:\n{rules_txt}"
+                    f"{contact_block}"
+                    f"{product_block}"
                 )
 
                 payload = {

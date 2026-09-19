@@ -680,6 +680,8 @@ export function NavIcon({
   if (navId === "mail") return <LogoOutlook size={size} />;
   if (navId === "calls") return <LogoTwilio size={size} />;
   if (navId === "ai-sales-agent") return <IconRobot size={size} className="text-cyan-400" />;
+  if (navId === "ai-train")
+    return <IconBookOpen size={size} className="text-violet-400" />;
   if (navId === "ai") return <IconSparkles size={size} className="text-emerald-400" />;
   if (navId === "others") return <IconList size={size} className="text-slate-400" />;
   if (navId === "client-history")

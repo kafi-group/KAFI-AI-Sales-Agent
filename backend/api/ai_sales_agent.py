@@ -171,9 +171,16 @@ def _auto_followup_after_call(
     """Send personal WhatsApp (Baileys) + mailbox email after a Sara/Rayan call.
 
     Does not use Meta WhatsApp Cloud API. Does not prompt the operator.
+    Respects AI Auto Mode channel toggles when Auto Mode is enabled.
     """
     from integrations import whatsapp_bridge_client as bridge
     from integrations.mail_client import mail_client
+    from modules.ai_sales_auto_mode import get_auto_mode_settings
+
+    auto = get_auto_mode_settings()
+    # When Auto Mode is off, keep legacy always-on follow-up behaviour.
+    send_wa = True if not auto.get("enabled") else bool(auto.get("send_whatsapp_after_call"))
+    send_em = True if not auto.get("enabled") else bool(auto.get("send_email_after_call"))
 
     company = (company_name or "").strip()
     greet_name = (contact_name or "there").strip() or "there"
@@ -247,7 +254,10 @@ def _auto_followup_after_call(
         result["email_message"] = result["whatsapp_message"]
         return result
 
-    if phone:
+    if not send_wa:
+        result["whatsapp_status"] = "skipped"
+        result["whatsapp_message"] = "Skipped — WhatsApp off in AI Auto Mode."
+    elif phone:
         try:
             status = bridge.bridge_status(user.id, username=user.username)
             if not status.get("connected"):
@@ -291,8 +301,13 @@ def _auto_followup_after_call(
         except Exception as exc:  # noqa: BLE001
             result["whatsapp_status"] = "error"
             result["whatsapp_message"] = str(exc)[:300]
+    else:
+        result["whatsapp_message"] = "No phone on file for WhatsApp follow-up."
 
-    if email:
+    if not send_em:
+        result["email_status"] = "skipped"
+        result["email_message"] = "Skipped — Email off in AI Auto Mode."
+    elif email:
         try:
             send_result = mail_client.send_approved(
                 to=email,
@@ -393,6 +408,8 @@ def _dial_task(
         contact_name=task.get("contact_name") or "Purchasing Manager",
         language=language,
         task_id=task.get("id"),
+        company_name=task.get("company_name"),
+        designation=task.get("designation"),
     )
     if not call_result.get("ok"):
         task["status"] = "failed"
@@ -869,15 +886,115 @@ def skip_task(
     raise HTTPException(404, "Task not found")
 
 
+def _bulk_email_queued(
+    db: Session,
+    *,
+    persona: str,
+    user: AppUser,
+    runner: dict[str, Any],
+) -> dict[str, Any]:
+    """When Auto Mode has call_mode off: email all ready queued contacts for this agent."""
+    from integrations.mail_client import mail_client
+
+    agent_name = "Sara" if persona == "female" else "Rayan"
+    queued = [
+        t
+        for t in _TASKS
+        if t.get("persona") == persona and t.get("status") == "queued" and t.get("ready", True)
+    ]
+    if not queued:
+        raise HTTPException(400, "No ready contacts in this agent's queue to email.")
+
+    sent = 0
+    failed = 0
+    for task in queued:
+        email = (task.get("contact_email") or "").strip()
+        greet = (task.get("contact_name") or "there").strip() or "there"
+        company = (task.get("company_name") or "").strip()
+        if not email:
+            task["status"] = "completed"
+            task["outcome"] = "no_email"
+            task["followup"] = {
+                "email_status": "skipped",
+                "email_message": "No email on file",
+                "whatsapp_status": "skipped",
+            }
+            failed += 1
+            continue
+        subject = f"Introduction — {agent_name}, Kafi Commodities"
+        body = (
+            f"<p>Dear {greet},</p>"
+            f"<p>This is <strong>{agent_name}</strong> from "
+            "<strong>Kafi Commodities (Pvt.) Ltd. (Brand: ESSENCE)</strong>"
+            f"{f' regarding {company}' if company else ''}.</p>"
+            "<p>We would like to introduce our export range (rice, Himalayan salt, "
+            "pickles, chutneys, sauces, spices) and share catalogues or CNF/FOB pricing "
+            "for your market.</p>"
+            f"<p>Best regards,<br/><strong>{agent_name}</strong><br/>"
+            "Kafi Commodities Export Team</p>"
+        )
+        try:
+            send_result = mail_client.send_approved(
+                to=email,
+                subject=subject,
+                body=body,
+                mailbox_user=user,
+            )
+            status = send_result.get("status") or "error"
+            task["status"] = "completed"
+            task["outcome"] = "emailed"
+            task["followup"] = {
+                "email_status": status,
+                "email_message": send_result.get("message") or status,
+                "email_to": email,
+                "whatsapp_status": "skipped",
+                "whatsapp_message": "Call mode off — WhatsApp not sent in bulk-email pass.",
+            }
+            if status in ("sent", "queued", "ok", "success"):
+                sent += 1
+            else:
+                failed += 1
+        except Exception as exc:  # noqa: BLE001
+            task["status"] = "completed"
+            task["outcome"] = "email_failed"
+            task["followup"] = {
+                "email_status": "error",
+                "email_message": str(exc)[:300],
+                "whatsapp_status": "skipped",
+            }
+            failed += 1
+
+    runner["status"] = "idle"
+    runner["sequence_mode"] = False
+    runner["operator_user_id"] = user.id
+    runner["current_task_id"] = None
+    runner["current_task"] = None
+    runner["bulk_email_result"] = {"sent": sent, "failed": failed, "total": len(queued)}
+    _refresh_runner_counts()
+    return runner
+
+
 @router.post("/runners/start")
 def start_runner(
     payload: RunnerControlRequest,
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
+    from modules.ai_sales_auto_mode import get_auto_mode_settings
+
     runner = _get_runner(payload.persona)
     if not runner:
         raise HTTPException(404, "Runner persona not found")
+
+    auto = get_auto_mode_settings()
+    # Auto Mode ON + call mode OFF → bulk email queued contacts instead of dialling.
+    if (
+        auto.get("enabled")
+        and not auto.get("call_mode")
+        and auto.get("bulk_email_when_no_call")
+        and payload.task_id is None
+    ):
+        return _bulk_email_queued(db, persona=payload.persona, user=user, runner=runner)
 
     in_prog = next(
         (
@@ -987,6 +1104,37 @@ def update_ai_sales_rules(payload: UpdateRulesRequest, user: AppUser = Depends(g
     _ = user
     from modules.ai_agent_training import update_custom_rules
     return update_custom_rules(payload.rules)
+
+
+class AutoModeSettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    study_contacts: bool | None = None
+    call_mode: bool | None = None
+    send_email_after_call: bool | None = None
+    send_whatsapp_after_call: bool | None = None
+    bulk_email_when_no_call: bool | None = None
+    study_products: bool | None = None
+    product_brief: str | None = None
+
+
+@router.get("/auto-mode")
+def get_ai_auto_mode(user: AppUser = Depends(get_current_user)):
+    _ = user
+    from modules.ai_sales_auto_mode import get_auto_mode_settings
+
+    return get_auto_mode_settings()
+
+
+@router.put("/auto-mode")
+def put_ai_auto_mode(
+    payload: AutoModeSettingsUpdate,
+    user: AppUser = Depends(get_current_user),
+):
+    _ = user
+    from modules.ai_sales_auto_mode import update_auto_mode_settings
+
+    patch = payload.model_dump(exclude_none=True)
+    return update_auto_mode_settings(patch)
 
 
 @webhooks_router.post("/ai-agent")

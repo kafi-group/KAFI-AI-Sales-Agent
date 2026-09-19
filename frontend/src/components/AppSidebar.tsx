@@ -38,6 +38,7 @@ export type Tab =
   | "kpi"
   | "ai-mode"
   | "ai-sales-agent"
+  | "ai-train"
   | "users"
   | "settings"
   | "ai"
@@ -228,7 +229,7 @@ export function AppSidebar({
     activeTab === "telegram-mobile" || activeTab === "telegram-templates",
   );
   const [callsMenuOpen, setCallsMenuOpen] = useState(
-    activeTab === "calls" || activeTab === "ai-sales-agent",
+    activeTab === "calls" || activeTab === "ai-sales-agent" || activeTab === "ai-train",
   );
   const [aiMenuOpen, setAiMenuOpen] = useState(
     activeTab === "ai-mode" ||
@@ -284,7 +285,7 @@ export function AppSidebar({
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab === "calls" || activeTab === "ai-sales-agent") {
+    if (activeTab === "calls" || activeTab === "ai-sales-agent" || activeTab === "ai-train") {
       setCallsMenuOpen(true);
     }
   }, [activeTab]);
@@ -481,7 +482,9 @@ export function AppSidebar({
                       ? activeTab === "telegram-mobile" ||
                         activeTab === "telegram-templates"
                     : item.id === "calls"
-                      ? activeTab === "calls" || activeTab === "ai-sales-agent"
+                      ? activeTab === "calls" ||
+                        activeTab === "ai-sales-agent" ||
+                        activeTab === "ai-train"
                       : item.id === "ai"
                         ? activeTab === "ai-mode" ||
                           activeTab === "leads" ||
@@ -604,7 +607,9 @@ export function AppSidebar({
                     : isCallsParent
                       ? activeTab === "ai-sales-agent"
                         ? "ai-sales-agent"
-                        : "calls"
+                        : activeTab === "ai-train"
+                          ? "ai-train"
+                          : "calls"
                       : isAiParent
                         ? activeTab
                         : isIndexesParent
