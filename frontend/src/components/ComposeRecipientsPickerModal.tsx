@@ -1,7 +1,15 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { client, type LeadTableRow } from "../api/client";
+import {
+  client,
+  type CallFilterSectionOption,
+  type LeadTableQuery,
+  type LeadTableRow,
+} from "../api/client";
+import { findCountry } from "../data/countries";
+import { TARGETED_POOL_EXCLUDE } from "./AppSidebar";
 import { IconMail, IconX } from "./icons/AppIcons";
+import { SearchableSelect } from "./SearchableSelect";
 
 export interface ComposeRecipientChoice {
   email: string;
@@ -45,6 +53,39 @@ function emailsFromRow(row: LeadTableRow): ComposeRecipientChoice[] {
   return out;
 }
 
+function sectionToLeadParams(section: string): Partial<LeadTableQuery> {
+  const id = (section || "").trim();
+  if (!id) return { master: true };
+  if (id === "master") return { master: true };
+  if (id === "old_clients") return { source: "old_clients" };
+  if (id === "hyperstore_targeted") return { source: "hyperstore_targeted" };
+  if (id === "targeted_distributor") return { source: "targeted_distributor" };
+  if (id === "targeted_client") return { source: "targeted_client" };
+  if (id === "khalid_focused_sales") return { source: "khalid_focused_sales" };
+  if (id === "incomplete_archives") return { source: "incomplete_archives" };
+  if (id === "my_assigned") return { my_assigned: true };
+  if (id === "sales_interested_clients") return { in_interested_clients: true };
+  if (id === "interested_clients") return { call_outcome: "follow_up" };
+  if (id === "not_interested_clients") return { call_outcome: "not_interested" };
+  if (id === "not_received_call_clients") return { call_outcome: "not_received_call" };
+  if (id === "all" || id === "new_search_lead") {
+    return { exclude_source: TARGETED_POOL_EXCLUDE, new_search_lead_only: true };
+  }
+  return { source: id };
+}
+
+const FALLBACK_SECTIONS: CallFilterSectionOption[] = [
+  { id: "", label: "All Sections / Master", icon: "🌐" },
+  { id: "targeted_distributor", label: "Targeted Distributors", icon: "🎯" },
+  { id: "old_clients", label: "Old clients", icon: "👥" },
+  { id: "hyperstore_targeted", label: "Hyperstore Target", icon: "🛒" },
+  { id: "all", label: "New search lead", icon: "🆕" },
+  { id: "interested_clients", label: "Follow up clients", icon: "⏰" },
+  { id: "sales_interested_clients", label: "Interested Clients", icon: "⭐" },
+  { id: "not_received_call_clients", label: "Did not receive call", icon: "📞" },
+  { id: "not_interested_clients", label: "Not interested", icon: "🚫" },
+];
+
 export function ComposeRecipientsPickerModal({
   onClose,
   onError,
@@ -59,25 +100,76 @@ export function ComposeRecipientsPickerModal({
   const [manualEmail, setManualEmail] = useState("");
   const [manualTarget, setManualTarget] = useState<"to" | "cc">("to");
 
+  const [sectionFilter, setSectionFilter] = useState("");
+  const [countryFilter, setCountryFilter] = useState("");
+  const [gradeFilter, setGradeFilter] = useState("");
+  const [designationFilter, setDesignationFilter] = useState("");
+
+  const [availableSections, setAvailableSections] = useState<CallFilterSectionOption[]>([]);
+  const [availableCountries, setAvailableCountries] = useState<string[]>([]);
+  const [availableGrades, setAvailableGrades] = useState<string[]>([]);
+  const [availableDesignations, setAvailableDesignations] = useState<string[]>([]);
+
   const toEmails = useMemo(() => new Set(toList.map((r) => r.email)), [toList]);
   const ccEmails = useMemo(() => new Set(ccList.map((r) => r.email)), [ccList]);
 
+  const hasPoolFilters = Boolean(
+    sectionFilter || countryFilter || gradeFilter || designationFilter,
+  );
+  const hasActiveFilters = Boolean(hasPoolFilters || query.trim());
+
+  useEffect(() => {
+    let active = true;
+    client
+      .getCallFilterOptions()
+      .then((res) => {
+        if (!active) return;
+        if (res.sections?.length) setAvailableSections(res.sections);
+        else setAvailableSections(FALLBACK_SECTIONS);
+        if (res.countries?.length) setAvailableCountries(res.countries);
+        if (res.grades?.length) setAvailableGrades(res.grades);
+        if (res.designations?.length) setAvailableDesignations(res.designations);
+      })
+      .catch(() => {
+        if (!active) return;
+        setAvailableSections(FALLBACK_SECTIONS);
+        setAvailableCountries([
+          "Pakistan",
+          "United Arab Emirates",
+          "Saudi Arabia",
+          "United States",
+          "United Kingdom",
+        ]);
+        setAvailableGrades(["AAAA", "AAA", "AA", "A", "B", "Ungraded"]);
+        setAvailableDesignations(["Managing Director", "Director", "CEO", "Owner", "Manager"]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 2) {
+    // Require typed search (2+ chars) and/or at least one pool filter.
+    if (q.length < 2 && !hasPoolFilters) {
       setHits([]);
       return;
     }
     let cancelled = false;
     const timer = window.setTimeout(() => {
       setLoading(true);
+      const sectionParams = sectionToLeadParams(sectionFilter);
+      const params: LeadTableQuery & { designation?: string } = {
+        ...sectionParams,
+        q: q.length >= 2 ? q : undefined,
+        country: countryFilter || undefined,
+        company_grading: gradeFilter || undefined,
+        designation: designationFilter || undefined,
+        page: 1,
+        page_size: 40,
+      };
       client
-        .listLeadsTable({
-          q,
-          page: 1,
-          page_size: 25,
-          master: true,
-        })
+        .listLeadsTable(params)
         .then((res) => {
           if (cancelled) return;
           const rows = res.rows || [];
@@ -105,7 +197,15 @@ export function ComposeRecipientsPickerModal({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query, onError]);
+  }, [
+    query,
+    sectionFilter,
+    countryFilter,
+    gradeFilter,
+    designationFilter,
+    hasPoolFilters,
+    onError,
+  ]);
 
   function addTo(bucket: "to" | "cc", item: ComposeRecipientChoice) {
     const email = normalizeEmail(item.email);
@@ -135,6 +235,15 @@ export function ComposeRecipientsPickerModal({
     setManualEmail("");
   }
 
+  function handleClearFilters() {
+    setSectionFilter("");
+    setCountryFilter("");
+    setGradeFilter("");
+    setDesignationFilter("");
+    setQuery("");
+    setHits([]);
+  }
+
   function handleContinue() {
     if (toList.length === 0 && ccList.length === 0) {
       onError("Add at least one email to To or Cc.");
@@ -149,6 +258,8 @@ export function ComposeRecipientsPickerModal({
       cc: ccList.map((r) => r.email),
     });
   }
+
+  const sectionOptions = availableSections.filter((sec) => sec.id !== "");
 
   return createPortal(
     <div
@@ -170,7 +281,8 @@ export function ComposeRecipientsPickerModal({
               Choose recipients
             </h2>
             <p className="text-sm text-slate-400 mt-1">
-              Pick contacts for <strong className="text-slate-300">To</strong> and{" "}
+              Narrow by list / country / grade / designation, pick{" "}
+              <strong className="text-slate-300">To</strong> and{" "}
               <strong className="text-slate-300">Cc</strong>, then open the mailer.
             </p>
           </div>
@@ -185,22 +297,113 @@ export function ComposeRecipientsPickerModal({
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          <div className="space-y-2">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-300 mb-1 flex items-center justify-between">
+                <span>📂 Filter by Lead List / Pool</span>
+                {sectionFilter ? (
+                  <span className="text-[10px] text-emerald-300 font-mono">Scoped Search Active</span>
+                ) : null}
+              </label>
+              <select
+                value={sectionFilter}
+                onChange={(e) => setSectionFilter(e.target.value)}
+                className="w-full rounded-md bg-slate-950 border border-slate-600 px-2.5 py-1.5 text-xs text-slate-100 font-medium focus:outline-none focus:border-emerald-500"
+              >
+                <option value="">🌐 All Sections / Master Table</option>
+                {sectionOptions.map((sec) => (
+                  <option key={sec.id} value={sec.id}>
+                    {sec.icon ? `${sec.icon} ` : ""}
+                    {sec.label}
+                    {sec.count != null ? ` (${sec.count.toLocaleString()})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1.5">
+              <SearchableSelect
+                label="Filter Country"
+                labelClassName="block text-[11px] font-medium text-slate-400 mb-1"
+                value={countryFilter}
+                onChange={setCountryFilter}
+                options={availableCountries.map((c) => {
+                  const info = findCountry(c);
+                  return { value: c, label: info ? `${info.flag} ${c}` : c };
+                })}
+                allowEmpty
+                emptyLabel="🌍 All Countries"
+                placeholder="Search countries…"
+                multiSelect={false}
+              />
+              <SearchableSelect
+                label="Filter Grade"
+                labelClassName="block text-[11px] font-medium text-slate-400 mb-1"
+                value={gradeFilter}
+                onChange={setGradeFilter}
+                options={[
+                  ...availableGrades.map((g) => ({ value: g, label: `Grade ${g}` })),
+                  ...(!availableGrades.includes("Ungraded")
+                    ? [{ value: "Ungraded", label: "Ungraded" }]
+                    : []),
+                ]}
+                allowEmpty
+                emptyLabel="⭐ All Grades"
+                placeholder="Search grades…"
+                multiSelect={false}
+              />
+            </div>
+
+            <SearchableSelect
+              label="Filter Designation"
+              labelClassName="block text-[11px] font-medium text-slate-400 mb-1"
+              value={designationFilter}
+              onChange={setDesignationFilter}
+              options={availableDesignations.map((d) => ({ value: d, label: d }))}
+              allowEmpty
+              emptyLabel="👔 All Designations"
+              placeholder="Search designations…"
+              multiSelect={false}
+            />
+          </div>
+
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-              Search contacts
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Search contacts
+              </label>
+              {hasActiveFilters ? (
+                <button
+                  type="button"
+                  onClick={handleClearFilters}
+                  className="text-[10px] text-rose-400 hover:text-rose-300 underline"
+                >
+                  Reset Filters
+                </button>
+              ) : null}
+            </div>
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Company, contact name, or email…"
+              placeholder={
+                sectionFilter
+                  ? `Search within ${
+                      sectionOptions.find((s) => s.id === sectionFilter)?.label || "selected pool"
+                    }…`
+                  : "Company, contact name, or email…"
+              }
               className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none"
               autoFocus
             />
             {loading ? (
               <p className="text-xs text-slate-500 mt-2">Searching…</p>
-            ) : query.trim().length >= 2 && hits.length === 0 ? (
+            ) : hasActiveFilters && (query.trim().length >= 2 || hasPoolFilters) && hits.length === 0 ? (
               <p className="text-xs text-slate-500 mt-2">No contacts with email matched.</p>
+            ) : !hasActiveFilters ? (
+              <p className="text-xs text-slate-500 mt-2">
+                Use filters and/or type at least 2 characters to find contacts with email.
+              </p>
             ) : null}
             {hits.length > 0 ? (
               <ul className="mt-2 max-h-44 overflow-y-auto space-y-1.5 rounded-xl border border-slate-800 bg-slate-950/60 p-2">
