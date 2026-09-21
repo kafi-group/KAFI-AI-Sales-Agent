@@ -47,8 +47,6 @@ interface OutreachFunnelViewProps {
   /** Jump to Assigned/Master table in edit mode for this lead. */
   onEditLead?: (leadId: number, companyName: string) => void;
   onError?: (message: string) => void;
-  /** Open AI Conclusion for one buyer (or omit id for list). */
-  onOpenAiConclusion?: (buyerId?: number) => void;
 }
 
 function workspaceLeadPhones(lead: WorkspaceLeadItem): WorkspaceLeadPhone[] {
@@ -141,7 +139,6 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
   onOpenEmailComposer,
   onEditLead,
   onError,
-  onOpenAiConclusion,
 }) => {
   const [selectedStage, setSelectedStage] = useState<string>("fresh");
   const [targetCountries, setTargetCountries] = useState<DayCountryTarget[]>([]);
@@ -754,16 +751,6 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
                     >
                       👤 KYC
                     </button>
-                    {onOpenAiConclusion ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenAiConclusion(lead.id)}
-                        className="px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-violet-950/70 text-violet-200 border border-violet-600/50 hover:border-violet-400/70 hover:bg-violet-900/50 transition"
-                        title="AI Conclusion — status, next action, management attention"
-                      >
-                        AI Conclusion
-                      </button>
-                    ) : null}
                   </div>
 
                   <div className="flex items-center gap-4 text-xs text-slate-300 flex-wrap">

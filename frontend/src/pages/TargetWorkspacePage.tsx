@@ -3,7 +3,6 @@ import { useAuth } from "../auth/AuthContext";
 import { OutreachFunnelView } from "../components/target-workspace/OutreachFunnelView";
 import { InboundDealsView } from "../components/target-workspace/InboundDealsView";
 import { AdminTargetManagerView } from "../components/target-workspace/AdminTargetManagerView";
-import { AiConclusionModal } from "../components/target-workspace/AiConclusionModal";
 
 interface TargetWorkspacePageProps {
   onOpenCall?: (phone: string, companyName: string, leadId?: number) => void;
@@ -23,18 +22,11 @@ export const TargetWorkspacePage: React.FC<TargetWorkspacePageProps> = ({
 }) => {
   const { user, isAdmin } = useAuth();
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<"outreach" | "inbound" | "admin">("outreach");
-  const [showAiConclusion, setShowAiConclusion] = useState(false);
-  const [aiConclusionBuyerId, setAiConclusionBuyerId] = useState<number | null>(null);
 
   const [selectedDay, setSelectedDay] = useState<string>(() => {
     const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
     return days[new Date().getDay()] || "friday";
   });
-
-  function openAiConclusion(buyerId?: number) {
-    setAiConclusionBuyerId(buyerId ?? null);
-    setShowAiConclusion(true);
-  }
 
   return (
     <div className="space-y-6 pb-12">
@@ -51,21 +43,6 @@ export const TargetWorkspacePage: React.FC<TargetWorkspacePageProps> = ({
               International daily sales workspace, day-wise country target schedules, and the 4-stage outreach funnel.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => openAiConclusion()}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border border-violet-500/50 bg-violet-600/25 hover:bg-violet-600/40 text-violet-100 shadow-md shadow-violet-950/40 transition"
-            title={
-              isAdmin
-                ? "AI conclusions for all users, companies, and days"
-                : "AI conclusions for your assigned companies"
-            }
-          >
-            <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-violet-500/40 text-[10px] font-black">
-              AI
-            </span>
-            <span>AI Conclusion</span>
-          </button>
         </div>
 
         <div className="flex items-center gap-1.5 overflow-x-auto bg-slate-900/90 p-1.5 rounded-2xl border border-slate-800 shadow-inner">
@@ -123,7 +100,6 @@ export const TargetWorkspacePage: React.FC<TargetWorkspacePageProps> = ({
           onOpenEmailComposer={onOpenEmailComposer}
           onEditLead={onEditLead}
           onError={onError}
-          onOpenAiConclusion={openAiConclusion}
         />
       )}
 
@@ -132,17 +108,6 @@ export const TargetWorkspacePage: React.FC<TargetWorkspacePageProps> = ({
       )}
 
       {activeWorkspaceTab === "admin" && <AdminTargetManagerView />}
-
-      <AiConclusionModal
-        open={showAiConclusion}
-        onClose={() => {
-          setShowAiConclusion(false);
-          setAiConclusionBuyerId(null);
-        }}
-        onError={onError}
-        initialBuyerId={aiConclusionBuyerId}
-        selectedDay={selectedDay}
-      />
     </div>
   );
 };
