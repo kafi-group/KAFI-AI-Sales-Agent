@@ -12,12 +12,20 @@ import {
   appendEmailPlaceholder,
   EmailBodyEditor,
   emailBodyHasContent,
+  htmlToPlainText,
+  plainTextToEditorHtml,
 } from "./EmailBodyEditor";
 import {
   DEFAULT_TEMPLATE_BODY,
   DEFAULT_TEMPLATE_SUBJECT,
   PLACEHOLDER_HINTS,
 } from "../utils/emailTemplateDefaults";
+import { useAuth } from "../auth/AuthContext";
+import {
+  applyEmailSignatureHtml,
+  bodyHasCurrentUserSignature,
+  signatureDisplayName,
+} from "../lib/emailSignature";
 
 type ComposeTab = "manual" | "template";
 
@@ -65,6 +73,7 @@ export function BulkEmailModal({
   onError,
   onCreated,
 }: BulkEmailModalProps) {
+  const { user } = useAuth();
   const [tab, setTab] = useState<ComposeTab>("manual");
   const [sending, setSending] = useState(false);
 
@@ -421,7 +430,24 @@ export function BulkEmailModal({
           )}
         </div>
 
-        <div className="p-5 border-t border-slate-800 flex justify-end gap-2 shrink-0">
+        <div className="p-5 border-t border-slate-800 flex flex-wrap justify-end gap-2 shrink-0">
+          {tab === "manual" ? (
+            <button
+              type="button"
+              onClick={() =>
+                setManualBody((prev) => applyEmailSignatureHtml(prev, user, plainTextToEditorHtml))
+              }
+              disabled={
+                sending || bodyHasCurrentUserSignature(manualBody, user, htmlToPlainText)
+              }
+              title={`Paste ${signatureDisplayName(user)} signature at the bottom of the body`}
+              className="px-4 py-2 rounded-lg border border-slate-700 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50 mr-auto"
+            >
+              {bodyHasCurrentUserSignature(manualBody, user, htmlToPlainText)
+                ? "Signature added"
+                : "Add signature"}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onClose}

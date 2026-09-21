@@ -25,6 +25,7 @@ import {
 } from "./components/AppSidebar";
 import { mailLabelSectionId } from "./lib/mailLabelRules";
 import { displayDashboardUserLabel } from "./utils/displayUserName";
+import { canOpenRestrictedAiTab } from "./lib/aiToolsGate";
 import { InboxAlertToasts } from "./components/InboxAlertToasts";
 import { UrgentEmailAlertModal, isGenuineNewInquiry } from "./components/UrgentEmailAlertModal";
 import { WorkspaceAiAutopilotButton } from "./components/WorkspaceAiAutopilotButton";
@@ -318,6 +319,9 @@ function DashboardApp() {
     }
     if (!isAdmin && tab === "settings") {
       setTab("inbox");
+    }
+    if ((tab === "ai-mode" || tab === "leads") && !canOpenRestrictedAiTab(isAdmin)) {
+      setTab(isAdmin ? "settings" : "inbox");
     }
   }, [isAdmin, tab]);
 
@@ -944,10 +948,30 @@ function DashboardApp() {
 
   function handleSelectTab(nextTab: Tab) {
     if (nextTab === "personalized-emails") {
+      if (!canOpenRestrictedAiTab(isAdmin)) {
+        setError(
+          isAdmin
+            ? "Unlock AI tools in Settings (password required) to open AI Mode."
+            : "AI Mode is admin-only. Open it from Settings after unlocking.",
+        );
+        if (isAdmin) setTab("settings");
+        return;
+      }
       sessionStorage.setItem("kafi.aiModePanel", "personalized");
       setTab("ai-mode");
       setSelectedLeadId(null);
       return;
+    }
+    if (nextTab === "ai-mode" || nextTab === "leads") {
+      if (!canOpenRestrictedAiTab(isAdmin)) {
+        setError(
+          isAdmin
+            ? "Unlock AI tools in Settings (password required) first."
+            : "AI Mode and Searched by AI are admin-only (Settings).",
+        );
+        if (isAdmin) setTab("settings");
+        return;
+      }
     }
     setTab(nextTab);
     if (nextTab !== "leads" && nextTab !== "table" && nextTab !== "calls") {
@@ -1004,7 +1028,7 @@ function DashboardApp() {
     }
     if (section === "personalized-emails") {
       sessionStorage.setItem("kafi.aiModePanel", "personalized");
-      setTab("ai-mode");
+      handleSelectTab("ai-mode");
       return;
     }
     setTab("inbox");
@@ -1121,12 +1145,20 @@ function DashboardApp() {
 
   function handleViewInterestedClientsFeed() {
     sessionStorage.setItem("kafi.aiModeStage", "interested");
-    setTab("ai-mode");
-    setSelectedLeadId(null);
+    handleSelectTab("ai-mode");
   }
 
   function handleViewQuotationMeeting(buyerId: number) {
     sessionStorage.setItem("kafi.aiModeStage", "quotation_sent");
+    if (!canOpenRestrictedAiTab(isAdmin)) {
+      setError(
+        isAdmin
+          ? "Unlock AI tools in Settings (password required) to view this client."
+          : "AI Mode is admin-only (Settings).",
+      );
+      if (isAdmin) setTab("settings");
+      return;
+    }
     setTab("ai-mode");
     setSelectedLeadId(buyerId);
   }
@@ -1424,23 +1456,19 @@ function DashboardApp() {
         })),
       ],
     },
-    // AI (New dropdown module)
-    {
-      id: "ai",
-      label: "AI",
-      count: personalizedEmailCount,
-      alert: personalizedEmailCount > 0,
-      children: [
-        {
-          id: "ai-mode",
-          label: "AI Mode",
-          count: personalizedEmailCount,
-          alert: personalizedEmailCount > 0,
-        },
-        { id: "leads" as const, label: "Searched by AI", count: discoverLeadsCount },
-        ...(isAdmin ? [{ id: "data-synthesis" as const, label: "Smart Data Clean & Merge", count: 0 }] : []),
-      ],
-    },
+    // AI — admin tools only (AI Mode / Searched by AI live under Settings + password)
+    ...(isAdmin
+      ? [
+          {
+            id: "ai",
+            label: "AI",
+            count: 0,
+            children: [
+              { id: "data-synthesis" as const, label: "Smart Data Clean & Merge", count: 0 },
+            ],
+          },
+        ]
+      : []),
     // #5 Others (dropdown)
     {
       id: "others",
@@ -1939,7 +1967,15 @@ function DashboardApp() {
                 }}
               />
             )}
-            {tab === "settings" && isAdmin && <SettingsPage onError={setError} />}
+            {tab === "settings" && isAdmin && (
+              <SettingsPage
+                onError={setError}
+                onOpenRestrictedAi={(next) => {
+                  setTab(next);
+                  setSelectedLeadId(null);
+                }}
+              />
+            )}
           </main>
         </div>
       </div>

@@ -13,6 +13,7 @@ import {
 import {
   EmailBodyEditor,
   emailBodyHasContent,
+  htmlToPlainText,
   plainTextToEditorHtml,
 } from "@/components/EmailBodyEditor";
 import { ensureDearSalutation, personalizeEmailText } from "@/lib/personalizeEmail";
@@ -21,6 +22,11 @@ import {
   hostDataUriImagesInBrowser,
   htmlHasDataUriImages,
 } from "@/lib/hostInlineImagesClient";
+import {
+  applyEmailSignatureHtml,
+  bodyHasCurrentUserSignature,
+  signatureDisplayName,
+} from "@/lib/emailSignature";
 
 type Lead = {
   buyer_id: number;
@@ -520,6 +526,69 @@ function BulkInner() {
             {scheduling
               ? "Scheduling…"
               : `Schedule ${leads.length} email${leads.length === 1 ? "" : "s"}`}
+          </button>
+
+          <button
+            className="btn"
+            type="button"
+            disabled={
+              running ||
+              scheduling ||
+              bodyHasCurrentUserSignature(
+                body,
+                user ?? {
+                  username: preview?.username,
+                  mailbox_email: preview?.mailbox_email,
+                  mailbox_display_name: preview?.display_name,
+                },
+                htmlToPlainText,
+              )
+            }
+            title={`Paste ${signatureDisplayName(
+              user ?? {
+                username: preview?.username,
+                mailbox_email: preview?.mailbox_email,
+                mailbox_display_name: preview?.display_name,
+              },
+            )} signature at the bottom of the body`}
+            onClick={() =>
+              setBody((prev) =>
+                applyEmailSignatureHtml(
+                  prev,
+                  user ?? {
+                    username: preview?.username,
+                    mailbox_email: preview?.mailbox_email,
+                    mailbox_display_name: preview?.display_name,
+                  },
+                  plainTextToEditorHtml,
+                ),
+              )
+            }
+            style={{
+              background: bodyHasCurrentUserSignature(
+                body,
+                user ?? {
+                  username: preview?.username,
+                  mailbox_email: preview?.mailbox_email,
+                  mailbox_display_name: preview?.display_name,
+                },
+                htmlToPlainText,
+              )
+                ? undefined
+                : "#047857",
+            }}
+          >
+            {bodyHasCurrentUserSignature(
+              body,
+              user ?? {
+                username: preview?.username,
+                mailbox_email: preview?.mailbox_email,
+                mailbox_display_name: preview?.display_name,
+              },
+              htmlToPlainText,
+            )
+              ? "Signature added"
+              : "Add signature"}
           </button>
         </div>
 

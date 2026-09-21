@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { client, type TwilioBalance, type VoiceEngineSettings } from "../api/client";
 import { ActionButton } from "../components/ui/ActionButton";
 import { IconRefresh } from "../components/icons/AppIcons";
@@ -16,9 +16,17 @@ import {
   type NarratorPrefs,
   type NarratorSpeed,
 } from "../utils/narratorPrefs";
+import {
+  AI_TOOLS_PASSWORD,
+  areAiToolsUnlocked,
+  lockAiTools,
+  unlockAiTools,
+} from "../lib/aiToolsGate";
 
 interface SettingsPageProps {
   onError: (message: string) => void;
+  /** Open restricted AI tools after Settings password unlock (admin only). */
+  onOpenRestrictedAi?: (tab: "ai-mode" | "leads") => void;
 }
 
 function formatBalance(data: TwilioBalance): string {
@@ -39,7 +47,7 @@ function formatFetchedAt(value: string | null | undefined): string {
   return date.toLocaleString();
 }
 
-export function SettingsPage({ onError }: SettingsPageProps) {
+export function SettingsPage({ onError, onOpenRestrictedAi }: SettingsPageProps) {
   const [twilio, setTwilio] = useState<TwilioBalance | null>(null);
   const [voiceSettings, setVoiceSettings] = useState<VoiceEngineSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -52,6 +60,11 @@ export function SettingsPage({ onError }: SettingsPageProps) {
   // Lock / Unlock State
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [activePin, setActivePin] = useState("");
+
+  // Restricted AI tools (AI Mode / Searched by AI)
+  const [aiToolsUnlocked, setAiToolsUnlocked] = useState(() => areAiToolsUnlocked());
+  const [aiToolsPin, setAiToolsPin] = useState("");
+  const [aiToolsPinError, setAiToolsPinError] = useState<string | null>(null);
 
   // PIN Secret Verification Modal State
   const [pinModalOpen, setPinModalOpen] = useState(false);
@@ -261,6 +274,25 @@ export function SettingsPage({ onError }: SettingsPageProps) {
     }
   }
 
+  function handleUnlockAiTools(e: FormEvent) {
+    e.preventDefault();
+    setAiToolsPinError(null);
+    if (aiToolsPin.trim() !== AI_TOOLS_PASSWORD) {
+      setAiToolsPinError("Incorrect password.");
+      return;
+    }
+    unlockAiTools();
+    setAiToolsUnlocked(true);
+    setAiToolsPin("");
+  }
+
+  function handleLockAiTools() {
+    lockAiTools();
+    setAiToolsUnlocked(false);
+    setAiToolsPin("");
+    setAiToolsPinError(null);
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -280,6 +312,70 @@ export function SettingsPage({ onError }: SettingsPageProps) {
           {refreshing ? "Refreshing…" : "Refresh"}
         </ActionButton>
       </div>
+
+      <section className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-5 space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold text-violet-200">Restricted AI tools</h3>
+          <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+            AI Mode and Searched by AI are hidden from the sidebar. Unlock with the admin password
+            to open them for this browser session.
+          </p>
+        </div>
+        {aiToolsUnlocked ? (
+          <div className="space-y-3">
+            <p className="text-xs text-emerald-300 font-medium">Unlocked for this session</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onOpenRestrictedAi?.("ai-mode")}
+                className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-sm font-semibold text-white"
+              >
+                Open AI Mode
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenRestrictedAi?.("leads")}
+                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sm font-semibold text-slate-100"
+              >
+                Open Searched by AI
+              </button>
+              <button
+                type="button"
+                onClick={handleLockAiTools}
+                className="px-4 py-2 rounded-lg border border-slate-700 text-sm text-slate-400 hover:text-slate-200"
+              >
+                Lock again
+              </button>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handleUnlockAiTools} className="flex flex-wrap items-end gap-3">
+            <label className="block min-w-[12rem] flex-1">
+              <span className="text-xs font-medium text-slate-300">Password</span>
+              <input
+                type="password"
+                value={aiToolsPin}
+                onChange={(e) => {
+                  setAiToolsPin(e.target.value);
+                  setAiToolsPinError(null);
+                }}
+                placeholder="Enter password"
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                autoComplete="off"
+              />
+            </label>
+            <button
+              type="submit"
+              className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-sm font-semibold text-white"
+            >
+              Unlock
+            </button>
+            {aiToolsPinError ? (
+              <p className="w-full text-xs text-rose-300">{aiToolsPinError}</p>
+            ) : null}
+          </form>
+        )}
+      </section>
 
       <section className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
