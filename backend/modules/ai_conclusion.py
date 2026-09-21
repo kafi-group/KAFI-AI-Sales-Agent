@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from db.models import (
     AppUser,
     Buyer,
-    Channel,
     Contact,
     Interaction,
     Quotation,
@@ -83,77 +82,76 @@ def _empty_bucket() -> dict[str, int]:
     }
 
 
-def _engagement_for_buyer(db: Session, buyer_id: int) -> dict[str, dict[str, int]]:
-    """Channel counts for 7 / 30 / 90 day windows."""
-    now = _utc_now()
+def _engagement_maps(
+    db: Session, buyer_ids: list[int]
+) -> tuple[dict[int, dict[str, dict[str, int]]], dict[int, datetime | None]]:
+    """Batch engagement + last-contact for many buyers (avoids N+1 timeouts)."""
     windows = {"7d": 7, "30d": 30, "90d": 90}
-    result = {key: _empty_bucket() for key in windows}
+    engagement: dict[int, dict[str, dict[str, int]]] = {
+        bid: {key: _empty_bucket() for key in windows} for bid in buyer_ids
+    }
+    last_at: dict[int, datetime | None] = {bid: None for bid in buyer_ids}
+    if not buyer_ids:
+        return engagement, last_at
 
-    contact_ids = [
-        row[0]
-        for row in db.query(Contact.id).filter(Contact.buyer_id == buyer_id).all()
-    ]
+    now = _utc_now()
+    since_90 = now - timedelta(days=90)
+
+    contact_rows = (
+        db.query(Contact.id, Contact.buyer_id)
+        .filter(Contact.buyer_id.in_(buyer_ids))
+        .all()
+    )
+    contact_to_buyer = {cid: bid for cid, bid in contact_rows}
+    contact_ids = list(contact_to_buyer.keys())
     if contact_ids:
-        since_90 = now - timedelta(days=90)
-        rows = (
-            db.query(Interaction.channel, Interaction.created_at)
+        ix_rows = (
+            db.query(Interaction.contact_id, Interaction.channel, Interaction.created_at)
             .filter(
                 Interaction.contact_id.in_(contact_ids),
                 Interaction.created_at >= since_90,
             )
             .all()
         )
-        for channel, created_at in rows:
+        for contact_id, channel, created_at in ix_rows:
+            bid = contact_to_buyer.get(contact_id)
+            if bid is None or created_at is None:
+                continue
             key = _channel_key(channel)
-            if key == "other" or created_at is None:
+            if key == "other":
                 continue
             ts = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+            prev = last_at.get(bid)
+            if prev is None or ts > prev:
+                last_at[bid] = ts
             age_days = (now - ts).total_seconds() / 86400.0
             for label, days in windows.items():
-                if age_days <= days and key in result[label]:
-                    result[label][key] += 1
+                if age_days <= days and key in engagement[bid][label]:
+                    engagement[bid][label][key] += 1
 
-    quotes = (
-        db.query(Quotation.generated_at, Quotation.sent_at, Quotation.status)
-        .filter(Quotation.buyer_id == buyer_id)
+    quote_rows = (
+        db.query(
+            Quotation.buyer_id,
+            Quotation.generated_at,
+            Quotation.sent_at,
+            Quotation.status,
+        )
+        .filter(Quotation.buyer_id.in_(buyer_ids))
         .all()
     )
-    for generated_at, sent_at, status in quotes:
+    for bid, generated_at, sent_at, status in quote_rows:
         when = sent_at or generated_at
-        if when is None:
+        if when is None or bid not in engagement:
             continue
         ts = when if when.tzinfo else when.replace(tzinfo=timezone.utc)
         age_days = (now - ts).total_seconds() / 86400.0
         for label, days in windows.items():
             if age_days <= days:
-                result[label]["quotations"] += 1
+                engagement[bid][label]["quotations"] += 1
                 if status == QuotationStatus.draft:
-                    result[label]["follow_ups_pending"] += 1
+                    engagement[bid][label]["follow_ups_pending"] += 1
 
-    life = (
-        db.query(WorkspaceLeadLifecycle)
-        .filter(WorkspaceLeadLifecycle.buyer_id == buyer_id)
-        .one_or_none()
-    )
-    if life and life.stage == "needs_follow_up":
-        for label in windows:
-            result[label]["follow_ups_pending"] += 1
-
-    return result
-
-
-def _last_interaction_at(db: Session, buyer_id: int) -> datetime | None:
-    contact_ids = [
-        row[0]
-        for row in db.query(Contact.id).filter(Contact.buyer_id == buyer_id).all()
-    ]
-    if not contact_ids:
-        return None
-    return (
-        db.query(func.max(Interaction.created_at))
-        .filter(Interaction.contact_id.in_(contact_ids))
-        .scalar()
-    )
+    return engagement, last_at
 
 
 def _responsible_name(db: Session, buyer: Buyer, life: WorkspaceLeadLifecycle | None) -> str:
@@ -206,7 +204,11 @@ def _build_fields(
         else:
             pending = reason.replace("_", " ").strip().capitalize() or "Follow up with buyer"
             next_action = "Follow up within 24 hours"
-        attention = "Required" if (life and life.follow_up_date and life.follow_up_date <= _utc_now() + timedelta(days=1)) else "Not required"
+        attention = (
+            "Required"
+            if (life and life.follow_up_date and life.follow_up_date <= _utc_now() + timedelta(days=1))
+            else "Not required"
+        )
     elif stage == "not_interested":
         pending = "Archive / revisit later"
         next_action = "No immediate action"
@@ -214,7 +216,12 @@ def _build_fields(
     elif stage == "no_response":
         pending = "Try alternate channel or contact"
         next_action = "One more multi-channel attempt this week"
-        attention = "Required" if (engagement.get("30d", {}).get("calls", 0) + engagement.get("30d", {}).get("emails", 0)) >= 5 else "Not required"
+        attention = (
+            "Required"
+            if (engagement.get("30d", {}).get("calls", 0) + engagement.get("30d", {}).get("emails", 0))
+            >= 5
+            else "Not required"
+        )
     elif stage == "fresh":
         pending = "First outreach"
         next_action = "Call during Valid-to-call window"
@@ -223,10 +230,9 @@ def _build_fields(
     open_quotes_90 = engagement.get("90d", {}).get("quotations", 0)
     if open_quotes_90 and stage in {"fresh", "needs_follow_up", "interested"}:
         if "quotation" not in pending.lower():
-            pending = "Send revised quotation" if open_quotes_90 else pending
+            pending = "Send revised quotation"
             next_action = "Follow up within 24 hours"
 
-    # Stale active deals need management eyes.
     if stage == "needs_follow_up" and last_contact_at:
         ts = last_contact_at if last_contact_at.tzinfo else last_contact_at.replace(tzinfo=timezone.utc)
         if (_utc_now() - ts).days >= 7:
@@ -252,8 +258,12 @@ def build_buyer_conclusion(db: Session, buyer_id: int) -> dict[str, Any] | None:
         .filter(WorkspaceLeadLifecycle.buyer_id == buyer_id)
         .one_or_none()
     )
-    last_at = _last_interaction_at(db, buyer_id)
-    engagement = _engagement_for_buyer(db, buyer_id)
+    eng_map, last_map = _engagement_maps(db, [buyer_id])
+    engagement = eng_map.get(buyer_id) or {k: _empty_bucket() for k in ("7d", "30d", "90d")}
+    if life and life.stage == "needs_follow_up":
+        for label in engagement:
+            engagement[label]["follow_ups_pending"] += 1
+    last_at = last_map.get(buyer_id)
     responsible = _responsible_name(db, buyer, life)
     fields = _build_fields(
         buyer=buyer,
@@ -282,31 +292,39 @@ def list_conclusions(
     company_query: str | None = None,
     day_of_week: str | None = None,
     attention: str | None = None,
-    limit: int = 50,
+    limit: int = 40,
     offset: int = 0,
 ) -> dict[str, Any]:
-    """Build conclusions for matching buyers (computed live from activity)."""
+    """Build conclusions for workspace-active buyers (batched — stays fast)."""
     from modules import target_workspace as tw_module
 
-    q = db.query(Buyer)
+    # Always start from workspace lifecycle (or a single buyer) — never the full Master Table.
+    q = (
+        db.query(Buyer, WorkspaceLeadLifecycle)
+        .outerjoin(WorkspaceLeadLifecycle, WorkspaceLeadLifecycle.buyer_id == Buyer.id)
+    )
+
     if buyer_id is not None:
         q = q.filter(Buyer.id == buyer_id)
+    else:
+        q = q.filter(
+            or_(
+                WorkspaceLeadLifecycle.id.isnot(None),
+                Buyer.assigned_to_user_id.isnot(None),
+            )
+        )
+
     if user_id is not None:
         q = q.filter(
             or_(
                 Buyer.assigned_to_user_id == user_id,
-                Buyer.id.in_(
-                    db.query(WorkspaceLeadLifecycle.buyer_id).filter(
-                        WorkspaceLeadLifecycle.user_id == user_id
-                    )
-                ),
+                WorkspaceLeadLifecycle.user_id == user_id,
             )
         )
     if company_query and company_query.strip():
         like = f"%{company_query.strip()}%"
         q = q.filter(Buyer.company_name.ilike(like))
 
-    # Day filter: buyers in that day's target countries (team or user).
     if day_of_week:
         targets = tw_module.get_day_country_targets(
             db, day_of_week=day_of_week.lower(), user_id=user_id
@@ -321,34 +339,68 @@ def list_conclusions(
         else:
             return {"total": 0, "items": [], "limit": limit, "offset": offset}
 
-    # Prefer buyers that already have workspace lifecycle or assignment.
-    # Without a user/company/day/buyer filter, only surface workspace-active leads
-    # so admin overview stays usable (not the entire Master Table).
-    if user_id is None and buyer_id is None and not (company_query or "").strip() and not day_of_week:
-        q = q.filter(
-            or_(
-                Buyer.assigned_to_user_id.isnot(None),
-                Buyer.id.in_(db.query(WorkspaceLeadLifecycle.buyer_id)),
-            )
-        )
-
+    safe_limit = min(80, max(1, int(limit or 40)))
+    safe_offset = max(0, int(offset or 0))
     total = q.count()
-    buyers = (
+    rows = (
         q.order_by(Buyer.company_name.asc())
-        .offset(max(0, offset))
-        .limit(min(200, max(1, limit)))
+        .offset(safe_offset)
+        .limit(safe_limit)
         .all()
     )
 
+    buyers = [b for b, _life in rows]
+    lives = {b.id: life for b, life in rows if life is not None}
+    buyer_ids = [b.id for b in buyers]
+    eng_map, last_map = _engagement_maps(db, buyer_ids)
+
+    # Prefetch assignees in one query
+    assignee_ids = {
+        (lives[b.id].user_id if lives.get(b.id) and lives[b.id].user_id else b.assigned_to_user_id)
+        for b in buyers
+    }
+    assignee_ids.discard(None)
+    users_by_id: dict[int, AppUser] = {}
+    if assignee_ids:
+        users_by_id = {
+            u.id: u for u in db.query(AppUser).filter(AppUser.id.in_(list(assignee_ids))).all()
+        }
+
     items: list[dict[str, Any]] = []
     for buyer in buyers:
-        item = build_buyer_conclusion(db, buyer.id)
-        if not item:
-            continue
+        life = lives.get(buyer.id)
+        engagement = eng_map.get(buyer.id) or {k: _empty_bucket() for k in ("7d", "30d", "90d")}
+        if life and life.stage == "needs_follow_up":
+            for label in engagement:
+                engagement[label]["follow_ups_pending"] += 1
+        last_at = last_map.get(buyer.id)
+        uid = life.user_id if life and life.user_id else buyer.assigned_to_user_id
+        user = users_by_id.get(uid) if uid else None
+        if user:
+            responsible = (user.full_name or user.username or "Sales Agent").strip()
+        else:
+            responsible = _responsible_name(db, buyer, life)
+        fields = _build_fields(
+            buyer=buyer,
+            life=life,
+            last_contact_at=last_at,
+            responsible=responsible,
+            engagement=engagement,
+        )
+        item = {
+            "buyer_id": buyer.id,
+            "company_name": buyer.company_name,
+            "country": buyer.country,
+            "stage": (life.stage if life else "fresh"),
+            "responsible_user_id": uid,
+            "engagement": engagement,
+            **fields,
+            "generated_at": _utc_now().isoformat(),
+        }
         if attention:
             want = attention.strip().lower()
             got = str(item.get("management_attention") or "").lower()
-            if want == "required" and "required" not in got:
+            if want == "required" and got != "required":
                 continue
             if want in {"not_required", "not required"} and "not required" not in got:
                 continue
@@ -357,14 +409,14 @@ def list_conclusions(
     return {
         "total": total if not attention else len(items),
         "items": items,
-        "limit": limit,
-        "offset": offset,
+        "limit": safe_limit,
+        "offset": safe_offset,
     }
 
 
 def summarize_admin_overview(db: Session, *, day_of_week: str | None = None) -> dict[str, Any]:
-    """Roll-up for Khalid / admins: attention counts by assignee."""
-    data = list_conclusions(db, day_of_week=day_of_week, limit=200, offset=0)
+    """Roll-up for admins from the same limited workspace set (not a second heavy scan)."""
+    data = list_conclusions(db, day_of_week=day_of_week, limit=60, offset=0)
     items = data.get("items") or []
     by_user: dict[str, dict[str, int]] = {}
     attention_required = 0
@@ -381,7 +433,9 @@ def summarize_admin_overview(db: Session, *, day_of_week: str | None = None) -> 
         "attention_required": attention_required,
         "by_user": [
             {"responsible_person": name, **counts}
-            for name, counts in sorted(by_user.items(), key=lambda x: (-x[1]["attention_required"], x[0]))
+            for name, counts in sorted(
+                by_user.items(), key=lambda x: (-x[1]["attention_required"], x[0])
+            )
         ],
         "items": items,
     }
