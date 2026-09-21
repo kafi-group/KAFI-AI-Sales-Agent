@@ -248,3 +248,66 @@ def delete_review_option(
     if not ok:
         raise HTTPException(400, "Cannot delete system default option or option not found")
     return {"success": True}
+
+
+# ── AI Conclusion ───────────────────────────────────────────────────────
+
+
+@router.get("/ai-conclusions/buyer/{buyer_id}")
+def get_buyer_ai_conclusion(
+    buyer_id: int,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """Engagement (7/30/90) + AI conclusion fields for one company."""
+    from modules import ai_conclusion as ac_module
+
+    _ = user
+    item = ac_module.build_buyer_conclusion(db, buyer_id)
+    if not item:
+        raise HTTPException(404, "Buyer not found")
+    return item
+
+
+@router.get("/ai-conclusions")
+def list_ai_conclusions(
+    user_id: Optional[int] = Query(None),
+    buyer_id: Optional[int] = Query(None),
+    company: Optional[str] = Query(None),
+    day: Optional[str] = Query(None, description="Day of week filter for target countries"),
+    attention: Optional[str] = Query(None, description="required | not_required"),
+    limit: int = Query(40, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """List AI conclusions. Non-admins are scoped to their own assigned leads."""
+    from modules import ai_conclusion as ac_module
+
+    scoped_user = user_id
+    if user.role != AppUserRole.admin:
+        scoped_user = user.id
+    return ac_module.list_conclusions(
+        db,
+        user_id=scoped_user,
+        buyer_id=buyer_id,
+        company_query=company,
+        day_of_week=day,
+        attention=attention,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/ai-conclusions/overview")
+def ai_conclusions_admin_overview(
+    day: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """Admin roll-up: attention required by sales person / company list."""
+    from modules import ai_conclusion as ac_module
+
+    if user.role != AppUserRole.admin:
+        raise HTTPException(403, "Admin only")
+    return ac_module.summarize_admin_overview(db, day_of_week=day)

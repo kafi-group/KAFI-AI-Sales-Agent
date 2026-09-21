@@ -25,6 +25,8 @@ _NO_ANSWER_STATUSES = {
     "canceled",
     "cancelled",
     "manually-canceled",
+    "call-deleted",
+    "ring-timeout-hangup",
     "customer-did-not-answer",
     "customer-busy",
     "voicemail",
@@ -201,6 +203,18 @@ def _is_no_answer(status: str | None, ended_reason: str | None, duration: Any) -
     except (TypeError, ValueError):
         seconds = None
 
+    # Our forced 16s hangup / API cancel — always a missed attempt.
+    if any(
+        flag in blob
+        for flag in (
+            "manually-canceled",
+            "call-deleted",
+            "ring-timeout-hangup",
+            "customer-did-not-answer",
+        )
+    ):
+        return True
+
     # Real talk then hangup — do not treat as a missed ring attempt.
     if tokens & _EARLY_HANGUP_STATUSES or any(flag in blob for flag in _EARLY_HANGUP_STATUSES):
         if seconds is not None and seconds >= 20:
@@ -213,6 +227,23 @@ def _is_no_answer(status: str | None, ended_reason: str | None, duration: Any) -
     for flag in _NO_ANSWER_STATUSES:
         if flag in blob:
             return True
+
+    # Vapi often posts status=ended/completed with a thin reason after we kill a ring.
+    # Short duration + no real conversation ⇒ treat as unanswered so attempt 2 can run.
+    if seconds is not None and seconds <= 18:
+        if "ended" in blob or "completed" in blob:
+            if any(
+                x in blob
+                for x in (
+                    "assistant-ended-call",
+                    "assistant-forwarded",
+                    "transfer",
+                    "exceeded-max-duration",
+                )
+            ):
+                return False
+            return True
+
     return False
 
 

@@ -4725,6 +4725,38 @@ export const client = {
     request<{ success: boolean }>(`/target-workspace/review-options/${optionId}`, {
       method: "DELETE",
     }),
+  getBuyerAiConclusion: (buyerId: number) =>
+    request<AiConclusionItem>(`/target-workspace/ai-conclusions/buyer/${buyerId}`),
+  listAiConclusions: (params: {
+    user_id?: number;
+    buyer_id?: number;
+    company?: string;
+    day?: string;
+    attention?: string;
+    limit?: number;
+    offset?: number;
+  } = {}) => {
+    const query = new URLSearchParams();
+    if (params.user_id != null) query.set("user_id", String(params.user_id));
+    if (params.buyer_id != null) query.set("buyer_id", String(params.buyer_id));
+    if (params.company) query.set("company", params.company);
+    if (params.day) query.set("day", params.day);
+    if (params.attention) query.set("attention", params.attention);
+    if (params.limit) query.set("limit", String(params.limit));
+    if (params.offset) query.set("offset", String(params.offset));
+    const qs = query.toString();
+    return request<AiConclusionListResponse>(
+      `/target-workspace/ai-conclusions${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getAiConclusionsOverview: (day?: string) => {
+    const query = new URLSearchParams();
+    if (day) query.set("day", day);
+    const qs = query.toString();
+    return request<AiConclusionOverviewResponse>(
+      `/target-workspace/ai-conclusions/overview${qs ? `?${qs}` : ""}`,
+    );
+  },
 };
 
 export interface DayCountryTarget {
@@ -4843,6 +4875,54 @@ export interface WorkspaceReviewOptionItem {
   label: string;
   action_hint: string | null;
   is_system: boolean;
+}
+
+export interface AiConclusionEngagementBucket {
+  calls: number;
+  emails: number;
+  whatsapp: number;
+  telegram: number;
+  quotations: number;
+  follow_ups_pending: number;
+}
+
+export interface AiConclusionItem {
+  buyer_id: number;
+  company_name: string;
+  country: string | null;
+  stage: string;
+  responsible_user_id?: number | null;
+  buyer_status: string;
+  last_contact: string;
+  pending_action: string;
+  responsible_person: string;
+  next_action: string;
+  management_attention: string;
+  engagement: {
+    "7d": AiConclusionEngagementBucket;
+    "30d": AiConclusionEngagementBucket;
+    "90d": AiConclusionEngagementBucket;
+  };
+  generated_at: string;
+}
+
+export interface AiConclusionListResponse {
+  total: number;
+  items: AiConclusionItem[];
+  limit: number;
+  offset: number;
+}
+
+export interface AiConclusionOverviewResponse {
+  day_of_week: string | null;
+  companies_scanned: number;
+  attention_required: number;
+  by_user: Array<{
+    responsible_person: string;
+    companies: number;
+    attention_required: number;
+  }>;
+  items: AiConclusionItem[];
 }
 
 export interface CnfLivePricingResponse {

@@ -531,14 +531,14 @@ class VoiceClient:
                 status = str(info.get("status") or "").lower().replace("_", "-")
                 if info.get("ended") or status in _ANSWERED_STATUSES:
                     return
-                if status in _RINGING_STATUSES or status in _PRE_RING_STATUSES:
-                    print(
-                        f"Fourth-ring hangup call={sid[-8:]} attempt={safe_attempt} "
-                        f"status={status or 'unknown'}",
-                        flush=True,
-                    )
-                    self.end_call(sid)
-                    hung_up = True
+                # Still not answered after the ring budget — force hangup + optional redial.
+                print(
+                    f"Fourth-ring hangup call={sid[-8:]} attempt={safe_attempt} "
+                    f"status={status or 'unknown'}",
+                    flush=True,
+                )
+                self.end_call(sid)
+                hung_up = True
             except Exception as exc:  # noqa: BLE001
                 print(f"Fourth-ring hangup skipped: {exc}", flush=True)
 
@@ -599,8 +599,34 @@ class VoiceClient:
         safe_attempt = max(1, int(ring_attempt or 1))
 
         def _arm_ring_limit(call_id: str | None) -> None:
-            # Hang up while still ringing; auto-redial is handled in call-status webhooks.
-            self.schedule_fourth_ring_hangup(call_id, attempt=safe_attempt)
+            # After ~16s still ringing → hang up. For AI queue tasks, redial attempt 2
+            # here (do not rely only on Vapi webhooks — they often omit no-answer reasons).
+            def _redial_after_timeout() -> None:
+                if not task_id or safe_attempt >= self.max_ring_attempts():
+                    return
+                try:
+                    from api.ai_sales_agent import handle_ai_call_status
+
+                    handle_ai_call_status(
+                        task_id=int(task_id),
+                        call_sid=call_id,
+                        status="no-answer",
+                        duration=self.ring_timeout_seconds() or 16,
+                        ended_reason="ring-timeout-hangup",
+                        ring_attempt=safe_attempt,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    print(f"Ring-timeout redial hook failed: {exc}", flush=True)
+
+            self.schedule_fourth_ring_hangup(
+                call_id,
+                attempt=safe_attempt,
+                on_hangup_redial=(
+                    _redial_after_timeout
+                    if task_id and safe_attempt < self.max_ring_attempts()
+                    else None
+                ),
+            )
 
         # Try Vapi Voice Engine first for sub-second conversational AI calling (if enabled)
         vapi_key = settings.vapi_api_key if getattr(settings, "vapi_enabled", True) else None
