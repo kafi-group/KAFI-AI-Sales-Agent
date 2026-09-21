@@ -274,7 +274,7 @@ def build_buyer_conclusion(db: Session, buyer_id: int) -> dict[str, Any] | None:
     )
     return {
         "buyer_id": buyer.id,
-        "company_name": buyer.company_name,
+        "company_name": (buyer.company_name or "").strip() or f"Company #{buyer.id}",
         "country": buyer.country,
         "stage": (life.stage if life else "fresh"),
         "responsible_user_id": life.user_id if life else buyer.assigned_to_user_id,
@@ -389,7 +389,7 @@ def list_conclusions(
         )
         item = {
             "buyer_id": buyer.id,
-            "company_name": buyer.company_name,
+            "company_name": (buyer.company_name or "").strip() or f"Company #{buyer.id}",
             "country": buyer.country,
             "stage": (life.stage if life else "fresh"),
             "responsible_user_id": uid,

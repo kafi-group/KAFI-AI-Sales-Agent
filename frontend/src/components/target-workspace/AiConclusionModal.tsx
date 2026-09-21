@@ -9,13 +9,13 @@ import {
 import { useAuth } from "../../auth/AuthContext";
 
 const DAYS = [
-  { id: "monday", label: "Mon" },
-  { id: "tuesday", label: "Tue" },
-  { id: "wednesday", label: "Wed" },
-  { id: "thursday", label: "Thu" },
-  { id: "friday", label: "Fri" },
-  { id: "saturday", label: "Sat" },
-  { id: "sunday", label: "Sun" },
+  { id: "monday", label: "Monday" },
+  { id: "tuesday", label: "Tuesday" },
+  { id: "wednesday", label: "Wednesday" },
+  { id: "thursday", label: "Thursday" },
+  { id: "friday", label: "Friday" },
+  { id: "saturday", label: "Saturday" },
+  { id: "sunday", label: "Sunday" },
 ];
 
 interface AiConclusionModalProps {
@@ -25,6 +25,14 @@ interface AiConclusionModalProps {
   /** When set, jump straight to this company. */
   initialBuyerId?: number | null;
   selectedDay?: string;
+}
+
+function companyLabel(item: AiConclusionItem): string {
+  const name = (item.company_name || "").trim();
+  if (name) return name;
+  const country = (item.country || "").trim();
+  if (country) return `${country} lead #${item.buyer_id}`;
+  return `Company #${item.buyer_id}`;
 }
 
 function EngagementTable({ item }: { item: AiConclusionItem }) {
@@ -104,7 +112,10 @@ function ConclusionFields({ item }: { item: AiConclusionItem }) {
   );
 }
 
-function buildOverviewFromItems(items: AiConclusionItem[], day: string | null): AiConclusionOverviewResponse {
+function buildOverviewFromItems(
+  items: AiConclusionItem[],
+  day: string | null,
+): AiConclusionOverviewResponse {
   const byUser = new Map<string, { companies: number; attention_required: number }>();
   let attentionRequired = 0;
   for (const item of items) {
@@ -126,7 +137,11 @@ function buildOverviewFromItems(items: AiConclusionItem[], day: string | null): 
     attention_required: attentionRequired,
     by_user: [...byUser.entries()]
       .map(([responsible_person, counts]) => ({ responsible_person, ...counts }))
-      .sort((a, b) => b.attention_required - a.attention_required || a.responsible_person.localeCompare(b.responsible_person)),
+      .sort(
+        (a, b) =>
+          b.attention_required - a.attention_required ||
+          a.responsible_person.localeCompare(b.responsible_person),
+      ),
     items,
   };
 }
@@ -136,7 +151,7 @@ export function AiConclusionModal({
   onClose,
   onError,
   initialBuyerId = null,
-  selectedDay,
+  selectedDay: _selectedDay,
 }: AiConclusionModalProps) {
   const { isAdmin } = useAuth();
   const onErrorRef = useRef(onError);
@@ -148,12 +163,18 @@ export function AiConclusionModal({
   const [selected, setSelected] = useState<AiConclusionItem | null>(null);
   const [overview, setOverview] = useState<AiConclusionOverviewResponse | null>(null);
   const [users, setUsers] = useState<AppUser[]>([]);
+
+  // Draft filters (what the user is editing)
+  const [searchInput, setSearchInput] = useState("");
   const [filterUserId, setFilterUserId] = useState<string>("");
-  const [filterCompany, setFilterCompany] = useState("");
-  // Default All days — auto-binding to today's day scanned every country buyer and hung.
   const [filterDay, setFilterDay] = useState("");
   const [filterAttention, setFilterAttention] = useState("");
-  const [dayHintApplied, setDayHintApplied] = useState(false);
+
+  // Applied server filters (only change on Refresh / day-user-attention apply)
+  const [appliedDay, setAppliedDay] = useState("");
+  const [appliedUserId, setAppliedUserId] = useState("");
+  const [appliedAttention, setAppliedAttention] = useState("");
+  const [appliedServerSearch, setAppliedServerSearch] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -167,23 +188,24 @@ export function AiConclusionModal({
         return;
       }
       const list = await client.listAiConclusions({
-        user_id: isAdmin && filterUserId ? Number(filterUserId) : undefined,
-        company: filterCompany.trim() || undefined,
-        day: filterDay || undefined,
-        attention: filterAttention || undefined,
-        limit: 50,
+        user_id: isAdmin && appliedUserId ? Number(appliedUserId) : undefined,
+        company: appliedServerSearch.trim() || undefined,
+        day: appliedDay || undefined,
+        attention: appliedAttention || undefined,
+        limit: 100,
       });
-      setItems(list.items);
+      setItems(list.items || []);
       if (isAdmin) {
-        setOverview(buildOverviewFromItems(list.items, filterDay || null));
+        setOverview(buildOverviewFromItems(list.items || [], appliedDay || null));
       } else {
         setOverview(null);
       }
       setSelected((prev) => {
-        if (prev && list.items.some((i) => i.buyer_id === prev.buyer_id)) {
-          return list.items.find((i) => i.buyer_id === prev.buyer_id) || list.items[0] || null;
+        const nextItems = list.items || [];
+        if (prev && nextItems.some((i) => i.buyer_id === prev.buyer_id)) {
+          return nextItems.find((i) => i.buyer_id === prev.buyer_id) || nextItems[0] || null;
         }
-        return list.items[0] || null;
+        return nextItems[0] || null;
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load AI conclusions";
@@ -195,7 +217,7 @@ export function AiConclusionModal({
     } finally {
       setLoading(false);
     }
-  }, [filterAttention, filterCompany, filterDay, filterUserId, initialBuyerId, isAdmin]);
+  }, [appliedAttention, appliedDay, appliedServerSearch, appliedUserId, initialBuyerId, isAdmin]);
 
   useEffect(() => {
     if (!open) return;
@@ -210,25 +232,71 @@ export function AiConclusionModal({
       .catch(() => setUsers([]));
   }, [open, isAdmin]);
 
-  // Optional: once when opening, suggest today's day in the filter (user can clear).
+  // Reset draft filters when reopening (always start All days — no forced Tue).
   useEffect(() => {
-    if (!open || dayHintApplied || initialBuyerId) return;
-    if (selectedDay) {
-      setFilterDay(selectedDay);
-      setDayHintApplied(true);
-    }
-  }, [open, selectedDay, dayHintApplied, initialBuyerId]);
-
-  useEffect(() => {
-    if (!open) setDayHintApplied(false);
+    if (!open) return;
+    setSearchInput("");
+    setFilterDay("");
+    setFilterUserId("");
+    setFilterAttention("");
+    setAppliedDay("");
+    setAppliedUserId("");
+    setAppliedAttention("");
+    setAppliedServerSearch("");
   }, [open]);
 
+  function applyFilters() {
+    setAppliedDay(filterDay);
+    setAppliedUserId(filterUserId);
+    setAppliedAttention(filterAttention);
+    // Server search only when user explicitly refreshes with a query (deep search).
+    setAppliedServerSearch(searchInput.trim());
+  }
+
+  // Instant local filter over whatever is already loaded.
+  const visibleItems = useMemo(() => {
+    const q = searchInput.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((item) => {
+      const hay = [
+        item.company_name,
+        item.country,
+        item.responsible_person,
+        item.buyer_status,
+        item.stage,
+        String(item.buyer_id),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [items, searchInput]);
+
+  const visibleOverview = useMemo(() => {
+    if (!isAdmin || initialBuyerId) return null;
+    return buildOverviewFromItems(visibleItems, appliedDay || null);
+  }, [appliedDay, initialBuyerId, isAdmin, visibleItems]);
+
+  useEffect(() => {
+    if (!visibleItems.length) {
+      setSelected(null);
+      return;
+    }
+    setSelected((prev) => {
+      if (prev && visibleItems.some((i) => i.buyer_id === prev.buyer_id)) return prev;
+      return visibleItems[0];
+    });
+  }, [visibleItems]);
+
   const title = useMemo(() => {
-    if (initialBuyerId && selected) return `AI Conclusion — ${selected.company_name}`;
+    if (initialBuyerId && selected) return `AI Conclusion — ${companyLabel(selected)}`;
     return isAdmin ? "AI Conclusion — Team overview" : "AI Conclusion — My companies";
   }, [initialBuyerId, isAdmin, selected]);
 
   if (!open) return null;
+
+  const displayOverview = visibleOverview || overview;
 
   return createPortal(
     <div
@@ -255,8 +323,8 @@ export function AiConclusionModal({
               <span className="truncate">{title}</span>
             </h2>
             <p className="text-sm text-slate-400 mt-1.5 leading-relaxed">
-              Buyer status, last contact, pending action, and management attention from live outreach
-              activity.
+              Search filters this list instantly. Change day / user / attention, then click{" "}
+              <strong className="text-slate-300">Apply filters</strong> to reload from the server.
             </p>
           </div>
           <button
@@ -273,18 +341,17 @@ export function AiConclusionModal({
           <div className="px-5 sm:px-6 py-3.5 border-b border-slate-800 flex flex-wrap gap-2.5 items-center shrink-0 bg-slate-950/30">
             <input
               type="search"
-              value={filterCompany}
-              onChange={(e) => setFilterCompany(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void load();
-              }}
-              placeholder="Search company…"
-              className="rounded-xl bg-slate-950 border border-slate-700 px-3.5 py-2.5 text-base text-slate-200 placeholder-slate-500 min-w-[12rem] flex-1"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search company, country, or sales person…"
+              className="rounded-xl bg-slate-950 border border-slate-700 px-3.5 py-2.5 text-base text-slate-200 placeholder-slate-500 min-w-[14rem] flex-1"
+              autoComplete="off"
             />
             <select
               value={filterDay}
               onChange={(e) => setFilterDay(e.target.value)}
-              className="rounded-xl bg-slate-950 border border-slate-700 px-3 py-2.5 text-base text-slate-200"
+              className="rounded-xl bg-slate-950 border border-slate-700 px-3 py-2.5 text-base text-slate-200 min-w-[9rem]"
+              title="Filter by target weekday"
             >
               <option value="">All days</option>
               {DAYS.map((d) => (
@@ -306,7 +373,7 @@ export function AiConclusionModal({
               <select
                 value={filterUserId}
                 onChange={(e) => setFilterUserId(e.target.value)}
-                className="rounded-xl bg-slate-950 border border-slate-700 px-3 py-2.5 text-base text-slate-200"
+                className="rounded-xl bg-slate-950 border border-slate-700 px-3 py-2.5 text-base text-slate-200 min-w-[10rem]"
               >
                 <option value="">All users</option>
                 {users.map((u) => (
@@ -318,30 +385,40 @@ export function AiConclusionModal({
             )}
             <button
               type="button"
-              onClick={() => void load()}
+              onClick={() => applyFilters()}
               disabled={loading}
               className="px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-base font-semibold disabled:opacity-50"
             >
-              {loading ? "Loading…" : "Refresh"}
+              {loading ? "Loading…" : "Apply filters"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void load()}
+              disabled={loading}
+              className="px-4 py-2.5 rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-100 text-base font-semibold disabled:opacity-50"
+            >
+              Refresh
             </button>
           </div>
         )}
 
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5 text-base">
-          {isAdmin && overview && !initialBuyerId && (
+          {isAdmin && displayOverview && !initialBuyerId && (
             <div className="grid sm:grid-cols-3 gap-4">
               <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-4">
-                <p className="text-xs uppercase tracking-wider text-slate-500">Companies</p>
-                <p className="text-3xl font-bold text-white mt-1">{overview.companies_scanned}</p>
+                <p className="text-xs uppercase tracking-wider text-slate-500">Companies shown</p>
+                <p className="text-3xl font-bold text-white mt-1">{visibleItems.length}</p>
               </div>
               <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 p-4">
                 <p className="text-xs uppercase tracking-wider text-amber-400/80">Attention required</p>
-                <p className="text-3xl font-bold text-amber-200 mt-1">{overview.attention_required}</p>
+                <p className="text-3xl font-bold text-amber-200 mt-1">
+                  {displayOverview.attention_required}
+                </p>
               </div>
               <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-4">
                 <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">By sales person</p>
                 <ul className="space-y-1 max-h-28 overflow-y-auto text-sm text-slate-300">
-                  {(overview.by_user || []).slice(0, 10).map((row) => (
+                  {(displayOverview.by_user || []).slice(0, 10).map((row) => (
                     <li key={row.responsible_person} className="flex justify-between gap-2">
                       <span className="truncate">{row.responsible_person}</span>
                       <span className="text-amber-300 shrink-0 font-semibold">
@@ -349,7 +426,7 @@ export function AiConclusionModal({
                       </span>
                     </li>
                   ))}
-                  {(overview.by_user || []).length === 0 && (
+                  {(displayOverview.by_user || []).length === 0 && (
                     <li className="text-slate-500">No rows yet</li>
                   )}
                 </ul>
@@ -370,16 +447,18 @@ export function AiConclusionModal({
             </div>
           ) : loading && items.length === 0 ? (
             <p className="text-base text-slate-400 text-center py-16">Building AI conclusions…</p>
-          ) : items.length === 0 ? (
-            <p className="text-base text-slate-500 text-center py-16">
-              No workspace companies matched these filters. Try <strong className="text-slate-300">All days</strong>{" "}
-              or search a company name.
+          ) : visibleItems.length === 0 ? (
+            <p className="text-base text-slate-500 text-center py-16 max-w-lg mx-auto leading-relaxed">
+              No companies match this search
+              {appliedDay ? ` for ${appliedDay}` : ""}. Clear the search box, set day to{" "}
+              <strong className="text-slate-300">All days</strong>, then click{" "}
+              <strong className="text-slate-300">Apply filters</strong>.
             </p>
           ) : (
-            <div className="grid lg:grid-cols-[280px_1fr] gap-5">
+            <div className="grid lg:grid-cols-[300px_1fr] gap-5">
               {!initialBuyerId && (
                 <ul className="space-y-1.5 max-h-[min(60vh,36rem)] overflow-y-auto pr-1">
-                  {items.map((item) => {
+                  {visibleItems.map((item) => {
                     const active = selected?.buyer_id === item.buyer_id;
                     const attn =
                       /required/i.test(item.management_attention) &&
@@ -395,9 +474,9 @@ export function AiConclusionModal({
                               : "border-slate-800 bg-slate-950/50 text-slate-300 hover:border-slate-600"
                           }`}
                         >
-                          <p className="text-base font-semibold truncate">{item.company_name}</p>
+                          <p className="text-base font-semibold truncate">{companyLabel(item)}</p>
                           <p className="text-xs text-slate-500 truncate mt-0.5">
-                            {item.responsible_person}
+                            {[item.country, item.responsible_person].filter(Boolean).join(" · ")}
                             {attn ? " · Attention" : ""}
                           </p>
                         </button>
@@ -410,9 +489,13 @@ export function AiConclusionModal({
               {selected && (
                 <div className="space-y-5 min-w-0">
                   <div>
-                    <h3 className="text-xl sm:text-2xl font-bold text-white">{selected.company_name}</h3>
+                    <h3 className="text-xl sm:text-2xl font-bold text-white">
+                      {companyLabel(selected)}
+                    </h3>
                     <p className="text-sm text-slate-500 mt-1">
-                      {[selected.country, selected.stage?.replace(/_/g, " ")].filter(Boolean).join(" · ")}
+                      {[selected.country, selected.stage?.replace(/_/g, " "), selected.responsible_person]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </p>
                   </div>
                   <EngagementTable item={selected} />
