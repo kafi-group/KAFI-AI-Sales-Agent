@@ -4894,18 +4894,31 @@ export interface AiConclusionEngagementBucket {
   follow_ups_pending: number;
 }
 
+export interface AiConclusionModeUsed {
+  id: string;
+  label: string;
+  count: number;
+}
+
 export interface AiConclusionItem {
   buyer_id: number;
   company_name: string;
   country: string | null;
   stage: string;
+  stage_label?: string;
   responsible_user_id?: number | null;
   buyer_status: string;
   last_contact: string;
+  last_contact_at?: string | null;
+  last_contact_at_display?: string | null;
+  last_contact_mode?: string | null;
+  modes_used?: AiConclusionModeUsed[];
+  last_contact_user?: string;
   pending_action: string;
   responsible_person: string;
   next_action: string;
   management_attention: string;
+  management_insight?: string;
   engagement: {
     "7d": AiConclusionEngagementBucket;
     "30d": AiConclusionEngagementBucket;

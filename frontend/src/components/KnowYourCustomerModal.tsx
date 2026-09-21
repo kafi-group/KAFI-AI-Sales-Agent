@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { LeadTableRow } from "../api/client";
+import { AiConclusionSidePanel } from "./AiConclusionSidePanel";
 
 export function KnowYourCustomerDetail({ row }: { row: LeadTableRow }) {
   const contactName = row.contact_name?.trim() || "";
@@ -150,6 +151,8 @@ interface KnowYourCustomerModalProps {
   onClose: () => void;
   companyName?: string | null;
   row: LeadTableRow | null;
+  /** When set, show AI Conclusion panel beside KYC. */
+  buyerId?: number | null;
   loading?: boolean;
   error?: string | null;
   footer?: ReactNode;
@@ -160,6 +163,7 @@ export function KnowYourCustomerModal({
   onClose,
   companyName,
   row,
+  buyerId = null,
   loading = false,
   error = null,
   footer,
@@ -181,45 +185,59 @@ export function KnowYourCustomerModal({
   if (!open) return null;
 
   const titleName = row?.company_name || companyName || "Customer";
+  const resolvedBuyerId = buyerId ?? row?.id ?? null;
+  const showAi = Boolean(resolvedBuyerId);
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md"
       onClick={onClose}
       role="presentation"
     >
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Know Your Customer"
-        className="w-full max-w-4xl rounded-3xl border-2 border-emerald-500/40 bg-slate-900 shadow-2xl overflow-hidden p-2"
+        className={`w-full ${showAi ? "max-w-6xl" : "max-w-4xl"} flex flex-col lg:flex-row gap-4 max-h-[92vh]`}
         onClick={(e) => e.stopPropagation()}
+        role="presentation"
       >
-        <div className="flex items-center justify-between gap-4 border-b border-slate-800 px-8 py-5 bg-slate-950/80">
-          <h3 className="text-2xl font-extrabold tracking-wide text-emerald-400">
-            Know Your Customer
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl px-5 py-2.5 text-base font-bold text-slate-200 hover:bg-slate-800 hover:text-white bg-slate-800/80 border border-slate-700 transition"
-          >
-            Close
-          </button>
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Know Your Customer"
+          className="flex-1 min-w-0 rounded-3xl border-2 border-emerald-500/40 bg-slate-900 shadow-2xl overflow-hidden flex flex-col"
+        >
+          <div className="flex items-center justify-between gap-4 border-b border-slate-800 px-6 sm:px-8 py-4 sm:py-5 bg-slate-950/80 shrink-0">
+            <h3 className="text-xl sm:text-2xl font-extrabold tracking-wide text-emerald-400">
+              Know Your Customer
+            </h3>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl px-5 py-2.5 text-base font-bold text-slate-200 hover:bg-slate-800 hover:text-white bg-slate-800/80 border border-slate-700 transition"
+            >
+              Close
+            </button>
+          </div>
+          <div className="px-6 sm:px-8 py-6 sm:py-8 overflow-y-auto space-y-6 flex-1">
+            <h4 className="text-base font-semibold text-slate-300">{titleName}</h4>
+            {loading ? (
+              <p className="text-sm text-slate-400">Loading customer profile…</p>
+            ) : error ? (
+              <p className="text-sm text-rose-300">{error}</p>
+            ) : row ? (
+              <KnowYourCustomerDetail row={row} />
+            ) : (
+              <p className="text-sm text-slate-500">No profile details available.</p>
+            )}
+            {footer}
+          </div>
         </div>
-        <div className="px-8 py-8 max-h-[80vh] overflow-y-auto space-y-6">
-          <h4 className="text-base font-semibold text-slate-300">{titleName}</h4>
-          {loading ? (
-            <p className="text-sm text-slate-400">Loading customer profile…</p>
-          ) : error ? (
-            <p className="text-sm text-rose-300">{error}</p>
-          ) : row ? (
-            <KnowYourCustomerDetail row={row} />
-          ) : (
-            <p className="text-sm text-slate-500">No profile details available.</p>
-          )}
-          {footer}
-        </div>
+
+        {showAi ? (
+          <AiConclusionSidePanel
+            buyerId={resolvedBuyerId}
+            className="w-full lg:w-[380px] xl:w-[420px] shrink-0 max-h-[50vh] lg:max-h-[92vh]"
+          />
+        ) : null}
       </div>
     </div>,
     document.body,

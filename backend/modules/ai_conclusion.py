@@ -12,9 +12,11 @@ from db.models import (
     AppUser,
     Buyer,
     Contact,
+    EmailActivityEvent,
     Interaction,
     Quotation,
     QuotationStatus,
+    UserActivityEvent,
     WorkspaceLeadLifecycle,
 )
 
@@ -26,6 +28,152 @@ _STAGE_STATUS = {
     "no_response": "No response / cold",
     "interested": "Active opportunity",
 }
+
+_STAGE_LABEL = {
+    "fresh": "Fresh / Untouched",
+    "needs_follow_up": "Needs Follow Up",
+    "not_interested": "Not Interested",
+    "no_response": "No Response / Dead meter",
+    "interested": "Interested / Potential",
+}
+
+_MODE_META = (
+    ("calls", "Call", "call"),
+    ("whatsapp", "WhatsApp", "whatsapp"),
+    ("emails", "Email", "email"),
+    ("telegram", "Telegram", "telegram"),
+)
+
+
+def _format_contact_when(when: datetime | None) -> str | None:
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+
+        local = when.astimezone(ZoneInfo("Asia/Karachi"))
+    except Exception:
+        local = when
+    return local.strftime("%d %b %Y · %I:%M %p")
+
+
+def _modes_used_from_engagement(engagement: dict[str, dict[str, int]]) -> list[dict[str, Any]]:
+    bucket = engagement.get("90d") or engagement.get("30d") or _empty_bucket()
+    used: list[dict[str, Any]] = []
+    for key, label, _mode_id in _MODE_META:
+        count = int(bucket.get(key) or 0)
+        if count > 0:
+            used.append({"id": key, "label": label, "count": count})
+    return used
+
+
+def _last_interaction_touch(
+    db: Session, buyer_id: int
+) -> tuple[datetime | None, str | None, str | None]:
+    """Return (when, mode_key, last_user_name hint from interaction fields)."""
+    contact_ids = [
+        cid for (cid,) in db.query(Contact.id).filter(Contact.buyer_id == buyer_id).all()
+    ]
+    if not contact_ids:
+        return None, None, None
+
+    row = (
+        db.query(Interaction)
+        .filter(Interaction.contact_id.in_(contact_ids))
+        .order_by(Interaction.created_at.desc())
+        .first()
+    )
+    if not row or not row.created_at:
+        return None, None, None
+
+    mode = _channel_key(row.channel)
+    mode_key = mode if mode != "other" else None
+    user_hint: str | None = None
+    wa_uid = getattr(row, "personal_whatsapp_user_id", None)
+    if wa_uid:
+        user = db.get(AppUser, int(wa_uid))
+        if user:
+            user_hint = (user.full_name or user.username or "").strip() or None
+    if not user_hint and row.approved_by:
+        user_hint = str(row.approved_by).strip() or None
+    return row.created_at, mode_key, user_hint
+
+
+def _last_contact_user_name(db: Session, buyer_id: int, fallback: str) -> str:
+    email_ev = (
+        db.query(EmailActivityEvent)
+        .filter(EmailActivityEvent.buyer_id == buyer_id, EmailActivityEvent.user_id.isnot(None))
+        .order_by(EmailActivityEvent.created_at.desc())
+        .first()
+    )
+    if email_ev and email_ev.user_id:
+        user = db.get(AppUser, email_ev.user_id)
+        if user:
+            return (user.full_name or user.username or fallback).strip()
+
+    activity_rows = (
+        db.query(UserActivityEvent)
+        .filter(
+            UserActivityEvent.activity_type.in_(
+                [
+                    "call_logged",
+                    "call_outcome",
+                    "personal_emails_sent",
+                    "personal_whatsapp_sent",
+                    "telegram_personal_sent",
+                ]
+            )
+        )
+        .order_by(UserActivityEvent.created_at.desc())
+        .limit(40)
+        .all()
+    )
+    for ev in activity_rows:
+        details = ev.details if isinstance(ev.details, dict) else {}
+        bid = details.get("buyer_id")
+        if bid is None and ev.entity_type == "buyer":
+            bid = ev.entity_id
+        try:
+            if int(bid) != int(buyer_id):
+                continue
+        except (TypeError, ValueError):
+            continue
+        user = db.get(AppUser, ev.user_id)
+        if user:
+            return (user.full_name or user.username or fallback).strip()
+
+    return fallback
+
+
+def _mode_label(mode_key: str | None) -> str | None:
+    if not mode_key:
+        return None
+    mapping = {
+        "calls": "Call",
+        "call": "Call",
+        "whatsapp": "WhatsApp",
+        "emails": "Email",
+        "email": "Email",
+        "telegram": "Telegram",
+    }
+    return mapping.get(mode_key)
+
+
+def _management_blurb(stage: str, fields: dict[str, str]) -> str:
+    stage_label = _STAGE_LABEL.get(stage, stage.replace("_", " ").title())
+    attention = fields.get("management_attention") or "Not required"
+    next_action = fields.get("next_action") or "Continue outreach"
+    pending = fields.get("pending_action") or ""
+    parts = [
+        f"Currently in workspace as {stage_label}.",
+        f"Management attention: {attention}.",
+        f"Next step: {next_action}.",
+    ]
+    if pending:
+        parts.append(f"Pending: {pending}.")
+    return " ".join(parts)
 
 
 def _utc_now() -> datetime:
@@ -264,7 +412,11 @@ def build_buyer_conclusion(db: Session, buyer_id: int) -> dict[str, Any] | None:
         for label in engagement:
             engagement[label]["follow_ups_pending"] += 1
     last_at = last_map.get(buyer_id)
+    touch_at, touch_mode, touch_user_hint = _last_interaction_touch(db, buyer_id)
+    if touch_at and (last_at is None or touch_at >= last_at):
+        last_at = touch_at
     responsible = _responsible_name(db, buyer, life)
+    last_user = touch_user_hint or _last_contact_user_name(db, buyer_id, responsible)
     fields = _build_fields(
         buyer=buyer,
         life=life,
@@ -272,14 +424,31 @@ def build_buyer_conclusion(db: Session, buyer_id: int) -> dict[str, Any] | None:
         responsible=responsible,
         engagement=engagement,
     )
+    stage = (life.stage if life else "fresh") or "fresh"
+    modes_used = _modes_used_from_engagement(engagement)
+    # Ensure the latest mode appears highlighted even if outside 90d window edge cases
+    if touch_mode and not any(m["id"] == touch_mode or m["id"].startswith(touch_mode[:4]) for m in modes_used):
+        label = _mode_label(touch_mode)
+        if label:
+            key = "calls" if touch_mode in {"call", "calls"} else (
+                "emails" if touch_mode in {"email", "emails"} else touch_mode
+            )
+            modes_used.append({"id": key, "label": label, "count": 1})
     return {
         "buyer_id": buyer.id,
         "company_name": (buyer.company_name or "").strip() or f"Company #{buyer.id}",
         "country": buyer.country,
-        "stage": (life.stage if life else "fresh"),
+        "stage": stage,
+        "stage_label": _STAGE_LABEL.get(stage, stage.replace("_", " ").title()),
         "responsible_user_id": life.user_id if life else buyer.assigned_to_user_id,
         "engagement": engagement,
         **fields,
+        "last_contact_at": last_at.isoformat() if last_at else None,
+        "last_contact_at_display": _format_contact_when(last_at),
+        "last_contact_mode": _mode_label(touch_mode),
+        "modes_used": modes_used,
+        "last_contact_user": last_user,
+        "management_insight": _management_blurb(stage, fields),
         "generated_at": _utc_now().isoformat(),
     }
 

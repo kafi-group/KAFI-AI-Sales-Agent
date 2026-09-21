@@ -25,6 +25,7 @@ import { BulkEmailModal } from "../components/BulkEmailModal";
 import { BulkWhatsAppModal } from "../components/BulkWhatsAppModal";
 import { BulkTelegramModal } from "../components/BulkTelegramModal";
 import { ScheduleMeetingModal } from "../components/ScheduleMeetingModal";
+import { AiConclusionSidePanel } from "../components/AiConclusionSidePanel";
 import {
   LeadWhatsAppComposeModal,
   type WhatsAppComposeTarget,
@@ -590,6 +591,7 @@ function ExpandableCell({
   empty = "—",
   title = "Know Your Customer",
   openWhenEmpty = false,
+  buyerId = null,
 }: {
   text: string | null | undefined;
   className?: string;
@@ -597,6 +599,8 @@ function ExpandableCell({
   empty?: string;
   title?: string;
   openWhenEmpty?: boolean;
+  /** When set (company KYC), show AI Conclusion beside the detail panel. */
+  buyerId?: number | null;
 }) {
   const [open, setOpen] = useState(false);
   const value = (text ?? "").trim();
@@ -620,6 +624,7 @@ function ExpandableCell({
   }
 
   const modalTitle = title === "Details" || !title || title === "Company name" ? "Know Your Customer" : title;
+  const showAi = Boolean(buyerId) && modalTitle === "Know Your Customer";
 
   return (
     <>
@@ -639,7 +644,7 @@ function ExpandableCell({
       {open &&
         createPortal(
           <div
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md"
+            className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md"
             onClick={(e) => {
               e.stopPropagation();
               setOpen(false);
@@ -647,42 +652,51 @@ function ExpandableCell({
             role="presentation"
           >
             <div
-              role="dialog"
-              aria-modal="true"
-              aria-label={modalTitle}
-              className="w-full max-w-4xl rounded-3xl border-2 border-emerald-500/40 bg-slate-900 shadow-2xl overflow-hidden p-2"
+              className={`w-full ${showAi ? "max-w-6xl" : "max-w-4xl"} flex flex-col lg:flex-row gap-4 max-h-[92vh]`}
               onClick={(e) => e.stopPropagation()}
+              role="presentation"
             >
-              <div className="flex items-center justify-between gap-4 border-b border-slate-800 px-8 py-5 bg-slate-950/80">
-                <h3 className="text-2xl font-extrabold tracking-wide text-emerald-400">{modalTitle}</h3>
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="rounded-xl px-5 py-2.5 text-base font-bold text-slate-200 hover:bg-slate-800 hover:text-white bg-slate-800/80 border border-slate-700 transition"
-                >
-                  Close
-                </button>
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={modalTitle}
+                className="flex-1 min-w-0 rounded-3xl border-2 border-emerald-500/40 bg-slate-900 shadow-2xl overflow-hidden flex flex-col"
+              >
+                <div className="flex items-center justify-between gap-4 border-b border-slate-800 px-6 sm:px-8 py-4 sm:py-5 bg-slate-950/80 shrink-0">
+                  <h3 className="text-xl sm:text-2xl font-extrabold tracking-wide text-emerald-400">
+                    {modalTitle}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    className="rounded-xl px-5 py-2.5 text-base font-bold text-slate-200 hover:bg-slate-800 hover:text-white bg-slate-800/80 border border-slate-700 transition"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="px-6 sm:px-8 py-6 sm:py-8 overflow-y-auto space-y-6 flex-1">
+                  {value ? (
+                    <div>
+                      {detail ? (
+                        <h4 className="text-base font-semibold text-slate-300">{value}</h4>
+                      ) : (
+                        <p className="break-all whitespace-pre-wrap text-2xl sm:text-3xl font-bold leading-relaxed text-slate-100 selection:bg-emerald-500 selection:text-white">
+                          {value}
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                  {detail ? (
+                    <div className={value ? "border-t border-slate-800 pt-6" : ""}>{detail}</div>
+                  ) : null}
+                </div>
               </div>
-              <div className="px-8 py-8 max-h-[80vh] overflow-y-auto space-y-6">
-                {value ? (
-                  <div>
-                    {detail ? (
-                      <h4 className="text-base font-semibold text-slate-300">
-                        {value}
-                      </h4>
-                    ) : (
-                      <p className="break-all whitespace-pre-wrap text-2xl sm:text-3xl font-bold leading-relaxed text-slate-100 selection:bg-emerald-500 selection:text-white">
-                        {value}
-                      </p>
-                    )}
-                  </div>
-                ) : null}
-                {detail ? (
-                  <div className={value ? "border-t border-slate-800 pt-6" : ""}>
-                    {detail}
-                  </div>
-                ) : null}
-              </div>
+              {showAi ? (
+                <AiConclusionSidePanel
+                  buyerId={buyerId}
+                  className="w-full lg:w-[380px] xl:w-[420px] shrink-0 max-h-[50vh] lg:max-h-[92vh]"
+                />
+              ) : null}
             </div>
           </div>,
           document.body,
@@ -4385,6 +4399,7 @@ export function LeadsTablePage({
                             title="Know Your Customer"
                             className="text-slate-200 font-medium hover:text-white"
                             detail={renderKycDetail(row)}
+                            buyerId={row.id}
                           />
                         )}
                       </td>
@@ -4933,6 +4948,7 @@ export function LeadsTablePage({
                           title="Know Your Customer"
                           className="text-slate-200 font-medium hover:text-white"
                           detail={renderKycDetail(row)}
+                          buyerId={row.id}
                         />
                       )}
                     </td>

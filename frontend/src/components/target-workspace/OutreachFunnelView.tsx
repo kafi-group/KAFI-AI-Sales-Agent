@@ -1402,6 +1402,7 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
         onClose={closeKnowYourCustomer}
         companyName={kycLead?.company_name}
         row={kycRow}
+        buyerId={kycLead?.id ?? null}
         loading={kycLoading}
         error={kycError}
       />
