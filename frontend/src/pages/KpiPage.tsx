@@ -65,7 +65,7 @@ const COUNT_CARDS: { key: keyof KpiCounts; label: string }[] = [
   { key: "personal_whatsapp_sent", label: "Personal WhatsApp sent" },
   { key: "bulk_whatsapp_sent", label: "Bulk WhatsApp sent" },
   { key: "inbox_replies", label: "Inbox replies" },
-  { key: "brand_assistant_sessions", label: "AI Chatbot" },
+  { key: "brand_assistant_sessions", label: "Research and Update" },
 ];
 
 const KPI_PER_USER_COLUMNS: ColumnDef[] = [

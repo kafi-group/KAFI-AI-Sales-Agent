@@ -219,9 +219,9 @@ function DashboardApp() {
   const [whatsappActivityUnread, setWhatsappActivityUnread] = useState(0);
   const [whatsappInboxUnread, setWhatsappInboxUnread] = useState(0);
   const [emailTemplateCount, setEmailTemplateCount] = useState(0);
-  const [personalizedEmailCount, setPersonalizedEmailCount] = useState(0);
+  const [, setPersonalizedEmailCount] = useState(0);
   const [whatsappTemplateCount, setWhatsappTemplateCount] = useState(0);
-  const [discoverLeadsCount, setDiscoverLeadsCount] = useState(0);
+  const [, setDiscoverLeadsCount] = useState(0);
 
   const [inboxUnread, setInboxUnread] = useState(0);
   const [urgentEmails, setUrgentEmails] = useState<UrgentEmailItem[]>([]);
@@ -1486,7 +1486,7 @@ function DashboardApp() {
           label: "Catalogue",
           count: 4,
         },
-        { id: "chatbot", label: "Brand assistant", count: 0 },
+        { id: "chatbot", label: "Research and Update", count: 0 },
         { id: "client-history", label: "Client History", count: 0 },
         { id: "helpful-guidance", label: "SALES HELP MANAGER", count: 0 },
         { id: "target-workspace" as const, label: "Target and Workspace", count: 0 },

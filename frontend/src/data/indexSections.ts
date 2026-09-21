@@ -310,13 +310,13 @@ export const INDEX_SECTIONS: IndexSection[] = [
   },
   {
     number: 7,
-    title: "AI Chatbot",
+    title: "Research and Update",
     description: "Ask about Kafi / ESSENCE products, specs, and export guidance.",
     openAction: { type: "tab", tab: "chatbot" },
     items: [
       {
         id: "7.1",
-        title: "AI Chatbot",
+        title: "Research and Update",
         description: "Chatbot for product and export questions.",
         icon: "robot",
         action: { type: "tab", tab: "chatbot" },

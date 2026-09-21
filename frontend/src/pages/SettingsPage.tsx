@@ -199,7 +199,7 @@ export function SettingsPage({ onError, onOpenRestrictedAi }: SettingsPageProps)
     setPinModalOpen(true);
   }
 
-  async function handlePinSubmit(e: React.FormEvent) {
+  async function handlePinSubmit(e: FormEvent) {
     e.preventDefault();
     if (!pinInput.trim()) {
       setPinError("Please enter secret code.");
