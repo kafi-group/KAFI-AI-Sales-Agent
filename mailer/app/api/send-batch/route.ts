@@ -210,7 +210,7 @@ export async function POST(req: NextRequest) {
         sent_count: sent,
         failed_count: failed,
         send_mode: "bulk",
-        subject: subject || undefined,
+        subject: subjectTpl || undefined,
         failures: results
           .filter((r) => !r.ok)
           .slice(0, 50)
