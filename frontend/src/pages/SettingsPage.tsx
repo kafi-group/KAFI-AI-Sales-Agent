@@ -518,8 +518,9 @@ export function SettingsPage({ onError }: SettingsPageProps) {
             <p className="mt-1 text-xs text-slate-400 leading-relaxed">
               Default <strong className="text-slate-300">ON</strong> for every caller — Sara, Rayan,
               and all dashboard users (Asim, Usman, Sadia, and anyone else). Unanswered calls hang up
-              after about {ringSeconds} seconds (~4s per ring × 4), then the system auto-dials again
-              once for another {ringSeconds} seconds (~8 rings total) so voicemail does not pick up and Twilio credits are not wasted.
+              after about {ringSeconds} seconds (~4s per ring × 4). If the person declines or hangs
+              up earlier, that attempt ends immediately. Then the system auto-dials once more for
+              another {ringSeconds} seconds (max 2 attempts) so voicemail does not burn Twilio credits.
             </p>
           </div>
           <div className="flex items-center gap-3">

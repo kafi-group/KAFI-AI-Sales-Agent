@@ -24,6 +24,7 @@ _NO_ANSWER_STATUSES = {
     "failed",
     "canceled",
     "cancelled",
+    "manually-canceled",
     "customer-did-not-answer",
     "customer-busy",
     "voicemail",
@@ -31,6 +32,11 @@ _NO_ANSWER_STATUSES = {
     "twilio-failed-to-connect-call",
     "vonage-failed-to-connect-call",
     "silence-timed-out",
+}
+
+# Callee hung up / declined — redial once only if the call never became a real conversation.
+_EARLY_HANGUP_STATUSES = {
+    "customer-ended-call",
 }
 
 
@@ -184,19 +190,29 @@ def _contact_email(contact: Contact | None) -> str | None:
 
 
 def _is_no_answer(status: str | None, ended_reason: str | None, duration: Any) -> bool:
+    """True when this dial attempt missed (no pickup / busy / our 16s hangup / early decline).
+
+    Not true for a real answered conversation that the customer later ended.
+    """
     blob = f"{status or ''} {ended_reason or ''}".strip().lower().replace("_", "-")
     tokens = {part for part in blob.replace("/", " ").split() if part}
+    try:
+        seconds = int(float(duration)) if duration not in (None, "") else None
+    except (TypeError, ValueError):
+        seconds = None
+
+    # Real talk then hangup — do not treat as a missed ring attempt.
+    if tokens & _EARLY_HANGUP_STATUSES or any(flag in blob for flag in _EARLY_HANGUP_STATUSES):
+        if seconds is not None and seconds >= 20:
+            return False
+        # Declined / hung up during ring or within first seconds → count as missed attempt.
+        return True
+
     if tokens & _NO_ANSWER_STATUSES or blob in _NO_ANSWER_STATUSES:
         return True
     for flag in _NO_ANSWER_STATUSES:
         if flag in blob:
             return True
-    try:
-        seconds = int(float(duration)) if duration not in (None, "") else None
-    except (TypeError, ValueError):
-        seconds = None
-    if seconds is not None and seconds < 8 and "completed" in blob:
-        return True
     return False
 
 
@@ -465,6 +481,7 @@ def _dial_task(
     task["call_sid"] = call_result.get("call_sid")
     task["call_engine"] = call_result.get("engine")
     task["ring_attempt"] = int(call_result.get("ring_attempt") or 1)
+    task["redial_used"] = False
     task["started_at"] = _now_iso()
     task["operator_user_id"] = user.id
     task["outcome"] = "Calling"
@@ -662,15 +679,21 @@ def handle_ai_call_status(
     if call_transcript:
         task["call_transcript"] = call_transcript
 
-    attempt = int(ring_attempt or task.get("ring_attempt") or 1)
+    # Always prefer the live task counter (webhook metadata can lag / be stale).
+    attempt = int(task.get("ring_attempt") or ring_attempt or 1)
     no_answer = _is_no_answer(status, ended_reason, duration)
-    if no_answer and attempt < voice_client.max_ring_attempts():
+    # Hard cap: only one auto-redial ever (attempt 1 → 2). Never attempt 3+.
+    already_redialed = bool(task.get("redial_used")) or attempt >= voice_client.max_ring_attempts()
+    if no_answer and not already_redialed and attempt < voice_client.max_ring_attempts():
         phone = task.get("contact_phone")
         if phone:
             next_attempt = attempt + 1
+            # Mark before place_outbound so a second webhook cannot double-dial.
+            task["redial_used"] = True
+            task["ring_attempt"] = next_attempt
             task["remarks"] = (
-                f"No answer after ~4 rings (attempt {attempt}) — auto-redialing "
-                f"for ~8 rings total without voicemail…"
+                f"Attempt {attempt} ended with no connect — auto-redialing "
+                f"attempt {next_attempt} (~16s). Max 2 attempts."
             )
             task["outcome"] = "Re-dialing"
             redial = voice_client.place_outbound_ai_call(
@@ -686,7 +709,6 @@ def handle_ai_call_status(
             if redial.get("ok"):
                 task["call_sid"] = redial.get("call_sid")
                 task["call_engine"] = redial.get("engine")
-                task["ring_attempt"] = next_attempt
                 task["started_at"] = _now_iso()
                 task["status"] = "in_progress"
                 _refresh_runner_counts()

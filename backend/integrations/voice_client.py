@@ -501,8 +501,8 @@ class VoiceClient:
                     if status in _RINGING_STATUSES:
                         break
                     # Still queued/connecting — keep waiting.
-                    time.sleep(1.5)
-                    elapsed += 1.5
+                    time.sleep(1.0)
+                    elapsed += 1.0
                 else:
                     # Never left pre-ring — do not force-hangup (would kill every AI dial).
                     print(
@@ -512,7 +512,21 @@ class VoiceClient:
                     )
                     return
 
-                time.sleep(seconds)
+                # Poll every second — if callee hangs up early, stop immediately
+                # (do not wait out the remaining 16s "at any cost").
+                ring_elapsed = 0.0
+                while ring_elapsed < seconds:
+                    time.sleep(1.0)
+                    ring_elapsed += 1.0
+                    info = self.fetch_outbound_status(sid)
+                    status = str(info.get("status") or "").lower().replace("_", "-")
+                    if info.get("ended"):
+                        return
+                    if status in _ANSWERED_STATUSES:
+                        return
+                    if any(tok in status for tok in _NO_CONNECT_STATUSES):
+                        return
+
                 info = self.fetch_outbound_status(sid)
                 status = str(info.get("status") or "").lower().replace("_", "-")
                 if info.get("ended") or status in _ANSWERED_STATUSES:

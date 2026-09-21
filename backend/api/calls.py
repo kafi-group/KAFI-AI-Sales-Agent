@@ -855,6 +855,8 @@ async def twilio_call_status(request: Request):
             )
 
         # Hang up after ~4 rings, then auto Dial again once (~8 rings, no voicemail).
+        # If the callee hangs up / declines early, DialCallStatus is canceled/busy —
+        # that ends this attempt immediately (Twilio does not wait out the remaining timeout).
         no_connect = dial_status in {
             "no-answer",
             "busy",
