@@ -246,7 +246,7 @@ export function BulkWhatsAppModal({
     <button
       type="button"
       onClick={() => setTab(id)}
-      className={`pb-2.5 px-2 sm:px-3 text-xs sm:text-sm font-bold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+      className={`pb-2.5 px-2 sm:px-3 text-sm font-bold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
         tab === id
           ? "border-emerald-500 text-emerald-300 shadow-sm"
           : "border-transparent text-slate-400 hover:text-slate-200"
@@ -264,7 +264,7 @@ export function BulkWhatsAppModal({
       role="presentation"
     >
       <div
-        className="w-full sm:max-w-4xl max-h-[92vh] overflow-hidden flex flex-col rounded-t-2xl sm:rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+        className="w-full sm:max-w-5xl lg:max-w-6xl max-h-[94vh] overflow-hidden flex flex-col rounded-t-2xl sm:rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl animate-in fade-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
@@ -275,7 +275,7 @@ export function BulkWhatsAppModal({
           <div className="min-w-0">
             <h3
               id="bulk-compose-whatsapp-title"
-              className="text-lg font-bold text-slate-100 flex items-center gap-2"
+              className="text-xl font-bold text-slate-100 flex items-center gap-2"
             >
               <WhatsAppIcon className="text-emerald-400" />
               <span>Bulk WhatsApp Message</span>
@@ -283,7 +283,7 @@ export function BulkWhatsAppModal({
                 {buyerIds.length} lead{buyerIds.length === 1 ? "" : "s"} selected
               </span>
             </h3>
-            <p className="text-xs text-slate-400 mt-1">
+            <p className="text-sm text-slate-400 mt-1">
               Dispatch to your staff testing list or targeted buyer contacts.
             </p>
           </div>
@@ -303,21 +303,21 @@ export function BulkWhatsAppModal({
           {tabBtn("personal_template", "Personal WhatsApp Templates")}
         </div>
 
-        <div className="p-5 overflow-y-auto flex-1 space-y-4">
+        <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-4 text-base">
           {tab === "personal" ? (
             <div className="space-y-3">
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-3 text-xs text-emerald-200/90 leading-relaxed flex items-start gap-2.5">
-                <span className="text-base shrink-0">⚡</span>
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-4 text-sm text-emerald-200/90 leading-relaxed flex items-start gap-2.5">
+                <span className="text-lg shrink-0">⚡</span>
                 <div>
-                  <strong className="text-emerald-300 font-semibold block">
+                  <strong className="text-emerald-300 font-semibold block text-base">
                     Sent via your scanned WhatsApp Web (Baileys)
                   </strong>
                   Each contact receives a direct personal message from your active session. Tags like{" "}
-                  <code className="bg-emerald-900/60 px-1 py-0.5 rounded text-emerald-200 font-mono">
+                  <code className="bg-emerald-900/60 px-1 py-0.5 rounded text-emerald-200 font-mono text-sm">
                     {"{{name}}"}
                   </code>{" "}
                   and{" "}
-                  <code className="bg-emerald-900/60 px-1 py-0.5 rounded text-emerald-200 font-mono">
+                  <code className="bg-emerald-900/60 px-1 py-0.5 rounded text-emerald-200 font-mono text-sm">
                     {"{{company}}"}
                   </code>{" "}
                   are automatically personalized for every recipient.
@@ -325,31 +325,31 @@ export function BulkWhatsAppModal({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                <label className="block text-sm font-semibold uppercase tracking-wider text-slate-400 mb-2">
                   Message Content:
                 </label>
                 <textarea
-                  rows={8}
+                  rows={14}
                   value={personalMessage}
                   onChange={(e) => setPersonalMessage(e.target.value)}
                   placeholder="Type your WhatsApp message..."
-                  className="w-full rounded-xl bg-slate-950 border border-slate-700 p-3.5 text-sm text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 leading-relaxed font-sans"
+                  className="w-full min-h-[280px] rounded-xl bg-slate-950 border border-slate-700 p-4 text-base text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 leading-relaxed font-sans whitespace-pre-wrap"
                 />
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+              <div className="flex flex-wrap items-center gap-2 pt-1 text-sm">
                 <span className="text-slate-400 font-medium">Insert tags:</span>
                 <button
                   type="button"
                   onClick={() => setPersonalMessage((prev) => prev + " {{name}}")}
-                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono border border-slate-700 transition"
+                  className="px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono border border-slate-700 transition text-sm"
                 >
                   + {"{{name}}"}
                 </button>
                 <button
                   type="button"
                   onClick={() => setPersonalMessage((prev) => prev + " {{company}}")}
-                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono border border-slate-700 transition"
+                  className="px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono border border-slate-700 transition text-sm"
                 >
                   + {"{{company}}"}
                 </button>
@@ -360,20 +360,20 @@ export function BulkWhatsAppModal({
                   type="button"
                   onClick={() => void handleDraftWithAi()}
                   disabled={draftingAi || sending || !personalMessage.trim()}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-violet-500/50 bg-violet-600/20 hover:bg-violet-600/30 text-violet-100 text-xs font-semibold disabled:opacity-50 transition"
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-violet-500/50 bg-violet-600/20 hover:bg-violet-600/30 text-violet-100 text-sm font-semibold disabled:opacity-50 transition"
                   title="Rephrase the message with AI — keeps {{name}} and {{company}}"
                 >
                   {draftingAi ? "Drafting…" : "✨ Draft with AI"}
                 </button>
-                <p className="text-[10px] text-slate-500 max-w-xs text-right leading-snug">
+                <p className="text-xs text-slate-500 max-w-sm text-right leading-snug">
                   Edit the text above, then Draft with AI to rephrase. Tags{" "}
-                  {"{{name}}"} / {"{{company}}"} stay intact.
+                  {"{{name}}"} / {"{{company}}"} stay intact. Paragraph spacing is preserved.
                 </p>
               </div>
             </div>
           ) : tab === "personal_template" ? (
             <div className="space-y-4">
-              <p className="text-xs text-slate-400">
+              <p className="text-sm text-slate-400 leading-relaxed">
                 Choose a saved Personal WhatsApp template (from{" "}
                 <strong className="text-slate-300">WhatsApp templates → WhatsApp Personal</strong>
                 ). Sent via your scanned WhatsApp — no Meta approval needed. You can tweak the body
@@ -441,12 +441,12 @@ export function BulkWhatsAppModal({
                         Message to send (editable):
                       </label>
                       <textarea
-                        rows={7}
+                        rows={10}
                         value={personalTemplateBody}
                         onChange={(e) => setPersonalTemplateBody(e.target.value)}
-                        className="w-full rounded-xl bg-slate-950 border border-slate-700 p-3.5 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 leading-relaxed font-sans"
+                        className="w-full min-h-[220px] rounded-xl bg-slate-950 border border-slate-700 p-4 text-base text-slate-100 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 leading-relaxed font-sans whitespace-pre-wrap"
                       />
-                      <p className="text-[11px] text-slate-500 mt-1.5">
+                      <p className="text-sm text-slate-500 mt-1.5">
                         {"{{name}}"} and {"{{company}}"} are filled per recipient when sending.
                       </p>
                     </div>
@@ -586,7 +586,7 @@ export function BulkWhatsAppModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs sm:text-sm font-semibold text-slate-300 transition"
+            className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm font-semibold text-slate-300 transition"
           >
             Cancel
           </button>
@@ -595,7 +595,7 @@ export function BulkWhatsAppModal({
               type="button"
               onClick={() => void handleSendPersonal()}
               disabled={sending || draftingAi || !personalMessage.trim()}
-              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs sm:text-sm font-bold text-white shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition cursor-pointer"
+              className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-bold text-white shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition cursor-pointer"
             >
               {sending ? "Sending…" : `Send to ${buyerIds.length} contact(s)`}
             </button>
@@ -606,7 +606,7 @@ export function BulkWhatsAppModal({
               disabled={
                 sending || !personalTemplateBody.trim() || personalTemplates.length === 0
               }
-              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs sm:text-sm font-bold text-white shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition cursor-pointer"
+              className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-bold text-white shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition cursor-pointer"
             >
               {sending ? "Sending…" : `Send ${buyerIds.length} message(s)`}
             </button>
@@ -615,7 +615,7 @@ export function BulkWhatsAppModal({
               type="button"
               onClick={() => void handleSendTemplate()}
               disabled={sending || !templateId || templates.length === 0}
-              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs sm:text-sm font-bold text-white shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition cursor-pointer"
+              className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-bold text-white shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition cursor-pointer"
             >
               {sending ? "Sending…" : `Send ${buyerIds.length} message(s)`}
             </button>

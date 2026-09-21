@@ -49,6 +49,7 @@ export function LeadWhatsAppComposeModal({
   const { row, phone } = target;
   const [tab, setTab] = useState<ComposeTab>(target.initialTab ?? "personal");
   const [sending, setSending] = useState(false);
+  const [draftingAi, setDraftingAi] = useState(false);
 
   const [message, setMessage] = useState(
     `Dear ${row.contact_name || "Sir/Madam"},\n\n` +
@@ -102,6 +103,25 @@ export function LeadWhatsAppComposeModal({
   useEffect(() => {
     setVariables(Array(selectedTemplate?.variable_count ?? 0).fill(""));
   }, [selectedTemplate]);
+
+  async function handleDraftWithAi() {
+    const source = message.trim();
+    if (!source) {
+      onError("Write or edit the message first, then click Draft with AI.");
+      return;
+    }
+    setDraftingAi(true);
+    try {
+      const result = await client.rephraseWhatsAppMessage(source);
+      if (result.message?.trim()) {
+        setMessage(result.message.trim());
+      }
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Draft with AI failed");
+    } finally {
+      setDraftingAi(false);
+    }
+  }
 
   async function handleSendPersonal() {
     if (!message.trim()) {
@@ -194,23 +214,23 @@ export function LeadWhatsAppComposeModal({
       role="presentation"
     >
       <div
-        className="w-full sm:max-w-2xl max-h-[92vh] overflow-hidden flex flex-col rounded-t-2xl sm:rounded-xl border border-slate-700 bg-slate-900 shadow-xl"
+        className="w-full sm:max-w-5xl lg:max-w-6xl max-h-[94vh] overflow-hidden flex flex-col rounded-t-2xl sm:rounded-2xl border border-slate-700 bg-slate-900 shadow-xl"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="compose-whatsapp-title"
       >
-        <div className="p-5 border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
+        <div className="p-5 sm:p-6 border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
           <div className="min-w-0">
             <h3
               id="compose-whatsapp-title"
-              className="text-lg font-medium text-slate-100 flex items-center gap-2"
+              className="text-xl font-medium text-slate-100 flex items-center gap-2"
             >
-              <WhatsAppIcon className="text-emerald-400" />
+              <WhatsAppIcon className="text-emerald-400 h-6 w-6" />
               WhatsApp message
             </h3>
-            <p className="text-sm text-slate-500 mt-1 truncate">
+            <p className="text-base text-slate-500 mt-1 truncate">
               To: <span className="text-slate-300">{phone}</span>
               {" · "}
               {row.company_name}
@@ -253,26 +273,43 @@ export function LeadWhatsAppComposeModal({
           </div>
         </div>
 
-        <div className="p-5 overflow-y-auto overflow-x-hidden flex-1 space-y-4 max-w-full">
+        <div className="p-5 sm:p-6 overflow-y-auto overflow-x-hidden flex-1 space-y-4 max-w-full text-base">
           {tab === "personal" ? (
             <>
-              <div className="flex items-center gap-2.5 text-xs text-emerald-300 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3">
+              <div className="flex items-center gap-2.5 text-sm text-emerald-300 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4">
                 <IconWhatsApp size="sm" className="text-emerald-400 shrink-0" />
                 <span>
-                  Sending directly from your <strong>QR-scanned WhatsApp</strong> to <strong className="text-white">{phone}</strong>.
+                  Sending directly from your <strong>QR-scanned WhatsApp</strong> to{" "}
+                  <strong className="text-white">{phone}</strong>.
                 </span>
               </div>
               <label className="block">
-                <span className="text-sm text-slate-400">Message</span>
+                <span className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+                  Message
+                </span>
                 <ProseTextarea
-                  rows={10}
+                  rows={14}
                   value={message}
                   onChange={setMessage}
-                  className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
+                  className="mt-2 w-full min-h-[280px] rounded-xl bg-slate-950 border border-slate-700 px-4 py-3 text-base text-slate-100 leading-relaxed whitespace-pre-wrap"
                 />
               </label>
-              <p className="text-xs text-slate-500">
-                Personal messages are sent directly from your connected WhatsApp device to this contact.
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleDraftWithAi()}
+                  disabled={draftingAi || sending || !message.trim()}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-violet-500/50 bg-violet-600/20 hover:bg-violet-600/30 text-violet-100 text-sm font-semibold disabled:opacity-50 transition"
+                >
+                  {draftingAi ? "Drafting…" : "✨ Draft with AI"}
+                </button>
+                <p className="text-xs text-slate-500 max-w-sm text-right leading-snug">
+                  Rephrases while keeping paragraph spacing (greeting, body, sign-off).
+                </p>
+              </div>
+              <p className="text-sm text-slate-500">
+                Personal messages are sent directly from your connected WhatsApp device to this
+                contact.
               </p>
             </>
           ) : (
@@ -384,7 +421,7 @@ export function LeadWhatsAppComposeModal({
               variant="primary"
               size="md"
               onClick={() => void handleSendPersonal()}
-              disabled={sending || !message.trim()}
+              disabled={sending || draftingAi || !message.trim()}
               title="Send message"
             >
               {sending ? "Sending…" : "Send"}

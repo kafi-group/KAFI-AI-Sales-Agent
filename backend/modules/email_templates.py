@@ -422,10 +422,21 @@ def rephrase_whatsapp_message(message: str) -> str:
         "- Preserve merge tags EXACTLY as written if present: {{name}} and {{company}} "
         "(do not expand, remove, or rename them).\n"
         "- Plain text only. No markdown. No subject line.\n"
+        "- CRITICAL formatting: use real line breaks (\\n) and blank lines (\\n\\n) "
+        "between sections. Never return one long single-line paragraph.\n"
+        "- Required structure (example layout):\n"
+        "  Line 1: greeting ending with a comma (e.g. Hi {{name}},)\n"
+        "  blank line\n"
+        "  1–2 short body paragraphs separated by a blank line\n"
+        "  blank line\n"
+        "  a clear question / call-to-action paragraph\n"
+        "  blank line\n"
+        "  Best regards,\n"
+        "  Kafi Commodities Export Team\n"
         "- Sign off as Kafi Commodities Export Team if a sign-off is present.\n"
         "- Do not invent prices, MOQs, or certifications.\n\n"
-        "Respond with ONLY valid JSON:\n"
-        '{"message":"..."}\n\n'
+        "Respond with ONLY valid JSON (put real newlines inside the JSON string):\n"
+        '{"message":"Hi {{name}},\\n\\nBody paragraph…\\n\\nQuestion?\\n\\nBest regards,\\nKafi Commodities Export Team"}\n\n'
         f"Original message:\n{cleaned}"
     )
 
@@ -434,4 +445,106 @@ def rephrase_whatsapp_message(message: str) -> str:
     out = str(data.get("message") or data.get("body") or "").strip()
     if not out:
         raise RuntimeError("AI returned an empty rephrase — try again.")
-    return out
+    return _normalize_whatsapp_paragraphs(out)
+
+
+_WA_GREETING_RE = re.compile(
+    r"^(?P<greeting>(?:Hi|Hello|Dear|Hey)\s+(?:\{\{name\}\}|[^\n,]{1,80}),)\s*",
+    re.IGNORECASE,
+)
+_WA_SIGNOFF_RE = re.compile(
+    r"(?P<body>.*?)\s*"
+    r"(?P<signoff>(?:Best|Kind|Warm)?\s*regards,)\s*"
+    r"(?P<team>.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+_WA_CTA_RE = re.compile(
+    r"^(?:would you|please let|let us know|are you|could you|kindly|"
+    r"if you(?:'d| would)? like|looking forward)",
+    re.IGNORECASE,
+)
+
+
+def _rebuild_whatsapp_structure(flat: str) -> str:
+    """Turn a single-line (or poorly spaced) rephrase into greeting / body / CTA / sign-off."""
+    text = re.sub(r"\s+", " ", (flat or "").strip())
+    if not text:
+        return ""
+
+    greeting = ""
+    gm = _WA_GREETING_RE.match(text)
+    if gm:
+        greeting = gm.group("greeting").strip()
+        text = text[gm.end() :].strip()
+
+    signoff = "Best regards,"
+    team = "Kafi Commodities Export Team"
+    sm = _WA_SIGNOFF_RE.search(text)
+    if sm:
+        body_flat = (sm.group("body") or "").strip()
+        signoff = (sm.group("signoff") or signoff).strip()
+        # Normalise "regards," → "Best regards," when model omitted Best/Kind/Warm
+        if signoff.lower() == "regards,":
+            signoff = "Best regards,"
+        team = (sm.group("team") or team).strip() or team
+        # Drop trailing punctuation the model may stick on the team line
+        team = team.rstrip(" .")
+    else:
+        body_flat = text
+
+    sentences = [p.strip() for p in re.split(r"(?<=[.!?])\s+", body_flat) if p.strip()]
+    cta = ""
+    body_sents = list(sentences)
+    if body_sents:
+        last = body_sents[-1]
+        if "?" in last or _WA_CTA_RE.match(last):
+            cta = last
+            body_sents = body_sents[:-1]
+
+    body = " ".join(body_sents).strip()
+    sections: list[str] = []
+    if greeting:
+        sections.append(greeting)
+    if body:
+        sections.append(body)
+    if cta:
+        sections.append(cta)
+    main = "\n\n".join(sections)
+    sign = f"{signoff}\n{team}"
+    if main:
+        return f"{main}\n\n{sign}"
+    return sign
+
+
+def _normalize_whatsapp_paragraphs(text: str) -> str:
+    """Ensure AI rephrases keep readable WhatsApp paragraph spacing."""
+    value = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    # Some models return literal backslash-n instead of real newlines.
+    if "\\n" in value:
+        value = value.replace("\\n\\n", "\n\n").replace("\\n", "\n")
+    while "\n\n\n" in value:
+        value = value.replace("\n\n\n", "\n\n")
+    value = value.strip()
+
+    # Too few breaks / no blank lines → rebuild greeting / body / CTA / sign-off.
+    if value.count("\n") < 3 or "\n\n" not in value:
+        rebuilt = _rebuild_whatsapp_structure(value)
+        if rebuilt:
+            value = rebuilt
+
+    # Guarantee a blank line after the greeting line.
+    lines = value.split("\n")
+    if len(lines) >= 2 and lines[0].strip().endswith(",") and lines[1].strip():
+        value = lines[0].rstrip() + "\n\n" + "\n".join(lines[1:]).lstrip("\n")
+
+    # Guarantee blank line before Best/Kind/Warm regards (keep team on next line).
+    value = re.sub(
+        r"(?<!\n)\n((?:Best|Kind|Warm)?\s*regards,)\s*\n",
+        r"\n\n\1\n",
+        value,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    while "\n\n\n" in value:
+        value = value.replace("\n\n\n", "\n\n")
+    return value.strip()
