@@ -27,16 +27,26 @@ TELEGRAM_BRIDGE_SECRET=<same as Railway service TELEGRAM_BRIDGE_SECRET>
 
 ## Connect flow (dashboard)
 
+### QR (recommended)
+
 1. Open **Telegram → Telegram Mobile**
-2. Enter the phone number for your Telegram account (with country code)
-3. Open Telegram on your phone → enter the login code
-4. If 2FA is enabled, enter your cloud password
-5. Status shows **Connected** — use test send
+2. Click **Generate QR code**
+3. On your phone: **Settings → Devices → Link Desktop Device** → scan the QR
+4. Keep the page open — the QR refreshes about every 30s until connected
+5. If 2FA is on, enter your Telegram cloud password when prompted
+
+### Phone + login code (fallback)
+
+1. Prefer phone login on the same page
+2. Enter phone with country code → open Telegram → enter the code
+3. If 2FA is enabled, enter your cloud password
 
 ## Endpoints
 
-- `GET /health`
+- `GET /health` — includes `features: ["qr-login"]` when this build is live
 - `GET /status?sessionId=`
+- `POST /start-qr-login` `{ sessionId }`
+- `POST /poll-qr-login` `{ sessionId }`
 - `POST /start-login` `{ sessionId, phone }`
 - `POST /confirm-code` `{ sessionId, code }`
 - `POST /confirm-password` `{ sessionId, password }`
@@ -44,3 +54,5 @@ TELEGRAM_BRIDGE_SECRET=<same as Railway service TELEGRAM_BRIDGE_SECRET>
 - `POST /send` `{ sessionId, to, text }`
 
 All mutating routes require header `x-bridge-secret`.
+
+QR login follows Telegram’s official flow: `auth.exportLoginToken` → `tg://login?token=…` QR → phone `auth.acceptLoginToken` → `updateLoginToken` → second `exportLoginToken` (`loginTokenSuccess` or `loginTokenMigrateTo` + `importLoginToken`).

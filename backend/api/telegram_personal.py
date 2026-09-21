@@ -157,8 +157,16 @@ def get_status(user: AppUser = Depends(get_current_user)):
         }
     try:
         data = bridge.get_status(_session(user))
-        data["configured"] = True
+        # Bridge URL is configured; MTProto credentials live on the bridge itself.
+        bridge_ready = bool(data.get("configured", False))
+        data["configured"] = bridge_ready
         data["bridge_configured"] = True
+        if not bridge_ready and not data.get("message"):
+            data["message"] = (
+                "Telegram bridge is reachable but TELEGRAM_API_ID / TELEGRAM_API_HASH "
+                "are missing or invalid on the telegram_bridge Railway service "
+                "(create them at https://my.telegram.org)."
+            )
         return data
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, str(exc)) from exc

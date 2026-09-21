@@ -60,7 +60,14 @@ def _request(
         except Exception:
             data = {"error": (res.text or res.reason_phrase)[:400]}
         if res.status_code >= 400:
-            raise RuntimeError(str(data.get("error") or data.get("detail") or res.text or res.status_code))
+            raw = str(data.get("error") or data.get("detail") or res.text or res.status_code)
+            if res.status_code == 404 or "Cannot POST /start-qr-login" in raw or "Cannot POST /poll-qr-login" in raw:
+                raise RuntimeError(
+                    "Telegram bridge is outdated (missing QR login routes). "
+                    "Redeploy the telegram_bridge service on Railway with the latest code, "
+                    "and set TELEGRAM_API_ID / TELEGRAM_API_HASH on that service."
+                )
+            raise RuntimeError(raw)
         return data if isinstance(data, dict) else {"ok": True}
 
 

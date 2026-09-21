@@ -313,6 +313,8 @@ app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     service: "kafi-telegram-bridge",
+    version: "1.1.0-qr",
+    features: ["phone-login", "qr-login"],
     configured: Boolean(API_ID && API_HASH),
   });
 });
