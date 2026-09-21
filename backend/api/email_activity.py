@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db
 from api.schemas import (
+    EmailActivityAiResponse,
     EmailActivityCatalogItem,
     EmailActivityInsights,
     EmailActivityListResponse,
@@ -32,6 +33,23 @@ def _parse_channel(channel: Optional[str]) -> Optional[email_activity.ActivityCh
     return key  # type: ignore[return-value]
 
 
+def _ai_period_args(
+    days: int | None,
+    date_from: Optional[str],
+    date_to: Optional[str],
+) -> tuple[int | None, Optional[str], Optional[str]]:
+    period: int | None
+    if days is not None and int(days) <= 0:
+        period = None
+    elif days is not None:
+        period = max(1, min(int(days), 3650))
+    else:
+        period = 30
+    if date_from or date_to:
+        period = None
+    return period, date_from, date_to
+
+
 @router.get("", response_model=EmailActivityListResponse)
 def list_email_activity(
     page: int = 1,
@@ -39,7 +57,7 @@ def list_email_activity(
     unread_only: bool = False,
     channel: Optional[ChannelParam] = Query("email"),
     event_type: Optional[str] = Query(
-        None, description="Filter: sent | opened | failed | send_failed | …"
+        None, description="Filter: sent | opened | failed | replied | send_failed | …"
     ),
     send_mode: Optional[str] = Query(None, description="individual | bulk"),
     days: Optional[int] = Query(
@@ -118,6 +136,50 @@ def email_activity_insights(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/ai-analysis", response_model=EmailActivityAiResponse)
+def email_activity_ai_analysis(
+    days: int | None = Query(30),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    period, df, dt = _ai_period_args(days, date_from, date_to)
+    try:
+        return email_activity.analyze_email_activity(
+            db,
+            days=period,
+            date_from=df,
+            date_to=dt,
+            user_id=user.id,
+            is_admin=_is_admin(user),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/improve-suggestions", response_model=EmailActivityAiResponse)
+def email_activity_improve_suggestions(
+    days: int | None = Query(30),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    period, df, dt = _ai_period_args(days, date_from, date_to)
+    try:
+        return email_activity.suggest_email_improvements(
+            db,
+            days=period,
+            date_from=df,
+            date_to=dt,
+            user_id=user.id,
+            is_admin=_is_admin(user),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/catalog", response_model=list[EmailActivityCatalogItem])

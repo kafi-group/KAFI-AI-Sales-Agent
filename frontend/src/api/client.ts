@@ -1219,8 +1219,10 @@ export interface EmailActivityModeStats {
   sent: number;
   failed: number;
   opened: number;
+  replied?: number;
   not_opened: number;
   open_rate_pct: number;
+  reply_rate_pct?: number;
   success_rate_pct: number;
   batches?: number | null;
   batches_partial?: number | null;
@@ -1238,6 +1240,13 @@ export interface EmailActivityInsights {
   individual: EmailActivityModeStats;
   bulk: EmailActivityModeStats;
   event_count: number;
+}
+
+export interface EmailActivityAiResponse {
+  kind: string;
+  title: string;
+  content: string;
+  stats?: EmailActivityInsights | null;
 }
 
 export interface BulkApproveResponse {
@@ -2838,6 +2847,46 @@ export const client = {
         channel: data.channel,
       }),
     }),
+  analyzeEmailActivity: (params: {
+    days?: number | null;
+    date_from?: string;
+    date_to?: string;
+  } = {}) => {
+    const search = new URLSearchParams();
+    if (params.date_from || params.date_to) {
+      if (params.date_from) search.set("date_from", params.date_from);
+      if (params.date_to) search.set("date_to", params.date_to);
+    } else if (params.days === null) {
+      search.set("days", "0");
+    } else if (params.days != null) {
+      search.set("days", String(params.days));
+    }
+    const query = search.toString();
+    return request<EmailActivityAiResponse>(
+      `/email-activity/ai-analysis${query ? `?${query}` : ""}`,
+      { method: "POST" },
+    );
+  },
+  suggestEmailActivityImprovements: (params: {
+    days?: number | null;
+    date_from?: string;
+    date_to?: string;
+  } = {}) => {
+    const search = new URLSearchParams();
+    if (params.date_from || params.date_to) {
+      if (params.date_from) search.set("date_from", params.date_from);
+      if (params.date_to) search.set("date_to", params.date_to);
+    } else if (params.days === null) {
+      search.set("days", "0");
+    } else if (params.days != null) {
+      search.set("days", String(params.days));
+    }
+    const query = search.toString();
+    return request<EmailActivityAiResponse>(
+      `/email-activity/improve-suggestions${query ? `?${query}` : ""}`,
+      { method: "POST" },
+    );
+  },
   bulkApproveDrafts: (interactionIds: number[], send = true) =>
     request<BulkApproveResponse>("/interactions/bulk-approve", {
       method: "POST",

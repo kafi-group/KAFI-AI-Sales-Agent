@@ -810,8 +810,10 @@ class EmailActivityModeStats(BaseModel):
     sent: int = 0
     failed: int = 0
     opened: int = 0
+    replied: int = 0
     not_opened: int = 0
     open_rate_pct: float = 0.0
+    reply_rate_pct: float = 0.0
     success_rate_pct: float = 0.0
     batches: int | None = None
     batches_partial: int | None = None
@@ -829,6 +831,13 @@ class EmailActivityInsights(BaseModel):
     individual: EmailActivityModeStats
     bulk: EmailActivityModeStats
     event_count: int = 0
+
+
+class EmailActivityAiResponse(BaseModel):
+    kind: str
+    title: str
+    content: str
+    stats: EmailActivityInsights | None = None
 
 
 class LeadTableFiltersRead(BaseModel):

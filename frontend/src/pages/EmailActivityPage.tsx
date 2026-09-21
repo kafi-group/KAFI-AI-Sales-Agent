@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   client,
-  type EmailActivityCatalogItem,
   type EmailActivityEvent,
   type EmailActivityInsights,
   type EmailActivityModeStats,
@@ -142,7 +141,10 @@ function ModeBlock({
   showOpens?: boolean;
   sendMode: "individual" | "bulk";
   activeEventType: string | null;
-  onStatClick?: (eventType: "sent" | "failed" | "opened", sendMode: "individual" | "bulk") => void;
+  onStatClick?: (
+    eventType: "sent" | "failed" | "opened" | "replied",
+    sendMode: "individual" | "bulk",
+  ) => void;
 }) {
   const activeMode = activeEventType?.startsWith(`${sendMode}:`)
     ? activeEventType.slice(sendMode.length + 1)
@@ -187,6 +189,14 @@ function ModeBlock({
               active={activeMode === "opened"}
               onClick={onStatClick ? () => onStatClick("opened", sendMode) : undefined}
             />
+            <StatTile
+              label="Replies"
+              value={stats.replied ?? 0}
+              hint={`${stats.reply_rate_pct ?? 0}% of sent`}
+              tone="good"
+              active={activeMode === "replied"}
+              onClick={onStatClick ? () => onStatClick("replied", sendMode) : undefined}
+            />
             <StatTile label="Not opened" value={stats.not_opened} />
           </>
         ) : null}
@@ -209,8 +219,6 @@ export function EmailActivityPage({
   const [totalPages, setTotalPages] = useState(1);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [catalog, setCatalog] = useState<EmailActivityCatalogItem[]>([]);
-  const [showCatalog, setShowCatalog] = useState(false);
   // Insights open by default for email so mailer + in-app sends are easy to review.
   const [showInsights, setShowInsights] = useState(channel === "email");
   const [insightsPeriod, setInsightsPeriod] = useState<InsightsPreset>(30);
@@ -218,9 +226,13 @@ export function EmailActivityPage({
   const [rangeTo, setRangeTo] = useState(() => defaultRangeBounds().to);
   const [insights, setInsights] = useState<EmailActivityInsights | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
-  const [unreadOnly, setUnreadOnly] = useState(false);
   /** e.g. individual:sent | bulk:opened — filters the feed below. */
   const [insightDrillKey, setInsightDrillKey] = useState<string | null>(null);
+  const [aiPanel, setAiPanel] = useState<{
+    title: string;
+    content: string;
+  } | null>(null);
+  const [aiLoading, setAiLoading] = useState<"analysis" | "suggestions" | null>(null);
 
   const drillSendMode = insightDrillKey?.split(":")[0] as "individual" | "bulk" | undefined;
   const drillEventType = insightDrillKey?.split(":")[1] || undefined;
@@ -237,7 +249,6 @@ export function EmailActivityPage({
       const result = await client.listEmailActivity({
         page,
         page_size: PAGE_SIZE,
-        unread_only: unreadOnly,
         channel,
         event_type: drillEventType,
         send_mode: drillSendMode,
@@ -271,7 +282,6 @@ export function EmailActivityPage({
     page,
     rangeFrom,
     rangeTo,
-    unreadOnly,
   ]);
 
   const refreshInsights = useCallback(async () => {
@@ -314,13 +324,12 @@ export function EmailActivityPage({
   }, [channel]);
 
   function handleInsightStatClick(
-    eventType: "sent" | "failed" | "opened",
+    eventType: "sent" | "failed" | "opened" | "replied",
     sendMode: "individual" | "bulk",
   ) {
     const key = `${sendMode}:${eventType}`;
     setInsightDrillKey((prev) => (prev === key ? null : key));
     setPage(1);
-    setUnreadOnly(false);
     setShowInsights(true);
     // Scroll feed into view so users see the contact/email list.
     window.setTimeout(() => {
@@ -331,6 +340,41 @@ export function EmailActivityPage({
     }, 50);
   }
 
+  function insightsAiParams() {
+    if (insightsPeriod === "range") {
+      return { date_from: rangeFrom || undefined, date_to: rangeTo || undefined };
+    }
+    if (insightsPeriod == null) return { days: null as number | null };
+    return { days: insightsPeriod };
+  }
+
+  async function runAiAnalysis() {
+    setAiLoading("analysis");
+    try {
+      const result = await client.analyzeEmailActivity(insightsAiParams());
+      setAiPanel({ title: result.title || "AI analysis", content: result.content });
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "AI analysis failed");
+    } finally {
+      setAiLoading(null);
+    }
+  }
+
+  async function runImproveSuggestions() {
+    setAiLoading("suggestions");
+    try {
+      const result = await client.suggestEmailActivityImprovements(insightsAiParams());
+      setAiPanel({
+        title: result.title || "Suggestion to improve email",
+        content: result.content,
+      });
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Suggestions failed");
+    } finally {
+      setAiLoading(null);
+    }
+  }
+
   useEffect(() => {
     void refresh();
     const timer = window.setInterval(() => void refresh(), POLL_MS);
@@ -338,24 +382,12 @@ export function EmailActivityPage({
   }, [refresh]);
 
   useEffect(() => {
-    client.listEmailActivityCatalog().then(setCatalog).catch(() => setCatalog([]));
-  }, []);
-
-  useEffect(() => {
     if (!showInsights) return;
     void refreshInsights();
   }, [showInsights, refreshInsights]);
 
-  async function markAllRead() {
-    try {
-      await client.markEmailActivityRead({ mark_all: true, channel });
-      await refresh();
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to mark notifications read");
-    }
-  }
-
   async function markOneRead(eventId: number) {
+    if (eventId < 0) return;
     try {
       await client.markEmailActivityRead({ event_ids: [eventId], channel });
       await refresh();
@@ -384,10 +416,7 @@ export function EmailActivityPage({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => {
-              setShowInsights((v) => !v);
-              if (!showInsights) setShowCatalog(false);
-            }}
+            onClick={() => setShowInsights((v) => !v)}
             className={`px-3 py-1.5 rounded-lg text-sm border ${
               showInsights
                 ? "bg-sky-600 border-sky-500 text-white"
@@ -396,35 +425,26 @@ export function EmailActivityPage({
           >
             {showInsights ? "Hide insights" : "Insights"}
           </button>
-          <button
-            type="button"
-            onClick={() => setUnreadOnly((v) => !v)}
-            className={`px-3 py-1.5 rounded-lg text-sm border ${
-              unreadOnly
-                ? "bg-emerald-600 border-emerald-500 text-white"
-                : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
-            }`}
-          >
-            {unreadOnly ? "Showing unread" : "Show unread only"}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setShowCatalog((v) => !v);
-              if (!showCatalog) setShowInsights(false);
-            }}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm text-slate-300"
-          >
-            {showCatalog ? "Hide event types" : "All event types"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void markAllRead()}
-            disabled={unreadCount === 0}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm text-slate-300 disabled:opacity-40"
-          >
-            Mark all read
-          </button>
+          {!isWhatsApp ? (
+            <>
+              <button
+                type="button"
+                onClick={() => void runAiAnalysis()}
+                disabled={aiLoading !== null}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm text-slate-300 disabled:opacity-40"
+              >
+                {aiLoading === "analysis" ? "Analyzing…" : "AI analysis"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void runImproveSuggestions()}
+                disabled={aiLoading !== null}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm text-slate-300 disabled:opacity-40"
+              >
+                {aiLoading === "suggestions" ? "Working…" : "Suggestion to improve email"}
+              </button>
+            </>
+          ) : null}
           <button
             type="button"
             onClick={() => {
@@ -457,7 +477,7 @@ export function EmailActivityPage({
               <p className="text-xs text-slate-500 mt-1 max-w-xl">
                 {isWhatsApp
                   ? "Sent vs failed WhatsApp messages, split by individual replies and bulk template campaigns."
-                  : "Sent vs failed, opened vs not opened, split by individual and bulk outreach."}
+                  : "Sent vs failed, opened, replies — split by individual and bulk outreach."}
               </p>
             </div>
             <div className="flex flex-col items-end gap-2">
@@ -526,7 +546,7 @@ export function EmailActivityPage({
             <>
               <div
                 className={`grid gap-2.5 sm:grid-cols-2 ${
-                  isWhatsApp ? "lg:grid-cols-3" : "lg:grid-cols-5"
+                  isWhatsApp ? "lg:grid-cols-3" : "lg:grid-cols-6"
                 }`}
               >
                 <StatTile label="Total sent" value={insights.totals.sent} tone="good" />
@@ -538,6 +558,12 @@ export function EmailActivityPage({
                       value={insights.totals.opened}
                       hint={`${insights.totals.open_rate_pct}% open rate`}
                       tone="accent"
+                    />
+                    <StatTile
+                      label="Replies"
+                      value={insights.totals.replied ?? 0}
+                      hint={`${insights.totals.reply_rate_pct ?? 0}% reply rate`}
+                      tone="good"
                     />
                     <StatTile label="Not opened" value={insights.totals.not_opened} />
                   </>
@@ -555,7 +581,7 @@ export function EmailActivityPage({
                   subtitle={
                     isWhatsApp
                       ? "One-off replies and personal messages"
-                      : "One-off sends to a single lead — click Sent / Failed / Opened for the contact list"
+                      : "One-off sends — click Sent / Failed / Opened / Replies for the list"
                   }
                   stats={insights.individual}
                   showOpens={!isWhatsApp}
@@ -568,7 +594,7 @@ export function EmailActivityPage({
                   subtitle={
                     isWhatsApp
                       ? "Template campaigns from Leads / WhatsApp compose"
-                      : "Multi-recipient campaigns — click Sent / Failed / Opened for the list"
+                      : "Multi-recipient campaigns — click Sent / Failed / Opened / Replies for the list"
                   }
                   stats={insights.bulk}
                   showBatches
@@ -640,30 +666,6 @@ export function EmailActivityPage({
           ) : (
             <p className="text-sm text-slate-400">No insight data yet.</p>
           )}
-        </div>
-      )}
-
-      {showCatalog && (
-        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-300 mb-3">
-            Notification types this feed can show
-          </h3>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {catalog.map((item) => (
-              <div
-                key={item.event_type}
-                className={`rounded-lg border px-3 py-2 ${severityClasses(item.severity)}`}
-              >
-                <p className="text-sm font-medium">{item.label}</p>
-                <p className="text-xs opacity-80 mt-1">{item.description}</p>
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-slate-500 mt-3">
-            {isWhatsApp
-              ? "WhatsApp send success/failure and bulk template campaign results are logged when Meta accepts or rejects each message."
-              : "Opens are recorded via a tracking pixel on outbound HTML emails. SMTP send success/failure and bulk batch results are logged immediately."}
-          </p>
         </div>
       )}
 
@@ -754,6 +756,38 @@ export function EmailActivityPage({
           })}
         </ul>
       )}
+
+      {aiPanel ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setAiPanel(null)}
+          role="presentation"
+        >
+          <div
+            className="w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-950 p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="email-activity-ai-title"
+          >
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <h3 id="email-activity-ai-title" className="text-base font-medium text-slate-100">
+                {aiPanel.title}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setAiPanel(null)}
+                className="px-2 py-1 rounded-md text-xs border border-slate-700 text-slate-400 hover:text-slate-200"
+              >
+                Close
+              </button>
+            </div>
+            <pre className="whitespace-pre-wrap text-sm text-slate-300 font-sans leading-relaxed">
+              {aiPanel.content}
+            </pre>
+          </div>
+        </div>
+      ) : null}
 
       {total > 0 && (
         <Pagination

@@ -417,6 +417,24 @@ def list_events(
         .count()
     )
 
+    if drill and event_key == "replied":
+        # Match Insights Replies card: replied events + inbound email interactions
+        # for contacts we emailed in this mode/window.
+        filtered = _replied_drill_rows(
+            db,
+            user_id=user_id,
+            is_admin=is_admin,
+            channel=channel,
+            mode_key=mode_key,
+            days=days if not (date_from or date_to) else None,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        total = len(filtered)
+        start = (page - 1) * page_size
+        rows = filtered[start : start + page_size]
+        return rows, total, unread
+
     if drill:
         # Match Insights card semantics: bulk totals come from batch events.
         if event_key in {"failed", "send_failed"}:
@@ -648,6 +666,143 @@ _FAIL_TYPES = {
 }
 
 
+def _activity_window_bounds(
+    *,
+    days: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> tuple[datetime | None, datetime | None]:
+    from datetime import date, time, timedelta
+
+    def _parse_day(value: str | None, *, end_of_day: bool) -> datetime | None:
+        if not value:
+            return None
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            day = date.fromisoformat(raw[:10])
+        except ValueError as exc:
+            raise ValueError(f"Invalid date '{value}'. Use YYYY-MM-DD.") from exc
+        if end_of_day:
+            return datetime.combine(day, time(23, 59, 59, 999999), tzinfo=timezone.utc)
+        return datetime.combine(day, time.min, tzinfo=timezone.utc)
+
+    if date_from or date_to:
+        since = _parse_day(date_from, end_of_day=False)
+        until = _parse_day(date_to, end_of_day=True)
+        if since and until and until < since:
+            raise ValueError("date_to must be on or after date_from")
+        return since, until
+    if days is not None and int(days) > 0:
+        since = datetime.now(timezone.utc) - timedelta(days=max(1, min(int(days), 3650)))
+        return since, None
+    return None, None
+
+
+def _replied_drill_rows(
+    db: Session,
+    *,
+    user_id: int | None,
+    is_admin: bool,
+    channel: ActivityChannel | None,
+    mode_key: str,
+    days: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[EmailActivityEvent]:
+    """Build Replies drill list matching Insights (events + inbound interactions)."""
+    from db.models import Buyer, Channel, Contact, Direction, Interaction
+
+    since, until = _activity_window_bounds(days=days, date_from=date_from, date_to=date_to)
+    base = _scoped_query(db, user_id=user_id, is_admin=is_admin, channel=channel)
+    if since is not None:
+        base = base.filter(EmailActivityEvent.created_at >= since)
+    if until is not None:
+        base = base.filter(EmailActivityEvent.created_at <= until)
+
+    def _row_mode(event: EmailActivityEvent) -> str:
+        details = event.details if isinstance(event.details, dict) else {}
+        raw = str(details.get("send_mode") or "individual").strip().lower()
+        return "bulk" if raw == "bulk" else "individual"
+
+    sent_contacts: set[int] = set()
+    for event in base.filter(EmailActivityEvent.event_type == "sent").all():
+        if _row_mode(event) != mode_key:
+            continue
+        if event.contact_id:
+            sent_contacts.add(int(event.contact_id))
+
+    seen_contacts: set[int] = set()
+    merged: list[EmailActivityEvent] = []
+
+    for event in (
+        base.filter(EmailActivityEvent.event_type == "replied")
+        .order_by(EmailActivityEvent.created_at.desc())
+        .all()
+    ):
+        if _row_mode(event) != mode_key:
+            continue
+        if event.contact_id:
+            seen_contacts.add(int(event.contact_id))
+        merged.append(event)
+
+    if channel != "whatsapp" and sent_contacts:
+        inbound_q = (
+            db.query(Interaction, Contact, Buyer)
+            .join(Contact, Contact.id == Interaction.contact_id)
+            .join(Buyer, Buyer.id == Contact.buyer_id)
+            .filter(
+                Interaction.channel == Channel.email,
+                Interaction.direction == Direction.inbound,
+                Interaction.contact_id.in_(sent_contacts),
+            )
+        )
+        if since is not None:
+            inbound_q = inbound_q.filter(Interaction.created_at >= since)
+        if until is not None:
+            inbound_q = inbound_q.filter(Interaction.created_at <= until)
+        inbound_rows = inbound_q.order_by(Interaction.created_at.desc()).all()
+
+        for interaction, contact, buyer in inbound_rows:
+            cid = int(contact.id)
+            if cid in seen_contacts:
+                continue
+            seen_contacts.add(cid)
+            preview = (interaction.content or "").strip().replace("\n", " ")
+            if len(preview) > 220:
+                preview = preview[:217] + "…"
+            company = buyer.company_name or contact.full_name or "Contact"
+            synthetic = EmailActivityEvent(
+                event_type="replied",
+                severity="success",
+                title=f"Reply — {company}",
+                message=preview or "Inbound reply recorded for this contact.",
+                user_id=user_id,
+                buyer_id=buyer.id,
+                contact_id=contact.id,
+                interaction_id=interaction.id,
+                details={
+                    "send_mode": mode_key,
+                    "company_name": company,
+                    "to_email": contact.email,
+                    "subject": interaction.subject,
+                    "source": "inbound_interaction",
+                },
+                read_at=datetime.now(timezone.utc),
+                created_at=interaction.created_at or datetime.now(timezone.utc),
+            )
+            # Ephemeral row for the feed — negative id avoids colliding with DB rows.
+            object.__setattr__(synthetic, "id", -int(interaction.id))
+            merged.append(synthetic)
+
+    merged.sort(
+        key=lambda e: e.created_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    return merged
+
+
 def insights_stats(
     db: Session,
     *,
@@ -728,23 +883,38 @@ def insights_stats(
     individual_sent = 0
     individual_failed = 0
     individual_opened = 0
+    individual_replied = 0
     bulk_sent = 0
     bulk_failed = 0
     bulk_opened = 0
+    bulk_replied = 0
     bulk_batches = 0
     bulk_batches_partial = 0
     bulk_batches_failed = 0
+    individual_sent_contacts: set[int] = set()
+    bulk_sent_contacts: set[int] = set()
+    replied_contacts_seen: set[int] = set()
 
     for event in rows:
         details = event.details or {}
         mode = str(details.get("send_mode") or "").lower()
         et = event.event_type
+        contact_id = event.contact_id
 
         if et == "opened":
             if mode == "bulk":
                 bulk_opened += 1
             else:
                 individual_opened += 1
+            continue
+
+        if et == "replied":
+            if mode == "bulk":
+                bulk_replied += 1
+            else:
+                individual_replied += 1
+            if contact_id:
+                replied_contacts_seen.add(int(contact_id))
             continue
 
         if et in ("bulk_completed", "bulk_partial"):
@@ -767,8 +937,12 @@ def insights_stats(
         if et == "sent":
             if mode == "bulk":
                 bulk_sent += 1
+                if contact_id:
+                    bulk_sent_contacts.add(int(contact_id))
             else:
                 individual_sent += 1
+                if contact_id:
+                    individual_sent_contacts.add(int(contact_id))
             continue
 
         if et in _FAIL_TYPES:
@@ -787,11 +961,41 @@ def insights_stats(
             else:
                 individual_failed += 1
 
+    # Supplement replies: inbound email interactions to contacts we emailed in-window.
+    # Does not touch IMAP — uses Interaction rows already stored by the app.
+    try:
+        from db.models import Channel, Direction, Interaction
+
+        outbound_contacts = individual_sent_contacts | bulk_sent_contacts
+        if outbound_contacts and channel != "whatsapp":
+            inbound_q = db.query(Interaction.contact_id).filter(
+                Interaction.channel == Channel.email,
+                Interaction.direction == Direction.inbound,
+                Interaction.contact_id.in_(outbound_contacts),
+            )
+            if since is not None:
+                inbound_q = inbound_q.filter(Interaction.created_at >= since)
+            if until is not None:
+                inbound_q = inbound_q.filter(Interaction.created_at <= until)
+            for (cid,) in inbound_q.distinct().all():
+                if cid is None or int(cid) in replied_contacts_seen:
+                    continue
+                replied_contacts_seen.add(int(cid))
+                if int(cid) in bulk_sent_contacts and int(cid) not in individual_sent_contacts:
+                    bulk_replied += 1
+                elif int(cid) in individual_sent_contacts:
+                    individual_replied += 1
+                elif int(cid) in bulk_sent_contacts:
+                    bulk_replied += 1
+    except Exception:  # noqa: BLE001
+        pass
+
     individual_total = individual_sent + individual_failed
     bulk_total = bulk_sent + bulk_failed
     total_sent = individual_sent + bulk_sent
     total_failed = individual_failed + bulk_failed
     total_opened = individual_opened + bulk_opened
+    total_replied = individual_replied + bulk_replied
     total_attempted = total_sent + total_failed
     not_opened = max(0, total_sent - total_opened)
 
@@ -816,8 +1020,10 @@ def insights_stats(
             "sent": total_sent,
             "failed": total_failed,
             "opened": total_opened,
+            "replied": total_replied,
             "not_opened": not_opened,
             "open_rate_pct": _rate(total_opened, total_sent),
+            "reply_rate_pct": _rate(total_replied, total_sent),
             "success_rate_pct": _rate(total_sent, total_attempted),
         },
         "individual": {
@@ -825,8 +1031,10 @@ def insights_stats(
             "sent": individual_sent,
             "failed": individual_failed,
             "opened": individual_opened,
+            "replied": individual_replied,
             "not_opened": max(0, individual_sent - individual_opened),
             "open_rate_pct": _rate(individual_opened, individual_sent),
+            "reply_rate_pct": _rate(individual_replied, individual_sent),
             "success_rate_pct": _rate(individual_sent, individual_total),
         },
         "bulk": {
@@ -837,9 +1045,164 @@ def insights_stats(
             "sent": bulk_sent,
             "failed": bulk_failed,
             "opened": bulk_opened,
+            "replied": bulk_replied,
             "not_opened": max(0, bulk_sent - bulk_opened),
             "open_rate_pct": _rate(bulk_opened, bulk_sent),
+            "reply_rate_pct": _rate(bulk_replied, bulk_sent),
             "success_rate_pct": _rate(bulk_sent, bulk_total),
         },
         "event_count": len(rows),
+    }
+
+
+def _insights_context_blob(stats: dict[str, Any]) -> str:
+    totals = stats.get("totals") or {}
+    individual = stats.get("individual") or {}
+    bulk = stats.get("bulk") or {}
+    period = stats.get("period_days")
+    since = stats.get("since") or "n/a"
+    until = stats.get("until") or "now"
+    period_label = f"last {period} days" if period else f"{since} → {until}"
+    return (
+        f"Period: {period_label}\n"
+        f"Tracking enabled: {stats.get('tracking_enabled')}\n\n"
+        f"TOTALS — sent={totals.get('sent')}, failed={totals.get('failed')}, "
+        f"opened={totals.get('opened')}, replied={totals.get('replied')}, "
+        f"not_opened={totals.get('not_opened')}, open_rate={totals.get('open_rate_pct')}%, "
+        f"reply_rate={totals.get('reply_rate_pct')}%, success_rate={totals.get('success_rate_pct')}%\n\n"
+        f"INDIVIDUAL — sent={individual.get('sent')}, failed={individual.get('failed')}, "
+        f"opened={individual.get('opened')}, replied={individual.get('replied')}, "
+        f"open_rate={individual.get('open_rate_pct')}%, reply_rate={individual.get('reply_rate_pct')}%\n\n"
+        f"BULK — batches={bulk.get('batches')}, sent={bulk.get('sent')}, failed={bulk.get('failed')}, "
+        f"opened={bulk.get('opened')}, replied={bulk.get('replied')}, "
+        f"open_rate={bulk.get('open_rate_pct')}%, reply_rate={bulk.get('reply_rate_pct')}%"
+    )
+
+
+def analyze_email_activity(
+    db: Session,
+    *,
+    days: int | None = 30,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    user_id: int | None = None,
+    is_admin: bool = False,
+) -> dict[str, Any]:
+    """LLM summary of Email Activity insights for the selected window."""
+    from modules.llm_client import llm_client
+
+    period = None if days is not None and int(days) <= 0 else (days if days is not None else 30)
+    if date_from or date_to:
+        period = None
+    stats = insights_stats(
+        db,
+        days=period,
+        date_from=date_from,
+        date_to=date_to,
+        user_id=user_id,
+        is_admin=is_admin,
+        channel="email",
+    )
+    blob = _insights_context_blob(stats)
+    system = (
+        "You are a sales email performance analyst for Kafi Commodities, a Pakistani food exporter "
+        "(rice, chutney, sauces, pickles, Himalayan pink salt, spices). "
+        "Write a clear, practical analysis for a sales rep — not marketing fluff."
+    )
+    prompt = (
+        "Analyze this outbound email activity. Cover:\n"
+        "1) Overall health (send success, opens, replies)\n"
+        "2) Individual vs bulk differences\n"
+        "3) Likely causes of weak opens/replies or high failures\n"
+        "4) 3–5 prioritized next actions\n\n"
+        "Use short paragraphs and bullet points. No markdown tables.\n\n"
+        f"DATA:\n{blob}"
+    )
+    if not llm_client.enabled:
+        return {
+            "kind": "analysis",
+            "title": "AI analysis",
+            "content": (
+                "LLM is not configured. Add GEMINI_API_KEY to enable AI analysis.\n\n"
+                f"Snapshot:\n{blob}"
+            ),
+            "stats": stats,
+        }
+    try:
+        content = llm_client.generate(prompt, system=system).strip()
+    except Exception as exc:  # noqa: BLE001
+        content = f"AI analysis failed: {exc}\n\nSnapshot:\n{blob}"
+    return {
+        "kind": "analysis",
+        "title": "AI analysis",
+        "content": content,
+        "stats": stats,
+    }
+
+
+def suggest_email_improvements(
+    db: Session,
+    *,
+    days: int | None = 30,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    user_id: int | None = None,
+    is_admin: bool = False,
+) -> dict[str, Any]:
+    """LLM suggestions to improve outbound email performance."""
+    from modules.llm_client import llm_client
+
+    period = None if days is not None and int(days) <= 0 else (days if days is not None else 30)
+    if date_from or date_to:
+        period = None
+    stats = insights_stats(
+        db,
+        days=period,
+        date_from=date_from,
+        date_to=date_to,
+        user_id=user_id,
+        is_admin=is_admin,
+        channel="email",
+    )
+    blob = _insights_context_blob(stats)
+    system = (
+        "You are an outbound email coach for Kafi Commodities (B2B food export: rice, sauces, "
+        "pickles, Himalayan salt, spices). Suggest concrete copy and process improvements. "
+        "Every message remains a draft until a human approves — never imply auto-send."
+    )
+    prompt = (
+        "Based on these Email Activity stats, give practical suggestions to improve email results.\n"
+        "Include:\n"
+        "- Subject line ideas (3–5)\n"
+        "- Opening line / value-prop tips for importers and distributors\n"
+        "- When to prefer individual vs bulk\n"
+        "- Follow-up timing after opens with no reply\n"
+        "- How to reduce failures (list hygiene, mailbox setup)\n\n"
+        "Keep it actionable and short. Bullet points preferred.\n\n"
+        f"DATA:\n{blob}"
+    )
+    if not llm_client.enabled:
+        return {
+            "kind": "suggestions",
+            "title": "Suggestion to improve email",
+            "content": (
+                "LLM is not configured. Add GEMINI_API_KEY to enable suggestions.\n\n"
+                "Quick checklist without AI:\n"
+                "- Personalize individual emails for HOT/AAAA leads; use bulk for nurture lists\n"
+                "- Lead with product fit (rice / salt / sauces) and certifications (Halal, ISO, HACCP)\n"
+                "- Follow up 3–5 days after an open with no reply\n"
+                "- Fix mailbox auth and invalid recipients to cut failures\n"
+                f"\nSnapshot:\n{blob}"
+            ),
+            "stats": stats,
+        }
+    try:
+        content = llm_client.generate(prompt, system=system).strip()
+    except Exception as exc:  # noqa: BLE001
+        content = f"Suggestions failed: {exc}\n\nSnapshot:\n{blob}"
+    return {
+        "kind": "suggestions",
+        "title": "Suggestion to improve email",
+        "content": content,
+        "stats": stats,
     }
