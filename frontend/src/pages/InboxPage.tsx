@@ -367,6 +367,7 @@ export function InboxPage({
 }: InboxPageProps) {
   const [status, setStatus] = useState<InboxStatus | null>(null);
   const [threads, setThreads] = useState<InboxThreadSummary[]>([]);
+  threadsRef.current = threads;
   const [messages, setMessages] = useState<InboxMessageSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
@@ -432,6 +433,10 @@ export function InboxPage({
   const onUnreadChangeRef = useRef(onUnreadChange);
   const onFolderCountsChangeRef = useRef(onFolderCountsChange);
   const onMailExtrasChangeRef = useRef(onMailExtrasChange);
+  const threadsRef = useRef<InboxThreadSummary[]>([]);
+  const openMessageRef = useRef<
+    ((message: InboxMessageSummary) => Promise<void>) | null
+  >(null);
   const mailboxUserIdRef = useRef<number | null>(initialMailboxUserId ?? null);
   /** Sticky for urgent Open & Reply — parent clears initialMailboxUserId immediately. */
   const stickyMailboxUserIdRef = useRef<number | null>(null);
@@ -488,7 +493,13 @@ export function InboxPage({
     section === "junk" ||
     section === "archive" ||
     isLabelView;
-  const isThreadView = section === "inbox" && !isLabelView && !searchActive;
+  /** Inbox conversation list (not search / labels). */
+  const showThreadList = section === "inbox" && !isLabelView && !searchActive;
+  /**
+   * Thread detail pane — unless we fell back to a single message open
+   * (bounce / newsletter rows that 404 on /threads/{id}).
+   */
+  const isThreadView = showThreadList && !selectedMessageKey;
 
   useEffect(() => {
     if (!mailAiOpen) return;
@@ -900,6 +911,73 @@ export function InboxPage({
     };
   }, [status?.configured, loadList]);
 
+  /** When thread open 404s, resolve the same row via folder messages (Sent-style). */
+  const openInboxThreadAsMessage = useCallback(
+    async (
+      summary: InboxThreadSummary,
+      mailboxId: number | null,
+    ): Promise<boolean> => {
+      const subject = (summary.subject || "").trim();
+      const fromEmail = (summary.latest_from_email || "").trim().toLowerCase();
+      const pickMatch = (items: InboxMessageSummary[]) => {
+        if (!items.length) return null;
+        const bySubjectAndFrom = items.find((m) => {
+          const sameSubject = subject
+            ? (m.subject || "").trim() === subject
+            : false;
+          const sameFrom = fromEmail
+            ? (m.from_email || "").trim().toLowerCase() === fromEmail
+            : true;
+          return sameSubject && sameFrom;
+        });
+        if (bySubjectAndFrom) return bySubjectAndFrom;
+        if (subject) {
+          const bySubject = items.find((m) => (m.subject || "").trim() === subject);
+          if (bySubject) return bySubject;
+        }
+        if (fromEmail) {
+          const byFrom = items.find(
+            (m) => (m.from_email || "").trim().toLowerCase() === fromEmail,
+          );
+          if (byFrom) return byFrom;
+        }
+        return null;
+      };
+
+      try {
+        const searchQ = (fromEmail || subject).slice(0, 120);
+        const searched = await client.listInboxMessages({
+          limit: 50,
+          folder: "inbox",
+          q: searchQ || undefined,
+          mailbox_user_id: mailboxId,
+        });
+        let match = pickMatch(searched.items || []);
+        if (!match) {
+          const page = await client.listInboxMessages({
+            limit: 80,
+            folder: "inbox",
+            mailbox_user_id: mailboxId,
+          });
+          match = pickMatch(page.items || []);
+        }
+        if (!match) return false;
+
+        // Switch into message detail view (clears thread selection).
+        setSelectedThreadId(null);
+        setThread(null);
+        if (openMessageRef.current) {
+          await openMessageRef.current(match);
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    },
+    [],
+  );
+
   const openThread = useCallback(
     async (
       threadId: string,
@@ -981,12 +1059,22 @@ export function InboxPage({
         }
       } catch (e) {
         pendingAutoDraftRef.current = false;
-        onErrorRef.current(e instanceof Error ? e.message : "Failed to open conversation");
+        // Thread merge can 404 for bounces / newsletters while the row is still in the list.
+        // Fall back to the same single-message open path Sent uses — inbox-only, no API redesign.
+        const summary = threadsRef.current.find((t) => t.thread_id === threadId);
+        const openedAsMessage = summary
+          ? await openInboxThreadAsMessage(summary, mailboxId)
+          : false;
+        if (!openedAsMessage) {
+          setSelectedThreadId(null);
+          setThread(null);
+          onErrorRef.current(e instanceof Error ? e.message : "Failed to open conversation");
+        }
       } finally {
         setDetailLoading(false);
       }
     },
-    [runThreadAnalyze, activeMailboxUserId],
+    [runThreadAnalyze, activeMailboxUserId, openInboxThreadAsMessage],
   );
 
   useEffect(() => {
@@ -1078,6 +1166,7 @@ export function InboxPage({
     },
     [runMessageAnalyze],
   );
+  openMessageRef.current = openMessage;
 
   useEffect(() => {
     if (!thread || detailLoading) return;
@@ -1653,7 +1742,7 @@ export function InboxPage({
               {(threadPage - 1) * PAGE_SIZE + threads.length} of ~{threadTotal} in mailbox
             </p>
           ) : null}
-          {!isThreadView && !isDraftsView && !searchActive && !loading && messages.length > 0 && messageTotal > 0 ? (
+          {!showThreadList && !isDraftsView && !searchActive && !loading && messages.length > 0 && messageTotal > 0 ? (
             <p className="text-xs text-slate-500 mt-1">
               Page {messagePage} · showing {(messagePage - 1) * PAGE_SIZE + 1}–
               {(messagePage - 1) * PAGE_SIZE + messages.length} of ~{messageTotal}
@@ -1994,7 +2083,7 @@ export function InboxPage({
               <p className="py-10 text-center text-slate-500 text-sm">
                 {isDraftsView
                   ? "Loading drafts…"
-                  : isThreadView
+                  : showThreadList
                     ? "Loading conversations…"
                     : "Loading messages…"}
               </p>
@@ -2041,7 +2130,7 @@ export function InboxPage({
                   </div>
                 ))
               )
-            ) : isThreadView ? (
+            ) : showThreadList ? (
               threads.length === 0 ? (
                 <p className="py-10 text-center text-slate-500 text-sm">{emptyListMessage(section)}</p>
               ) : (
@@ -2195,7 +2284,7 @@ export function InboxPage({
               })
             )}
           </div>
-          {isThreadView && !searchActive && (threadPage > 1 || threadHasMore) ? (
+          {showThreadList && !searchActive && (threadPage > 1 || threadHasMore) ? (
             <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-slate-800 bg-slate-950/60">
               <ActionButton
                 icon={IconChevronRight}
@@ -2219,7 +2308,7 @@ export function InboxPage({
               </ActionButton>
             </div>
           ) : null}
-          {!isThreadView && !isDraftsView && !searchActive && (messagePage > 1 || messageHasMore) ? (
+          {!showThreadList && !isDraftsView && !searchActive && (messagePage > 1 || messageHasMore) ? (
             <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-slate-800 bg-slate-950/60">
               <ActionButton
                 icon={IconChevronRight}
