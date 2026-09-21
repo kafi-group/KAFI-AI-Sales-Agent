@@ -174,6 +174,26 @@ def start_login(body: PhoneLoginBody, user: AppUser = Depends(get_current_user))
         raise HTTPException(502, str(exc)) from exc
 
 
+@router.post("/start-qr-login")
+def start_qr_login(user: AppUser = Depends(get_current_user)):
+    if not bridge.bridge_configured():
+        raise HTTPException(503, "Telegram bridge is not configured")
+    try:
+        return bridge.start_qr_login(_session(user))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, str(exc)) from exc
+
+
+@router.post("/poll-qr-login")
+def poll_qr_login(user: AppUser = Depends(get_current_user)):
+    if not bridge.bridge_configured():
+        raise HTTPException(503, "Telegram bridge is not configured")
+    try:
+        return bridge.poll_qr_login(_session(user))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, str(exc)) from exc
+
+
 @router.post("/confirm-code")
 def confirm_code(body: CodeBody, user: AppUser = Depends(get_current_user)):
     if not bridge.bridge_configured():

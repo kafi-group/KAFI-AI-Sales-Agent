@@ -14,6 +14,7 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
+const QRCode = require("qrcode");
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const { Api } = require("telegram/tl");
@@ -93,10 +94,135 @@ function getOrCreateState(sessionId) {
       phoneCodeHash: null,
       pendingPhone: null,
       error: null,
+      qrDataUrl: null,
+      qrLoginUri: null,
+      qrExpires: null,
+      qrHandlerAttached: false,
     };
     sessions.set(sessionId, st);
   }
   return st;
+}
+
+function bytesToBase64Url(bytes) {
+  return Buffer.from(bytes)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function isLoginTokenSuccess(result) {
+  return (
+    result instanceof Api.auth.LoginTokenSuccess ||
+    result?.className === "auth.LoginTokenSuccess"
+  );
+}
+
+function isLoginTokenMigrateTo(result) {
+  return (
+    result instanceof Api.auth.LoginTokenMigrateTo ||
+    result?.className === "auth.LoginTokenMigrateTo"
+  );
+}
+
+function isLoginToken(result) {
+  return (
+    result instanceof Api.auth.LoginToken ||
+    result?.className === "auth.LoginToken"
+  );
+}
+
+function clearQrFields(st) {
+  st.qrDataUrl = null;
+  st.qrLoginUri = null;
+  st.qrExpires = null;
+}
+
+async function persistAuthorizedSession(st) {
+  const stringSession = st.client.session.save();
+  st.phone = st.pendingPhone || st.phone;
+  saveStoredSession(st.sessionId, {
+    stringSession,
+    phone: st.phone,
+    savedAt: new Date().toISOString(),
+  });
+  st.phoneCodeHash = null;
+  st.pendingPhone = null;
+  clearQrFields(st);
+  await refreshMe(st);
+}
+
+async function applyQrTokenResult(st, result) {
+  if (isLoginTokenSuccess(result)) {
+    await persistAuthorizedSession(st);
+    return { connected: true };
+  }
+
+  if (isLoginTokenMigrateTo(result)) {
+    await st.client._switchDC(result.dcId);
+    const imported = await st.client.invoke(
+      new Api.auth.ImportLoginToken({ token: result.token }),
+    );
+    return applyQrTokenResult(st, imported);
+  }
+
+  if (!isLoginToken(result)) {
+    throw new Error(`Unexpected login token response: ${result?.className || typeof result}`);
+  }
+
+  const uri = `tg://login?token=${bytesToBase64Url(result.token)}`;
+  const qrDataUrl = await QRCode.toDataURL(uri, {
+    width: 420,
+    margin: 2,
+    errorCorrectionLevel: "M",
+  });
+  st.status = "awaiting_qr";
+  st.connected = false;
+  st.qrDataUrl = qrDataUrl;
+  st.qrLoginUri = uri;
+  st.qrExpires = Number(result.expires) || null;
+  st.error = null;
+  return {
+    connected: false,
+    qrDataUrl,
+    qrLoginUri: uri,
+    qrExpires: st.qrExpires,
+  };
+}
+
+async function exportQrLoginToken(st) {
+  const result = await st.client.invoke(
+    new Api.auth.ExportLoginToken({
+      apiId: API_ID,
+      apiHash: API_HASH,
+      exceptIds: [],
+    }),
+  );
+  return applyQrTokenResult(st, result);
+}
+
+function attachQrUpdateHandler(st) {
+  if (!st.client || st.qrHandlerAttached) return;
+  st.qrHandlerAttached = true;
+  st.client.addEventHandler(async (update) => {
+    const isTokenUpdate =
+      update instanceof Api.UpdateLoginToken || update?.className === "UpdateLoginToken";
+    if (!isTokenUpdate) return;
+    if (st.status !== "awaiting_qr") return;
+    try {
+      await exportQrLoginToken(st);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/SESSION_PASSWORD_NEEDED|password/i.test(msg) || err?.errorMessage === "SESSION_PASSWORD_NEEDED") {
+        st.status = "awaiting_password";
+        st.error = null;
+        clearQrFields(st);
+        return;
+      }
+      st.error = msg;
+    }
+  });
 }
 
 async function ensureClient(sessionId, stringSession = "") {
@@ -173,7 +299,11 @@ function publicStatus(st) {
     displayName: st.displayName,
     needsCode: st.status === "awaiting_code",
     needsPassword: st.status === "awaiting_password",
+    needsQr: st.status === "awaiting_qr",
     pendingPhone: st.pendingPhone,
+    qrDataUrl: st.qrDataUrl || null,
+    qrLoginUri: st.qrLoginUri || null,
+    qrExpires: st.qrExpires || null,
     error: st.error,
     configured: Boolean(API_ID && API_HASH),
   };
@@ -203,6 +333,103 @@ app.get("/status", requireSecret, async (req, res) => {
   }
 });
 
+app.post("/start-qr-login", requireSecret, async (req, res) => {
+  try {
+    const sessionId = String(req.body?.sessionId || "").trim();
+    if (!sessionId) return res.status(400).json({ error: "sessionId required" });
+
+    const st = getOrCreateState(sessionId);
+    if (st.connected) {
+      await refreshMe(st);
+      return res.json({
+        ...publicStatus(st),
+        message: "Telegram Mobile already connected.",
+      });
+    }
+
+    if (st.client) {
+      try {
+        await st.client.disconnect();
+      } catch {
+        /* ignore */
+      }
+      st.client = null;
+      st.qrHandlerAttached = false;
+    }
+
+    clearQrFields(st);
+    st.phoneCodeHash = null;
+    st.pendingPhone = null;
+    st.error = null;
+
+    const client = await ensureClient(sessionId, "");
+    await client.connect();
+    attachQrUpdateHandler(st);
+
+    const qr = await exportQrLoginToken(st);
+    if (qr.connected) {
+      return res.json({
+        ...publicStatus(st),
+        message: "Telegram Mobile connected.",
+      });
+    }
+
+    return res.json({
+      ...publicStatus(st),
+      message:
+        "Scan this QR code in Telegram on your phone: Settings → Devices → Link Desktop Device.",
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post("/poll-qr-login", requireSecret, async (req, res) => {
+  try {
+    const sessionId = String(req.body?.sessionId || "").trim();
+    if (!sessionId) return res.status(400).json({ error: "sessionId required" });
+
+    const st = getOrCreateState(sessionId);
+    if (st.connected) {
+      await refreshMe(st);
+      return res.json(publicStatus(st));
+    }
+
+    if (st.status === "awaiting_password") {
+      return res.json(publicStatus(st));
+    }
+
+    if (!st.client || st.status !== "awaiting_qr") {
+      return res.json(publicStatus(st));
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const expired = !st.qrExpires || nowSec >= Number(st.qrExpires) - 2;
+
+    if (expired) {
+      try {
+        await exportQrLoginToken(st);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/SESSION_PASSWORD_NEEDED|password/i.test(msg) || err?.errorMessage === "SESSION_PASSWORD_NEEDED") {
+          st.status = "awaiting_password";
+          st.error = null;
+          clearQrFields(st);
+          return res.json({
+            ...publicStatus(st),
+            message: "Two-step verification is on — enter your Telegram password.",
+          });
+        }
+        throw err;
+      }
+    }
+
+    return res.json(publicStatus(st));
+  } catch (err) {
+    return res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 app.post("/start-login", requireSecret, async (req, res) => {
   try {
     const sessionId = String(req.body?.sessionId || "").trim();
@@ -220,8 +447,10 @@ app.post("/start-login", requireSecret, async (req, res) => {
         /* ignore */
       }
       st.client = null;
+      st.qrHandlerAttached = false;
     }
 
+    clearQrFields(st);
     const client = await ensureClient(sessionId, "");
     await client.connect();
     const result = await client.invoke(
@@ -292,6 +521,7 @@ app.post("/confirm-code", requireSecret, async (req, res) => {
     });
     st.phoneCodeHash = null;
     st.pendingPhone = null;
+    clearQrFields(st);
     await refreshMe(st);
     return res.json({
       ...publicStatus(st),
@@ -328,6 +558,7 @@ app.post("/confirm-password", requireSecret, async (req, res) => {
     });
     st.phoneCodeHash = null;
     st.pendingPhone = null;
+    clearQrFields(st);
     await refreshMe(st);
     return res.json({
       ...publicStatus(st),
@@ -363,6 +594,8 @@ app.post("/disconnect", requireSecret, async (req, res) => {
     st.displayName = null;
     st.phoneCodeHash = null;
     st.pendingPhone = null;
+    st.qrHandlerAttached = false;
+    clearQrFields(st);
     deleteStoredSession(sessionId);
     return res.json(publicStatus(st));
   } catch (err) {

@@ -3257,6 +3257,14 @@ export const client = {
       method: "POST",
       body: JSON.stringify({ phone }),
     }),
+  startTelegramPersonalQrLogin: () =>
+    request<Record<string, unknown>>("/telegram-personal/start-qr-login", {
+      method: "POST",
+    }),
+  pollTelegramPersonalQrLogin: () =>
+    request<Record<string, unknown>>("/telegram-personal/poll-qr-login", {
+      method: "POST",
+    }),
   confirmTelegramPersonalCode: (code: string) =>
     request<Record<string, unknown>>("/telegram-personal/confirm-code", {
       method: "POST",

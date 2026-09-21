@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { client } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ActionButton } from "../components/ui/ActionButton";
@@ -16,24 +16,40 @@ type TgStatus = {
   displayName?: string | null;
   needsCode?: boolean;
   needsPassword?: boolean;
+  needsQr?: boolean;
   pendingPhone?: string | null;
+  qrDataUrl?: string | null;
+  qrLoginUri?: string | null;
+  qrExpires?: number | null;
   configured?: boolean;
   bridge_configured?: boolean;
   message?: string;
   error?: string | null;
 };
 
+function pickQrImage(st: TgStatus | null): string | null {
+  if (!st) return null;
+  const candidates = [st.qrDataUrl];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.startsWith("data:image")) return c;
+  }
+  return null;
+}
+
 export function TelegramMobilePage({ onError }: TelegramMobilePageProps) {
   const { user } = useAuth();
   const [status, setStatus] = useState<TgStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [pairing, setPairing] = useState(false);
+  const [showPhoneLogin, setShowPhoneLogin] = useState(false);
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [testTo, setTestTo] = useState("");
   const [testMessage, setTestMessage] = useState("Hello from Kafi Sales Agent Telegram Mobile.");
   const [notice, setNotice] = useState<string | null>(null);
+  const pollRef = useRef<number | null>(null);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -48,11 +64,66 @@ export function TelegramMobilePage({ onError }: TelegramMobilePageProps) {
 
   useEffect(() => {
     void loadStatus();
-    const t = window.setInterval(() => void loadStatus(), 8000);
+    const t = window.setInterval(() => void loadStatus(), 10000);
     return () => window.clearInterval(t);
   }, [loadStatus]);
 
   const connected = Boolean(status?.connected);
+  const qrImage = pickQrImage(status);
+  const awaitingQr = Boolean(status?.needsQr || qrImage) && !connected;
+
+  useEffect(() => {
+    if (pollRef.current) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (!awaitingQr || connected) return;
+
+    pollRef.current = window.setInterval(() => {
+      void (async () => {
+        try {
+          const st = (await client.pollTelegramPersonalQrLogin()) as TgStatus;
+          setStatus(st);
+          if (st.connected) {
+            setNotice("Telegram Mobile connected.");
+            setPairing(false);
+          } else if (st.needsPassword) {
+            setNotice("Two-step verification is on — enter your Telegram password.");
+            setPairing(false);
+          }
+        } catch {
+          /* keep polling */
+        }
+      })();
+    }, 2500);
+
+    return () => {
+      if (pollRef.current) {
+        window.clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [awaitingQr, connected]);
+
+  async function startQrLogin() {
+    setPairing(true);
+    setBusy(true);
+    setNotice(null);
+    setShowPhoneLogin(false);
+    try {
+      const st = (await client.startTelegramPersonalQrLogin()) as TgStatus;
+      setStatus(st);
+      setNotice(
+        st.message ||
+          "Scan this QR code in Telegram: Settings → Devices → Link Desktop Device.",
+      );
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Could not generate Telegram QR code");
+    } finally {
+      setBusy(false);
+      setPairing(false);
+    }
+  }
 
   async function startLogin() {
     setBusy(true);
@@ -104,7 +175,8 @@ export function TelegramMobilePage({ onError }: TelegramMobilePageProps) {
     try {
       const st = (await client.disconnectTelegramPersonal()) as TgStatus;
       setStatus(st);
-      setNotice("Disconnected.");
+      setNotice("Disconnected — generate a QR code to link again.");
+      setShowPhoneLogin(false);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Disconnect failed");
     } finally {
@@ -154,7 +226,7 @@ export function TelegramMobilePage({ onError }: TelegramMobilePageProps) {
             variant="secondary"
             icon={IconRefresh}
             onClick={() => void loadStatus()}
-            disabled={busy}
+            disabled={busy || pairing}
           >
             Refresh
           </ActionButton>
@@ -261,25 +333,88 @@ export function TelegramMobilePage({ onError }: TelegramMobilePageProps) {
             </ActionButton>
           </div>
         ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-slate-300">
-              Enter the phone number for the Telegram account already logged in on your phone
-              (include country code, e.g. +92…).
-            </p>
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+92…"
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
-            />
-            <ActionButton
-              type="button"
-              icon={IconTelegram}
-              onClick={() => void startLogin()}
-              disabled={busy || phone.trim().length < 8}
-            >
-              {busy ? "Sending code…" : "Send login code to Telegram"}
-            </ActionButton>
+          <div className="space-y-5">
+            <div className="rounded-lg border border-slate-700/80 bg-slate-950/40 p-4 space-y-2">
+              <p className="text-sm font-medium text-slate-200">Scan QR with Telegram on your phone</p>
+              <ol className="list-decimal list-inside text-xs text-slate-400 space-y-1">
+                <li>Open Telegram on your mobile</li>
+                <li>
+                  Go to <span className="text-slate-300">Settings → Devices → Link Desktop Device</span>
+                </li>
+                <li>Scan the QR code shown below</li>
+              </ol>
+            </div>
+
+            {qrImage ? (
+              <div className="text-center space-y-4 py-2">
+                <img
+                  src={qrImage}
+                  alt="Telegram login QR code"
+                  className="mx-auto w-72 h-72 sm:w-80 sm:h-80 rounded-3xl bg-white p-4 shadow-2xl border-4 border-sky-500/40 object-contain"
+                />
+                <div className="inline-flex items-center gap-2 text-sm text-sky-300 bg-sky-500/10 px-4 py-1.5 rounded-full border border-sky-500/30 font-semibold">
+                  <span className="w-2.5 h-2.5 rounded-full bg-sky-400 animate-ping" />
+                  Waiting for scan… QR refreshes automatically
+                </div>
+                <ActionButton
+                  type="button"
+                  variant="secondary"
+                  icon={IconRefresh}
+                  onClick={() => void startQrLogin()}
+                  disabled={busy || pairing}
+                  className="w-full justify-center"
+                >
+                  {pairing ? "Refreshing QR…" : "Refresh QR code"}
+                </ActionButton>
+              </div>
+            ) : (
+              <div className="text-center space-y-3 py-4">
+                <p className="text-sm text-slate-300">
+                  Generate a QR code to link your Telegram account — no phone number needed.
+                </p>
+                <ActionButton
+                  type="button"
+                  icon={IconTelegram}
+                  onClick={() => void startQrLogin()}
+                  disabled={busy || pairing}
+                  className="w-full justify-center text-base py-3 font-bold"
+                >
+                  {pairing ? "Generating QR…" : "Generate QR code"}
+                </ActionButton>
+              </div>
+            )}
+
+            <div className="border-t border-slate-800 pt-4">
+              <button
+                type="button"
+                className="text-xs text-slate-500 hover:text-slate-300 underline"
+                onClick={() => setShowPhoneLogin((v) => !v)}
+              >
+                {showPhoneLogin ? "Hide phone login" : "Prefer phone + login code instead?"}
+              </button>
+              {showPhoneLogin ? (
+                <div className="mt-3 space-y-3">
+                  <p className="text-sm text-slate-300">
+                    Enter the phone number for the Telegram account already logged in on your phone
+                    (include country code, e.g. +92…).
+                  </p>
+                  <input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+92…"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+                  />
+                  <ActionButton
+                    type="button"
+                    icon={IconTelegram}
+                    onClick={() => void startLogin()}
+                    disabled={busy || phone.trim().length < 8}
+                  >
+                    {busy ? "Sending code…" : "Send login code to Telegram"}
+                  </ActionButton>
+                </div>
+              ) : null}
+            </div>
           </div>
         )}
       </div>

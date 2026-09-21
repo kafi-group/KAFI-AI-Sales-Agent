@@ -49,3 +49,4 @@ backend/data/synthesis_outputs/
 scratch/
 SMTP_CREDENTIALS.md
 *.xlsx
+telegram_bridge/node_modules/

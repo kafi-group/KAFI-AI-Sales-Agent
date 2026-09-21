@@ -77,6 +77,24 @@ def start_login(session_id: str, phone: str) -> dict[str, Any]:
     )
 
 
+def start_qr_login(session_id: str) -> dict[str, Any]:
+    return _request(
+        "POST",
+        "/start-qr-login",
+        json_body={"sessionId": session_id},
+        timeout=_LOGIN_TIMEOUT,
+    )
+
+
+def poll_qr_login(session_id: str) -> dict[str, Any]:
+    return _request(
+        "POST",
+        "/poll-qr-login",
+        json_body={"sessionId": session_id},
+        timeout=_LOGIN_TIMEOUT,
+    )
+
+
 def confirm_code(session_id: str, code: str) -> dict[str, Any]:
     return _request(
         "POST",
