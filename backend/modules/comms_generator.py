@@ -1077,6 +1077,7 @@ class CommsGenerator:
                 item = {
                     "buyer_id": buyer_id,
                     "company_name": buyer.company_name,
+                    "to_email": contact.email,
                     "interaction_id": draft.id,
                     "contact_id": draft.contact_id,
                     "sent": False,
@@ -1765,6 +1766,7 @@ class CommsGenerator:
                 item = {
                     "buyer_id": buyer_id,
                     "company_name": buyer.company_name,
+                    "to_email": contact.email,
                     "interaction_id": draft.id,
                     "contact_id": draft.contact_id,
                     "sent": False,
@@ -1844,16 +1846,23 @@ class CommsGenerator:
                     "skipped_count": len(skipped),
                     "selected_count": len(buyer_ids),
                     "mode": "manual",
+                    "send_mode": "bulk",
+                    "mailbox_email": getattr(mailbox_user, "mailbox_email", None)
+                    if mailbox_user
+                    else None,
                     "skipped": skipped[:20],
                     "failures": [
                         {
                             "company_name": row.get("company_name"),
+                            "to_email": row.get("to_email"),
+                            "buyer_id": row.get("buyer_id"),
                             "send_status": row.get("send_status"),
                             "send_message": row.get("send_message"),
+                            "error": row.get("send_message"),
                         }
                         for row in created
                         if not row.get("sent")
-                    ][:20],
+                    ][:50],
                 },
                 mailbox_user=mailbox_user,
             )
@@ -1919,6 +1928,7 @@ class CommsGenerator:
                 item = {
                     "buyer_id": buyer_id,
                     "company_name": buyer.company_name,
+                    "to_email": contact.email,
                     "interaction_id": draft.id,
                     "contact_id": draft.contact_id,
                     "sent": False,
@@ -1998,16 +2008,24 @@ class CommsGenerator:
                     "skipped_count": len(skipped),
                     "selected_count": len(buyer_ids),
                     "template_id": template_id,
+                    "mode": "manual",
+                    "send_mode": "bulk",
+                    "mailbox_email": getattr(mailbox_user, "mailbox_email", None)
+                    if mailbox_user
+                    else None,
                     "skipped": skipped[:20],
                     "failures": [
                         {
                             "company_name": row.get("company_name"),
+                            "to_email": row.get("to_email"),
+                            "buyer_id": row.get("buyer_id"),
                             "send_status": row.get("send_status"),
                             "send_message": row.get("send_message"),
+                            "error": row.get("send_message"),
                         }
                         for row in created
                         if not row.get("sent")
-                    ][:20],
+                    ][:50],
                 },
                 mailbox_user=mailbox_user,
             )

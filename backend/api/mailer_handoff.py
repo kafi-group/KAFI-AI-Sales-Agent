@@ -106,6 +106,8 @@ class MailerActivityReportRequest(BaseModel):
     sent_count: Optional[int] = None
     failed_count: Optional[int] = None
     skipped_count: Optional[int] = None
+    # Failed recipients for bulk_finished (shown on Email Activity drill-down).
+    failures: Optional[list[dict[str, Any]]] = None
 
 
 class MailerPrepareTrackedRequest(BaseModel):
@@ -767,23 +769,50 @@ def report_mailer_activity(
         failed_count = int(payload.failed_count or 0)
         skipped_count = int(payload.skipped_count or 0)
         selected = int(payload.selected_count or (sent_count + failed_count + skipped_count))
+        subject = (payload.subject or "").strip() or None
+        mailbox_email = mailbox.email if mailbox else None
+        failures_raw = payload.failures or []
+        failures: list[dict[str, Any]] = []
+        for row in failures_raw[:50]:
+            if not isinstance(row, dict):
+                continue
+            failures.append(
+                {
+                    "to_email": (row.get("to_email") or row.get("email") or "").strip() or None,
+                    "company_name": (row.get("company_name") or "").strip() or None,
+                    "buyer_id": row.get("buyer_id"),
+                    "error": (row.get("error") or row.get("send_message") or row.get("message") or "").strip()
+                    or None,
+                }
+            )
         if failed_count > 0 and sent_count > 0:
             event_type = "bulk_partial"
-            title = f"Bulk send partial — {sent_count} sent, {failed_count} failed"
+            title = f"Bulk campaign partial — {sent_count} sent, {failed_count} failed"
         elif failed_count > 0 and sent_count == 0:
             event_type = "send_failed"
-            title = f"Bulk send failed — 0 of {selected} sent"
+            title = f"Bulk campaign failed — 0 of {selected} sent"
         else:
             event_type = "bulk_completed"
-            title = f"Bulk send completed — {sent_count} sent"
+            title = f"Bulk campaign completed — {sent_count} sent"
+        from_bit = f"From {mailbox_email}" if mailbox_email else "Vercel mailer"
+        subject_bit = f" · Subject: {subject}" if subject else ""
+        fail_preview = ""
+        if failures:
+            addrs = [f.get("to_email") for f in failures if f.get("to_email")]
+            if addrs:
+                shown = ", ".join(addrs[:5])
+                extra = len(addrs) - 5
+                fail_preview = f" Failed: {shown}" + (f" (+{extra} more)" if extra > 0 else "") + "."
+        message = (
+            f"{from_bit}{subject_bit}. "
+            f"{sent_count} sent, {failed_count} failed, {skipped_count} skipped "
+            f"out of {selected} selected.{fail_preview}"
+        )
         event = email_activity.record_event(
             db,
             event_type=event_type,
             title=title,
-            message=(
-                f"{sent_count} sent, {failed_count} failed, {skipped_count} skipped "
-                f"out of {selected} selected (Vercel mailer)."
-            ),
+            message=message,
             mailbox_user=user,
             details={
                 **source_details,
@@ -793,6 +822,9 @@ def report_mailer_activity(
                 "selected_count": selected,
                 "mode": "mailer",
                 "send_mode": "bulk",
+                "subject": subject,
+                "mailbox_email": mailbox_email,
+                "failures": failures,
             },
         )
         if sent_count > 0:

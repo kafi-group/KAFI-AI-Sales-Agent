@@ -1,5 +1,14 @@
 /** Report Vercel mailer sends to Sales Agent Email Activity. */
 
+export type ActivityFailure = {
+  to_email?: string;
+  email?: string;
+  company_name?: string;
+  buyer_id?: number;
+  error?: string;
+  message?: string;
+};
+
 export type ActivityReport = {
   token?: string;
   authToken?: string;
@@ -18,6 +27,7 @@ export type ActivityReport = {
   sent_count?: number;
   failed_count?: number;
   skipped_count?: number;
+  failures?: ActivityFailure[];
 };
 
 function apiBase(): string {
@@ -66,6 +76,7 @@ export async function reportMailerActivity(
     sent_count: report.sent_count,
     failed_count: report.failed_count,
     skipped_count: report.skipped_count,
+    failures: report.failures,
   };
 
   try {

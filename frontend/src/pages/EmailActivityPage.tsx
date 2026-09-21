@@ -69,6 +69,64 @@ function activityEventLabel(event: EmailActivityEvent, isWhatsApp: boolean): str
   return WHATSAPP_EVENT_LABELS[event.event_type] ?? event.event_type.replace(/_/g, " ");
 }
 
+function detailStr(details: Record<string, unknown>, key: string): string | null {
+  const value = details[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function detailNum(details: Record<string, unknown>, key: string): number | null {
+  const value = details[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() && !Number.isNaN(Number(value))) {
+    return Number(value);
+  }
+  return null;
+}
+
+function isBulkCampaignEvent(event: EmailActivityEvent): boolean {
+  const details = (event.details || {}) as Record<string, unknown>;
+  if (event.event_type === "bulk_partial" || event.event_type === "bulk_completed") {
+    return true;
+  }
+  if (event.event_type === "bulk_started") return true;
+  if (
+    event.event_type === "send_failed" &&
+    (detailNum(details, "sent_count") != null ||
+      detailNum(details, "failed_count") != null ||
+      detailNum(details, "selected_count") != null)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function failureRowsFromDetails(
+  details: Record<string, unknown>,
+): Array<{ to_email: string | null; company_name: string | null; error: string | null }> {
+  const raw = details.failures;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
+    .map((row) => ({
+      to_email:
+        typeof row.to_email === "string"
+          ? row.to_email
+          : typeof row.email === "string"
+            ? row.email
+            : null,
+      company_name: typeof row.company_name === "string" ? row.company_name : null,
+      error:
+        typeof row.error === "string"
+          ? row.error
+          : typeof row.send_message === "string"
+            ? row.send_message
+            : typeof row.message === "string"
+              ? row.message
+              : null,
+    }))
+    .filter((row) => row.to_email || row.company_name);
+}
+
 function StatTile({
   label,
   value,
@@ -611,10 +669,11 @@ export function EmailActivityPage({
                     Showing{" "}
                     <strong className="uppercase">{drillEventType}</strong> ·{" "}
                     <strong>{drillSendMode}</strong> ({total}{" "}
-                    {drillSendMode === "bulk" &&
-                    (drillEventType === "sent" || drillEventType === "failed")
-                      ? "batch/events"
-                      : "in list"}
+                    {drillSendMode === "bulk" && drillEventType === "failed"
+                      ? "campaigns / failed addresses"
+                      : drillSendMode === "bulk" && drillEventType === "sent"
+                        ? "batch/events"
+                        : "in list"}
                     {insightsPeriod === "range"
                       ? ` · ${rangeFrom || "…"} → ${rangeTo || "…"}`
                       : insightsPeriod
@@ -688,17 +747,18 @@ export function EmailActivityPage({
         <ul id="email-activity-feed" className="space-y-3">
           {rows.map((event) => {
             const unread = !event.read_at;
-            const details = event.details || {};
+            const details = (event.details || {}) as Record<string, unknown>;
             const toEmail =
-              typeof details.to_email === "string"
-                ? details.to_email
-                : typeof details.recipient === "string"
-                  ? details.recipient
-                  : null;
-            const company =
-              typeof details.company_name === "string" ? details.company_name : null;
-            const subject =
-              typeof details.subject === "string" ? details.subject : null;
+              detailStr(details, "to_email") || detailStr(details, "recipient");
+            const company = detailStr(details, "company_name");
+            const subject = detailStr(details, "subject");
+            const mailboxEmail = detailStr(details, "mailbox_email");
+            const source = detailStr(details, "source") || detailStr(details, "mode");
+            const sentCount = detailNum(details, "sent_count");
+            const failedCount = detailNum(details, "failed_count");
+            const selectedCount = detailNum(details, "selected_count");
+            const bulkCampaign = isBulkCampaignEvent(event);
+            const failureRows = failureRowsFromDetails(details);
             return (
               <li
                 key={event.id}
@@ -712,6 +772,11 @@ export function EmailActivityPage({
                       <span className="text-[11px] uppercase tracking-wide text-white/80">
                         {activityEventLabel(event, isWhatsApp)}
                       </span>
+                      {bulkCampaign ? (
+                        <span className="text-[10px] uppercase tracking-wide rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-100">
+                          Campaign summary
+                        </span>
+                      ) : null}
                       {unread && (
                         <span className="text-[10px] uppercase tracking-wide rounded bg-emerald-500/20 px-1.5 py-0.5 text-emerald-200">
                           New
@@ -724,24 +789,106 @@ export function EmailActivityPage({
                       ) : null}
                     </div>
                     <p className="text-sm font-medium mt-1">{event.title}</p>
-                    {(company || toEmail) && (
-                      <p className="text-sm text-cyan-200/90 mt-1">
-                        {company ? <strong>{company}</strong> : null}
-                        {company && toEmail ? " · " : null}
-                        {toEmail ? (
-                          <span className="font-mono text-xs">{toEmail}</span>
+                    {bulkCampaign ? (
+                      <div className="mt-2 space-y-1 text-xs text-slate-300">
+                        <p>
+                          This is a <strong>bulk campaign rollup</strong>
+                          {source ? ` (${source})` : ""} — not a single recipient.
+                          {selectedCount != null
+                            ? ` ${selectedCount} leads selected`
+                            : ""}
+                          {sentCount != null || failedCount != null
+                            ? ` · ${sentCount ?? 0} sent · ${failedCount ?? 0} failed`
+                            : ""}
+                          .
+                        </p>
+                        {mailboxEmail ? (
+                          <p>
+                            From:{" "}
+                            <span className="font-mono text-cyan-200/90">{mailboxEmail}</span>
+                          </p>
+                        ) : (
+                          <p className="text-slate-500">
+                            From mailbox was not stored on this older event (sender:{" "}
+                            {event.user_full_name || event.user_username || "unknown"}).
+                          </p>
+                        )}
+                        {subject ? (
+                          <p className="truncate" title={subject}>
+                            Subject: <span className="text-slate-200">{subject}</span>
+                          </p>
                         ) : null}
-                      </p>
+                        {failureRows.length > 0 ? (
+                          <div className="mt-2 rounded-lg border border-red-500/20 bg-red-950/30 px-2.5 py-2">
+                            <p className="text-[10px] uppercase tracking-wide text-red-200/80 mb-1">
+                              Failed recipients
+                            </p>
+                            <ul className="space-y-1">
+                              {failureRows.slice(0, 8).map((row, idx) => (
+                                <li key={`${row.to_email || row.company_name}-${idx}`}>
+                                  {row.company_name ? (
+                                    <strong className="text-red-100">{row.company_name}</strong>
+                                  ) : null}
+                                  {row.company_name && row.to_email ? " · " : null}
+                                  {row.to_email ? (
+                                    <span className="font-mono text-red-100/90">
+                                      {row.to_email}
+                                    </span>
+                                  ) : null}
+                                  {row.error ? (
+                                    <span className="text-slate-400"> — {row.error}</span>
+                                  ) : null}
+                                </li>
+                              ))}
+                            </ul>
+                            {failureRows.length > 8 ? (
+                              <p className="mt-1 text-slate-500">
+                                +{failureRows.length - 8} more
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : failedCount != null && failedCount > 0 ? (
+                          <p className="text-amber-200/80">
+                            {failedCount} address(es) failed in this campaign, but per-address
+                            detail was not stored for this older send. New bulk sends will list
+                            each failed email here.
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <>
+                        {(company || toEmail || mailboxEmail) && (
+                          <div className="mt-1 space-y-0.5 text-sm">
+                            {(company || toEmail) && (
+                              <p className="text-cyan-200/90">
+                                {company ? <strong>{company}</strong> : null}
+                                {company && toEmail ? " · " : null}
+                                {toEmail ? (
+                                  <span className="font-mono text-xs">{toEmail}</span>
+                                ) : null}
+                              </p>
+                            )}
+                            {mailboxEmail ? (
+                              <p className="text-xs text-slate-400">
+                                From:{" "}
+                                <span className="font-mono text-slate-300">{mailboxEmail}</span>
+                              </p>
+                            ) : null}
+                          </div>
+                        )}
+                        {subject ? (
+                          <p className="text-xs text-slate-300 mt-1 truncate" title={subject}>
+                            Subject: {subject}
+                          </p>
+                        ) : null}
+                      </>
                     )}
-                    {subject ? (
-                      <p className="text-xs text-slate-300 mt-1 truncate" title={subject}>
-                        Subject: {subject}
-                      </p>
+                    {!bulkCampaign ? (
+                      <p className="text-sm opacity-90 mt-1 whitespace-pre-wrap">{event.message}</p>
                     ) : null}
-                    <p className="text-sm opacity-90 mt-1 whitespace-pre-wrap">{event.message}</p>
                     <p className="text-xs opacity-60 mt-2">{formatWhen(event.created_at)}</p>
                   </div>
-                  {unread && (
+                  {unread && event.id > 0 && (
                     <button
                       type="button"
                       onClick={() => void markOneRead(event.id)}

@@ -112,8 +112,8 @@ EVENT_CATALOG: dict[str, dict[str, str]] = {
         "description": "All messages in a bulk batch finished (success and/or failure).",
     },
     "bulk_partial": {
-        "label": "Bulk send partial",
-        "description": "Some messages in a bulk batch sent; others failed or were skipped.",
+        "label": "Bulk campaign partial",
+        "description": "Bulk campaign finished with some sends successful and some failed. Includes From mailbox and failed recipients when available.",
     },
     "skipped_no_email": {
         "label": "Skipped — no email",
@@ -515,6 +515,12 @@ def list_events(
             return mode == mode_key
 
         filtered = [row for row in candidates if _matches(row)]
+
+        # Bulk Failed drill: expand campaign summaries into one row per failed recipient
+        # when details.failures includes addresses (new mailer payloads).
+        if event_key in {"failed", "send_failed"} and mode_key == "bulk":
+            filtered = _expand_bulk_failure_rows(filtered)
+
         total = len(filtered)
         start = (page - 1) * page_size
         rows = filtered[start : start + page_size]
@@ -542,6 +548,77 @@ def list_events(
         .all()
     )
     return rows, total, unread
+
+
+def _expand_bulk_failure_rows(
+    events: list[EmailActivityEvent],
+) -> list[EmailActivityEvent]:
+    """Turn bulk_partial summaries with failures[] into per-recipient failed rows."""
+    expanded: list[EmailActivityEvent] = []
+    for event in events:
+        details = event.details if isinstance(event.details, dict) else {}
+        failures = details.get("failures")
+        is_batch = event.event_type in ("bulk_partial", "bulk_completed") or (
+            event.event_type == "send_failed"
+            and (
+                "sent_count" in details
+                or "failed_count" in details
+                or "selected_count" in details
+            )
+        )
+        if not is_batch or not isinstance(failures, list) or not failures:
+            expanded.append(event)
+            continue
+
+        mailbox = details.get("mailbox_email")
+        subject = details.get("subject")
+        source = details.get("source") or details.get("mode") or "bulk"
+        made = 0
+        for idx, raw in enumerate(failures):
+            if not isinstance(raw, dict):
+                continue
+            to_email = (
+                (raw.get("to_email") or raw.get("email") or "").strip() or None
+            )
+            company = (raw.get("company_name") or "").strip() or None
+            error = (
+                (raw.get("error") or raw.get("send_message") or raw.get("message") or "")
+                .strip()
+                or "Send failed"
+            )
+            if not to_email and not company:
+                continue
+            label = company or to_email or "recipient"
+            synthetic = EmailActivityEvent(
+                event_type="send_failed",
+                severity="error",
+                title=f"Send failed — {label}",
+                message=error,
+                user_id=event.user_id,
+                buyer_id=raw.get("buyer_id") or event.buyer_id,
+                contact_id=event.contact_id,
+                interaction_id=event.interaction_id,
+                details={
+                    "send_mode": "bulk",
+                    "company_name": company,
+                    "to_email": to_email,
+                    "subject": subject,
+                    "mailbox_email": mailbox,
+                    "source": source,
+                    "parent_event_id": event.id,
+                    "batch_summary": False,
+                },
+                read_at=event.read_at or datetime.now(timezone.utc),
+                created_at=event.created_at,
+            )
+            # Unique negative id derived from parent + index.
+            parent_id = int(event.id or 0)
+            object.__setattr__(synthetic, "id", -(parent_id * 1000 + idx + 1))
+            expanded.append(synthetic)
+            made += 1
+        if made == 0:
+            expanded.append(event)
+    return expanded
 
 
 def mark_read(

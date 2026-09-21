@@ -210,6 +210,16 @@ export async function POST(req: NextRequest) {
         sent_count: sent,
         failed_count: failed,
         send_mode: "bulk",
+        subject: subject || undefined,
+        failures: results
+          .filter((r) => !r.ok)
+          .slice(0, 50)
+          .map((r) => ({
+            to_email: r.email,
+            company_name: leads.find((l) => l.buyer_id === r.buyer_id)?.company_name,
+            buyer_id: r.buyer_id,
+            error: r.message,
+          })),
       });
     }
     return NextResponse.json({ sent, failed, results });

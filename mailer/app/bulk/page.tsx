@@ -146,6 +146,12 @@ function BulkInner() {
     const batches = chunk(leads, Math.max(1, Math.min(15, batchSize)));
     let sentTotal = 0;
     let failTotal = 0;
+    const failures: Array<{
+      to_email: string;
+      company_name?: string;
+      buyer_id?: number;
+      error: string;
+    }> = [];
     const isBulk = leads.length > 1;
     pushLog(
       `Starting ${leads.length} emails in ${batches.length} batch(es) as ${preview?.mailbox_email}`,
@@ -219,6 +225,12 @@ function BulkInner() {
                 `FAIL  ${lead.contact_email}  Server returned non-JSON (${res.status}): ${raw.slice(0, 180)}`,
               );
               failTotal += 1;
+              failures.push({
+                to_email: lead.contact_email,
+                company_name: lead.company_name,
+                buyer_id: lead.buyer_id,
+                error: `Server returned non-JSON (${res.status})`,
+              });
               setProgress({
                 done: sentTotal + failTotal,
                 total: leads.length,
@@ -227,10 +239,15 @@ function BulkInner() {
               continue;
             }
             if (!res.ok || data.ok === false) {
-              pushLog(
-                `FAIL  ${lead.contact_email}  ${data.error || data.message || res.statusText}`,
-              );
+              const errMsg = data.error || data.message || res.statusText;
+              pushLog(`FAIL  ${lead.contact_email}  ${errMsg}`);
               failTotal += 1;
+              failures.push({
+                to_email: lead.contact_email,
+                company_name: lead.company_name,
+                buyer_id: lead.buyer_id,
+                error: String(errMsg),
+              });
             } else {
               pushLog(`OK  ${lead.contact_email}`);
               sentTotal += 1;
@@ -241,10 +258,15 @@ function BulkInner() {
               current: "",
             });
           } catch (e) {
-            pushLog(
-              `FAIL  ${lead.contact_email}  ${e instanceof Error ? e.message : String(e)}`,
-            );
+            const errMsg = e instanceof Error ? e.message : String(e);
+            pushLog(`FAIL  ${lead.contact_email}  ${errMsg}`);
             failTotal += 1;
+            failures.push({
+              to_email: lead.contact_email,
+              company_name: lead.company_name,
+              buyer_id: lead.buyer_id,
+              error: errMsg,
+            });
             setProgress({
               done: sentTotal + failTotal,
               total: leads.length,
@@ -272,6 +294,8 @@ function BulkInner() {
         sent_count: sentTotal,
         failed_count: failTotal,
         send_mode: "bulk",
+        subject: subject || undefined,
+        failures: failures.slice(0, 50),
       });
     }
 
