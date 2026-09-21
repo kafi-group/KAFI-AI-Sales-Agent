@@ -8,7 +8,7 @@ from typing import Any
 
 from config import settings
 
-_FOURTH_RING_SECONDS = 24  # ~6s per ring × 4 rings (12s was cutting AI dials before pickup)
+_FOURTH_RING_SECONDS = 16  # ~4s per ring × 4 rings; then auto-redial once for another 16s
 _MAX_RING_ATTEMPTS = 2  # hang up ~4 rings, auto-redial once → ~8 rings, no voicemail
 # Carrier still setting up the call — never hang up solely because of these.
 _PRE_RING_STATUSES = {
