@@ -3082,9 +3082,24 @@ export const client = {
     const query = search.toString();
     return request<InboxThreadListResponse>(`/inbox/threads${query ? `?${query}` : ""}`);
   },
-  getHelpfulGuidance: (params: { months?: number; user_id?: number | string } = {}) => {
+  getHelpfulGuidance: (params: {
+    months?: number;
+    days?: number | null;
+    date_from?: string;
+    date_to?: string;
+    channel?: "calls" | "emails" | "whatsapp" | "telegram" | string;
+    user_id?: number | string;
+  } = {}) => {
     const search = new URLSearchParams();
-    if (params.months) search.set("months", String(params.months));
+    if (params.date_from || params.date_to) {
+      if (params.date_from) search.set("date_from", params.date_from);
+      if (params.date_to) search.set("date_to", params.date_to);
+    } else if (params.days != null && params.days > 0) {
+      search.set("days", String(params.days));
+    } else if (params.months) {
+      search.set("months", String(params.months));
+    }
+    if (params.channel) search.set("channel", params.channel);
     if (params.user_id != null) search.set("user_id", String(params.user_id));
     const query = search.toString();
     return request<Record<string, unknown>>(`/guidance/helpful${query ? `?${query}` : ""}`);

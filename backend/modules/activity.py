@@ -501,6 +501,71 @@ def _activity_dict(
     }
 
 
+def get_kpi_counts_for_range(
+    db: Session,
+    *,
+    start_utc: datetime,
+    end_utc: datetime,
+    viewer: AppUser,
+    user_id: int | None = None,
+) -> dict[str, int]:
+    """Sum KPI count buckets for an arbitrary UTC window (one user or team)."""
+    role = viewer.role.value if isinstance(viewer.role, AppUserRole) else str(viewer.role)
+    is_admin = role == AppUserRole.admin.value
+
+    target_user_id = user_id
+    if not is_admin:
+        target_user_id = viewer.id
+    elif user_id is not None:
+        target = db.get(AppUser, user_id)
+        if not target:
+            raise ValueError("User not found")
+
+    query = db.query(UserActivityEvent).filter(
+        UserActivityEvent.created_at >= start_utc,
+        UserActivityEvent.created_at < end_utc,
+    )
+    if target_user_id is not None:
+        query = query.filter(UserActivityEvent.user_id == target_user_id)
+
+    events = query.all()
+    email_by_user = _email_send_counts_by_user(
+        db,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        user_id=target_user_id,
+    )
+    wa_by_user = _whatsapp_send_counts_by_user(
+        db,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        user_id=target_user_id,
+    )
+
+    counts = _empty_counts()
+    target_companies: set[str] = set()
+    for event in events:
+        _bump_counts(counts, event, target_companies)
+    counts["companies_called"] = len(target_companies)
+
+    if target_user_id is not None:
+        _apply_email_activity_counts(counts, email_by_user.get(target_user_id))
+        _apply_whatsapp_activity_counts(counts, wa_by_user.get(target_user_id))
+    else:
+        email_totals = _empty_email_bucket()
+        for bucket in email_by_user.values():
+            for key in email_totals:
+                email_totals[key] += int(bucket.get(key) or 0)
+        _apply_email_activity_counts(counts, email_totals)
+        wa_totals = {"personal_whatsapp_sent": 0, "bulk_whatsapp_sent": 0}
+        for bucket in wa_by_user.values():
+            wa_totals["personal_whatsapp_sent"] += int(bucket.get("personal_whatsapp_sent") or 0)
+            wa_totals["bulk_whatsapp_sent"] += int(bucket.get("bulk_whatsapp_sent") or 0)
+        _apply_whatsapp_activity_counts(counts, wa_totals)
+
+    return counts
+
+
 def get_kpi_report(
     db: Session,
     *,

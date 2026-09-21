@@ -1,17 +1,21 @@
-"""Helpful Guidance — coaching report from client history, KPI, and call patterns."""
+"""Helpful Guidance — coaching report from client history, KPI, and channel activity."""
 
 from __future__ import annotations
 
 import re
 from collections import Counter
-from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from datetime import date, datetime, time, timedelta, timezone
+from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
 from db.models import AppUser, AppUserRole, Buyer
-from modules.activity import get_kpi_report
+from modules.activity import get_kpi_counts_for_range, get_kpi_report
 
+KPI_TZ = ZoneInfo("Asia/Karachi")
+
+GuidanceChannel = Literal["calls", "emails", "whatsapp", "telegram"]
 
 _REMARK_PATTERNS: list[tuple[str, str]] = [
     (r"not pick|no answer|did not receive|didn't pick|unanswered", "no_answer"),
@@ -25,6 +29,95 @@ _REMARK_PATTERNS: list[tuple[str, str]] = [
 
 def _normalize_period_months(months: int) -> int:
     return max(1, min(months, 12))
+
+
+def _normalize_channel(channel: str | None) -> GuidanceChannel:
+    key = (channel or "calls").strip().lower()
+    if key in {"email", "emails"}:
+        return "emails"
+    if key in {"whatsapp", "wa", "meta", "whatsapp_meta"}:
+        return "whatsapp"
+    if key in {"telegram", "tg"}:
+        return "telegram"
+    return "calls"
+
+
+def _parse_day(value: str | None, *, end_of_day: bool) -> datetime | None:
+    if not value:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        day = date.fromisoformat(raw[:10])
+    except ValueError as exc:
+        raise ValueError(f"Invalid date '{value}'. Use YYYY-MM-DD.") from exc
+    local = datetime.combine(
+        day,
+        time(23, 59, 59, 999999) if end_of_day else time.min,
+        tzinfo=KPI_TZ,
+    )
+    return local.astimezone(timezone.utc)
+
+
+def resolve_guidance_window(
+    *,
+    days: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    months: int | None = None,
+) -> dict[str, Any]:
+    """Resolve coaching window. Prefer custom range, then rolling days, else months."""
+    if date_from or date_to:
+        start = _parse_day(date_from, end_of_day=False)
+        end = _parse_day(date_to, end_of_day=True)
+        if start and end and end < start:
+            raise ValueError("date_to must be on or after date_from")
+        if start is None and end is not None:
+            start = end - timedelta(days=29)
+            start = datetime.combine(start.date(), time.min, tzinfo=KPI_TZ).astimezone(
+                timezone.utc
+            )
+        if end is None and start is not None:
+            end = datetime.now(timezone.utc)
+        assert start is not None and end is not None
+        span_days = max(1, (end.date() - start.astimezone(KPI_TZ).date()).days + 1)
+        return {
+            "mode": "range",
+            "days": span_days,
+            "months": None,
+            "since": start,
+            "until": end,
+            "period_label": (
+                f"{start.astimezone(KPI_TZ).date().isoformat()} → "
+                f"{end.astimezone(KPI_TZ).date().isoformat()}"
+            ),
+        }
+
+    if days is not None and int(days) > 0:
+        d = max(1, min(int(days), 3650))
+        until = datetime.now(timezone.utc)
+        since = until - timedelta(days=d)
+        label = "Today" if d == 1 else f"Last {d} days"
+        return {
+            "mode": "days",
+            "days": d,
+            "months": None,
+            "since": since,
+            "until": until,
+            "period_label": label,
+        }
+
+    # Legacy calendar-month rollup (kept for older clients).
+    m = _normalize_period_months(int(months or 3))
+    return {
+        "mode": "months",
+        "days": None,
+        "months": m,
+        "since": None,
+        "until": None,
+        "period_label": f"Last {m} month{'s' if m != 1 else ''}",
+    }
 
 
 def _scan_remark_patterns(db: Session, *, assigned_to_user_id: int | None) -> dict[str, Any]:
@@ -83,7 +176,7 @@ def _monthly_kpi_rollups(
     return rollups
 
 
-def _build_recommendations(
+def _build_call_recommendations(
     pattern_counts: dict[str, int],
     kpi_totals: dict[str, int],
 ) -> list[dict[str, str]]:
@@ -153,114 +246,278 @@ def _build_recommendations(
     return recs
 
 
-def generate_helpful_guidance(
-    db: Session,
-    *,
-    viewer: AppUser,
-    months: int = 3,
-    user_id: Any = None,
-) -> dict[str, Any]:
-    """Build a coaching report for the viewer, selected user, or AI Sales Agent (Sara/Rayan)."""
-    raw_user_str = str(user_id or "").lower()
-    is_agent_view = any(k in raw_user_str for k in ("agent", "sara", "rayan"))
+def _build_email_recommendations(stats: dict[str, Any]) -> list[dict[str, str]]:
+    totals = stats.get("totals") or {}
+    individual = stats.get("individual") or {}
+    bulk = stats.get("bulk") or {}
+    sent = int(totals.get("sent") or 0)
+    failed = int(totals.get("failed") or 0)
+    opened = int(totals.get("opened") or 0)
+    replied = int(totals.get("replied") or 0)
+    open_rate = float(totals.get("open_rate_pct") or 0)
+    reply_rate = float(totals.get("reply_rate_pct") or 0)
+    recs: list[dict[str, str]] = []
 
-    if is_agent_view:
-        agent_name = "Sara" if "sara" in raw_user_str else ("Rayan" if "rayan" in raw_user_str else "AI Sales Agents (Sara & Rayan)")
-        from db.models import Interaction, Channel, HandledBy
-        
-        total_calls, interested_cnt, followup_cnt, no_ans_cnt = 0, 0, 0, 0
-        try:
-            query = db.query(Interaction).filter(Interaction.channel == Channel.phone)
-            if "sara" in raw_user_str:
-                query = query.filter(Interaction.subject.ilike("%sara%"))
-            elif "rayan" in raw_user_str:
-                query = query.filter(Interaction.subject.ilike("%rayan%"))
-            else:
-                query = query.filter(Interaction.handled_by == HandledBy.agent)
-            
-            ai_calls = query.all()
-            total_calls = len(ai_calls)
-            interested_cnt = sum(1 for c in ai_calls if "interested" in (c.subject or "").lower() or "interested" in (c.content or "").lower())
-            followup_cnt = sum(1 for c in ai_calls if "follow" in (c.subject or "").lower() or "catalogue" in (c.content or "").lower())
-            no_ans_cnt = max(0, total_calls - interested_cnt - followup_cnt)
-        except Exception as e:
-            print(f"Error querying AI calls for guidance: {e}", flush=True)
+    if sent == 0:
+        return [
+            {
+                "title": "No email sends in this window",
+                "body": (
+                    "Use Mail compose for hot leads and Bulk Email Sender / Vercel mailer for nurture lists. "
+                    "Track results under Email Activity."
+                ),
+            }
+        ]
 
-        kpi_totals = {
-            "calls_logged": max(total_calls, 12),
-            "outcomes_interested": max(interested_cnt, 3),
-            "outcomes_follow_up": max(followup_cnt, 4),
-            "outcomes_not_received_call": max(no_ans_cnt, 5),
+    if failed / max(sent + failed, 1) >= 0.1:
+        recs.append(
+            {
+                "title": "Send failures are high",
+                "body": (
+                    "Check mailbox auth, invalid addresses, and bulk failure lists in Email Activity. "
+                    "Clean bounced/invalid contacts before the next campaign."
+                ),
+            }
+        )
+
+    if sent >= 10 and open_rate < 20:
+        recs.append(
+            {
+                "title": "Low open rate",
+                "body": (
+                    "Tighten subject lines (product + country + Halal/ISO when relevant). "
+                    "Prefer individual mail for HOT / AAAA leads; keep bulk for cold nurture."
+                ),
+            }
+        )
+
+    if opened >= 5 and reply_rate < 5:
+        recs.append(
+            {
+                "title": "Opens without replies",
+                "body": (
+                    "Follow up 3–5 days after an open with a short ask (MOQ, destination port, product interest). "
+                    "Offer a one-page catalogue or quotation PDF."
+                ),
+            }
+        )
+
+    if int(bulk.get("sent") or 0) > int(individual.get("sent") or 0) * 3 and replied == 0:
+        recs.append(
+            {
+                "title": "Bulk-heavy mix",
+                "body": (
+                    "Bulk drives volume but few replies. Carve out daily personal emails to top scored leads "
+                    "and reference their product fit from the buyer profile."
+                ),
+            }
+        )
+
+    if not recs:
+        recs.append(
+            {
+                "title": "Email cadence looks healthy",
+                "body": (
+                    "Keep pairing opens with timely follow-ups, and review Email Activity Replies after each campaign."
+                ),
+            }
+        )
+    return recs
+
+
+def _build_whatsapp_recommendations(stats: dict[str, Any]) -> list[dict[str, str]]:
+    totals = stats.get("totals") or {}
+    sent = int(totals.get("sent") or 0)
+    failed = int(totals.get("failed") or 0)
+    recs: list[dict[str, str]] = []
+
+    if sent == 0:
+        return [
+            {
+                "title": "No WhatsApp Meta sends in this window",
+                "body": (
+                    "Use approved Cloud API templates for cold outreach outside the 24h window, "
+                    "and free-text replies inside the customer-service window."
+                ),
+            }
+        ]
+
+    if failed / max(sent + failed, 1) >= 0.1:
+        recs.append(
+            {
+                "title": "WhatsApp delivery failures",
+                "body": (
+                    "Check invalid numbers, template rejections, and Meta quality rating. "
+                    "Fix wa_id / E.164 formatting before retrying bulk templates."
+                ),
+            }
+        )
+
+    recs.append(
+        {
+            "title": "Warm before you dial",
+            "body": (
+                "Send a short Meta template 10–30 minutes before cold calls to lift pickup rates. "
+                "Log outcomes so Sales Help Manager can compare WhatsApp → call conversion."
+            ),
         }
+    )
+    recs.append(
+        {
+            "title": "Use the 24h window",
+            "body": (
+                "When a buyer replies on WhatsApp, answer quickly with catalogue links and CNF/FOB options "
+                "while free-form messages are still allowed."
+            ),
+        }
+    )
+    return recs
 
-        strengths = [
+
+def _agent_guidance(db: Session, *, user_id: Any, months: int, window: dict[str, Any], channel: GuidanceChannel) -> dict[str, Any]:
+    raw_user_str = str(user_id or "").lower()
+    agent_name = (
+        "Sara"
+        if "sara" in raw_user_str
+        else ("Rayan" if "rayan" in raw_user_str else "AI Sales Agents (Sara & Rayan)")
+    )
+    from db.models import Interaction, Channel, HandledBy
+
+    total_calls, interested_cnt, followup_cnt, no_ans_cnt = 0, 0, 0, 0
+    try:
+        query = db.query(Interaction).filter(Interaction.channel == Channel.phone)
+        if "sara" in raw_user_str:
+            query = query.filter(Interaction.subject.ilike("%sara%"))
+        elif "rayan" in raw_user_str:
+            query = query.filter(Interaction.subject.ilike("%rayan%"))
+        else:
+            query = query.filter(Interaction.handled_by == HandledBy.agent)
+        since = window.get("since")
+        until = window.get("until")
+        if since is not None:
+            query = query.filter(Interaction.created_at >= since)
+        if until is not None:
+            query = query.filter(Interaction.created_at <= until)
+        ai_calls = query.all()
+        total_calls = len(ai_calls)
+        interested_cnt = sum(
+            1
+            for c in ai_calls
+            if "interested" in (c.subject or "").lower() or "interested" in (c.content or "").lower()
+        )
+        followup_cnt = sum(
+            1
+            for c in ai_calls
+            if "follow" in (c.subject or "").lower() or "catalogue" in (c.content or "").lower()
+        )
+        no_ans_cnt = max(0, total_calls - interested_cnt - followup_cnt)
+    except Exception as e:  # noqa: BLE001
+        print(f"Error querying AI calls for guidance: {e}", flush=True)
+
+    kpi_totals = {
+        "calls_logged": total_calls,
+        "outcomes_interested": interested_cnt,
+        "outcomes_follow_up": followup_cnt,
+        "outcomes_not_received_call": no_ans_cnt,
+    }
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "channel": channel,
+        "months": window.get("months"),
+        "days": window.get("days"),
+        "period_label": window.get("period_label"),
+        "since": window["since"].isoformat() if window.get("since") else None,
+        "until": window["until"].isoformat() if window.get("until") else None,
+        "user_id": user_id,
+        "is_team_view": False,
+        "is_agent_view": True,
+        "agent_name": agent_name,
+        "connected": True,
+        "kpi_by_month": [],
+        "kpi_totals": kpi_totals,
+        "metric_tiles": [
+            {"label": "Calls logged", "value": kpi_totals["calls_logged"]},
+            {"label": "Interested", "value": kpi_totals["outcomes_interested"]},
+            {"label": "Follow up", "value": kpi_totals["outcomes_follow_up"]},
+            {"label": "No answer", "value": kpi_totals["outcomes_not_received_call"]},
+        ],
+        "remark_patterns": {"scanned_remarks": total_calls, "pattern_counts": {}, "samples": {}},
+        "strengths": [
             f"{agent_name} introduces Kafi Commodities cleanly and offers WhatsApp & Email catalogue delivery.",
             f"{agent_name} never repeats customer names unnecessarily and maintains natural spoken voice.",
             "Zero manual rep fatigue — handles automated calling queue efficiently with instant DB logging.",
-        ]
-
-        gaps = [
+        ],
+        "gaps": [
             f"{agent_name} needs continuous objection handling tuning for volume discounts (100+ MT).",
             "High no-answer rate on cold calling batches — try warming up leads via WhatsApp template before queuing AI calls.",
             "Ensure custom sales rules in AI dashboard are updated with exact target CNF port pricing.",
-        ]
-
-        recommendations = [
+        ],
+        "recommendations": [
             {
                 "title": f"Train {agent_name} from Call History",
-                "body": f"Click 'Auto-Train from Call History' on the AI Sales Agent page so Gemini AI continuously learns winning objection responses for {agent_name}.",
+                "body": (
+                    f"Click 'Auto-Train from Call History' on the AI Sales Agent page so Gemini AI "
+                    f"continuously learns winning objection responses for {agent_name}."
+                ),
             },
             {
                 "title": "Add Executive Custom Rules",
-                "body": "Type specific company pricing rules (e.g. 'Always offer CNF Karachi port quotes first') in the Custom Sales Rules editor on the AI Sales Agent page.",
+                "body": (
+                    "Type specific company pricing rules (e.g. 'Always offer CNF Karachi port quotes first') "
+                    "in the Custom Sales Rules editor on the AI Sales Agent page."
+                ),
             },
             {
                 "title": "Warm Up Cold Leads Before Dialing",
-                "body": "Send a short WhatsApp template or email introduction 10 minutes before queuing calls to Sara/Rayan to boost pickup rates.",
+                "body": (
+                    "Send a short WhatsApp template or email introduction 10 minutes before queuing "
+                    "calls to Sara/Rayan to boost pickup rates."
+                ),
             },
-        ]
+        ],
+        "approach_buyers": [
+            f"Queue high-intent leads to {agent_name} from Master Table or Old clients.",
+            f"{agent_name} will verify buyer identity ('Am I speaking with [Name]?') on pickup.",
+            f"Offer catalogue and price list over WhatsApp & Email without asking for contact info.",
+        ],
+        "save_phone_bill": [
+            "Queue calls during local business hours (10 AM - 4 PM buyer time).",
+            "Skip wrong numbers and unverified contact phones.",
+        ],
+    }
 
-        return {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "months": months,
-            "user_id": user_id,
-            "is_team_view": False,
-            "is_agent_view": True,
-            "agent_name": agent_name,
-            "kpi_by_month": [],
-            "kpi_totals": kpi_totals,
-            "remark_patterns": {"scanned_remarks": total_calls, "pattern_counts": {}, "samples": {}},
-            "strengths": strengths,
-            "gaps": gaps,
-            "recommendations": recommendations,
-            "approach_buyers": [
-                f"Queue high-intent leads to {agent_name} from Master Table or Old clients.",
-                f"{agent_name} will verify buyer identity ('Am I speaking with [Name]?') on pickup.",
-                f"Offer catalogue and price list over WhatsApp & Email without asking for contact info.",
-            ],
-            "save_phone_bill": [
-                "Queue calls during local business hours (10 AM - 4 PM buyer time).",
-                "Skip wrong numbers and unverified contact phones.",
-            ],
-        }
 
-    role = viewer.role.value if isinstance(viewer.role, AppUserRole) else str(viewer.role)
-    is_admin = role == AppUserRole.admin.value
-    target_user_id = viewer.id if not is_admin else (int(user_id) if str(user_id or "").isdigit() else None)
-
-    months = _normalize_period_months(months)
+def _calls_guidance(
+    db: Session,
+    *,
+    viewer: AppUser,
+    target_user_id: int | None,
+    is_team_view: bool,
+    window: dict[str, Any],
+) -> dict[str, Any]:
     remark_scan = _scan_remark_patterns(db, assigned_to_user_id=target_user_id)
+    kpi_by_month: list[dict[str, Any]] = []
+    if window["mode"] == "months":
+        months = int(window["months"] or 3)
+        kpi_by_month = _monthly_kpi_rollups(
+            db, viewer=viewer, target_user_id=target_user_id, months=months
+        )
+        kpi_totals: dict[str, int] = {}
+        for row in kpi_by_month:
+            for key, val in (row.get("counts") or {}).items():
+                if isinstance(val, int):
+                    kpi_totals[key] = kpi_totals.get(key, 0) + val
+    else:
+        kpi_totals = get_kpi_counts_for_range(
+            db,
+            start_utc=window["since"],
+            end_utc=window["until"] + timedelta(microseconds=1),
+            viewer=viewer,
+            user_id=target_user_id,
+        )
 
-    kpi_months = _monthly_kpi_rollups(
-        db, viewer=viewer, target_user_id=target_user_id, months=months
-    )
-    kpi_totals: dict[str, int] = {}
-    for row in kpi_months:
-        for key, val in (row.get("counts") or {}).items():
-            if isinstance(val, int):
-                kpi_totals[key] = kpi_totals.get(key, 0) + val
-
-    recommendations = _build_recommendations(
+    recommendations = _build_call_recommendations(
         remark_scan.get("pattern_counts") or {},
         kpi_totals,
     )
@@ -284,11 +541,24 @@ def generate_helpful_guidance(
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "months": months,
+        "channel": "calls",
+        "months": window.get("months"),
+        "days": window.get("days"),
+        "period_label": window.get("period_label"),
+        "since": window["since"].isoformat() if window.get("since") else None,
+        "until": window["until"].isoformat() if window.get("until") else None,
         "user_id": target_user_id,
-        "is_team_view": is_admin and user_id is None,
-        "kpi_by_month": kpi_months,
+        "is_team_view": is_team_view,
+        "is_agent_view": False,
+        "connected": True,
+        "kpi_by_month": kpi_by_month,
         "kpi_totals": kpi_totals,
+        "metric_tiles": [
+            {"label": "Calls logged", "value": int(kpi_totals.get("calls_logged") or 0)},
+            {"label": "Interested", "value": int(kpi_totals.get("outcomes_interested") or 0)},
+            {"label": "Follow up", "value": int(kpi_totals.get("outcomes_follow_up") or 0)},
+            {"label": "No answer", "value": int(kpi_totals.get("outcomes_not_received_call") or 0)},
+        ],
         "remark_patterns": remark_scan,
         "strengths": strengths or ["Building history — keep logging every touchpoint."],
         "gaps": gaps or ["No major gaps detected from remark patterns yet."],
@@ -307,3 +577,297 @@ def generate_helpful_guidance(
             "Remove wrong numbers via Full clean / dedupe on Old clients.",
         ],
     }
+
+
+def _emails_guidance(
+    db: Session,
+    *,
+    viewer: AppUser,
+    target_user_id: int | None,
+    is_team_view: bool,
+    window: dict[str, Any],
+) -> dict[str, Any]:
+    from modules import email_activity
+
+    role = viewer.role.value if isinstance(viewer.role, AppUserRole) else str(viewer.role)
+    is_admin = role == AppUserRole.admin.value
+    days = window.get("days")
+    date_from = None
+    date_to = None
+    if window["mode"] == "range" and window.get("since") and window.get("until"):
+        date_from = window["since"].astimezone(KPI_TZ).date().isoformat()
+        date_to = window["until"].astimezone(KPI_TZ).date().isoformat()
+        days = None
+    elif window["mode"] == "months":
+        days = int(window["months"] or 3) * 30
+
+    stats = email_activity.insights_stats(
+        db,
+        days=days,
+        date_from=date_from,
+        date_to=date_to,
+        user_id=viewer.id if not is_admin else target_user_id,
+        is_admin=is_admin and target_user_id is None,
+        channel="email",
+        sync_user=viewer if target_user_id in (None, viewer.id) else None,
+    )
+    totals = stats.get("totals") or {}
+    tiles = [
+        {"label": "Sent", "value": int(totals.get("sent") or 0)},
+        {"label": "Failed", "value": int(totals.get("failed") or 0)},
+        {"label": "Opened", "value": int(totals.get("opened") or 0)},
+        {"label": "Replies", "value": int(totals.get("replied") or 0)},
+    ]
+    strengths: list[str] = []
+    gaps: list[str] = []
+    if int(totals.get("sent") or 0) > 0:
+        strengths.append(
+            f"Sent {int(totals.get('sent') or 0)} emails "
+            f"({float(totals.get('success_rate_pct') or 0)}% delivery success)."
+        )
+    if float(totals.get("open_rate_pct") or 0) >= 25:
+        strengths.append(f"Open rate {float(totals.get('open_rate_pct') or 0)}% — subjects are landing.")
+    if int(totals.get("replied") or 0) > 0:
+        strengths.append("Recipients are replying — prioritize those threads in Inbox.")
+    if float(totals.get("open_rate_pct") or 0) < 15 and int(totals.get("sent") or 0) >= 10:
+        gaps.append("Open rate is low — test shorter, product-led subjects.")
+    if int(totals.get("failed") or 0) > 0:
+        gaps.append("Failed sends present — review Email Activity Failed lists.")
+    if int(totals.get("opened") or 0) > 0 and int(totals.get("replied") or 0) == 0:
+        gaps.append("Opens without replies — schedule follow-ups on opened leads.")
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "channel": "emails",
+        "months": window.get("months"),
+        "days": window.get("days"),
+        "period_label": window.get("period_label"),
+        "since": window["since"].isoformat() if window.get("since") else None,
+        "until": window["until"].isoformat() if window.get("until") else None,
+        "user_id": target_user_id,
+        "is_team_view": is_team_view,
+        "is_agent_view": False,
+        "connected": True,
+        "kpi_by_month": [],
+        "kpi_totals": {
+            "emails_sent": int(totals.get("sent") or 0),
+            "emails_failed": int(totals.get("failed") or 0),
+            "emails_opened": int(totals.get("opened") or 0),
+            "emails_replied": int(totals.get("replied") or 0),
+            "email_open_rate_pct": float(totals.get("open_rate_pct") or 0),
+            "email_reply_rate_pct": float(totals.get("reply_rate_pct") or 0),
+        },
+        "metric_tiles": tiles,
+        "insights": stats,
+        "remark_patterns": {"scanned_remarks": 0, "pattern_counts": {}, "samples": {}},
+        "strengths": strengths or ["Start sending to build email coaching history."],
+        "gaps": gaps or ["No major email gaps detected in this window."],
+        "recommendations": _build_email_recommendations(stats),
+        "approach_buyers": [
+            "Personalize individual emails for HOT / AAAA leads with product fit from the buyer profile.",
+            "Lead with certifications (Halal, ISO, HACCP) and clear next step (quote / samples / MOQ).",
+            "Use Email Activity → Replies to queue Inbox follow-ups the same day.",
+        ],
+        "save_phone_bill": [
+            "Email or WhatsApp first for cold numbers that keep going to voicemail.",
+            "Reserve calls for opens/replies and Valid to call now slots.",
+        ],
+    }
+
+
+def _whatsapp_guidance(
+    db: Session,
+    *,
+    viewer: AppUser,
+    target_user_id: int | None,
+    is_team_view: bool,
+    window: dict[str, Any],
+) -> dict[str, Any]:
+    from modules import email_activity
+
+    role = viewer.role.value if isinstance(viewer.role, AppUserRole) else str(viewer.role)
+    is_admin = role == AppUserRole.admin.value
+    days = window.get("days")
+    date_from = None
+    date_to = None
+    if window["mode"] == "range" and window.get("since") and window.get("until"):
+        date_from = window["since"].astimezone(KPI_TZ).date().isoformat()
+        date_to = window["until"].astimezone(KPI_TZ).date().isoformat()
+        days = None
+    elif window["mode"] == "months":
+        days = int(window["months"] or 3) * 30
+
+    stats = email_activity.insights_stats(
+        db,
+        days=days,
+        date_from=date_from,
+        date_to=date_to,
+        user_id=viewer.id if not is_admin else target_user_id,
+        is_admin=is_admin and target_user_id is None,
+        channel="whatsapp",
+    )
+    totals = stats.get("totals") or {}
+    tiles = [
+        {"label": "Sent", "value": int(totals.get("sent") or 0)},
+        {"label": "Failed", "value": int(totals.get("failed") or 0)},
+        {"label": "Batches", "value": int((stats.get("bulk") or {}).get("batches") or 0)},
+        {
+            "label": "Success rate",
+            "value": f"{float(totals.get('success_rate_pct') or 0)}%",
+        },
+    ]
+    strengths: list[str] = []
+    gaps: list[str] = []
+    if int(totals.get("sent") or 0) > 0:
+        strengths.append(f"Meta WhatsApp sends recorded: {int(totals.get('sent') or 0)}.")
+    if float(totals.get("success_rate_pct") or 0) >= 90:
+        strengths.append("High delivery success on WhatsApp Cloud API.")
+    if int(totals.get("failed") or 0) > 0:
+        gaps.append("Failed WhatsApp deliveries — check template status and number format.")
+    if int(totals.get("sent") or 0) == 0:
+        gaps.append("No WhatsApp Meta activity in this window.")
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "channel": "whatsapp",
+        "months": window.get("months"),
+        "days": window.get("days"),
+        "period_label": window.get("period_label"),
+        "since": window["since"].isoformat() if window.get("since") else None,
+        "until": window["until"].isoformat() if window.get("until") else None,
+        "user_id": target_user_id,
+        "is_team_view": is_team_view,
+        "is_agent_view": False,
+        "connected": True,
+        "kpi_by_month": [],
+        "kpi_totals": {
+            "whatsapp_sent": int(totals.get("sent") or 0),
+            "whatsapp_failed": int(totals.get("failed") or 0),
+            "whatsapp_success_rate_pct": float(totals.get("success_rate_pct") or 0),
+        },
+        "metric_tiles": tiles,
+        "insights": stats,
+        "remark_patterns": {"scanned_remarks": 0, "pattern_counts": {}, "samples": {}},
+        "strengths": strengths or ["Connect Meta templates and start outreach to build history."],
+        "gaps": gaps or ["No major WhatsApp gaps detected in this window."],
+        "recommendations": _build_whatsapp_recommendations(stats),
+        "approach_buyers": [
+            "Use approved templates for first touch; switch to free-text after the buyer replies.",
+            "Warm leads on WhatsApp before queuing AI or human cold calls.",
+            "Keep catalogue / CNF answers ready for the 24h service window.",
+        ],
+        "save_phone_bill": [
+            "WhatsApp first for numbers that repeatedly go to voicemail.",
+            "Only dial after a Meta reply or Valid to call now window.",
+        ],
+    }
+
+
+def _telegram_guidance(*, window: dict[str, Any], target_user_id: int | None, is_team_view: bool) -> dict[str, Any]:
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "channel": "telegram",
+        "months": window.get("months"),
+        "days": window.get("days"),
+        "period_label": window.get("period_label"),
+        "since": window["since"].isoformat() if window.get("since") else None,
+        "until": window["until"].isoformat() if window.get("until") else None,
+        "user_id": target_user_id,
+        "is_team_view": is_team_view,
+        "is_agent_view": False,
+        "connected": False,
+        "kpi_by_month": [],
+        "kpi_totals": {},
+        "metric_tiles": [
+            {"label": "Sent", "value": 0},
+            {"label": "Failed", "value": 0},
+            {"label": "Replies", "value": 0},
+            {"label": "Status", "value": "Not connected"},
+        ],
+        "remark_patterns": {"scanned_remarks": 0, "pattern_counts": {}, "samples": {}},
+        "strengths": [],
+        "gaps": ["Telegram personal bridge is not fully connected for coaching yet."],
+        "recommendations": [
+            {
+                "title": "Telegram coaching coming next",
+                "body": (
+                    "Once Telegram replies are wired like WhatsApp Meta activity, this tab will show "
+                    "sent / failed / reply coaching for the selected period."
+                ),
+            }
+        ],
+        "approach_buyers": [
+            "Use WhatsApp Meta or email for outreach until Telegram reply tracking is live.",
+        ],
+        "save_phone_bill": [
+            "Prefer message channels before cold dialing abroad.",
+        ],
+    }
+
+
+def generate_helpful_guidance(
+    db: Session,
+    *,
+    viewer: AppUser,
+    months: int = 3,
+    user_id: Any = None,
+    channel: str | None = "calls",
+    days: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, Any]:
+    """Build a coaching report for calls, emails, WhatsApp Meta, or Telegram."""
+    ch = _normalize_channel(channel)
+    window = resolve_guidance_window(
+        days=days,
+        date_from=date_from,
+        date_to=date_to,
+        months=months if days is None and not date_from and not date_to else None,
+    )
+
+    raw_user_str = str(user_id or "").lower()
+    is_agent_view = any(k in raw_user_str for k in ("agent", "sara", "rayan"))
+    if is_agent_view:
+        return _agent_guidance(
+            db,
+            user_id=user_id,
+            months=int(window.get("months") or months or 3),
+            window=window,
+            channel=ch,
+        )
+
+    role = viewer.role.value if isinstance(viewer.role, AppUserRole) else str(viewer.role)
+    is_admin = role == AppUserRole.admin.value
+    target_user_id = viewer.id if not is_admin else (int(user_id) if str(user_id or "").isdigit() else None)
+    is_team_view = bool(is_admin and user_id is None)
+
+    if ch == "emails":
+        return _emails_guidance(
+            db,
+            viewer=viewer,
+            target_user_id=target_user_id,
+            is_team_view=is_team_view,
+            window=window,
+        )
+    if ch == "whatsapp":
+        return _whatsapp_guidance(
+            db,
+            viewer=viewer,
+            target_user_id=target_user_id,
+            is_team_view=is_team_view,
+            window=window,
+        )
+    if ch == "telegram":
+        return _telegram_guidance(
+            window=window,
+            target_user_id=target_user_id,
+            is_team_view=is_team_view,
+        )
+
+    return _calls_guidance(
+        db,
+        viewer=viewer,
+        target_user_id=target_user_id,
+        is_team_view=is_team_view,
+        window=window,
+    )
