@@ -8,6 +8,7 @@ import hmac
 import html
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -455,6 +456,8 @@ def record_open(
     send_mode: str = "individual",
 ) -> dict[str, Any]:
     """Record a first-open engagement event for an outbound email interaction."""
+    from datetime import timedelta
+
     from db.models import Buyer, EmailActivityEvent
     from modules import email_activity
 
@@ -462,6 +465,22 @@ def record_open(
     if not interaction:
         logger.info("Open ignored: unknown interaction_id=%s", interaction_id)
         return {"status": "ignored", "reason": "unknown_interaction"}
+
+    # Gmail (and some hosts) prefetch tracking pixels shortly after delivery via
+    # an image proxy — that fires before a human opens. Ignore very early hits.
+    OPEN_PREFETCH_GRACE_SECONDS = 90
+    sent_at = interaction.created_at
+    if sent_at is not None:
+        if sent_at.tzinfo is None:
+            sent_at = sent_at.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - sent_at
+        if age < timedelta(seconds=OPEN_PREFETCH_GRACE_SECONDS):
+            logger.info(
+                "Open ignored (prefetch grace): interaction_id=%s age_s=%.1f",
+                interaction_id,
+                age.total_seconds(),
+            )
+            return {"status": "ignored", "reason": "prefetch_grace"}
 
     already = (
         db.query(EmailActivityEvent)

@@ -880,6 +880,133 @@ def _replied_drill_rows(
     return merged
 
 
+def sync_replies_from_mailbox(
+    db: Session,
+    *,
+    user: AppUser,
+    days: int | None = 7,
+) -> int:
+    """Match recent IMAP inbox messages to outbound sends and record `replied` events.
+
+    Email Activity Replies previously only counted CRM Interaction inbound rows
+    (WhatsApp-style). Real email replies live in IMAP and never created those rows.
+    """
+    from datetime import timedelta
+
+    from modules import inbox as inbox_module
+    from modules.mailbox_accounts import resolve_user_mailbox
+
+    account = resolve_user_mailbox(user)
+    if not account:
+        return 0
+
+    window_days = max(1, min(int(days or 7), 90))
+    since = datetime.now(timezone.utc) - timedelta(days=window_days)
+
+    sent_rows = (
+        db.query(EmailActivityEvent)
+        .filter(
+            EmailActivityEvent.event_type == "sent",
+            EmailActivityEvent.created_at >= since,
+            EmailActivityEvent.user_id == user.id,
+        )
+        .order_by(EmailActivityEvent.created_at.desc())
+        .limit(400)
+        .all()
+    )
+    if not sent_rows:
+        return 0
+
+    # Map recipient email → most recent matching sent event.
+    outbound_by_email: dict[str, EmailActivityEvent] = {}
+    for event in sent_rows:
+        details = event.details if isinstance(event.details, dict) else {}
+        to_email = str(details.get("to_email") or details.get("recipient") or "").strip().lower()
+        if not to_email or "@" not in to_email:
+            continue
+        if to_email not in outbound_by_email:
+            outbound_by_email[to_email] = event
+
+    if not outbound_by_email:
+        return 0
+
+    try:
+        inbox_msgs = inbox_module.list_messages(
+            user, limit=80, offset=0, folder="inbox", unread_only=False
+        )
+    except Exception:  # noqa: BLE001
+        return 0
+
+    mailbox = (account.email or "").strip().lower()
+    recorded = 0
+    for msg in inbox_msgs:
+        if not inbox_module._message_is_inbound(msg, mailbox):  # noqa: SLF001
+            continue
+        from_email = str(msg.get("from_email") or "").strip().lower()
+        if not from_email or from_email not in outbound_by_email:
+            continue
+        sent_event = outbound_by_email[from_email]
+        details = sent_event.details if isinstance(sent_event.details, dict) else {}
+        mode = str(details.get("send_mode") or "individual").strip().lower()
+        if mode != "bulk":
+            mode = "individual"
+
+        contact_id = sent_event.contact_id
+        already = False
+        if contact_id:
+            already = (
+                db.query(EmailActivityEvent)
+                .filter(
+                    EmailActivityEvent.event_type == "replied",
+                    EmailActivityEvent.created_at >= since,
+                    EmailActivityEvent.user_id == user.id,
+                    EmailActivityEvent.contact_id == contact_id,
+                )
+                .first()
+                is not None
+            )
+        else:
+            for e in (
+                db.query(EmailActivityEvent)
+                .filter(
+                    EmailActivityEvent.event_type == "replied",
+                    EmailActivityEvent.created_at >= since,
+                    EmailActivityEvent.user_id == user.id,
+                )
+                .all()
+            ):
+                if str((e.details or {}).get("to_email") or "").strip().lower() == from_email:
+                    already = True
+                    break
+        if already:
+            continue
+
+        subject = str(msg.get("subject") or details.get("subject") or "").strip()
+        preview = str(msg.get("preview") or "").strip()
+        company = str(details.get("company_name") or from_email)
+        record_event(
+            db,
+            event_type="replied",
+            title=f"Reply — {company}",
+            message=preview or f"Inbound reply from {from_email}.",
+            user_id=user.id,
+            buyer_id=sent_event.buyer_id,
+            contact_id=contact_id,
+            interaction_id=sent_event.interaction_id,
+            details={
+                "send_mode": mode,
+                "to_email": from_email,
+                "subject": subject,
+                "company_name": company,
+                "source": "imap_inbox",
+                "mailbox_email": mailbox or None,
+            },
+        )
+        recorded += 1
+
+    return recorded
+
+
 def insights_stats(
     db: Session,
     *,
@@ -889,9 +1016,20 @@ def insights_stats(
     user_id: int | None = None,
     is_admin: bool = False,
     channel: ActivityChannel | None = "email",
+    sync_user: AppUser | None = None,
 ) -> dict[str, Any]:
     """Aggregate outbound activity into bulk vs individual insight cards."""
     from datetime import date, time, timedelta
+
+    # Pull IMAP replies into activity events so Replies cards are accurate.
+    if channel != "whatsapp" and sync_user is not None:
+        try:
+            sync_window = days if days and days > 0 else 7
+            if date_from or date_to:
+                sync_window = 30
+            sync_replies_from_mailbox(db, user=sync_user, days=min(int(sync_window), 30))
+        except Exception:  # noqa: BLE001
+            pass
 
     query = _scoped_query(db, user_id=user_id, is_admin=is_admin, channel=channel)
     since = None
@@ -1164,6 +1302,7 @@ def analyze_email_activity(
     date_to: str | None = None,
     user_id: int | None = None,
     is_admin: bool = False,
+    sync_user: AppUser | None = None,
 ) -> dict[str, Any]:
     """LLM summary of Email Activity insights for the selected window."""
     from modules.llm_client import llm_client
@@ -1179,6 +1318,7 @@ def analyze_email_activity(
         user_id=user_id,
         is_admin=is_admin,
         channel="email",
+        sync_user=sync_user,
     )
     blob = _insights_context_blob(stats)
     system = (
@@ -1225,6 +1365,7 @@ def suggest_email_improvements(
     date_to: str | None = None,
     user_id: int | None = None,
     is_admin: bool = False,
+    sync_user: AppUser | None = None,
 ) -> dict[str, Any]:
     """LLM suggestions to improve outbound email performance."""
     from modules.llm_client import llm_client
@@ -1240,6 +1381,7 @@ def suggest_email_improvements(
         user_id=user_id,
         is_admin=is_admin,
         channel="email",
+        sync_user=sync_user,
     )
     blob = _insights_context_blob(stats)
     system = (

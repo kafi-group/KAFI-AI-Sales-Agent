@@ -707,16 +707,17 @@ export function EmailActivityPage({
                 </p>
               ) : (
                 <p className="text-xs text-slate-500">
-                  Opens count when the recipient loads the tracking pixel in an HTML email. If
-                  images stay blocked (common in Gmail until “Display images”), the open will not
-                  register.
+                  Opens count when the tracking pixel loads (after a short grace period so
+                  Gmail’s image proxy doesn’t mark every delivery as opened). Replies are
+                  detected from your Inbox when the sender matches someone you emailed.
+                  Self-tests to your own addresses often inflate opens — both messages can
+                  load pixels when you view the thread.
                   {insights.tracking_base_url ? (
                     <>
                       {" "}
                       Pixel host:{" "}
                       <span className="text-slate-400 font-mono">{insights.tracking_base_url}</span>
-                      . Only emails sent after tracking was fixed will count opens — send a new test
-                      and allow images.
+                      .
                     </>
                   ) : null}
                 </p>

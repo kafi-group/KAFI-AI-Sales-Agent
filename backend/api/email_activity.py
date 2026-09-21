@@ -133,6 +133,7 @@ def email_activity_insights(
             user_id=user.id,
             is_admin=_is_admin(user),
             channel=_parse_channel(channel),
+            sync_user=user,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -155,6 +156,7 @@ def email_activity_ai_analysis(
             date_to=dt,
             user_id=user.id,
             is_admin=_is_admin(user),
+            sync_user=user,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -177,6 +179,7 @@ def email_activity_improve_suggestions(
             date_to=dt,
             user_id=user.id,
             is_admin=_is_admin(user),
+            sync_user=user,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
