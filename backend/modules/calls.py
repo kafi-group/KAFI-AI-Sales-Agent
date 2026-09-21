@@ -220,7 +220,7 @@ def twilio_balance() -> dict:
 
     cfg = call_config()
     result = voice_client.fetch_account_balance()
-    ring_seconds = int(getattr(settings, "ring_timeout_seconds", 12) or 12)
+    ring_seconds = int(getattr(settings, "ring_timeout_seconds", 24) or 24)
     return {
         "configured": bool(cfg.get("configured")),
         "caller_id_masked": cfg.get("caller_id_masked"),

@@ -8,15 +8,27 @@ from typing import Any
 
 from config import settings
 
-_FOURTH_RING_SECONDS = 12  # ~3s per ring × 4 rings
+_FOURTH_RING_SECONDS = 24  # ~6s per ring × 4 rings (12s was cutting AI dials before pickup)
 _MAX_RING_ATTEMPTS = 2  # hang up ~4 rings, auto-redial once → ~8 rings, no voicemail
-_RINGING_STATUSES = {
+# Carrier still setting up the call — never hang up solely because of these.
+_PRE_RING_STATUSES = {
     "queued",
-    "ringing",
     "connecting",
     "initiated",
-    "dialing",
     "scheduled",
+}
+# Handset is actually ringing (safe to apply ring budget).
+_RINGING_STATUSES = {
+    "ringing",
+    "dialing",
+}
+# Still "live" for auto-redial decisions (pre-ring + ringing).
+_LIVE_DIAL_STATUSES = _PRE_RING_STATUSES | _RINGING_STATUSES
+_ANSWERED_STATUSES = {
+    "in-progress",
+    "in_progress",
+    "answered",
+    "forwarding",
 }
 _NO_CONNECT_STATUSES = {
     "no-answer",
@@ -447,7 +459,7 @@ class VoiceClient:
             return False
         if any(tok in blob for tok in _NO_CONNECT_STATUSES):
             return True
-        if blob in _RINGING_STATUSES:
+        if blob in _LIVE_DIAL_STATUSES:
             return True
         return False
 
@@ -458,26 +470,57 @@ class VoiceClient:
         attempt: int = 1,
         on_hangup_redial: Any | None = None,
     ) -> None:
-        """If still ringing after ~4 rings, hang up; optionally auto-redial once (~8 rings total)."""
+        """If still ringing after ~4 rings, hang up; optionally auto-redial once (~8 rings total).
+
+        Timer starts only after the call leaves pre-ring (queued/connecting). Arming from
+        Vapi/Twilio create time was killing dials before the handset rang.
+        """
         seconds = self.ring_timeout_seconds()
         sid = (call_sid or "").strip()
         if not seconds or not sid:
             return
         safe_attempt = max(1, int(attempt or 1))
+        connect_grace = 45  # wait for carrier/Vapi to reach ringing
 
         def _watch() -> None:
             import time
 
-            time.sleep(seconds)
             hung_up = False
             try:
+                elapsed = 0.0
+                status = ""
+                while elapsed < connect_grace:
+                    info = self.fetch_outbound_status(sid)
+                    status = str(info.get("status") or "").lower().replace("_", "-")
+                    if info.get("ended"):
+                        return
+                    if status in _ANSWERED_STATUSES:
+                        return
+                    if any(tok in status for tok in _NO_CONNECT_STATUSES):
+                        return
+                    if status in _RINGING_STATUSES:
+                        break
+                    # Still queued/connecting — keep waiting.
+                    time.sleep(1.5)
+                    elapsed += 1.5
+                else:
+                    # Never left pre-ring — do not force-hangup (would kill every AI dial).
+                    print(
+                        f"Fourth-ring hangup skipped (still pre-ring) call={sid[-8:]} "
+                        f"status={status or 'unknown'} after {connect_grace}s",
+                        flush=True,
+                    )
+                    return
+
+                time.sleep(seconds)
                 info = self.fetch_outbound_status(sid)
                 status = str(info.get("status") or "").lower().replace("_", "-")
-                if info.get("ended"):
+                if info.get("ended") or status in _ANSWERED_STATUSES:
                     return
-                if status in _RINGING_STATUSES:
+                if status in _RINGING_STATUSES or status in _PRE_RING_STATUSES:
                     print(
-                        f"Fourth-ring hangup call={sid[-8:]} attempt={safe_attempt} status={status or 'unknown'}",
+                        f"Fourth-ring hangup call={sid[-8:]} attempt={safe_attempt} "
+                        f"status={status or 'unknown'}",
                         flush=True,
                     )
                     self.end_call(sid)
@@ -772,33 +815,43 @@ class VoiceClient:
         """Hang up a live call via Twilio or Vapi."""
         if not call_sid:
             return {"ok": False, "error": "No call SID provided"}
-        
-        # If Twilio call
-        if call_sid.startswith("CA") or (settings.twilio_account_sid and settings.twilio_auth_token):
-            try:
-                from twilio.rest import Client
-                c = Client(settings.twilio_account_sid.strip(), settings.twilio_auth_token.strip())
-                c.calls(call_sid).update(status="completed")
-                return {"ok": True, "engine": "twilio"}
-            except Exception as exc:
-                print(f"Twilio hangup failed: {exc}", flush=True)
 
-        # If Vapi call
+        # Twilio SIDs always start with CA — never send Vapi UUIDs to Twilio.
+        if call_sid.startswith("CA"):
+            if settings.twilio_account_sid and settings.twilio_auth_token:
+                try:
+                    from twilio.rest import Client
+
+                    c = Client(
+                        settings.twilio_account_sid.strip(),
+                        settings.twilio_auth_token.strip(),
+                    )
+                    c.calls(call_sid).update(status="completed")
+                    return {"ok": True, "engine": "twilio"}
+                except Exception as exc:
+                    print(f"Twilio hangup failed: {exc}", flush=True)
+                    return {"ok": False, "error": str(exc), "engine": "twilio"}
+            return {"ok": False, "error": "Twilio is not configured", "engine": "twilio"}
+
+        # Vapi call ids are UUIDs (not CA…).
         vapi_key = getattr(settings, "vapi_api_key", None)
         if vapi_key:
             try:
                 import urllib.request
+
                 req = urllib.request.Request(
                     f"https://api.vapi.ai/call/{call_sid}",
                     headers={"Authorization": f"Bearer {vapi_key}"},
                     method="DELETE",
                 )
                 with urllib.request.urlopen(req, timeout=10) as res:
+                    _ = res
                     return {"ok": True, "engine": "vapi"}
             except Exception as exc:
                 print(f"Vapi hangup failed: {exc}", flush=True)
+        return {"ok": False, "error": str(exc), "engine": "vapi"}
 
-        return {"ok": True, "engine": "generic"}
+        return {"ok": False, "error": "No hangup engine configured for this call id"}
 
     def fetch_outbound_status(self, call_sid: str | None) -> dict[str, Any]:
         """Best-effort live status for a Vapi or Twilio call (used to detect no-answer)."""

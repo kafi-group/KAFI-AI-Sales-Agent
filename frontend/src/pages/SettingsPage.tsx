@@ -238,7 +238,7 @@ export function SettingsPage({ onError }: SettingsPageProps) {
   }
 
   const hangupAfterFourthRing = twilio?.hangup_after_fourth_ring !== false;
-  const ringSeconds = twilio?.ring_timeout_seconds ?? 12;
+  const ringSeconds = twilio?.ring_timeout_seconds ?? 24;
   const lowBalance = twilio?.ok && twilio.balance != null && twilio.balance < 5;
 
   async function handleHangupToggle(next: boolean) {
@@ -518,7 +518,7 @@ export function SettingsPage({ onError }: SettingsPageProps) {
             <p className="mt-1 text-xs text-slate-400 leading-relaxed">
               Default <strong className="text-slate-300">ON</strong> for every caller — Sara, Rayan,
               and all dashboard users (Asim, Usman, Sadia, and anyone else). Unanswered calls hang up
-              after about {ringSeconds} seconds (~3s per ring × 4), then the system auto-dials again
+              after about {ringSeconds} seconds (~6s per ring × 4), then the system auto-dials again
               once (~8 rings total) so voicemail does not pick up and Twilio credits are not wasted.
             </p>
           </div>
