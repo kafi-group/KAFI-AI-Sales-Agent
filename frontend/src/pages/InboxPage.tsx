@@ -367,7 +367,6 @@ export function InboxPage({
 }: InboxPageProps) {
   const [status, setStatus] = useState<InboxStatus | null>(null);
   const [threads, setThreads] = useState<InboxThreadSummary[]>([]);
-  threadsRef.current = threads;
   const [messages, setMessages] = useState<InboxMessageSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
@@ -434,6 +433,7 @@ export function InboxPage({
   const onFolderCountsChangeRef = useRef(onFolderCountsChange);
   const onMailExtrasChangeRef = useRef(onMailExtrasChange);
   const threadsRef = useRef<InboxThreadSummary[]>([]);
+  threadsRef.current = threads;
   const openMessageRef = useRef<
     ((message: InboxMessageSummary) => Promise<void>) | null
   >(null);
