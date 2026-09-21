@@ -354,33 +354,156 @@ def list_events(
     channel: ActivityChannel | None = "email",
     event_type: str | None = None,
     send_mode: str | None = None,
+    days: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> tuple[list[EmailActivityEvent], int, int]:
+    """List activity rows.
+
+    When ``event_type`` + ``send_mode`` come from Insights drill-down, event matching
+    mirrors ``insights_stats`` (bulk sent/failed include batch summary events).
+    Optional ``days`` / ``date_from`` / ``date_to`` keep the feed in the same window
+    as the Insights cards.
+    """
+    from datetime import date, time, timedelta
+
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     query = _scoped_query(db, user_id=user_id, is_admin=is_admin, channel=channel)
     if unread_only:
         query = query.filter(EmailActivityEvent.read_at.is_(None))
+
+    def _parse_day(value: str | None, *, end_of_day: bool) -> datetime | None:
+        if not value:
+            return None
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            day = date.fromisoformat(raw[:10])
+        except ValueError as exc:
+            raise ValueError(f"Invalid date '{value}'. Use YYYY-MM-DD.") from exc
+        if end_of_day:
+            return datetime.combine(day, time(23, 59, 59, 999999), tzinfo=timezone.utc)
+        return datetime.combine(day, time.min, tzinfo=timezone.utc)
+
+    if date_from or date_to:
+        since = _parse_day(date_from, end_of_day=False)
+        until = _parse_day(date_to, end_of_day=True)
+        if since and until and until < since:
+            raise ValueError("date_to must be on or after date_from")
+        if since is not None:
+            query = query.filter(EmailActivityEvent.created_at >= since)
+        if until is not None:
+            query = query.filter(EmailActivityEvent.created_at <= until)
+    elif days is not None and int(days) > 0:
+        since = datetime.now(timezone.utc) - timedelta(days=max(1, min(int(days), 3650)))
+        query = query.filter(EmailActivityEvent.created_at >= since)
+
     event_key = (event_type or "").strip().lower()
-    if event_key:
+    mode_key = (send_mode or "").strip().lower()
+    drill = mode_key in {"individual", "bulk"} and bool(event_key)
+
+    if event_key and not drill:
+        # Plain feed filter (sidebar / catalog) — not Insights drill.
         if event_key in {"failed", "send_failed"}:
-            query = query.filter(
-                EmailActivityEvent.event_type.in_(
-                    ("send_failed", "mailbox_not_configured", "invalid_recipient")
-                )
-            )
+            query = query.filter(EmailActivityEvent.event_type.in_(tuple(_FAIL_TYPES)))
         else:
             query = query.filter(EmailActivityEvent.event_type == event_key)
+
     unread = (
         _scoped_query(db, user_id=user_id, is_admin=is_admin, channel=channel)
         .filter(EmailActivityEvent.read_at.is_(None))
         .count()
     )
-    mode_key = (send_mode or "").strip().lower()
+
+    if drill:
+        # Match Insights card semantics: bulk totals come from batch events.
+        if event_key in {"failed", "send_failed"}:
+            query = query.filter(
+                EmailActivityEvent.event_type.in_(
+                    tuple(_FAIL_TYPES) + ("bulk_completed", "bulk_partial")
+                )
+            )
+        elif event_key == "sent":
+            query = query.filter(
+                EmailActivityEvent.event_type.in_(
+                    ("sent", "bulk_completed", "bulk_partial")
+                )
+            )
+        elif event_key == "opened":
+            query = query.filter(EmailActivityEvent.event_type == "opened")
+        else:
+            query = query.filter(EmailActivityEvent.event_type == event_key)
+
+        candidates = query.order_by(EmailActivityEvent.created_at.desc()).all()
+
+        def _row_mode(event: EmailActivityEvent) -> str:
+            details = event.details if isinstance(event.details, dict) else {}
+            raw = str(details.get("send_mode") or "individual").strip().lower()
+            return "bulk" if raw == "bulk" else "individual"
+
+        def _failed_count(details: dict) -> int:
+            try:
+                return int(details.get("failed_count") or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        def _is_batch_failure(event: EmailActivityEvent) -> bool:
+            details = event.details if isinstance(event.details, dict) else {}
+            if event.event_type == "send_failed" and (
+                "sent_count" in details
+                or "failed_count" in details
+                or "interaction_ids" in details
+            ):
+                return True
+            if event.event_type in ("bulk_completed", "bulk_partial"):
+                return _failed_count(details) > 0
+            return False
+
+        def _matches(event: EmailActivityEvent) -> bool:
+            details = event.details if isinstance(event.details, dict) else {}
+            et = event.event_type
+            mode = _row_mode(event)
+
+            if event_key == "opened":
+                return et == "opened" and mode == mode_key
+
+            if event_key == "sent":
+                if mode_key == "bulk":
+                    # Per-recipient bulk sent OR campaign batch summaries (insights source).
+                    if et == "sent" and mode == "bulk":
+                        return True
+                    return et in ("bulk_completed", "bulk_partial")
+                # individual
+                if et != "sent":
+                    return False
+                return mode == "individual"
+
+            if event_key in {"failed", "send_failed"}:
+                if mode_key == "bulk":
+                    if et in ("bulk_completed", "bulk_partial"):
+                        return _failed_count(details) > 0
+                    if _is_batch_failure(event):
+                        return True
+                    return et in _FAIL_TYPES and mode == "bulk"
+                # individual — exclude batch rollups and bulk-tagged failures
+                if et in ("bulk_completed", "bulk_partial"):
+                    return False
+                if _is_batch_failure(event):
+                    return False
+                return et in _FAIL_TYPES and mode == "individual"
+
+            return mode == mode_key
+
+        filtered = [row for row in candidates if _matches(row)]
+        total = len(filtered)
+        start = (page - 1) * page_size
+        rows = filtered[start : start + page_size]
+        return rows, total, unread
+
     if mode_key in {"individual", "bulk"}:
-        # JSON send_mode filter in Python (reliable across null / missing keys).
-        candidates = (
-            query.order_by(EmailActivityEvent.created_at.desc()).limit(800).all()
-        )
+        candidates = query.order_by(EmailActivityEvent.created_at.desc()).all()
 
         def _row_mode(event: EmailActivityEvent) -> str:
             details = event.details if isinstance(event.details, dict) else {}

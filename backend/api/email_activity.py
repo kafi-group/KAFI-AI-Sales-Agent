@@ -42,22 +42,33 @@ def list_email_activity(
         None, description="Filter: sent | opened | failed | send_failed | …"
     ),
     send_mode: Optional[str] = Query(None, description="individual | bulk"),
+    days: Optional[int] = Query(
+        None, description="Insights window (rolling days) when drilling down"
+    ),
+    date_from: Optional[str] = Query(None, description="YYYY-MM-DD inclusive start"),
+    date_to: Optional[str] = Query(None, description="YYYY-MM-DD inclusive end"),
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
     is_admin = _is_admin(user)
     ch = _parse_channel(channel)
-    rows, total, unread = email_activity.list_events(
-        db,
-        page=page,
-        page_size=page_size,
-        unread_only=unread_only,
-        user_id=user.id,
-        is_admin=is_admin,
-        channel=ch,
-        event_type=event_type,
-        send_mode=send_mode,
-    )
+    try:
+        rows, total, unread = email_activity.list_events(
+            db,
+            page=page,
+            page_size=page_size,
+            unread_only=unread_only,
+            user_id=user.id,
+            is_admin=is_admin,
+            channel=ch,
+            event_type=event_type,
+            send_mode=send_mode,
+            days=days,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     total_pages = max(1, (total + page_size - 1) // page_size) if total else 1

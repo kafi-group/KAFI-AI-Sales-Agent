@@ -228,6 +228,12 @@ export function EmailActivityPage({
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
+      const windowParams =
+        insightDrillKey && insightsPeriod === "range"
+          ? { date_from: rangeFrom || undefined, date_to: rangeTo || undefined }
+          : insightDrillKey && insightsPeriod != null && insightsPeriod !== "range"
+            ? { days: insightsPeriod }
+            : {};
       const result = await client.listEmailActivity({
         page,
         page_size: PAGE_SIZE,
@@ -235,6 +241,7 @@ export function EmailActivityPage({
         channel,
         event_type: drillEventType,
         send_mode: drillSendMode,
+        ...windowParams,
       });
       setRows(result.rows);
       setTotal(result.total);
@@ -256,10 +263,14 @@ export function EmailActivityPage({
     channel,
     drillEventType,
     drillSendMode,
+    insightDrillKey,
+    insightsPeriod,
     isWhatsApp,
     onError,
     onUnreadChange,
     page,
+    rangeFrom,
+    rangeTo,
     unreadOnly,
   ]);
 
@@ -573,7 +584,17 @@ export function EmailActivityPage({
                   <span>
                     Showing{" "}
                     <strong className="uppercase">{drillEventType}</strong> ·{" "}
-                    <strong>{drillSendMode}</strong> ({total} in list)
+                    <strong>{drillSendMode}</strong> ({total}{" "}
+                    {drillSendMode === "bulk" &&
+                    (drillEventType === "sent" || drillEventType === "failed")
+                      ? "batch/events"
+                      : "in list"}
+                    {insightsPeriod === "range"
+                      ? ` · ${rangeFrom || "…"} → ${rangeTo || "…"}`
+                      : insightsPeriod
+                        ? ` · last ${insightsPeriod}d`
+                        : " · all time"}
+                    )
                   </span>
                   <button
                     type="button"

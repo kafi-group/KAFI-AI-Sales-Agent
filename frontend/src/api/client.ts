@@ -2772,6 +2772,9 @@ export const client = {
       channel?: "email" | "whatsapp";
       event_type?: string;
       send_mode?: "individual" | "bulk" | string;
+      days?: number | null;
+      date_from?: string;
+      date_to?: string;
     } = {},
   ) => {
     const search = new URLSearchParams();
@@ -2781,6 +2784,9 @@ export const client = {
     search.set("channel", params.channel || "email");
     if (params.event_type) search.set("event_type", params.event_type);
     if (params.send_mode) search.set("send_mode", params.send_mode);
+    if (params.days != null && params.days > 0) search.set("days", String(params.days));
+    if (params.date_from) search.set("date_from", params.date_from);
+    if (params.date_to) search.set("date_to", params.date_to);
     const query = search.toString();
     return request<EmailActivityListResponse>(`/email-activity${query ? `?${query}` : ""}`);
   },
