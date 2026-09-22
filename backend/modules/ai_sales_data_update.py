@@ -40,6 +40,9 @@ FIELD_LABELS = {
 }
 
 DEFAULT_COOLDOWN_SEC = 45
+MAX_RUN_HISTORY = 40
+MAX_LOG_LINES = 80
+MAX_REPORT_LOG_LINES = 40
 
 
 def _now_utc() -> datetime:
@@ -77,8 +80,10 @@ def _default_run_state() -> dict[str, Any]:
             "skipped": 0,
             "filled_total": 0,
         },
-        "log": [],  # recent per-contact results
+        "log": [],  # current run per-contact results
         "last_report": None,
+        # Completed (and interrupted) runs — newest first — for later review.
+        "run_history": [],
         "updated_at": None,
         "run_id": None,
     }
@@ -144,10 +149,51 @@ def _load() -> dict[str, Any]:
             if isinstance(st.get("progress"), dict):
                 merged_st["progress"] = {**merged_st["progress"], **st["progress"]}
             if isinstance(st.get("log"), list):
-                merged_st["log"] = st["log"][-80:]
+                merged_st["log"] = st["log"][-MAX_LOG_LINES:]
+            if isinstance(st.get("run_history"), list):
+                merged_st["run_history"] = [
+                    h for h in st["run_history"] if isinstance(h, dict)
+                ][:MAX_RUN_HISTORY]
+            # Older installs only had last_report — seed history so it stays reviewable.
+            if not merged_st["run_history"] and isinstance(merged_st.get("last_report"), dict):
+                merged_st["run_history"] = [merged_st["last_report"]]
             base["run_state"][persona] = merged_st
     return base
 
+
+def _report_dedupe_key(report: dict[str, Any]) -> str:
+    return str(report.get("run_id") or report.get("finished_at") or "")
+
+
+def _prepend_run_history(
+    history: list[dict[str, Any]], report: dict[str, Any]
+) -> list[dict[str, Any]]:
+    if not isinstance(report, dict):
+        return history[:MAX_RUN_HISTORY]
+    key = _report_dedupe_key(report)
+    cleaned = [
+        h
+        for h in history
+        if isinstance(h, dict) and (not key or _report_dedupe_key(h) != key)
+    ]
+    cleaned.insert(0, report)
+    return cleaned[:MAX_RUN_HISTORY]
+
+
+def _snapshot_report_from_state(st: dict[str, Any], *, partial: bool = False) -> dict[str, Any]:
+    prog = st.get("progress") or {}
+    return {
+        "finished_at": _now_iso(),
+        "succeeded": prog.get("succeeded", 0),
+        "failed": prog.get("failed", 0),
+        "skipped": prog.get("skipped", 0),
+        "filled_total": prog.get("filled_total", 0),
+        "done": prog.get("done", 0),
+        "total": prog.get("total", 0),
+        "log": list(st.get("log") or [])[-MAX_REPORT_LOG_LINES:],
+        "run_id": st.get("run_id"),
+        "partial": bool(partial),
+    }
 
 def _save(data: dict[str, Any]) -> None:
     _ensure_file()
@@ -155,7 +201,17 @@ def _save(data: dict[str, Any]) -> None:
 
 
 def get_status() -> dict[str, Any]:
-    return _load()
+    data = _load()
+    # Persist one-time seed of last_report → run_history for older installs.
+    dirty = False
+    for persona in ("female", "male"):
+        st = data["run_state"][persona]
+        if not st.get("run_history") and isinstance(st.get("last_report"), dict):
+            st["run_history"] = [st["last_report"]]
+            dirty = True
+    if dirty:
+        _save(data)
+    return data
 
 
 def update_schedule(persona: str, patch: dict[str, Any]) -> dict[str, Any]:
@@ -372,10 +428,23 @@ def _schedule_due(sch: dict[str, Any]) -> bool:
 def start_run(persona: str, *, total: int, force: bool = False) -> dict[str, Any]:
     persona = "female" if persona not in ("male", "female") else persona
     data = _load()
-    st = data["run_state"][persona]
-    if st.get("status") == "running" and not force:
+    prev = data["run_state"][persona]
+    if prev.get("status") == "running" and not force:
         return data
+
+    # Keep reviewable history across runs (start_run used to wipe the whole state).
+    history = list(prev.get("run_history") or [])
+    last_report = prev.get("last_report") if isinstance(prev.get("last_report"), dict) else None
+    if prev.get("status") == "running" and list(prev.get("log") or []):
+        history = _prepend_run_history(
+            history, _snapshot_report_from_state(prev, partial=True)
+        )
+    elif last_report:
+        history = _prepend_run_history(history, last_report)
+
     st = _default_run_state()
+    st["run_history"] = history[:MAX_RUN_HISTORY]
+    st["last_report"] = last_report
     st["status"] = "running"
     st["run_id"] = f"{persona}-{int(time.time())}"
     st["progress"] = {
@@ -402,28 +471,19 @@ def start_run(persona: str, *, total: int, force: bool = False) -> dict[str, Any
 def _append_log(st: dict[str, Any], entry: dict[str, Any]) -> None:
     log = list(st.get("log") or [])
     log.append(entry)
-    st["log"] = log[-80:]
+    st["log"] = log[-MAX_LOG_LINES:]
 
 
 def complete_run(persona: str) -> dict[str, Any]:
     persona = "female" if persona not in ("male", "female") else persona
     data = _load()
     st = data["run_state"][persona]
-    prog = st.get("progress") or {}
-    report = {
-        "finished_at": _now_iso(),
-        "succeeded": prog.get("succeeded", 0),
-        "failed": prog.get("failed", 0),
-        "skipped": prog.get("skipped", 0),
-        "filled_total": prog.get("filled_total", 0),
-        "done": prog.get("done", 0),
-        "total": prog.get("total", 0),
-        "log": list(st.get("log") or [])[-40:],
-    }
+    report = _snapshot_report_from_state(st, partial=False)
     st["status"] = "completed"
     st["current_buyer_id"] = None
     st["current_label"] = None
     st["last_report"] = report
+    st["run_history"] = _prepend_run_history(list(st.get("run_history") or []), report)
     st["updated_at"] = _now_iso()
     data["run_state"][persona] = st
     _save(data)

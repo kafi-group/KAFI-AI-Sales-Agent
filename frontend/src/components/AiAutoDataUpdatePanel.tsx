@@ -55,6 +55,8 @@ type DataUpdateLastReport = {
   done?: number;
   total?: number;
   log?: DataUpdateLogEntry[];
+  run_id?: string | null;
+  partial?: boolean;
 };
 
 function formatLogTime(iso?: string): string {
@@ -80,22 +82,87 @@ function logResultLabel(entry: DataUpdateLogEntry): { text: string; cls: string 
   return { text: "Failed", cls: "text-rose-300" };
 }
 
+function LogEntriesList({
+  entries,
+  onView,
+}: {
+  entries: DataUpdateLogEntry[];
+  onView: (entry: DataUpdateLogEntry) => void;
+}) {
+  if (entries.length === 0) {
+    return <p className="text-[11px] text-slate-500">No per-contact lines yet.</p>;
+  }
+  return (
+    <ul className="max-h-52 overflow-y-auto space-y-1.5">
+      {[...entries].reverse().map((entry, idx) => {
+        const result = logResultLabel(entry);
+        return (
+          <li
+            key={`${entry.buyer_id ?? "x"}-${entry.at ?? idx}`}
+            className="rounded border border-slate-800 px-2 py-1.5 text-[11px]"
+          >
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span className="text-slate-500 tabular-nums shrink-0">
+                {formatLogTime(entry.at)}
+              </span>
+              <span className="font-medium text-slate-100 truncate min-w-0 flex-1">
+                {entry.label || `Lead #${entry.buyer_id ?? "?"}`}
+              </span>
+              <span className={`font-semibold ${result.cls}`}>{result.text}</span>
+              <button
+                type="button"
+                onClick={() => onView(entry)}
+                className="shrink-0 px-2 py-0.5 rounded border border-cyan-500/40 text-cyan-200 hover:bg-cyan-500/15 text-[10px] font-semibold"
+              >
+                View
+              </button>
+            </div>
+            {entry.filled?.length ? (
+              <p className="text-emerald-300/90 mt-0.5">Filled: {entry.filled.join(", ")}</p>
+            ) : null}
+            {entry.error ? (
+              <p className="text-rose-300/90 mt-0.5 break-words">{String(entry.error)}</p>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function DataUpdateActivityLog({
   liveLog,
   lastReport,
+  runHistory,
+  agentLabel,
 }: {
   liveLog: DataUpdateLogEntry[];
   lastReport?: DataUpdateLastReport | null;
+  runHistory?: DataUpdateLastReport[] | null;
+  agentLabel: string;
 }) {
   const [open, setOpen] = useState(true);
+  const [tab, setTab] = useState<"current" | "history">("current");
   const [viewEntry, setViewEntry] = useState<DataUpdateLogEntry | null>(null);
-  const entries =
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+
+  const history = useMemo(() => {
+    const raw = Array.isArray(runHistory) ? runHistory.filter((h) => h && typeof h === "object") : [];
+    if (raw.length) return raw;
+    if (lastReport) return [lastReport];
+    return [];
+  }, [runHistory, lastReport]);
+
+  const currentEntries =
     liveLog.length > 0
       ? liveLog
       : Array.isArray(lastReport?.log)
         ? lastReport!.log!
         : [];
-  if (!entries.length && !lastReport) return null;
+
+  if (!currentEntries.length && !lastReport && history.length === 0) return null;
+
+  const isLive = liveLog.length > 0;
 
   return (
     <>
@@ -108,56 +175,99 @@ function DataUpdateActivityLog({
           <span className="text-xs font-semibold text-slate-100 inline-flex items-center gap-1.5">
             <span className="text-slate-400">{open ? "▾" : "▸"}</span>
             Activity log
-            {entries.length ? (
-              <span className="text-[10px] font-normal text-slate-500">({entries.length})</span>
-            ) : null}
+            <span className="text-[10px] font-normal text-slate-500">
+              ({tab === "current" ? currentEntries.length : history.length}
+              {tab === "history" ? " runs" : ""})
+            </span>
           </span>
-          {lastReport ? (
+          {isLive ? (
+            <span className="text-[10px] text-cyan-300/80">Live this run</span>
+          ) : lastReport ? (
             <span className="text-[10px] text-slate-500">
-              Finished {formatLogTime(lastReport.finished_at)} · ok {lastReport.succeeded ?? 0} ·
-              skip {lastReport.skipped ?? 0} · fail {lastReport.failed ?? 0}
+              Last finished {formatLogTime(lastReport.finished_at)}
             </span>
           ) : (
-            <span className="text-[10px] text-cyan-300/80">Live this run</span>
+            <span className="text-[10px] text-slate-500">Saved history</span>
           )}
         </button>
 
         {open ? (
           <div className="px-2.5 pb-2.5 space-y-2 border-t border-slate-800 pt-2">
-            {entries.length === 0 ? (
-              <p className="text-[11px] text-slate-500">No per-contact lines yet.</p>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => setTab("current")}
+                className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
+                  tab === "current"
+                    ? "border-cyan-400/50 bg-cyan-500/20 text-cyan-100"
+                    : "border-slate-700 text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                This run
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab("history")}
+                className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
+                  tab === "history"
+                    ? "border-cyan-400/50 bg-cyan-500/20 text-cyan-100"
+                    : "border-slate-700 text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                History ({history.length})
+              </button>
+            </div>
+
+            {tab === "current" ? (
+              <>
+                {lastReport && !isLive ? (
+                  <p className="text-[10px] text-slate-500">
+                    Finished {formatLogTime(lastReport.finished_at)} · ok{" "}
+                    {lastReport.succeeded ?? 0} · skip {lastReport.skipped ?? 0} · fail{" "}
+                    {lastReport.failed ?? 0}
+                  </p>
+                ) : null}
+                <LogEntriesList entries={currentEntries} onView={setViewEntry} />
+              </>
+            ) : history.length === 0 ? (
+              <p className="text-[11px] text-slate-500">
+                No saved runs yet for {agentLabel}. Finished Data Update runs stay here so you can
+                review them later.
+              </p>
             ) : (
-              <ul className="max-h-52 overflow-y-auto space-y-1.5">
-                {[...entries].reverse().map((entry, idx) => {
-                  const result = logResultLabel(entry);
+              <ul className="max-h-64 overflow-y-auto space-y-1.5">
+                {history.map((report, idx) => {
+                  const runKey = String(report.run_id || report.finished_at || idx);
+                  const expanded = expandedRunId === runKey;
+                  const lines = Array.isArray(report.log) ? report.log : [];
                   return (
                     <li
-                      key={`${entry.buyer_id ?? "x"}-${entry.at ?? idx}`}
-                      className="rounded border border-slate-800 px-2 py-1.5 text-[11px]"
+                      key={runKey}
+                      className="rounded border border-slate-800 overflow-hidden"
                     >
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                        <span className="text-slate-500 tabular-nums shrink-0">
-                          {formatLogTime(entry.at)}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedRunId((cur) => (cur === runKey ? null : runKey))
+                        }
+                        className="w-full flex flex-wrap items-center gap-x-2 gap-y-0.5 px-2 py-1.5 text-left text-[11px] hover:bg-slate-900/50"
+                      >
+                        <span className="text-slate-500">{expanded ? "▾" : "▸"}</span>
+                        <span className="text-slate-200 font-medium">
+                          {formatLogTime(report.finished_at) || "Run"}
                         </span>
-                        <span className="font-medium text-slate-100 truncate min-w-0 flex-1">
-                          {entry.label || `Lead #${entry.buyer_id ?? "?"}`}
+                        {report.partial ? (
+                          <span className="text-[10px] text-amber-300/90">interrupted</span>
+                        ) : null}
+                        <span className="text-slate-500 ml-auto tabular-nums">
+                          {lines.length} contacts · ok {report.succeeded ?? 0} · skip{" "}
+                          {report.skipped ?? 0} · fail {report.failed ?? 0}
                         </span>
-                        <span className={`font-semibold ${result.cls}`}>{result.text}</span>
-                        <button
-                          type="button"
-                          onClick={() => setViewEntry(entry)}
-                          className="shrink-0 px-2 py-0.5 rounded border border-cyan-500/40 text-cyan-200 hover:bg-cyan-500/15 text-[10px] font-semibold"
-                        >
-                          View
-                        </button>
-                      </div>
-                      {entry.filled?.length ? (
-                        <p className="text-emerald-300/90 mt-0.5">
-                          Filled: {entry.filled.join(", ")}
-                        </p>
-                      ) : null}
-                      {entry.error ? (
-                        <p className="text-rose-300/90 mt-0.5 break-words">{String(entry.error)}</p>
+                      </button>
+                      {expanded ? (
+                        <div className="px-2 pb-2 border-t border-slate-800/80 pt-1.5">
+                          <LogEntriesList entries={lines} onView={setViewEntry} />
+                        </div>
                       ) : null}
                     </li>
                   );
@@ -595,6 +705,10 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
                   <DataUpdateActivityLog
                     liveLog={(run?.log as DataUpdateLogEntry[] | undefined) || []}
                     lastReport={run?.last_report as DataUpdateLastReport | null | undefined}
+                    runHistory={
+                      (run?.run_history as DataUpdateLastReport[] | undefined) || []
+                    }
+                    agentLabel={p.label}
                   />
 
                   {/* Per-agent queues */}

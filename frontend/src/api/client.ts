@@ -5278,6 +5278,8 @@ export interface AiSalesDataUpdateRunState {
   };
   log?: Array<Record<string, unknown>>;
   last_report?: Record<string, unknown> | null;
+  /** Past Data Update runs (newest first) for later review. */
+  run_history?: Array<Record<string, unknown>>;
   updated_at?: string | null;
   run_id?: string | null;
 }
