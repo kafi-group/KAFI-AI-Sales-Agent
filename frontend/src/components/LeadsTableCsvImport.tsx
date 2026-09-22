@@ -1,13 +1,17 @@
 import { useMemo, useState } from "react";
 import { client, type DiscoveryCandidate, type ImportJobStatus } from "../api/client";
 
-// Import saves rows as-is (no per-row scraping). The whole selection goes to
-// the backend as one background job; progress is polled live from the server.
+// Import saves rows as-is (no per-row scraping). Large selections are split into
+// small background jobs so a proxy/DB blip mid-way does not strand half the sheet
+// (e.g. interrupted at ~130/284 left only ~100 rows after the last commit).
 const MAX_CSV_IMPORT = 20000;
+/** Rows per backend job — keep small enough for Railway/proxy + DB lock windows. */
+const IMPORT_BATCH_SIZE = 80;
 const IMPORT_PREVIEW_ROWS = 50;
 const IMPORT_FILE_ACCEPT = ".csv,.xlsx,.xls,.xlsm,.tsv";
 const JOB_POLL_INTERVAL_MS = 800;
 const MAX_POLL_FAILURES = 6;
+const BATCH_PAUSE_MS = 400;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -94,6 +98,15 @@ function formatElapsed(seconds: number): string {
   return `${mins}m ${secs}s`;
 }
 
+function chunkArray<T>(items: T[], size: number): T[][] {
+  if (size <= 0) return [items];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
 function sourceDisplayName(source: string, tableLabel?: string): string {
   if (tableLabel) return tableLabel;
   if (source === "old_clients") return "Old clients";
@@ -104,10 +117,12 @@ function ImportProgressPanel({
   status,
   sourceLabel,
   tableLabel,
+  batchInfo,
 }: {
   status: ImportJobStatus;
   sourceLabel: string;
   tableLabel?: string;
+  batchInfo?: { current: number; total: number } | null;
 }) {
   const done = status.status === "completed";
   const settling = status.status === "committing" || status.status === "verifying";
@@ -122,7 +137,11 @@ function ImportProgressPanel({
     <div className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 space-y-3">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-medium text-slate-100">
-          {done ? `Import complete — saved to ${tableName}` : status.phase_label}
+          {done
+            ? `Import complete — saved to ${tableName}`
+            : batchInfo && batchInfo.total > 1
+              ? `Batch ${batchInfo.current} of ${batchInfo.total} — ${status.phase_label}`
+              : status.phase_label}
         </p>
         <span className="text-xs tabular-nums text-slate-400">
           {percent}% · {formatElapsed(status.elapsed_seconds)}
@@ -163,7 +182,7 @@ function ImportProgressPanel({
       {settling && (
         <p className="text-xs text-slate-500">
           {status.status === "committing"
-            ? "All rows processed — writing everything to the database in one transaction…"
+            ? "Batch processed — writing rows to the database…"
             : `Counting rows in the ${tableName} table to confirm the import landed…`}
         </p>
       )}
@@ -193,6 +212,7 @@ export function LeadsTableCsvImport({
   const [messages, setMessages] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [jobStatus, setJobStatus] = useState<ImportJobStatus | null>(null);
+  const [batchInfo, setBatchInfo] = useState<{ current: number; total: number } | null>(null);
   const [results, setResults] = useState<ImportRowResult[] | null>(null);
 
   const importable = useMemo(() => candidates, [candidates]);
@@ -268,77 +288,221 @@ export function LeadsTableCsvImport({
       return;
     }
 
+    const batches = chunkArray(toImport, IMPORT_BATCH_SIZE);
+    const batchNote =
+      batches.length > 1
+        ? `\n• Upload runs in ${batches.length} batches of up to ${IMPORT_BATCH_SIZE} rows (safer for large sheets).`
+        : "";
+
     const confirmed = window.confirm(
       `Import ${toImport.length} lead${toImport.length === 1 ? "" : "s"} as-is?\n\n` +
         `• Spreadsheet rows are copied exactly (including blank/sparse fields).\n` +
         `• Only duplicates in your own table are skipped or replaced.\n` +
-        `• Use Research & score later to enrich missing details.\n\n` +
-        `Continue?`,
+        `• Use Research & score later to enrich missing details.` +
+        batchNote +
+        `\n\nContinue?`,
     );
     if (!confirmed) return;
 
     setImporting(true);
     setResults(null);
     setJobStatus(null);
+    setBatchInfo(batches.length > 1 ? { current: 1, total: batches.length } : null);
 
-    // Start the background import job — the backend processes every row in one
-    // job and we poll its live progress (processed rows, created/skipped counts,
-    // current company, commit + verification phases).
-    let jobId: string;
-    try {
-      const job = await client.startLeadsImportJob({
-        candidates: toImport.map((candidate) => candidateToImportPayload(candidate, importSource)),
-        auto_onboard: false,
-        replace_duplicates: true,
-        skip_enrichment: true,
+    const startedAt = Date.now();
+    let overallCreated = 0;
+    let overallSkipped = 0;
+    let overallReplaced = 0;
+    let lastVerifiedTotal: number | null = null;
+    const allSkipped: Array<{ company_name: string; reason: string }> = [];
+    const allCreatedNames = new Set<string>();
+    const skipReasonCounts: Record<string, number> = {};
+    let failedBatchError: string | null = null;
+
+    const publishProgress = (
+      baseProcessed: number,
+      batchStatus: ImportJobStatus | null,
+      batchIndex: number,
+      complete: boolean,
+    ) => {
+      const batchProcessed = batchStatus
+        ? Math.min(batchStatus.processed, batchStatus.total)
+        : 0;
+      const processed = complete
+        ? toImport.length
+        : Math.min(toImport.length, baseProcessed + batchProcessed);
+      setJobStatus({
+        job_id: batchStatus?.job_id ?? "batched-import",
+        status: complete
+          ? "completed"
+          : batchStatus?.status === "committing" || batchStatus?.status === "verifying"
+            ? batchStatus.status
+            : "running",
+        total: toImport.length,
+        processed,
+        created_count: overallCreated + (batchStatus?.created_count ?? 0),
+        skipped_count: overallSkipped + (batchStatus?.skipped_count ?? 0),
+        replaced_count: overallReplaced + (batchStatus?.replaced_count ?? 0),
+        current_company: batchStatus?.current_company ?? null,
+        error: null,
+        import_source: batchStatus?.import_source ?? importSource,
+        verified_source_total: lastVerifiedTotal,
+        created: null,
+        skipped: null,
+        replaced: null,
+        skip_reason_counts: null,
+        phase_label: complete
+          ? "Import complete"
+          : batchStatus?.phase_label ||
+            (batches.length > 1
+              ? `Saving batch ${batchIndex + 1} of ${batches.length}…`
+              : "Saving leads into the table…"),
+        elapsed_seconds: Math.round((Date.now() - startedAt) / 1000),
       });
-      jobId = job.job_id;
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Could not start the import");
-      setImporting(false);
-      return;
-    }
+    };
 
-    let finalStatus: ImportJobStatus | null = null;
-    let pollFailures = 0;
-    while (finalStatus === null) {
-      await sleep(JOB_POLL_INTERVAL_MS);
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      const baseProcessed = batchIndex * IMPORT_BATCH_SIZE;
+      setBatchInfo(
+        batches.length > 1 ? { current: batchIndex + 1, total: batches.length } : null,
+      );
+      publishProgress(baseProcessed, null, batchIndex, false);
+
+      let jobId: string;
       try {
-        const status = await client.getLeadsImportJob(jobId);
-        pollFailures = 0;
-        setJobStatus(status);
-        if (status.status === "completed" || status.status === "failed") {
-          finalStatus = status;
+        const job = await client.startLeadsImportJob({
+          candidates: batch.map((candidate) =>
+            candidateToImportPayload(candidate, importSource),
+          ),
+          auto_onboard: false,
+          replace_duplicates: true,
+          skip_enrichment: true,
+        });
+        jobId = job.job_id;
+      } catch (e) {
+        failedBatchError =
+          e instanceof Error
+            ? e.message
+            : `Could not start import batch ${batchIndex + 1}`;
+        break;
+      }
+
+      let finalStatus: ImportJobStatus | null = null;
+      let pollFailures = 0;
+      while (finalStatus === null) {
+        await sleep(JOB_POLL_INTERVAL_MS);
+        try {
+          const status = await client.getLeadsImportJob(jobId);
+          pollFailures = 0;
+          publishProgress(baseProcessed, status, batchIndex, false);
+          if (status.status === "completed" || status.status === "failed") {
+            finalStatus = status;
+          }
+        } catch {
+          pollFailures += 1;
+          if (pollFailures >= MAX_POLL_FAILURES) {
+            failedBatchError =
+              `Lost connection during batch ${batchIndex + 1} of ${batches.length}. ` +
+              `${overallCreated} lead(s) from earlier batches were saved — refresh the table, then re-import the rest.`;
+            break;
+          }
         }
-      } catch {
-        pollFailures += 1;
-        if (pollFailures >= MAX_POLL_FAILURES) {
-          onError(
-            "Lost connection to the import job. The import may still be running on the server — refresh the table in a minute to check.",
-          );
-          setImporting(false);
-          return;
+      }
+
+      if (!finalStatus) {
+        break;
+      }
+
+      if (finalStatus.status === "failed") {
+        overallCreated += finalStatus.created_count ?? 0;
+        overallSkipped += finalStatus.skipped_count ?? 0;
+        overallReplaced += finalStatus.replaced_count ?? 0;
+        if (finalStatus.verified_source_total != null) {
+          lastVerifiedTotal = finalStatus.verified_source_total;
         }
+        for (const row of finalStatus.created ?? []) {
+          allCreatedNames.add(row.company_name.trim().toLowerCase());
+        }
+        for (const item of finalStatus.skipped ?? []) {
+          allSkipped.push(item);
+          skipReasonCounts[item.reason] = (skipReasonCounts[item.reason] ?? 0) + 1;
+        }
+        failedBatchError =
+          finalStatus.error ||
+          `Import batch ${batchIndex + 1} of ${batches.length} failed. ` +
+            `${overallCreated} lead(s) saved so far — re-import to finish the remaining rows.`;
+        break;
+      }
+
+      overallCreated += finalStatus.created_count ?? 0;
+      overallSkipped += finalStatus.skipped_count ?? 0;
+      overallReplaced += finalStatus.replaced_count ?? 0;
+      if (finalStatus.verified_source_total != null) {
+        lastVerifiedTotal = finalStatus.verified_source_total;
+      }
+      for (const row of finalStatus.created ?? []) {
+        allCreatedNames.add(row.company_name.trim().toLowerCase());
+      }
+      for (const item of finalStatus.skipped ?? []) {
+        allSkipped.push(item);
+        skipReasonCounts[item.reason] = (skipReasonCounts[item.reason] ?? 0) + 1;
+      }
+      // Counts on the last completed batch are already folded into overall*;
+      // clear batch deltas before the next publish so we don't double-count.
+      publishProgress(
+        baseProcessed + batch.length,
+        {
+          ...finalStatus,
+          created_count: 0,
+          skipped_count: 0,
+          replaced_count: 0,
+        },
+        batchIndex,
+        batchIndex === batches.length - 1,
+      );
+
+      if (batchIndex < batches.length - 1) {
+        await sleep(BATCH_PAUSE_MS);
       }
     }
 
-    if (finalStatus.status === "failed") {
-      onError(finalStatus.error || "Import failed — no rows were saved.");
+    if (failedBatchError) {
+      onError(failedBatchError);
       setImporting(false);
+      if (overallCreated > 0 || overallSkipped > 0) {
+        onImported();
+      }
       return;
     }
 
-    const skippedByName = new Map(
-      (finalStatus.skipped ?? []).map((item) => [item.company_name.toLowerCase(), item.reason]),
+    publishProgress(toImport.length, null, batches.length - 1, true);
+    setJobStatus((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: "completed",
+            processed: toImport.length,
+            created_count: overallCreated,
+            skipped_count: overallSkipped,
+            replaced_count: overallReplaced,
+            verified_source_total: lastVerifiedTotal,
+            skip_reason_counts: skipReasonCounts,
+            phase_label: "Import complete",
+            current_company: null,
+            elapsed_seconds: Math.round((Date.now() - startedAt) / 1000),
+          }
+        : prev,
     );
-    const createdNames = new Set(
-      (finalStatus.created ?? []).map((row) => row.company_name.trim().toLowerCase()),
+
+    const skippedByName = new Map(
+      allSkipped.map((item) => [item.company_name.toLowerCase(), item.reason]),
     );
 
     const rowResults: ImportRowResult[] = [];
     for (const candidate of toImport) {
       const key = candidate.company_name.trim().toLowerCase();
-      if (createdNames.has(key)) {
+      if (allCreatedNames.has(key)) {
         rowResults.push({
           candidate_id: candidate.candidate_id,
           company_name: candidate.company_name,
@@ -356,6 +520,7 @@ export function LeadsTableCsvImport({
     }
 
     setImporting(false);
+    setBatchInfo(null);
     setResults(rowResults);
     setCandidates((prev) =>
       prev.map((candidate) =>
@@ -406,7 +571,8 @@ export function LeadsTableCsvImport({
               />
             </label>
             <span className="text-xs text-slate-500">
-              Up to {MAX_CSV_IMPORT} rows per import · live progress while saving
+              Up to {MAX_CSV_IMPORT} rows · auto-batched in groups of {IMPORT_BATCH_SIZE} · live
+              progress
             </span>
           </div>
 
@@ -429,6 +595,7 @@ export function LeadsTableCsvImport({
               status={jobStatus}
               sourceLabel={importSource}
               tableLabel={tableLabel}
+              batchInfo={batchInfo}
             />
           )}
 

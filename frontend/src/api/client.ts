@@ -2677,6 +2677,8 @@ export const client = {
     request<ImportJobStart>("/leads/discover/import-async", {
       method: "POST",
       body: JSON.stringify(data),
+      // Batched imports send ≤80 rows; give headroom on slow links.
+      timeoutMs: 120_000,
     }),
 
   getLeadsImportJob: (jobId: string) =>
