@@ -35,6 +35,7 @@ import {
   type AiResearchLogEntry,
 } from "./utils/aiResearchLog";
 import { AiResearchLogModal } from "./components/AiResearchLogModal";
+import { stashPendingAiResearchFind } from "./utils/aiResearchPendingFind";
 import { InboxAlertToasts } from "./components/InboxAlertToasts";
 import { UrgentEmailAlertModal, isGenuineNewInquiry } from "./components/UrgentEmailAlertModal";
 import { WorkspaceAiAutopilotButton } from "./components/WorkspaceAiAutopilotButton";
@@ -631,17 +632,20 @@ function DashboardApp() {
   const returnToTableWithSelection = useCallback(
     (leadIds: number[], section?: string | null, searchHint?: string | null) => {
       const nextSection = (section || aiResearchReturnSection || tableSection) as LeadsTableSection;
+      const ids = leadIds.filter((id) => id > 0);
+      const hint =
+        (searchHint || "").trim() ||
+        (ids.length ? String(ids[0]) : "");
       setShowAiResearchLog(false);
       setAiResearchContacts(null);
       setAiResearchReturnSection(null);
-      if (leadIds.length) {
-        setAiResearchRestoreIds(leadIds);
-        // Filter the table to this lead so it is not buried in 3000+ rows.
-        const hint =
-          (searchHint || "").trim() ||
-          (leadIds.length === 1 ? String(leadIds[0]) : String(leadIds[0]));
+      // Persist before tab switch so remount / Strict Mode cannot keep the previous search.
+      if (ids.length && hint) {
+        stashPendingAiResearchFind(ids, hint, nextSection);
+        setAiResearchRestoreIds(ids);
         setAiResearchRestoreSearch(hint);
       } else {
+        setAiResearchRestoreIds(null);
         setAiResearchRestoreSearch(null);
       }
       setTableSection(nextSection);

@@ -78,6 +78,10 @@ import {
 import { exportLeadsTableCsv } from "../utils/exportCsv";
 import { UNASSIGNED } from "../utils/leadAssignees";
 import { listAiResearchHighlights, syncAiResearchHighlightsFromLog } from "../utils/aiResearchHighlights";
+import {
+  consumePendingAiResearchFind,
+  peekPendingAiResearchFind,
+} from "../utils/aiResearchPendingFind";
 
 const SORT_FILTER_OPTIONS = [
   { value: "company_name", label: "Company name" },
@@ -1129,7 +1133,21 @@ export function LeadsTablePage({
   onRestoreSelectedConsumed,
 }: LeadsTablePageProps) {
   const { isAdmin, user } = useAuth();
-  const initialTableViewRef = useRef(readStoredTableView(user?.id, section));
+  const pendingFindOnMount = peekPendingAiResearchFind();
+  const initialTableViewRef = useRef(
+    (() => {
+      const stored = readStoredTableView(user?.id, section);
+      // Prefer a pending Find-in-list handoff over the last saved search (avoids
+      // showing the previous AI Research contact after Strict Mode remount).
+      if (
+        pendingFindOnMount &&
+        (!pendingFindOnMount.section || pendingFindOnMount.section === section)
+      ) {
+        return { ...stored, search: pendingFindOnMount.search };
+      }
+      return stored;
+    })(),
+  );
   const restoringSectionRef = useRef(false);
   const previousSectionRef = useRef(section);
   const [assigneeOptions, setAssigneeOptions] = useState<AssigneeOption[]>([]);
@@ -1838,6 +1856,11 @@ export function LeadsTablePage({
     previousSectionRef.current = section;
     restoringSectionRef.current = true;
     const stored = readStoredTableView(user?.id, section);
+    const pending = peekPendingAiResearchFind();
+    const searchToUse =
+      pending && (!pending.section || pending.section === section)
+        ? pending.search
+        : stored.search;
     setScore(stored.score);
     setMarketRole(stored.marketRole);
     setCountry(stored.country);
@@ -1846,8 +1869,8 @@ export function LeadsTablePage({
     setProductInterest(stored.productInterest);
     setCity(stored.city);
     setCallRecommended(stored.callRecommended);
-    setSearch(stored.search);
-    setDebouncedSearch(stored.search);
+    setSearch(searchToUse);
+    setDebouncedSearch(searchToUse);
     setSortBy(stored.sortBy);
     setSortDir(stored.sortDir);
   }, [section, user?.id]);
@@ -1938,30 +1961,53 @@ export function LeadsTablePage({
 
   // Apply after section effect so remount does not wipe the restored checkboxes.
   useEffect(() => {
-    if (!restoreSelectedIds?.length && !(restoreSearchHint || "").trim()) {
+    const pending = peekPendingAiResearchFind();
+    const leadIds =
+      restoreSelectedIds?.length
+        ? restoreSelectedIds
+        : pending && (!pending.section || pending.section === section)
+          ? pending.leadIds
+          : null;
+    const hintRaw =
+      (restoreSearchHint || "").trim() ||
+      (pending && (!pending.section || pending.section === section) ? pending.search : "") ||
+      (leadIds?.length === 1 ? String(leadIds[0]) : "");
+    const hint = hintRaw.trim();
+
+    if (!leadIds?.length && !hint) {
       return;
     }
-    if (restoreSelectedIds?.length) {
-      setSelected(new Set(restoreSelectedIds));
+
+    if (leadIds?.length) {
+      setSelected(new Set(leadIds));
       setAllMatchingSelected(false);
-      pendingAiFocusIdsRef.current = [...restoreSelectedIds];
+      pendingAiFocusIdsRef.current = [...leadIds];
     }
-    const hint =
-      (restoreSearchHint || "").trim() ||
-      (restoreSelectedIds?.length === 1 ? String(restoreSelectedIds[0]) : "");
     if (hint) {
+      // Keep table-view storage in sync immediately so a remount cannot revive the old query.
+      try {
+        const stored = readStoredTableView(user?.id, section);
+        sessionStorage.setItem(
+          tableViewStorageKey(user?.id, section),
+          JSON.stringify({ ...stored, search: hint }),
+        );
+      } catch {
+        /* ignore */
+      }
       setSearch(hint);
       setDebouncedSearch(hint);
       setPage(1);
       setFiltersExpanded(true);
+      const focusId = leadIds?.[0];
       setSaveNotice(
-        restoreSelectedIds?.length === 1
-          ? `Filtered to lead #${restoreSelectedIds[0]} from AI Research. Clear Search in Filter to see the full list again.`
-          : `Filtered from AI Research (${restoreSelectedIds?.length ?? 0} selected). Clear Search in Filter to see the full list again.`,
+        focusId
+          ? `Filtered to lead #${focusId} from AI Research. Clear Search in Filter to see the full list again.`
+          : `Filtered from AI Research. Clear Search in Filter to see the full list again.`,
       );
     }
+    consumePendingAiResearchFind();
     onRestoreSelectedConsumed?.();
-  }, [restoreSelectedIds, restoreSearchHint, onRestoreSelectedConsumed]);
+  }, [restoreSelectedIds, restoreSearchHint, onRestoreSelectedConsumed, section, user?.id]);
 
   // Scroll the restored AI Research contact into view once filtered rows load.
   useEffect(() => {

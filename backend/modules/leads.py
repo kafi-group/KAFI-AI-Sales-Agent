@@ -1152,71 +1152,73 @@ def _filtered_lead_table_rows(
                 )
             )
 
-    # Table search: company name, lead id, spreadsheet S. No, contact name / phone / email.
-    # Numeric queries also match Buyer.id and legacy_serial_no exactly (AI Research log uses #id).
+    # Table search. Pure lead-# / digit queries match Buyer.id or S. No exactly
+    # (AI Research "Find in list") — do not OR with fuzzy name/phone (that returned
+    # the wrong "last" contact when the id was missing or filters raced).
     query_text = (q or "").strip().lower()
     if query_text:
-        escaped = (
-            query_text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        )
-        pattern = f"%{escaped}%"
-        search_clauses = [
-            sa_func.lower(sa_func.coalesce(Buyer.company_name, "")).like(
-                pattern, escape="\\"
-            ),
-        ]
         digits_only = "".join(ch for ch in query_text if ch.isdigit())
-        if digits_only and digits_only == query_text.lstrip("#").strip():
+        bare = query_text.lstrip("#").strip()
+        pure_id_query = bool(digits_only) and digits_only == bare and len(digits_only) <= 9
+        if pure_id_query:
             try:
                 nid = int(digits_only)
-                search_clauses.append(Buyer.id == nid)
-                search_clauses.append(Buyer.legacy_serial_no == nid)
+                buyer_query = buyer_query.filter(
+                    or_(Buyer.id == nid, Buyer.legacy_serial_no == nid)
+                )
             except ValueError:
                 pass
-        elif digits_only and len(digits_only) >= 7:
-            # Phone-like: match contact phone fields (digits or as stored).
-            phone_pat = f"%{digits_only}%"
-            phone_buyer_ids = (
+        else:
+            escaped = (
+                query_text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            pattern = f"%{escaped}%"
+            search_clauses = [
+                sa_func.lower(sa_func.coalesce(Buyer.company_name, "")).like(
+                    pattern, escape="\\"
+                ),
+            ]
+            if digits_only and len(digits_only) >= 7:
+                phone_pat = f"%{digits_only}%"
+                phone_buyer_ids = (
+                    db.query(Contact.buyer_id)
+                    .filter(
+                        or_(
+                            sa_func.coalesce(Contact.phone, "").like(phone_pat),
+                            sa_func.coalesce(Contact.primary_phone, "").like(phone_pat),
+                            sa_func.coalesce(Contact.secondary_mobile, "").like(phone_pat),
+                            sa_func.coalesce(Contact.secondary_phone, "").like(phone_pat),
+                        )
+                    )
+                    .distinct()
+                )
+                search_clauses.append(Buyer.id.in_(phone_buyer_ids))
+
+            contact_buyer_ids = (
                 db.query(Contact.buyer_id)
                 .filter(
                     or_(
-                        sa_func.coalesce(Contact.phone, "").like(phone_pat),
-                        sa_func.coalesce(Contact.primary_phone, "").like(phone_pat),
-                        sa_func.coalesce(Contact.secondary_mobile, "").like(phone_pat),
-                        sa_func.coalesce(Contact.secondary_phone, "").like(phone_pat),
+                        sa_func.lower(sa_func.coalesce(Contact.full_name, "")).like(
+                            pattern, escape="\\"
+                        ),
+                        sa_func.lower(sa_func.coalesce(Contact.email, "")).like(
+                            pattern, escape="\\"
+                        ),
+                        sa_func.lower(sa_func.coalesce(Contact.secondary_email, "")).like(
+                            pattern, escape="\\"
+                        ),
+                        sa_func.lower(sa_func.coalesce(Contact.phone, "")).like(
+                            pattern, escape="\\"
+                        ),
+                        sa_func.lower(sa_func.coalesce(Contact.primary_phone, "")).like(
+                            pattern, escape="\\"
+                        ),
                     )
                 )
                 .distinct()
             )
-            search_clauses.append(Buyer.id.in_(phone_buyer_ids))
-
-        # Non-numeric / mixed: also match contact person + email.
-        contact_buyer_ids = (
-            db.query(Contact.buyer_id)
-            .filter(
-                or_(
-                    sa_func.lower(sa_func.coalesce(Contact.full_name, "")).like(
-                        pattern, escape="\\"
-                    ),
-                    sa_func.lower(sa_func.coalesce(Contact.email, "")).like(
-                        pattern, escape="\\"
-                    ),
-                    sa_func.lower(sa_func.coalesce(Contact.secondary_email, "")).like(
-                        pattern, escape="\\"
-                    ),
-                    sa_func.lower(sa_func.coalesce(Contact.phone, "")).like(
-                        pattern, escape="\\"
-                    ),
-                    sa_func.lower(sa_func.coalesce(Contact.primary_phone, "")).like(
-                        pattern, escape="\\"
-                    ),
-                )
-            )
-            .distinct()
-        )
-        search_clauses.append(Buyer.id.in_(contact_buyer_ids))
-
-        buyer_query = buyer_query.filter(or_(*search_clauses))
+            search_clauses.append(Buyer.id.in_(contact_buyer_ids))
+            buyer_query = buyer_query.filter(or_(*search_clauses))
 
     if score:
         grade = score.strip().upper()
