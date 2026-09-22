@@ -45,17 +45,9 @@ export function CallLeadButton({
     return null;
   }
 
-  const callBlockedReason =
-    voice?.initError ??
-    (!voice?.ready ? "Calling is initializing…" : null);
-
   async function proceedWithCall(targetPhone: string) {
     if (!voice) {
       onError("In-app calling is initializing. Please wait a few seconds and try again.");
-      return;
-    }
-    if (voice.initError && !voice.ready) {
-      onError(voice.initError);
       return;
     }
     const assignmentWarning = getAssignmentCallWarning(
@@ -68,21 +60,12 @@ export function CallLeadButton({
     }
 
     setCalling(true);
-    // Multi-redial can run many 16s attempts — keep UI unlocked after connect starts.
     const safetyTimer = window.setTimeout(() => {
       setCalling(false);
     }, 45000);
 
     try {
-      if (!voice.ready) {
-        await voice.retryInit();
-      }
-      if (!voice.ready) {
-        throw new Error(
-          voice.initError ||
-            "Calling is not ready. Allow microphone access, then refresh. Check Settings → Twilio if it still fails.",
-        );
-      }
+      // placeCall re-inits the Device if needed — do not gate on stale `ready`.
       const result = await voice.placeCall(leadId, contactId, targetPhone);
       onSuccess?.(result);
     } catch (e) {
@@ -113,15 +96,30 @@ export function CallLeadButton({
     inCall &&
     (phonesMatch(phone, activeCall?.phone) ||
       (activeCall?.buyerId != null && activeCall.buyerId === leadId));
-  const showInitError = voice && !voice.ready && voice.initError;
+
+  // Stuck "active" with no matching row End button — still offer hang-up everywhere.
+  if (inCall && !isThisCall) {
+    return (
+      <span className="inline-flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          onClick={() => voice?.hangUp()}
+          className={
+            compact
+              ? "inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-red-600 hover:bg-red-500 text-white"
+              : "inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs bg-red-600 hover:bg-red-500 text-white"
+          }
+          title="End the call in progress, then dial this contact"
+        >
+          <IconX size="xs" />
+          End
+        </button>
+      </span>
+    );
+  }
 
   return (
     <span className="inline-flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
-      {showInitError && !compact && (
-        <span className="text-xs text-red-300" title={voice.initError ?? undefined}>
-          Calling unavailable
-        </span>
-      )}
       {isThisCall ? (
         <button
           type="button"
@@ -139,30 +137,19 @@ export function CallLeadButton({
       ) : (
         <button
           type="button"
-          onClick={() => {
-            if (!voice?.ready) {
-              onError(
-                voice?.initError ||
-                  callBlockedReason ||
-                  "Calling is not ready yet. Allow microphone, wait a few seconds, or check Settings → Twilio.",
-              );
-              if (voice?.retryInit) void voice.retryInit();
-              return;
-            }
-            void handleTwilioCall();
-          }}
-          disabled={calling || inCall}
+          onClick={() => void handleTwilioCall()}
+          disabled={calling}
           className={btnClass}
           title={
-            inCall
-              ? "Another call is already in progress"
-              : voice?.ready
-                ? "Call from browser (allow microphone). Unanswered: 16s hangup then redial until answered."
-                : callBlockedReason ?? voice?.initError ?? "Calling is not ready yet"
+            voice?.ready
+              ? "Call from browser. Unanswered: 16s hangup then redial until answered."
+              : voice?.initError
+                ? voice.initError
+                : "Call — dialer will connect when ready"
           }
         >
           <IconPhone size={compact ? "xs" : "sm"} />
-          {calling ? "Connecting…" : inCall ? "In call" : compact ? "Call" : "Call now"}
+          {calling ? "Connecting…" : compact ? "Call" : "Call now"}
         </button>
       )}
 

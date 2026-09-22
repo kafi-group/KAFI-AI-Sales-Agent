@@ -160,8 +160,10 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
 
     if (!cfg.browser_ready) {
       setReady(false);
+      deviceRef.current?.destroy();
+      deviceRef.current = null;
       setInitError(cfg.setup_message ?? "Twilio browser calling is not configured");
-      return;
+      throw new Error(cfg.setup_message ?? "Twilio browser calling is not configured");
     }
 
     const { token } = await client.getVoiceToken();
@@ -194,6 +196,7 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
     deviceRef.current = device;
     await device.register();
     setReady(true);
+    setInitError(null);
   }, [refreshToken]);
 
   // Mount once — do not re-run when callback identities change (would hang up live calls).
@@ -202,6 +205,11 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
     void (async () => {
       try {
         await initDevice();
+        if (cancelled) {
+          deviceRef.current?.destroy();
+          deviceRef.current = null;
+          setReady(false);
+        }
       } catch (e) {
         if (!cancelled) {
           setReady(false);
@@ -225,6 +233,8 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
       deviceRef.current?.destroy();
       deviceRef.current = null;
       callRef.current = null;
+      setActive(false);
+      setActiveCall(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-once init
   }, []);
@@ -241,12 +251,13 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
 
   const hangUp = useCallback(() => {
     const call = callRef.current;
-    if (!call) {
-      setActive(false);
-      setActiveCall(null);
-      return;
+    try {
+      call?.disconnect();
+    } catch {
+      /* ignore */
     }
-    call.disconnect();
+    callRef.current = null;
+    activePrepRef.current = null;
     setActive(false);
     setActiveCall(null);
   }, []);
@@ -266,6 +277,49 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
     activePrepRef.current = prep;
     setCallError(null);
 
+    // Capture prep in closure so a later dial cannot steal this call's follow-up.
+    const prepForThisCall = prep;
+    let finished = false;
+    const finishCall = (call: Call) => {
+      if (finished) return;
+      finished = true;
+      if (callRef.current === call) {
+        callRef.current = null;
+      }
+      setActive(false);
+      setActiveCall(null);
+      if (activePrepRef.current?.id === prepForThisCall.id) {
+        activePrepRef.current = null;
+      }
+      const buyerId = prepForThisCall.buyer_id ?? null;
+      const dialedPhone = prepForThisCall.lead_phone ?? null;
+      let triedPhones: string[] = [];
+      if (buyerId != null && dialedPhone) {
+        const session = leadDialSessionRef.current;
+        if (session?.buyerId === buyerId) {
+          triedPhones = [...session.triedPhones];
+          if (!triedPhones.some((p) => phonesMatch(p, dialedPhone))) {
+            triedPhones.push(dialedPhone);
+          }
+        } else {
+          triedPhones = [dialedPhone];
+        }
+        leadDialSessionRef.current = { buyerId, triedPhones };
+      }
+      setPendingFollowUp({
+        interactionId: prepForThisCall.id,
+        label:
+          prepForThisCall.company_name ||
+          prepForThisCall.contact_name ||
+          prepForThisCall.subject?.replace(/^Call to /, "") ||
+          "this call",
+        buyerId,
+        contactId: prepForThisCall.contact_id ?? null,
+        dialedPhone,
+        triedPhones,
+      });
+    };
+
     try {
       const connectPromise = activeDevice.connect({
         params: {
@@ -280,8 +334,8 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
           () =>
             reject(
               new Error(
-                "Call connection timed out (15s). Please check your internet connection and microphone settings."
-              )
+                "Call connection timed out (15s). Please check your internet connection and allow microphone access in the browser (padlock → Site settings).",
+              ),
             ),
           15000,
         ),
@@ -289,65 +343,24 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
 
       const call = await Promise.race([connectPromise, timeoutPromise]);
       callRef.current = call;
+
+      // Attach lifecycle listeners before flipping UI to "in call".
+      call.on("error", (err) => {
+        console.error("Twilio call error:", err);
+        const friendly = friendlyCallError(err);
+        setCallError(friendly);
+        finishCall(call);
+      });
+      call.on("disconnect", () => finishCall(call));
+      call.on("cancel", () => finishCall(call));
+      call.on("reject", () => finishCall(call));
+
       setActive(true);
       setActiveCall({
         buyerId: prep.buyer_id ?? null,
         contactId: prep.contact_id ?? null,
         phone: prep.lead_phone ?? null,
       });
-
-      // Capture prep in closure so a later dial cannot steal this call's follow-up.
-      const prepForThisCall = prep;
-      let finished = false;
-      const finishCall = () => {
-        if (finished) return;
-        finished = true;
-        if (callRef.current === call) {
-          callRef.current = null;
-          setActive(false);
-          setActiveCall(null);
-        }
-        if (activePrepRef.current?.id === prepForThisCall.id) {
-          activePrepRef.current = null;
-        }
-        const buyerId = prepForThisCall.buyer_id ?? null;
-        const dialedPhone = prepForThisCall.lead_phone ?? null;
-        let triedPhones: string[] = [];
-        if (buyerId != null && dialedPhone) {
-          const session = leadDialSessionRef.current;
-          if (session?.buyerId === buyerId) {
-            triedPhones = [...session.triedPhones];
-            if (!triedPhones.some((p) => phonesMatch(p, dialedPhone))) {
-              triedPhones.push(dialedPhone);
-            }
-          } else {
-            triedPhones = [dialedPhone];
-          }
-          leadDialSessionRef.current = { buyerId, triedPhones };
-        }
-        setPendingFollowUp({
-          interactionId: prepForThisCall.id,
-          label:
-            prepForThisCall.company_name ||
-            prepForThisCall.contact_name ||
-            prepForThisCall.subject?.replace(/^Call to /, "") ||
-            "this call",
-          buyerId,
-          contactId: prepForThisCall.contact_id ?? null,
-          dialedPhone,
-          triedPhones,
-        });
-      };
-
-      call.on("error", (err) => {
-        console.error("Twilio call error:", err);
-        const friendly = friendlyCallError(err);
-        setCallError(friendly);
-        finishCall();
-      });
-      call.on("disconnect", finishCall);
-      call.on("cancel", finishCall);
-      call.on("reject", finishCall);
 
       return prep;
     } catch (err) {
@@ -361,16 +374,23 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const ensureRegisteredDevice = useCallback(async () => {
+    let device = deviceRef.current;
+    if (!device || device.state !== "registered") {
+      await initDevice();
+      device = deviceRef.current;
+    }
+    if (!device || device.state !== "registered") {
+      throw new Error(
+        "Twilio calling is not ready. Refresh the page, allow microphone in the browser (padlock icon), or check Settings → Twilio.",
+      );
+    }
+    return device;
+  }, [initDevice]);
+
   const placeCall = useCallback(
     async (leadId: number, contactId?: number, phone?: string) => {
-      let device = deviceRef.current;
-      if (!device || device.state !== "registered") {
-        await initDevice();
-        device = deviceRef.current;
-      }
-      if (!device) {
-        throw new Error("Twilio calling is not ready. Refresh the page or check Twilio configuration.");
-      }
+      const device = await ensureRegisteredDevice();
 
       const prep = await client.initiateLeadCall(leadId, {
         contact_id: contactId,
@@ -382,19 +402,12 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
 
       return connectPreparedCall(device, { ...prep, buyer_id: leadId });
     },
-    [connectPreparedCall, initDevice],
+    [connectPreparedCall, ensureRegisteredDevice],
   );
 
   const placeManualCall = useCallback(
     async (phone: string, options?: { contactName?: string; country?: string }) => {
-      let device = deviceRef.current;
-      if (!device || device.state !== "registered") {
-        await initDevice();
-        device = deviceRef.current;
-      }
-      if (!device) {
-        throw new Error("Twilio calling is not ready. Refresh the page or check Twilio configuration.");
-      }
+      const device = await ensureRegisteredDevice();
 
       const prep = await client.initiateManualCall({
         phone,
@@ -407,7 +420,7 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
 
       return connectPreparedCall(device, prep);
     },
-    [connectPreparedCall, initDevice],
+    [connectPreparedCall, ensureRegisteredDevice],
   );
 
   return (
