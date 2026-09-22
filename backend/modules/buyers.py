@@ -495,6 +495,11 @@ def upsert_primary_contact(
     secondary_phone: str | None = None,
     secondary_email: str | None = None,
 ) -> Contact | None:
+    """Update the buyer's existing contact in place when possible.
+
+    Only fields passed as non-None are written — omitted fields keep their
+    current values so filling email cannot wipe an existing phone.
+    """
     contact_extras = {
         "designation": designation,
         "secondary_mobile": secondary_mobile,
@@ -502,37 +507,91 @@ def upsert_primary_contact(
         "secondary_phone": secondary_phone,
         "secondary_email": secondary_email,
     }
-    if contact_id:
-        contact = db.get(Contact, contact_id)
-        if contact and contact.buyer_id == buyer_id:
-            if full_name is not None:
-                contact.full_name = full_name
-            if email is not None:
-                contact.email = email or None
-            if phone is not None:
-                contact.phone = phone or None
-            for key, value in contact_extras.items():
-                if value is not None:
-                    setattr(contact, key, value or None)
-            db.commit()
-            db.refresh(contact)
-            return contact
 
-    has_extra = any(value for value in contact_extras.values())
-    if not (full_name or email or phone or has_extra):
+    contact: Contact | None = None
+    if contact_id:
+        candidate = db.get(Contact, contact_id)
+        if candidate and candidate.buyer_id == buyer_id:
+            contact = candidate
+
+    if contact is None:
+        existing = list_contacts_for_buyer(db, buyer_id)
+        if existing:
+            # Prefer the contact that already has a phone, else first row.
+            contact = next(
+                (
+                    c
+                    for c in existing
+                    if (c.phone or c.primary_phone or c.secondary_mobile or c.secondary_phone)
+                ),
+                existing[0],
+            )
+
+    if contact is not None:
+        if full_name is not None and str(full_name).strip():
+            contact.full_name = full_name
+        if email is not None:
+            # Allow clearing only via explicit empty string from a dedicated editor;
+            # blank from partial PATCH keeps existing email.
+            new_email = (email or "").strip()
+            if new_email:
+                contact.email = new_email
+        if phone is not None:
+            new_phone = (phone or "").strip()
+            if new_phone:
+                contact.phone = new_phone
+        for key, value in contact_extras.items():
+            if value is None:
+                continue
+            new_val = str(value).strip()
+            if new_val:
+                setattr(contact, key, new_val)
+        # If a prior AI fill created a second contact, pull phone/email from siblings
+        # so existing numbers are never left stranded on a hidden row.
+        for other in list_contacts_for_buyer(db, buyer_id):
+            if other.id == contact.id:
+                continue
+            if other.phone and not (contact.phone or "").strip():
+                contact.phone = other.phone
+            if other.primary_phone and not (contact.primary_phone or "").strip():
+                contact.primary_phone = other.primary_phone
+            if other.secondary_mobile and not (contact.secondary_mobile or "").strip():
+                contact.secondary_mobile = other.secondary_mobile
+            if other.email and not (contact.email or "").strip():
+                contact.email = other.email
+            if (
+                other.full_name
+                and (other.full_name or "").strip().lower() != "general contact"
+                and (
+                    not (contact.full_name or "").strip()
+                    or (contact.full_name or "").strip().lower() == "general contact"
+                )
+            ):
+                contact.full_name = other.full_name
+        db.commit()
+        db.refresh(contact)
+        return contact
+
+    has_extra = any((value or "").strip() for value in contact_extras.values() if value is not None)
+    if not (
+        (full_name or "").strip()
+        or (email or "").strip()
+        or (phone or "").strip()
+        or has_extra
+    ):
         return None
 
     payload = {
         "buyer_id": buyer_id,
-        "full_name": full_name or "General contact",
-        "email": email or None,
-        "phone": phone or None,
+        "full_name": (full_name or "").strip() or "General contact",
+        "email": (email or "").strip() or None,
+        "phone": (phone or "").strip() or None,
         "data_source": "table_edit",
         "consent_status": "unknown",
     }
     for key, value in contact_extras.items():
-        if value is not None:
-            payload[key] = value or None
+        if value is not None and str(value).strip():
+            payload[key] = str(value).strip()
     return create_contact(db, payload)
 
 

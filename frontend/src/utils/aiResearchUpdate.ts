@@ -36,6 +36,7 @@ export type AiResearchContactSnapshot = Pick<
   | "website_url"
   | "address"
   | "city"
+  | "contact_id"
   | "contact_name"
   | "contact_email"
   | "contact_phone"
@@ -83,6 +84,7 @@ export function snapshotLeadForAiResearch(row: LeadTableRow): AiResearchContactS
     website_url: row.website_url,
     address: row.address,
     city: row.city,
+    contact_id: row.contact_id,
     contact_name: row.contact_name,
     contact_email: row.contact_email,
     contact_phone: row.contact_phone ?? row.contact_primary_phone,
@@ -216,6 +218,12 @@ export function buildAiResearchReviewItems(
     }
 
     if (changes.length === 0) continue;
+
+    // Never wipe existing contact data — only patch fields we filled, and
+    // target the same contact row when we know its id.
+    if (snap.contact_id != null) {
+      updatePayload.contact_id = snap.contact_id;
+    }
 
     const displayName =
       snap.company_name?.trim() ||

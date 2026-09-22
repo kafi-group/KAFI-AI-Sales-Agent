@@ -761,6 +761,7 @@ def _hydrate_lead_table_rows(
         score_by_buyer[record.buyer_id] = record
 
     contact_by_buyer: dict[int, Contact] = {}
+    contacts_list_by_buyer: dict[int, list[Contact]] = {}
     all_contacts = (
         db.query(Contact)
         .filter(Contact.buyer_id.in_(buyer_ids))
@@ -768,10 +769,36 @@ def _hydrate_lead_table_rows(
         .all()
     )
     for contact in all_contacts:
-        if contact.buyer_id not in contact_by_buyer:
-            contact_by_buyer[contact.buyer_id] = contact
-        if contact.email and contact_by_buyer[contact.buyer_id].email is None:
-            contact_by_buyer[contact.buyer_id] = contact
+        contacts_list_by_buyer.setdefault(contact.buyer_id, []).append(contact)
+
+    def _contact_richness(c: Contact) -> tuple[int, int, int]:
+        has_phone = 1 if (c.phone or c.primary_phone or c.secondary_mobile or c.secondary_phone) else 0
+        has_email = 1 if (c.email or c.secondary_email) else 0
+        has_name = 1 if (c.full_name or "").strip() and (c.full_name or "").strip().lower() != "general contact" else 0
+        return (has_phone, has_email, has_name)
+
+    for buyer_id, clist in contacts_list_by_buyer.items():
+        # Prefer contact with phone; never hide a phone-only row behind a new email-only row.
+        best = max(clist, key=_contact_richness)
+        # Merge missing fields from siblings onto the display contact (in-memory only).
+        if not (best.phone or best.primary_phone):
+            for other in clist:
+                if other is best:
+                    continue
+                if other.phone and not best.phone:
+                    best.phone = other.phone
+                if other.primary_phone and not best.primary_phone:
+                    best.primary_phone = other.primary_phone
+                if other.secondary_mobile and not best.secondary_mobile:
+                    best.secondary_mobile = other.secondary_mobile
+        if not best.email:
+            for other in clist:
+                if other is best:
+                    continue
+                if other.email:
+                    best.email = other.email
+                    break
+        contact_by_buyer[buyer_id] = best
 
     from modules.calls import latest_call_notes_by_buyer
 
@@ -1991,7 +2018,26 @@ def get_lead_table_row(db: Session, buyer_id: int) -> dict[str, object] | None:
 
     latest = get_latest_score(db, buyer_id)
     contacts = buyers_module.list_contacts_for_buyer(db, buyer_id)
-    contact = next((c for c in contacts if c.email), contacts[0] if contacts else None)
+    if contacts:
+        def _richness(c: Contact) -> tuple[int, int]:
+            has_phone = 1 if (c.phone or c.primary_phone or c.secondary_mobile) else 0
+            has_email = 1 if c.email else 0
+            return (has_phone, has_email)
+
+        contact = max(contacts, key=_richness)
+        if not (contact.phone or contact.primary_phone):
+            for other in contacts:
+                if other.phone and not contact.phone:
+                    contact.phone = other.phone
+                if other.primary_phone and not contact.primary_phone:
+                    contact.primary_phone = other.primary_phone
+        if not contact.email:
+            for other in contacts:
+                if other.email:
+                    contact.email = other.email
+                    break
+    else:
+        contact = None
     call_timing = get_call_recommendation(buyer.country)
     from modules.calls import latest_call_notes_by_buyer
 
@@ -2135,19 +2181,27 @@ def update_lead_table_row(
     )
     contact_fields_present = any(key in data for key in contact_keys)
     if contact_fields_present:
-        buyers_module.upsert_primary_contact(
-            db,
-            buyer_id,
-            contact_id=data.get("contact_id"),
-            full_name=data.get("contact_name"),
-            email=data.get("contact_email"),
-            phone=data.get("contact_phone"),
-            designation=data.get("contact_designation"),
-            secondary_mobile=data.get("contact_secondary_mobile"),
-            primary_phone=data.get("contact_primary_phone"),
-            secondary_phone=data.get("contact_secondary_phone"),
-            secondary_email=data.get("contact_secondary_email"),
-        )
+        # Only pass keys that were actually sent — omitted fields keep existing values.
+        upsert_kwargs: dict[str, object] = {}
+        if "contact_id" in data and data.get("contact_id") is not None:
+            upsert_kwargs["contact_id"] = data.get("contact_id")
+        if "contact_name" in data:
+            upsert_kwargs["full_name"] = data.get("contact_name")
+        if "contact_email" in data:
+            upsert_kwargs["email"] = data.get("contact_email")
+        if "contact_phone" in data:
+            upsert_kwargs["phone"] = data.get("contact_phone")
+        if "contact_designation" in data:
+            upsert_kwargs["designation"] = data.get("contact_designation")
+        if "contact_secondary_mobile" in data:
+            upsert_kwargs["secondary_mobile"] = data.get("contact_secondary_mobile")
+        if "contact_primary_phone" in data:
+            upsert_kwargs["primary_phone"] = data.get("contact_primary_phone")
+        if "contact_secondary_phone" in data:
+            upsert_kwargs["secondary_phone"] = data.get("contact_secondary_phone")
+        if "contact_secondary_email" in data:
+            upsert_kwargs["secondary_email"] = data.get("contact_secondary_email")
+        buyers_module.upsert_primary_contact(db, buyer_id, **upsert_kwargs)  # type: ignore[arg-type]
 
     log_action(
         db,
