@@ -178,6 +178,7 @@ function DashboardApp() {
   const [aiResearchReturnSection, setAiResearchReturnSection] =
     useState<LeadsTableSection | null>(null);
   const [aiResearchRestoreIds, setAiResearchRestoreIds] = useState<number[] | null>(null);
+  const [aiResearchRestoreSearch, setAiResearchRestoreSearch] = useState<string | null>(null);
   const [showAiResearchLog, setShowAiResearchLog] = useState(false);
   const [aiResearchLogEntries, setAiResearchLogEntries] = useState<AiResearchLogEntry[]>([]);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -628,12 +629,21 @@ function DashboardApp() {
     ) : null;
 
   const returnToTableWithSelection = useCallback(
-    (leadIds: number[], section?: string | null) => {
+    (leadIds: number[], section?: string | null, searchHint?: string | null) => {
       const nextSection = (section || aiResearchReturnSection || tableSection) as LeadsTableSection;
       setShowAiResearchLog(false);
       setAiResearchContacts(null);
       setAiResearchReturnSection(null);
-      if (leadIds.length) setAiResearchRestoreIds(leadIds);
+      if (leadIds.length) {
+        setAiResearchRestoreIds(leadIds);
+        // Filter the table to this lead so it is not buried in 3000+ rows.
+        const hint =
+          (searchHint || "").trim() ||
+          (leadIds.length === 1 ? String(leadIds[0]) : String(leadIds[0]));
+        setAiResearchRestoreSearch(hint);
+      } else {
+        setAiResearchRestoreSearch(null);
+      }
       setTableSection(nextSection);
       setLeadsTableRefreshToken((t) => t + 1);
       setTab("table");
@@ -1925,7 +1935,11 @@ function DashboardApp() {
                   setTab("chatbot");
                 }}
                 restoreSelectedIds={aiResearchRestoreIds}
-                onRestoreSelectedConsumed={() => setAiResearchRestoreIds(null)}
+                restoreSearchHint={aiResearchRestoreSearch}
+                onRestoreSelectedConsumed={() => {
+                  setAiResearchRestoreIds(null);
+                  setAiResearchRestoreSearch(null);
+                }}
               />
             )}
             {tab === "inbox" && (
@@ -2059,8 +2073,8 @@ function DashboardApp() {
           entries={aiResearchLogEntries}
           onClose={() => setShowAiResearchLog(false)}
           onEntriesChange={setAiResearchLogEntries}
-          onOpenContacts={(leadIds, section) =>
-            returnToTableWithSelection(leadIds, section)
+          onOpenContacts={(leadIds, section, searchHint) =>
+            returnToTableWithSelection(leadIds, section, searchHint)
           }
         />
       ) : null}

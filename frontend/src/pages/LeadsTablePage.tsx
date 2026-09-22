@@ -162,6 +162,8 @@ interface LeadsTablePageProps {
   onOpenAiResearchUpdate?: (contacts: LeadTableRow[]) => void;
   /** Restore checkbox selection after returning from AI Research & Update. */
   restoreSelectedIds?: number[] | null;
+  /** Prefill table search when returning from AI Research log (company / phone / lead id). */
+  restoreSearchHint?: string | null;
   onRestoreSelectedConsumed?: () => void;
 }
 
@@ -1123,6 +1125,7 @@ export function LeadsTablePage({
   onOpenAiSalesAgent,
   onOpenAiResearchUpdate,
   restoreSelectedIds = null,
+  restoreSearchHint = null,
   onRestoreSelectedConsumed,
 }: LeadsTablePageProps) {
   const { isAdmin, user } = useAuth();
@@ -1141,6 +1144,7 @@ export function LeadsTablePage({
   const [drafts, setDrafts] = useState<Record<number, LeadTableRow>>({});
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
+  const pendingAiFocusIdsRef = useRef<number[] | null>(null);
   const [originalKeys, setOriginalKeys] = useState<Record<number, string>>({});
   const [savingId, setSavingId] = useState<number | null>(null);
   const [assigningId, setAssigningId] = useState<number | null>(null);
@@ -1934,11 +1938,44 @@ export function LeadsTablePage({
 
   // Apply after section effect so remount does not wipe the restored checkboxes.
   useEffect(() => {
-    if (!restoreSelectedIds?.length) return;
-    setSelected(new Set(restoreSelectedIds));
-    setAllMatchingSelected(false);
+    if (!restoreSelectedIds?.length && !(restoreSearchHint || "").trim()) {
+      return;
+    }
+    if (restoreSelectedIds?.length) {
+      setSelected(new Set(restoreSelectedIds));
+      setAllMatchingSelected(false);
+      pendingAiFocusIdsRef.current = [...restoreSelectedIds];
+    }
+    const hint =
+      (restoreSearchHint || "").trim() ||
+      (restoreSelectedIds?.length === 1 ? String(restoreSelectedIds[0]) : "");
+    if (hint) {
+      setSearch(hint);
+      setDebouncedSearch(hint);
+      setPage(1);
+      setFiltersExpanded(true);
+      setSaveNotice(
+        restoreSelectedIds?.length === 1
+          ? `Filtered to lead #${restoreSelectedIds[0]} from AI Research. Clear Search in Filter to see the full list again.`
+          : `Filtered from AI Research (${restoreSelectedIds?.length ?? 0} selected). Clear Search in Filter to see the full list again.`,
+      );
+    }
     onRestoreSelectedConsumed?.();
-  }, [restoreSelectedIds, onRestoreSelectedConsumed]);
+  }, [restoreSelectedIds, restoreSearchHint, onRestoreSelectedConsumed]);
+
+  // Scroll the restored AI Research contact into view once filtered rows load.
+  useEffect(() => {
+    const ids = pendingAiFocusIdsRef.current;
+    if (!ids?.length || loading || !rows.length) return;
+    const targetId = ids[0];
+    if (!rows.some((r) => r.id === targetId)) return;
+    const el = document.querySelector(`[data-lead-row-id="${targetId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    pendingAiFocusIdsRef.current = null;
+  }, [loading, rows]);
+
   useEffect(() => {
     const company = (focusEditCompany || "").trim();
     if (!company && focusEditLeadId == null) return;
@@ -3919,7 +3956,7 @@ export function LeadsTablePage({
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Company name…"
+                  placeholder="Company, phone, email, or lead #…"
                   className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
                 />
               </label>
@@ -4013,7 +4050,7 @@ export function LeadsTablePage({
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Company name…"
+                  placeholder="Company, phone, email, or lead #…"
                   className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-200"
                 />
               </label>

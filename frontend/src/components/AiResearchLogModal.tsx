@@ -11,8 +11,12 @@ interface AiResearchLogModalProps {
   entries: AiResearchLogEntry[];
   onClose: () => void;
   onEntriesChange: (entries: AiResearchLogEntry[]) => void;
-  /** Jump back to the contact list with these IDs still selected. */
-  onOpenContacts: (leadIds: number[], section?: string | null) => void;
+  /** Jump back to the contact list with these IDs still selected (and filtered). */
+  onOpenContacts: (
+    leadIds: number[],
+    section?: string | null,
+    searchHint?: string | null,
+  ) => void;
 }
 
 type DetailMode = "before_after" | "current" | null;
@@ -167,15 +171,18 @@ export function AiResearchLogModal({
                         </li>
                       ))}
                     </ul>
-                    {ids.length > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenContacts(ids, entry.section)}
-                        className="mt-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20"
-                      >
-                        Open list with these contacts selected
-                      </button>
-                    ) : null}
+                  {ids.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Prefer lead id — filters the table to that one row (not S. No).
+                        onOpenContacts(ids, entry.section, String(ids[0]));
+                      }}
+                      className="mt-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20"
+                    >
+                      Open list with these contacts selected
+                    </button>
+                  ) : null}
                   </div>
                 );
               })
@@ -320,7 +327,11 @@ export function AiResearchLogModal({
                     <button
                       type="button"
                       onClick={() => {
-                        onOpenContacts([detail.contact.id], detail.entry.section);
+                        onOpenContacts(
+                          [detail.contact.id],
+                          detail.entry.section,
+                          String(detail.contact.id),
+                        );
                         setDetail(null);
                       }}
                       className="px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-xs text-emerald-100 hover:bg-emerald-500/20"
