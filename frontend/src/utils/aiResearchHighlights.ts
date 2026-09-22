@@ -1,6 +1,10 @@
 /** Persist which CRM fields AI Research filled — used to yellow-highlight table cells. */
 
-import type { AiResearchFieldKey } from "./aiResearchUpdate";
+import {
+  AI_RESEARCH_FIELD_LABELS,
+  type AiResearchFieldKey,
+} from "./aiResearchUpdate";
+import { listAiResearchLog } from "./aiResearchLog";
 
 export type AiResearchHighlightEntry = {
   fields: AiResearchFieldKey[];
@@ -19,6 +23,12 @@ const STORAGE_KEY = "kafi-ai-research-highlights-v1";
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 type Store = Record<string, AiResearchHighlightEntry>;
+
+const LABEL_TO_FIELD = Object.fromEntries(
+  (Object.entries(AI_RESEARCH_FIELD_LABELS) as Array<[AiResearchFieldKey, string]>).map(
+    ([field, label]) => [label.toLowerCase(), field],
+  ),
+) as Record<string, AiResearchFieldKey>;
 
 function readStore(): Store {
   try {
@@ -69,6 +79,40 @@ export function recordAiResearchHighlights(
     },
   };
   writeStore(store);
+}
+
+/** Rebuild yellow highlights from saved AI Research log entries (incl. older ones). */
+export function syncAiResearchHighlightsFromLog(): Store {
+  const store = readStore();
+  for (const entry of listAiResearchLog()) {
+    if (entry.action !== "saved") continue;
+    for (const c of entry.contacts) {
+      if (!c.id) continue;
+      const fields = new Set<AiResearchFieldKey>(store[String(c.id)]?.fields ?? []);
+      for (const ch of c.changes ?? []) {
+        if (ch.field) fields.add(ch.field as AiResearchFieldKey);
+      }
+      for (const label of c.filled_fields ?? []) {
+        const mapped = LABEL_TO_FIELD[label.toLowerCase()];
+        if (mapped) fields.add(mapped);
+      }
+      if (!fields.size) continue;
+      const prev = store[String(c.id)];
+      store[String(c.id)] = {
+        fields: Array.from(fields),
+        at: entry.at || prev?.at || new Date().toISOString(),
+        search: {
+          ...(prev?.search ?? {}),
+          company_name: c.after_company_name || c.company_name || prev?.search?.company_name,
+          contact_name: c.after_contact_name || c.contact_name || prev?.search?.contact_name,
+          phone: c.after_phone || c.phone || prev?.search?.phone,
+          email: c.after_email || c.email || prev?.search?.email,
+        },
+      };
+    }
+  }
+  writeStore(store);
+  return store;
 }
 
 export function getAiResearchHighlightFields(leadId: number): AiResearchFieldKey[] {
