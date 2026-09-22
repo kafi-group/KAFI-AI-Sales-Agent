@@ -77,6 +77,7 @@ import {
 } from "../hooks/useColumnVisibility";
 import { exportLeadsTableCsv } from "../utils/exportCsv";
 import { UNASSIGNED } from "../utils/leadAssignees";
+import { listAiResearchHighlights, syncAiResearchHighlightsFromLog } from "../utils/aiResearchHighlights";
 
 const SORT_FILTER_OPTIONS = [
   { value: "company_name", label: "Company name" },
@@ -1148,6 +1149,9 @@ export function LeadsTablePage({
   const [savingAll, setSavingAll] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [aiResearchHighlights, setAiResearchHighlights] = useState(() =>
+    listAiResearchHighlights(),
+  );
   const [allMatchingSelected, setAllMatchingSelected] = useState(false);
   const [selectingAll, setSelectingAll] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -1901,6 +1905,16 @@ export function LeadsTablePage({
       void loadSectionCounts();
     }
   }, [loadSectionCounts, loadTable, refreshToken]);
+
+  useEffect(() => {
+    setAiResearchHighlights(syncAiResearchHighlightsFromLog());
+  }, [refreshToken, restoreSelectedIds, section]);
+
+  useEffect(() => {
+    const onFocus = () => setAiResearchHighlights(syncAiResearchHighlightsFromLog());
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
 
   useEffect(() => {
     setEditMode(false);
@@ -4251,6 +4265,8 @@ export function LeadsTablePage({
                 {displayedRows.map((row) => {
                   const draft = drafts[row.id] ?? row;
                   const dirty = editMode && isRowDirty(row.id);
+                  const aiHlFields =
+                    aiResearchHighlights[String(row.id)]?.fields?.join(" ") ?? "";
                   const cell = (
                     field: keyof LeadTableRow,
                     display: string,
@@ -4280,6 +4296,7 @@ export function LeadsTablePage({
                     <tr
                       key={row.id}
                       data-lead-row-id={row.id}
+                      data-ai-hl={aiHlFields || undefined}
                       onClick={() => {
                         if (!editMode) onSelectLead(row.id);
                       }}
@@ -4817,11 +4834,14 @@ export function LeadsTablePage({
               {displayedRows.map((row) => {
                 const draft = drafts[row.id] ?? row;
                 const dirty = editMode && isRowDirty(row.id);
+                const aiHlFields =
+                  aiResearchHighlights[String(row.id)]?.fields?.join(" ") ?? "";
 
                 return (
                   <tr
                     key={row.id}
                     data-lead-row-id={row.id}
+                    data-ai-hl={aiHlFields || undefined}
                     onClick={() => {
                       if (!editMode) onSelectLead(row.id);
                     }}

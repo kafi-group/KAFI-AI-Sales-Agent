@@ -10,6 +10,8 @@ import {
 import {
   appendAiResearchLog,
 } from "../utils/aiResearchLog";
+import { recordAiResearchHighlights } from "../utils/aiResearchHighlights";
+import type { AiResearchFieldKey } from "../utils/aiResearchUpdate";
 
 interface ChatbotPageProps {
   onError: (msg: string) => void;
@@ -33,7 +35,11 @@ function contactLogLabel(snap: AiResearchContactSnapshot): string {
 function snapshotToLogContact(
   snap: AiResearchContactSnapshot,
   filled?: string[],
+  changes?: import("../utils/aiResearchLog").AiResearchLogFieldChange[],
 ): import("../utils/aiResearchLog").AiResearchLogContact {
+  const afterByField = Object.fromEntries(
+    (changes ?? []).map((ch) => [ch.field, ch.after]),
+  ) as Partial<Record<AiResearchFieldKey, string>>;
   return {
     id: snap.id,
     label: contactLogLabel(snap),
@@ -42,6 +48,16 @@ function snapshotToLogContact(
     phone: snap.contact_phone || undefined,
     email: snap.contact_email || undefined,
     filled_fields: filled,
+    changes,
+    after_company_name: afterByField.company_name || snap.company_name || undefined,
+    after_contact_name: afterByField.contact_name || snap.contact_name || undefined,
+    after_phone: afterByField.contact_phone || snap.contact_phone || undefined,
+    after_email: afterByField.contact_email || snap.contact_email || undefined,
+    after_website: afterByField.website_url || snap.website_url || undefined,
+    after_address: afterByField.address || snap.address || undefined,
+    after_country: afterByField.country || snap.country || undefined,
+    after_designation: afterByField.contact_designation || snap.contact_designation || undefined,
+    after_industry: afterByField.industry || snap.industry || undefined,
   };
 }
 
@@ -530,11 +546,34 @@ export function ChatbotPage({
       const logContacts = reviewItems.map((item) => {
         const snap = batchContacts?.find((c) => c.id === item.leadId);
         const filled = item.changes.map((c) => c.label);
-        if (snap) return snapshotToLogContact(snap, filled);
+        const changes = item.changes.map((c) => ({
+          field: c.field,
+          label: c.label,
+          before: c.before,
+          after: c.after,
+        }));
+        if (snap) {
+          recordAiResearchHighlights(
+            item.leadId,
+            item.changes.map((c) => c.field),
+            {
+              company_name: changes.find((c) => c.field === "company_name")?.after || snap.company_name || undefined,
+              contact_name: changes.find((c) => c.field === "contact_name")?.after || snap.contact_name || undefined,
+              phone: changes.find((c) => c.field === "contact_phone")?.after || snap.contact_phone || undefined,
+              email: changes.find((c) => c.field === "contact_email")?.after || snap.contact_email || undefined,
+            },
+          );
+          return snapshotToLogContact(snap, filled, changes);
+        }
+        recordAiResearchHighlights(
+          item.leadId,
+          item.changes.map((c) => c.field),
+        );
         return {
           id: item.leadId,
           label: item.displayName,
           filled_fields: filled,
+          changes,
         };
       });
       appendAiResearchLog({
