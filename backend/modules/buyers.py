@@ -343,6 +343,59 @@ def list_contacts_for_buyer(db: Session, buyer_id: int) -> list[Contact]:
     )
 
 
+def merge_stranded_contact_fields(db: Session, buyer_id: int) -> Contact | None:
+    """Collapse split contact rows from older AI fills (email-only vs phone-only).
+
+    Used by AI Research & Update and Sara/Rayan Auto Data Update so filling email
+    never hides an existing phone on a sibling contact row.
+    """
+    contacts = list_contacts_for_buyer(db, buyer_id)
+    if not contacts:
+        return None
+    if len(contacts) == 1:
+        return contacts[0]
+
+    def _richness(c: Contact) -> tuple[int, int, int, int]:
+        has_phone = 1 if (c.phone or c.primary_phone or c.secondary_mobile or c.secondary_phone) else 0
+        has_email = 1 if (c.email or c.secondary_email) else 0
+        name = (c.full_name or "").strip()
+        has_name = 1 if name and name.lower() != "general contact" else 0
+        return (has_phone, has_email, has_name, -int(c.id or 0))
+
+    primary = max(contacts, key=_richness)
+    changed = False
+    for other in contacts:
+        if other.id == primary.id:
+            continue
+        for field in (
+            "phone",
+            "primary_phone",
+            "secondary_mobile",
+            "secondary_phone",
+            "email",
+            "secondary_email",
+            "designation",
+        ):
+            cur = (getattr(primary, field, None) or "").strip()
+            alt = (getattr(other, field, None) or "").strip()
+            if alt and not cur:
+                setattr(primary, field, alt)
+                changed = True
+        other_name = (other.full_name or "").strip()
+        primary_name = (primary.full_name or "").strip()
+        if (
+            other_name
+            and other_name.lower() != "general contact"
+            and (not primary_name or primary_name.lower() == "general contact")
+        ):
+            primary.full_name = other_name
+            changed = True
+    if changed:
+        db.commit()
+        db.refresh(primary)
+    return primary
+
+
 def contact_to_read(contact: Contact) -> dict:
     """Serialize a contact, including WhatsApp 24h session window status."""
     from datetime import datetime, timezone
@@ -546,31 +599,11 @@ def upsert_primary_contact(
             new_val = str(value).strip()
             if new_val:
                 setattr(contact, key, new_val)
-        # If a prior AI fill created a second contact, pull phone/email from siblings
-        # so existing numbers are never left stranded on a hidden row.
-        for other in list_contacts_for_buyer(db, buyer_id):
-            if other.id == contact.id:
-                continue
-            if other.phone and not (contact.phone or "").strip():
-                contact.phone = other.phone
-            if other.primary_phone and not (contact.primary_phone or "").strip():
-                contact.primary_phone = other.primary_phone
-            if other.secondary_mobile and not (contact.secondary_mobile or "").strip():
-                contact.secondary_mobile = other.secondary_mobile
-            if other.email and not (contact.email or "").strip():
-                contact.email = other.email
-            if (
-                other.full_name
-                and (other.full_name or "").strip().lower() != "general contact"
-                and (
-                    not (contact.full_name or "").strip()
-                    or (contact.full_name or "").strip().lower() == "general contact"
-                )
-            ):
-                contact.full_name = other.full_name
         db.commit()
         db.refresh(contact)
-        return contact
+        # Pull any stranded phone/email from sibling rows (legacy AI split contacts).
+        merged = merge_stranded_contact_fields(db, buyer_id)
+        return merged or contact
 
     has_extra = any((value or "").strip() for value in contact_extras.values() if value is not None)
     if not (

@@ -2202,6 +2202,10 @@ def update_lead_table_row(
         if "contact_secondary_email" in data:
             upsert_kwargs["secondary_email"] = data.get("contact_secondary_email")
         buyers_module.upsert_primary_contact(db, buyer_id, **upsert_kwargs)  # type: ignore[arg-type]
+    else:
+        # Even buyer-only patches (company/website) should re-merge split contacts
+        # so Auto Data Update / AI Research never leave phones stranded.
+        buyers_module.merge_stranded_contact_fields(db, buyer_id)
 
     log_action(
         db,

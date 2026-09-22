@@ -470,24 +470,30 @@ def research_and_update_buyer(db: Any, buyer_id: int) -> dict[str, Any]:
 
     found = parse_research_reply(reply) if reply else {}
     update_payload: dict[str, Any] = {}
+    # Target the existing contact row so we never create a second contact that
+    # hides the original phone (same rule as AI Research & Update).
+    if row.get("contact_id") is not None:
+        update_payload["contact_id"] = row.get("contact_id")
+
     for key in PRIORITY_FIELDS:
-        if not _is_blank(row.get(key)) and key != "company_name":
+        # Fill empties only — never overwrite existing CRM values.
+        if not _is_blank(row.get(key)):
             continue
-        if key == "company_name" and not _is_blank(row.get("company_name")):
-            continue
-        val = found.get(key) or found.get(
-            {
-                "contact_designation": "contact_designation",
-            }.get(key, key)
-        )
-        # map designation key
+        val = found.get(key)
         if key == "contact_designation":
             val = found.get("contact_designation") or found.get("designation")
         if val and not _is_blank(val):
             update_payload[key] = val
 
-    # If chatbot found little, try classic enrichment (fills empties).
-    if len(update_payload) < 1:
+    # Drop blank contact patches so upsert cannot clear filled fields.
+    for key in list(update_payload.keys()):
+        if key == "contact_id":
+            continue
+        if key.startswith("contact_") and _is_blank(update_payload.get(key)):
+            update_payload.pop(key, None)
+
+    # If chatbot found little, try classic enrichment (fills empties only).
+    if len([k for k in update_payload if k != "contact_id"]) < 1:
         try:
             enrich_existing_buyer(db, buyer_id)
             db.commit()
@@ -499,13 +505,21 @@ def research_and_update_buyer(db: Any, buyer_id: int) -> dict[str, Any]:
             lm.onboard_buyer(db, buyer_id)
         except Exception:  # noqa: BLE001
             pass
+        # Repair any split contacts enrichment may have left behind.
+        try:
+            from modules import buyers as buyers_module
+
+            buyers_module.merge_stranded_contact_fields(db, buyer_id)
+        except Exception:  # noqa: BLE001
+            pass
 
     filled: list[str] = []
     changes: list[dict[str, str]] = []
-    if update_payload:
+    patch_keys = [k for k in update_payload if k != "contact_id"]
+    if patch_keys:
         updated = leads_module.update_lead_table_row(db, buyer_id, update_payload)
         if updated:
-            filled = list(update_payload.keys())
+            filled = list(patch_keys)
             for key in filled:
                 changes.append(
                     {
@@ -515,6 +529,14 @@ def research_and_update_buyer(db: Any, buyer_id: int) -> dict[str, Any]:
                         "after": str(update_payload.get(key) or "").strip(),
                     }
                 )
+    else:
+        # Buyer-only / enrich path — still merge stranded phones onto the display contact.
+        try:
+            from modules import buyers as buyers_module
+
+            buyers_module.merge_stranded_contact_fields(db, buyer_id)
+        except Exception:  # noqa: BLE001
+            pass
 
     # Re-read to report what changed after enrich/onboard path
     after = leads_module.get_lead_table_row(db, buyer_id) or row
