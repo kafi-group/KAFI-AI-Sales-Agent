@@ -313,7 +313,7 @@ export function ChatbotPage({ onError }: ChatbotPageProps) {
       {/* Header */}
       <div className="flex items-center justify-between pb-4 border-b border-slate-800">
         <div>
-          <h1 className="text-xl font-semibold text-slate-100">Research and Update</h1>
+          <h1 className="text-xl font-semibold text-slate-100">AI Research & Update</h1>
           <p className="text-sm text-slate-400 mt-0.5">
             Upload a product image for brand identification and full company details first.
           </p>
@@ -392,7 +392,7 @@ export function ChatbotPage({ onError }: ChatbotPageProps) {
             </p>
           )}
           <CreateLeadForm
-            title="Add lead from Research and Update"
+            title="Add lead from AI Research & Update"
             source="manual"
             initialValues={leadDraft}
             onCancel={() => {

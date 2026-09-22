@@ -228,17 +228,17 @@ export function AppSidebar({
   const [telegramMenuOpen, setTelegramMenuOpen] = useState(
     activeTab === "telegram-mobile" || activeTab === "telegram-templates",
   );
-  const [callsMenuOpen, setCallsMenuOpen] = useState(
-    activeTab === "calls" || activeTab === "ai-sales-agent" || activeTab === "ai-train",
-  );
+  const [callsMenuOpen, setCallsMenuOpen] = useState(activeTab === "calls");
   const [aiMenuOpen, setAiMenuOpen] = useState(
     activeTab === "ai-mode" ||
     activeTab === "leads" ||
-    activeTab === "data-synthesis",
+    activeTab === "data-synthesis" ||
+    activeTab === "ai-sales-agent" ||
+    activeTab === "ai-train" ||
+    activeTab === "chatbot",
   );
   const [othersMenuOpen, setOthersMenuOpen] = useState(
     activeTab === "catalogue" ||
-    activeTab === "chatbot" ||
     activeTab === "client-history" ||
     activeTab === "helpful-guidance" ||
     activeTab === "target-workspace" ||
@@ -285,7 +285,7 @@ export function AppSidebar({
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab === "calls" || activeTab === "ai-sales-agent" || activeTab === "ai-train") {
+    if (activeTab === "calls") {
       setCallsMenuOpen(true);
     }
   }, [activeTab]);
@@ -294,7 +294,10 @@ export function AppSidebar({
     if (
       activeTab === "ai-mode" ||
       activeTab === "leads" ||
-      activeTab === "data-synthesis"
+      activeTab === "data-synthesis" ||
+      activeTab === "ai-sales-agent" ||
+      activeTab === "ai-train" ||
+      activeTab === "chatbot"
     ) {
       setAiMenuOpen(true);
     }
@@ -303,7 +306,6 @@ export function AppSidebar({
   useEffect(() => {
     if (
       activeTab === "catalogue" ||
-      activeTab === "chatbot" ||
       activeTab === "client-history" ||
       activeTab === "helpful-guidance" ||
       activeTab === "target-workspace" ||
@@ -482,16 +484,16 @@ export function AppSidebar({
                       ? activeTab === "telegram-mobile" ||
                         activeTab === "telegram-templates"
                     : item.id === "calls"
-                      ? activeTab === "calls" ||
-                        activeTab === "ai-sales-agent" ||
-                        activeTab === "ai-train"
+                      ? activeTab === "calls"
                       : item.id === "ai"
                         ? activeTab === "ai-mode" ||
                           activeTab === "leads" ||
-                          activeTab === "data-synthesis"
+                          activeTab === "data-synthesis" ||
+                          activeTab === "ai-sales-agent" ||
+                          activeTab === "ai-train" ||
+                          activeTab === "chatbot"
                         : item.id === "others"
                           ? activeTab === "catalogue" ||
-                            activeTab === "chatbot" ||
                             activeTab === "client-history" ||
                             activeTab === "helpful-guidance" ||
                             activeTab === "target-workspace" ||
@@ -574,7 +576,7 @@ export function AppSidebar({
                   : isCallsParent
                     ? "calls"
                     : isAiParent
-                      ? "ai-mode"
+                      ? "ai-sales-agent"
                       : isIndexesParent
                         ? "indexes"
                         : isOthersParent
@@ -605,11 +607,7 @@ export function AppSidebar({
                         ? "telegram-templates"
                         : "telegram-mobile"
                     : isCallsParent
-                      ? activeTab === "ai-sales-agent"
-                        ? "ai-sales-agent"
-                        : activeTab === "ai-train"
-                          ? "ai-train"
-                          : "calls"
+                      ? "calls"
                       : isAiParent
                         ? activeTab
                         : isIndexesParent
@@ -680,7 +678,7 @@ export function AppSidebar({
                         }
                         if (isAiParent) {
                           setAiMenuOpen((open) => !open);
-                          onSelectTab("ai-mode");
+                          onSelectTab("ai-sales-agent");
                           closeMobile();
                           return;
                         }

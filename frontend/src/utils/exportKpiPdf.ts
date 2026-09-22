@@ -17,7 +17,7 @@ const COUNT_LABELS: { key: keyof KpiCounts; label: string }[] = [
   { key: "personal_whatsapp_sent", label: "Personal WhatsApp sent" },
   { key: "bulk_whatsapp_sent", label: "Bulk WhatsApp sent" },
   { key: "inbox_replies", label: "Inbox replies" },
-  { key: "brand_assistant_sessions", label: "Research and Update" },
+  { key: "brand_assistant_sessions", label: "AI Research & Update" },
 ];
 
 export interface KpiPdfInput {

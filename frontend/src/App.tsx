@@ -1406,8 +1406,6 @@ function DashboardApp() {
       count: 0,
       children: [
         { id: "calls", label: "Manual Call Center", count: 0 },
-        { id: "ai-sales-agent", label: "AI Sales Agent", count: 0 },
-        { id: "ai-train", label: "AI Train", count: 0 },
       ],
     },
     // #4 Emails (dropdown) with Bulk Email Sender inside
@@ -1456,19 +1454,20 @@ function DashboardApp() {
         })),
       ],
     },
-    // AI — admin tools only (AI Mode / Searched by AI live under Settings + password)
-    ...(isAdmin
-      ? [
-          {
-            id: "ai",
-            label: "AI",
-            count: 0,
-            children: [
-              { id: "data-synthesis" as const, label: "Smart Data Clean & Merge", count: 0 },
-            ],
-          },
-        ]
-      : []),
+    // AI — Sales Agent / Train / Research for all users; Smart Data Clean admin-only
+    {
+      id: "ai",
+      label: "AI",
+      count: 0,
+      children: [
+        { id: "ai-sales-agent" as const, label: "AI Sales Agent", count: 0 },
+        { id: "ai-train" as const, label: "AI Train", count: 0 },
+        ...(isAdmin
+          ? [{ id: "data-synthesis" as const, label: "Smart Data Clean & Merge", count: 0 }]
+          : []),
+        { id: "chatbot" as const, label: "AI Research & Update", count: 0 },
+      ],
+    },
     // #5 Others (dropdown)
     {
       id: "others",
@@ -1486,7 +1485,6 @@ function DashboardApp() {
           label: "Catalogue",
           count: 4,
         },
-        { id: "chatbot", label: "Research and Update", count: 0 },
         { id: "client-history", label: "Client History", count: 0 },
         { id: "helpful-guidance", label: "SALES HELP MANAGER", count: 0 },
         { id: "target-workspace" as const, label: "Target and Workspace", count: 0 },

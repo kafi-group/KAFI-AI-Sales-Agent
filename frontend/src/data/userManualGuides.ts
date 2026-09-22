@@ -12,7 +12,7 @@ export const SECTION_MANUAL_OVERVIEWS: Record<number, string> = {
   4: "Vercel mailer sits below Mail in the sidebar — a separate full mailer app with the same login session.",
   5: "Calls uses Twilio. Always set a call outcome after hanging up — it moves leads into the correct Master table bucket.",
   6: "Quotation agent opens in a new tab for ESSENCE PDF quotes with catalog line items.",
-  7: "Research and Update is the in-app chatbot for product and export questions.",
+  7: "AI Research & Update is the in-app chatbot for product and export questions.",
   8: "AI Mode covers auto-reply and the company lifecycle tabs (New Lead through Interested). Admin sees all users' activity feeds.",
   9: "KPI Generation reports logged activity — calls, emails, outcomes — for you or the whole team.",
   10: "Users (admin only) — create accounts and assign leads, which creates Leads Sent To {username} under Master table.",
@@ -299,9 +299,9 @@ export const USER_MANUAL_GUIDES: Record<string, UserManualGuide> = {
   },
   "7.1": {
     whoFor: "Admin and sales users",
-    overview: "Research and Update chatbot for Kafi product questions.",
+    overview: "AI Research & Update chatbot for Kafi product questions.",
     steps: [
-      "Open Research and Update in the sidebar.",
+      "Open AI Research & Update in the sidebar.",
       "Ask about products, categories, certifications, or specs.",
       "Use answers to draft emails or call scripts — confirm pricing with admin.",
     ],

@@ -22,7 +22,7 @@ interface CreateLeadFormProps {
   /** Buyer source so the lead appears in the right table section (e.g. old_clients). */
   source?: string;
   title?: string;
-  /** Pre-fill from Research and Update or other sources. */
+  /** Pre-fill from AI Research & Update or other sources. */
   initialValues?: Partial<typeof emptyForm> & { address?: string };
 }
 
