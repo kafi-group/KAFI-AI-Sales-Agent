@@ -174,9 +174,11 @@ class Settings(BaseSettings):
     twilio_webhook_base_url: str | None = None
     # Validate X-Twilio-Signature on webhooks (default false for reverse-proxy compatibility on Railway/Cloudflare)
     twilio_validate_webhooks: bool = False
-    # Hang up unanswered outbound calls after ~4 rings (~4s each = 16s), then auto-redial once.
+    # Hang up unanswered outbound after ring_timeout_seconds, then auto-redial
+    # up to max_ring_attempts times (16s → hangup → 16s → …) until answered or cap.
     hangup_after_fourth_ring: bool = True
     ring_timeout_seconds: int = 16
+    max_ring_attempts: int = 10
 
     # Bulk email throttling (Gmail-safe batching)
     bulk_email_batch_size: int = 50

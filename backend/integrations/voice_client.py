@@ -8,8 +8,9 @@ from typing import Any
 
 from config import settings
 
-_FOURTH_RING_SECONDS = 16  # ~4s per ring × 4 rings; then auto-redial once for another 16s
-_MAX_RING_ATTEMPTS = 2  # hang up ~4 rings, auto-redial once → ~8 rings, no voicemail
+_FOURTH_RING_SECONDS = 16  # ~4s per ring × 4 rings per dial attempt
+_DEFAULT_MAX_RING_ATTEMPTS = 10  # 16s → hangup → 16s again … until answer or this cap
+_HARD_MAX_RING_ATTEMPTS = 20
 # Carrier still setting up the call — never hang up solely because of these.
 _PRE_RING_STATUSES = {
     "queued",
@@ -447,13 +448,20 @@ class VoiceClient:
         return max(8, min(seconds, 60))
 
     def max_ring_attempts(self) -> int:
-        """When 4th-ring hangup is ON: dial twice (~4 + ~4 rings). Otherwise one continuous ring."""
+        """How many 16s dial attempts when hangup-after-rings is ON (stops on answer)."""
         if not self.hangup_after_fourth_ring_enabled():
             return 1
-        return _MAX_RING_ATTEMPTS
+        try:
+            n = int(
+                getattr(settings, "max_ring_attempts", _DEFAULT_MAX_RING_ATTEMPTS)
+                or _DEFAULT_MAX_RING_ATTEMPTS
+            )
+        except (TypeError, ValueError):
+            n = _DEFAULT_MAX_RING_ATTEMPTS
+        return max(1, min(n, _HARD_MAX_RING_ATTEMPTS))
 
     def should_auto_redial(self, *, attempt: int, status: str | None) -> bool:
-        """True when this unanswered attempt should be followed by one more dial."""
+        """True when this unanswered attempt should be followed by another dial."""
         blob = (status or "").lower().replace("_", "-")
         if attempt >= self.max_ring_attempts():
             return False
@@ -590,7 +598,7 @@ class VoiceClient:
     ) -> dict[str, Any]:
         """Initiate an outbound PSTN call via Vapi AI Voice Engine (or Twilio fallback).
 
-        When hang-up-after-4th-ring is ON, unanswered dials auto-redial once (~8 rings total).
+        When hang-up-after-rings is ON, unanswered dials auto-redial up to max_ring_attempts.
         """
         normalized = normalize_e164(to_phone)
         if not normalized:

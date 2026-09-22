@@ -723,18 +723,17 @@ def handle_ai_call_status(
     # Always prefer the live task counter (webhook metadata can lag / be stale).
     attempt = int(task.get("ring_attempt") or ring_attempt or 1)
     no_answer = _is_no_answer(status, ended_reason, duration)
-    # Hard cap: only one auto-redial ever (attempt 1 → 2). Never attempt 3+.
-    already_redialed = bool(task.get("redial_used")) or attempt >= voice_client.max_ring_attempts()
-    if no_answer and not already_redialed and attempt < voice_client.max_ring_attempts():
+    max_attempts = voice_client.max_ring_attempts()
+    if no_answer and attempt < max_attempts:
         phone = task.get("contact_phone")
         if phone:
             next_attempt = attempt + 1
             # Mark before place_outbound so a second webhook cannot double-dial.
-            task["redial_used"] = True
             task["ring_attempt"] = next_attempt
+            task["redial_used"] = next_attempt > 1
             task["remarks"] = (
-                f"Attempt {attempt} ended with no connect — auto-redialing "
-                f"attempt {next_attempt} (~16s). Max 2 attempts."
+                f"Attempt {attempt} no connect — redialing attempt {next_attempt}/{max_attempts} "
+                f"(~{voice_client.ring_timeout_seconds() or 16}s each)."
             )
             task["outcome"] = "Re-dialing"
             redial = voice_client.place_outbound_ai_call(

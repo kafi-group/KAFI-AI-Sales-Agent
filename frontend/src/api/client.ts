@@ -929,6 +929,7 @@ export interface TwilioBalance {
   fetched_at?: string | null;
   hangup_after_fourth_ring?: boolean;
   ring_timeout_seconds?: number;
+  max_ring_attempts?: number;
 }
 
 export interface VoiceToken {
@@ -4034,15 +4035,19 @@ export const client = {
 
   getCallConfig: () => request<CallConfig>("/calls/config"),
   getTwilioBalance: () => request<TwilioBalance>("/calls/twilio-balance"),
-  toggleHangupAfterFourthRing: (enabled: boolean) =>
+  toggleHangupAfterFourthRing: (enabled: boolean, maxRingAttempts?: number) =>
     request<{
       ok: boolean;
       hangup_after_fourth_ring: boolean;
       ring_timeout_seconds: number;
+      max_ring_attempts?: number;
       message: string;
     }>("/calls/hangup-after-fourth-ring", {
       method: "POST",
-      body: JSON.stringify({ enabled }),
+      body: JSON.stringify({
+        enabled,
+        ...(maxRingAttempts != null ? { max_ring_attempts: maxRingAttempts } : {}),
+      }),
     }),
   getVoiceEngineSettings: () => request<VoiceEngineSettings>("/calls/voice-engine-settings"),
   unlockVoiceSettings: (pin: string) =>

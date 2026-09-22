@@ -298,23 +298,47 @@ export function SettingsPage({ onError, onOpenRestrictedAi }: SettingsPageProps)
 
   const hangupAfterFourthRing = twilio?.hangup_after_fourth_ring !== false;
   const ringSeconds = twilio?.ring_timeout_seconds ?? 16;
+  const maxRingAttempts = twilio?.max_ring_attempts ?? 10;
   const lowBalance = twilio?.ok && twilio.balance != null && twilio.balance < 5;
 
   async function handleHangupToggle(next: boolean) {
     setSavingHangup(true);
     try {
-      const res = await client.toggleHangupAfterFourthRing(next);
+      const res = await client.toggleHangupAfterFourthRing(next, maxRingAttempts);
       setTwilio((prev) =>
         prev
           ? {
               ...prev,
               hangup_after_fourth_ring: res.hangup_after_fourth_ring,
               ring_timeout_seconds: res.ring_timeout_seconds,
+              max_ring_attempts: res.max_ring_attempts ?? maxRingAttempts,
             }
           : prev,
       );
     } catch (err) {
       onError(err instanceof Error ? err.message : "Could not update hang-up after 4th ring");
+    } finally {
+      setSavingHangup(false);
+    }
+  }
+
+  async function handleMaxRingAttempts(next: number) {
+    setSavingHangup(true);
+    try {
+      const capped = Math.max(1, Math.min(20, Math.round(next) || 10));
+      const res = await client.toggleHangupAfterFourthRing(hangupAfterFourthRing, capped);
+      setTwilio((prev) =>
+        prev
+          ? {
+              ...prev,
+              hangup_after_fourth_ring: res.hangup_after_fourth_ring,
+              ring_timeout_seconds: res.ring_timeout_seconds,
+              max_ring_attempts: res.max_ring_attempts ?? capped,
+            }
+          : prev,
+      );
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Could not update max redial attempts");
     } finally {
       setSavingHangup(false);
     }
@@ -654,45 +678,64 @@ export function SettingsPage({ onError, onOpenRestrictedAi }: SettingsPageProps)
           </div>
         )}
 
-        <div className="mt-4 rounded-lg border border-emerald-500/25 bg-emerald-950/20 p-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-[220px] flex-1">
-            <p className="text-sm font-medium text-slate-100">Hang up after 4th ring + auto redial</p>
-            <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-              Default <strong className="text-slate-300">ON</strong> for every caller — Sara, Rayan,
-              and all dashboard users (Asim, Usman, Sadia, and anyone else). Unanswered calls hang up
-              after about {ringSeconds} seconds (~4s per ring × 4). If the person declines or hangs
-              up earlier, that attempt ends immediately. Then the system auto-dials once more for
-              another {ringSeconds} seconds (max 2 attempts) so voicemail does not burn Twilio credits.
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <span
-              className={`text-xs px-2.5 py-1 rounded-full border font-medium ${
-                hangupAfterFourthRing
-                  ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-                  : "bg-slate-800 text-slate-400 border-slate-700"
-              }`}
-            >
-              {hangupAfterFourthRing ? "ON (4+4 rings)" : "OFF (may hit voicemail)"}
-            </span>
-            <button
-              type="button"
-              disabled={savingHangup || loading}
-              onClick={() => void handleHangupToggle(!hangupAfterFourthRing)}
-              className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-40 ${
-                hangupAfterFourthRing ? "bg-emerald-600" : "bg-slate-700"
-              }`}
-              role="switch"
-              aria-checked={hangupAfterFourthRing}
-              title="Hang up after 4 rings, then auto-redial once for ~8 rings total"
-            >
+        <div className="mt-4 rounded-lg border border-emerald-500/25 bg-emerald-950/20 p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-[220px] flex-1">
+              <p className="text-sm font-medium text-slate-100">
+                Hang up after ~{ringSeconds}s + keep redialing
+              </p>
+              <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+                Unanswered dials hang up after about {ringSeconds} seconds, then dial again — up to{" "}
+                {maxRingAttempts} attempts per contact — until someone answers or the cap is reached.
+                Stops early if they decline. Avoids sitting in voicemail.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
               <span
-                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                  hangupAfterFourthRing ? "translate-x-5" : "translate-x-0"
+                className={`text-xs px-2.5 py-1 rounded-full border font-medium ${
+                  hangupAfterFourthRing
+                    ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                    : "bg-slate-800 text-slate-400 border-slate-700"
                 }`}
-              />
-            </button>
+              >
+                {hangupAfterFourthRing
+                  ? `ON (${ringSeconds}s × ${maxRingAttempts})`
+                  : "OFF (may hit voicemail)"}
+              </span>
+              <button
+                type="button"
+                disabled={savingHangup || loading}
+                onClick={() => void handleHangupToggle(!hangupAfterFourthRing)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-40 ${
+                  hangupAfterFourthRing ? "bg-emerald-600" : "bg-slate-700"
+                }`}
+                role="switch"
+                aria-checked={hangupAfterFourthRing}
+                title="Hang up after ring timeout, then keep redialing until answered"
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    hangupAfterFourthRing ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
           </div>
+          {hangupAfterFourthRing ? (
+            <label className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+              Max dial attempts per contact
+              <input
+                type="number"
+                min={1}
+                max={20}
+                disabled={savingHangup || loading}
+                value={maxRingAttempts}
+                onChange={(e) => void handleMaxRingAttempts(Number(e.target.value))}
+                className="w-20 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-slate-100"
+              />
+              <span className="text-slate-500">(1–20 · each ~{ringSeconds}s)</span>
+            </label>
+          ) : null}
         </div>
       </section>
 

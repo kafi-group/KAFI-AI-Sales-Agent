@@ -54,6 +54,10 @@ export function CallLeadButton({
       onError("In-app calling is initializing. Please wait a few seconds and try again.");
       return;
     }
+    if (voice.initError && !voice.ready) {
+      onError(voice.initError);
+      return;
+    }
     const assignmentWarning = getAssignmentCallWarning(
       assignedToUserId,
       assignedTo,
@@ -64,14 +68,20 @@ export function CallLeadButton({
     }
 
     setCalling(true);
-    // Safety auto-reset timeout so button is NEVER stuck in "Connecting…"
+    // Multi-redial can run many 16s attempts — keep UI unlocked after connect starts.
     const safetyTimer = window.setTimeout(() => {
       setCalling(false);
-    }, 16000);
+    }, 45000);
 
     try {
       if (!voice.ready) {
         await voice.retryInit();
+      }
+      if (!voice.ready) {
+        throw new Error(
+          voice.initError ||
+            "Calling is not ready. Allow microphone access, then refresh. Check Settings → Twilio if it still fails.",
+        );
       }
       const result = await voice.placeCall(leadId, contactId, targetPhone);
       onSuccess?.(result);
@@ -129,15 +139,26 @@ export function CallLeadButton({
       ) : (
         <button
           type="button"
-          onClick={handleTwilioCall}
-          disabled={calling || inCall || !voice?.ready}
+          onClick={() => {
+            if (!voice?.ready) {
+              onError(
+                voice?.initError ||
+                  callBlockedReason ||
+                  "Calling is not ready yet. Allow microphone, wait a few seconds, or check Settings → Twilio.",
+              );
+              if (voice?.retryInit) void voice.retryInit();
+              return;
+            }
+            void handleTwilioCall();
+          }}
+          disabled={calling || inCall}
           className={btnClass}
           title={
             inCall
               ? "Another call is already in progress"
               : voice?.ready
-                ? "Call client directly from your browser (allow microphone)"
-                : callBlockedReason ?? "Calling is not ready yet"
+                ? "Call from browser (allow microphone). Unanswered: 16s hangup then redial until answered."
+                : callBlockedReason ?? voice?.initError ?? "Calling is not ready yet"
           }
         >
           <IconPhone size={compact ? "xs" : "sm"} />

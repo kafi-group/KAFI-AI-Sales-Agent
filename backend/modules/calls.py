@@ -232,6 +232,7 @@ def twilio_balance() -> dict:
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "hangup_after_fourth_ring": bool(getattr(settings, "hangup_after_fourth_ring", True)),
         "ring_timeout_seconds": ring_seconds,
+        "max_ring_attempts": int(getattr(settings, "max_ring_attempts", 10) or 10),
     }
 
 

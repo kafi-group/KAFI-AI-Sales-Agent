@@ -177,6 +177,7 @@ def get_twilio_balance(_admin: AppUser = Depends(require_admin)):
 
 class ToggleHangupAfterFourthRingRequest(BaseModel):
     enabled: bool
+    max_ring_attempts: int | None = None
 
 
 @router.post("/calls/hangup-after-fourth-ring")
@@ -184,15 +185,23 @@ def toggle_hangup_after_fourth_ring(
     payload: ToggleHangupAfterFourthRingRequest,
     _admin: AppUser = Depends(require_admin),
 ):
-    """Default ON: unanswered calls drop after the 4th ring, then auto-redial once (~8 rings) so voicemail does not use credits."""
+    """Hang up unanswered dials after ring_timeout, then redial up to max_ring_attempts."""
     settings.hangup_after_fourth_ring = bool(payload.enabled)
+    if payload.max_ring_attempts is not None:
+        try:
+            settings.max_ring_attempts = max(1, min(20, int(payload.max_ring_attempts)))
+        except (TypeError, ValueError):
+            pass
     seconds = int(getattr(settings, "ring_timeout_seconds", 16) or 16)
+    attempts = int(getattr(settings, "max_ring_attempts", 10) or 10)
     return {
         "ok": True,
         "hangup_after_fourth_ring": settings.hangup_after_fourth_ring,
         "ring_timeout_seconds": seconds,
+        "max_ring_attempts": attempts,
         "message": (
-            "Calls hang up after the 4th ring, then auto-dial again once (~8 rings total) without voicemail."
+            f"Each unanswered dial rings ~{seconds}s then hangs up and redials "
+            f"(up to {attempts} attempts) until answered — avoids sitting in voicemail."
             if settings.hangup_after_fourth_ring
             else "Calls can ring through to voicemail (Twilio credits will be used if voicemail answers)."
         ),
@@ -854,7 +863,7 @@ async def twilio_call_status(request: Request):
                 )
             )
 
-        # Hang up after ~4 rings, then auto Dial again once (~8 rings, no voicemail).
+        # Hang up after ~4 rings (16s), then Dial again until answered or max attempts.
         # If the callee hangs up / declines early, DialCallStatus is canceled/busy —
         # that ends this attempt immediately (Twilio does not wait out the remaining timeout).
         no_connect = dial_status in {
