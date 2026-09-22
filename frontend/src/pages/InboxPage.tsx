@@ -2874,6 +2874,17 @@ export function InboxPage({
                         Trash
                       </ActionButton>
                     )}
+                    {(section === "inbox" || section === "all") && (
+                      <ActionButton
+                        icon={IconTrash}
+                        variant="rose"
+                        onClick={() => void moveSelectedMessage("trash")}
+                        disabled={moving}
+                        title="Move to Trash"
+                      >
+                        Trash
+                      </ActionButton>
+                    )}
                     {section === "sent" && (
                       <>
                         <ActionButton
