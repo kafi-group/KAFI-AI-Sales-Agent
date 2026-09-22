@@ -690,10 +690,8 @@ def run_auto_trash_learn(
     user: AppUser = Depends(get_current_user_released),
     db=Depends(get_db),
 ):
-    """Re-scan learning mailboxes' Trash and refresh the global profile."""
-    role = user.role.value if isinstance(user.role, AppUserRole) else str(user.role)
-    if role != AppUserRole.admin.value and not _is_asim(user):
-        raise HTTPException(403, "Only admin or Asim can trigger Auto Trash learning")
+    """Scan Trash on all configured mailboxes and refresh the global Auto Trash profile."""
+    _ = user
     from modules import auto_trash
 
     return auto_trash.learn_from_trash(db)

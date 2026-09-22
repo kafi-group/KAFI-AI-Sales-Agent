@@ -13,7 +13,10 @@ from sqlalchemy.orm import Session
 from db.models import AppUser, AutoTrashLog, AutoTrashProfile, AutoTrashSettings
 from modules.inbox_triage import classify_email_triage
 
-# Trash from these accounts trains the global profile (Asim's duty mailboxes + Khalid).
+LEARN_TRASH_PER_MAILBOX = 150
+SUBJECT_TOKEN_MIN = 3
+
+# Preferred seed mailboxes (Asim's duty accounts + Khalid) — still learns from ALL configured mailboxes.
 LEARN_FROM_EMAILS = frozenset(
     {
         "info@kafi-group.com",
@@ -38,8 +41,6 @@ MIN_SAMPLES_READY = 40
 MIN_SENDER_HITS = 2
 MIN_DOMAIN_HITS = 4
 APPLY_INBOX_LIMIT = 35
-LEARN_TRASH_PER_MAILBOX = 80
-SUBJECT_TOKEN_MIN = 3
 
 _EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
 _TOKEN_RE = re.compile(r"[a-z0-9]{4,}")
@@ -144,26 +145,33 @@ def set_enabled(db: Session, user_id: int, enabled: bool) -> dict[str, Any]:
 
 
 def list_learning_mailbox_users(db: Session) -> list[AppUser]:
+    """All active users with a working mailbox — preferred accounts first."""
+    from modules.mailbox_accounts import resolve_user_mailbox
+
     users = (
         db.query(AppUser)
-        .filter(AppUser.is_active.is_(True), AppUser.mailbox_enabled.is_(True))
+        .filter(AppUser.is_active.is_(True))
         .all()
     )
-    out: list[AppUser] = []
+    preferred: list[AppUser] = []
+    others: list[AppUser] = []
     seen: set[int] = set()
     for u in users:
-        email = _norm_email(u.mailbox_email)
-        if email not in LEARN_FROM_EMAILS:
-            continue
         if u.id in seen:
             continue
+        email = _norm_email(u.mailbox_email)
+        if not email or not resolve_user_mailbox(u):
+            continue
         seen.add(u.id)
-        out.append(u)
-    return out
+        if email in LEARN_FROM_EMAILS:
+            preferred.append(u)
+        else:
+            others.append(u)
+    return preferred + others
 
 
 def learn_from_trash(db: Session) -> dict[str, Any]:
-    """Rebuild global rules from Trash of the four learning mailboxes."""
+    """Rebuild global rules from Trash across every configured mailbox."""
     from modules import inbox as inbox_module
 
     sender_counts: Counter[str] = Counter()
