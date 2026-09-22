@@ -1,6 +1,7 @@
 """Inbox API — per-user IMAP mailbox and replies from the dashboard."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from api.deps import get_current_user_released, get_db
 from db.session import SessionLocal
@@ -637,6 +638,65 @@ def empty_inbox_trash(
     if result.get("status") != "ok":
         raise HTTPException(502, result.get("message", "Empty trash failed"))
     return result
+
+
+class AutoTrashSettingsUpdate(BaseModel):
+    enabled: bool = Field(..., description="Turn Auto Trash on/off for this mailbox user")
+
+
+@router.get("/auto-trash/settings")
+def get_auto_trash_settings(
+    mailbox_user_id: int | None = Query(default=None),
+    user: AppUser = Depends(get_current_user_released),
+    db=Depends(get_db),
+):
+    """Per-mailbox Auto Trash toggle + global learn status."""
+    from modules import auto_trash
+
+    target = _resolve_mailbox_user(user, mailbox_user_id)
+    row = auto_trash.get_or_create_settings(db, target.id)
+    profile = auto_trash.get_or_create_profile(db)
+    return auto_trash.settings_to_dict(row, profile)
+
+
+@router.put("/auto-trash/settings")
+def put_auto_trash_settings(
+    payload: AutoTrashSettingsUpdate,
+    mailbox_user_id: int | None = Query(default=None),
+    user: AppUser = Depends(get_current_user_released),
+    db=Depends(get_db),
+):
+    from modules import auto_trash
+
+    target = _resolve_mailbox_user(user, mailbox_user_id)
+    return auto_trash.set_enabled(db, target.id, payload.enabled)
+
+
+@router.get("/auto-trash/daily-log")
+def get_auto_trash_daily_log(
+    days: int = Query(default=14, ge=1, le=90),
+    user: AppUser = Depends(get_current_user_released),
+    db=Depends(get_db),
+):
+    """Day-wise counts of emails auto-moved to Trash, broken down by user."""
+    _ = user
+    from modules import auto_trash
+
+    return auto_trash.daily_stats(db, days=days)
+
+
+@router.post("/auto-trash/learn")
+def run_auto_trash_learn(
+    user: AppUser = Depends(get_current_user_released),
+    db=Depends(get_db),
+):
+    """Re-scan learning mailboxes' Trash and refresh the global profile."""
+    role = user.role.value if isinstance(user.role, AppUserRole) else str(user.role)
+    if role != AppUserRole.admin.value and not _is_asim(user):
+        raise HTTPException(403, "Only admin or Asim can trigger Auto Trash learning")
+    from modules import auto_trash
+
+    return auto_trash.learn_from_trash(db)
 
 
 @router.post("/messages/{uid}/reply", response_model=InboxReplyResponse)

@@ -585,6 +585,47 @@ export interface InboxEmptyTrashResponse {
   deleted_count: number;
 }
 
+export interface AutoTrashSettings {
+  user_id: number;
+  enabled: boolean;
+  last_scan_at: string | null;
+  updated_at: string | null;
+  profile_ready: boolean;
+  samples_seen: number;
+  last_learned_at: string | null;
+  can_auto_trash: boolean;
+}
+
+export interface AutoTrashDailyLogUser {
+  user_id: number;
+  username: string;
+  full_name: string | null;
+  mailbox_email: string | null;
+  count: number;
+}
+
+export interface AutoTrashDailyLogDay {
+  date: string;
+  total: number;
+  users: AutoTrashDailyLogUser[];
+}
+
+export interface AutoTrashDailyLogResponse {
+  days: AutoTrashDailyLogDay[];
+  since: string;
+}
+
+export interface AutoTrashLearnResponse {
+  ok: boolean;
+  ready: boolean;
+  samples_seen: number;
+  senders?: number;
+  domains?: number;
+  mailboxes?: Array<{ user_id: number; email: string; trash_sampled: number }>;
+  errors?: string[];
+  last_learned_at?: string | null;
+}
+
 export interface InboxAnalyzeResponse {
   summary: string;
   draft_reply: string;
@@ -3416,6 +3457,30 @@ export const client = {
         : "";
     return request<InboxEmptyTrashResponse>(`/inbox/trash/empty${qs}`, { method: "POST" });
   },
+  getAutoTrashSettings: (mailboxUserId?: number | null) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<AutoTrashSettings>(`/inbox/auto-trash/settings${qs}`);
+  },
+  updateAutoTrashSettings: (
+    data: { enabled: boolean },
+    mailboxUserId?: number | null,
+  ) => {
+    const qs =
+      mailboxUserId != null && Number.isFinite(mailboxUserId)
+        ? `?mailbox_user_id=${mailboxUserId}`
+        : "";
+    return request<AutoTrashSettings>(`/inbox/auto-trash/settings${qs}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  },
+  getAutoTrashDailyLog: (days = 14) =>
+    request<AutoTrashDailyLogResponse>(`/inbox/auto-trash/daily-log?days=${days}`),
+  runAutoTrashLearn: () =>
+    request<AutoTrashLearnResponse>("/inbox/auto-trash/learn", { method: "POST" }),
   replyInboxMessage: (
     uid: string,
     payload: {

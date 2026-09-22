@@ -13,6 +13,8 @@ import {
   type MailComposeDraft,
   type MailLabel,
   type MailLabelMessageKey,
+  type AutoTrashSettings,
+  type AutoTrashDailyLogDay,
 } from "../api/client";
 import {
   isMailLabelSection,
@@ -378,6 +380,10 @@ export function InboxPage({
   const [moving, setMoving] = useState(false);
   const [emptyingTrash, setEmptyingTrash] = useState(false);
   const [filterRibbonOpen, setFilterRibbonOpen] = useState(false);
+  const [autoTrash, setAutoTrash] = useState<AutoTrashSettings | null>(null);
+  const [autoTrashSaving, setAutoTrashSaving] = useState(false);
+  const [autoTrashLogDays, setAutoTrashLogDays] = useState<AutoTrashDailyLogDay[]>([]);
+  const [autoTrashLogLoading, setAutoTrashLogLoading] = useState(false);
 
   const [replyBody, setReplyBody] = useState("");
   const [replyTo, setReplyTo] = useState("");
@@ -1092,6 +1098,63 @@ export function InboxPage({
     setAiAnalysis(null);
     setNotice(null);
   }, [activeMailboxUserId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void client
+      .getAutoTrashSettings(mailboxUserIdRef.current)
+      .then((row) => {
+        if (!cancelled) setAutoTrash(row);
+      })
+      .catch(() => {
+        if (!cancelled) setAutoTrash(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMailboxUserId, section]);
+
+  useEffect(() => {
+    if (section !== "trash") return;
+    let cancelled = false;
+    setAutoTrashLogLoading(true);
+    void client
+      .getAutoTrashDailyLog(14)
+      .then((res) => {
+        if (!cancelled) setAutoTrashLogDays(res.days || []);
+      })
+      .catch(() => {
+        if (!cancelled) setAutoTrashLogDays([]);
+      })
+      .finally(() => {
+        if (!cancelled) setAutoTrashLogLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [section]);
+
+  async function toggleAutoTrash(next: boolean) {
+    setAutoTrashSaving(true);
+    try {
+      const row = await client.updateAutoTrashSettings(
+        { enabled: next },
+        mailboxUserIdRef.current,
+      );
+      setAutoTrash(row);
+      setNotice(
+        next
+          ? row.profile_ready
+            ? "Auto Trash ON — matching inbox mail will move to Trash automatically."
+            : "Auto Trash ON — still learning from Trash; auto-moves start once the profile is ready."
+          : "Auto Trash OFF for this mailbox.",
+      );
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Could not update Auto Trash");
+    } finally {
+      setAutoTrashSaving(false);
+    }
+  }
 
   useEffect(() => {
     if (!initialThreadId) return;
@@ -1872,6 +1935,92 @@ export function InboxPage({
         </div>
       </div>
 
+      {section === "trash" ? (
+        <div className="rounded-xl border border-slate-700 bg-slate-900/80 p-3.5 space-y-2 shrink-0">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-100">Auto Trash log</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Emails moved automatically — day-wise counts per mailbox user (last 14 days).
+              </p>
+            </div>
+            {autoTrashLogLoading ? (
+              <span className="text-xs text-slate-500">Loading…</span>
+            ) : null}
+          </div>
+          {autoTrashLogDays.length === 0 && !autoTrashLogLoading ? (
+            <p className="text-xs text-slate-500">No auto-trashed emails logged yet.</p>
+          ) : (
+            <div className="max-h-40 overflow-y-auto space-y-2">
+              {autoTrashLogDays.map((day) => (
+                <div
+                  key={day.date}
+                  className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2"
+                >
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="font-semibold text-amber-200">{day.date}</span>
+                    <span className="text-slate-300 tabular-nums">{day.total} total</span>
+                  </div>
+                  <ul className="mt-1.5 space-y-0.5">
+                    {day.users.map((u) => (
+                      <li
+                        key={`${day.date}-${u.user_id}`}
+                        className="text-xs text-slate-400 flex flex-wrap gap-x-2"
+                      >
+                        <span className="text-slate-200">
+                          {u.full_name || u.username}
+                        </span>
+                        {u.mailbox_email ? (
+                          <span className="text-slate-500">{u.mailbox_email}</span>
+                        ) : null}
+                        <span className="text-rose-300/90 tabular-nums ml-auto">{u.count}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {section === "inbox" && !filterRibbonOpen ? (
+        <div className="flex justify-end shrink-0">
+          <label
+            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-semibold cursor-pointer select-none ${
+              autoTrash?.enabled
+                ? "border-rose-500/50 bg-rose-500/15 text-rose-100"
+                : "border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-500"
+            }`}
+            title="When ON, this mailbox inbox is scanned and matching noise is moved to Trash automatically."
+          >
+            <input
+              type="checkbox"
+              className="sr-only"
+              checked={Boolean(autoTrash?.enabled)}
+              disabled={autoTrashSaving || !autoTrash}
+              onChange={(e) => void toggleAutoTrash(e.target.checked)}
+            />
+            <span
+              className={`relative w-9 h-5 rounded-full transition-colors ${
+                autoTrash?.enabled ? "bg-rose-500" : "bg-slate-600"
+              }`}
+              aria-hidden
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                  autoTrash?.enabled ? "translate-x-4" : ""
+                }`}
+              />
+            </span>
+            <span>Auto Trash</span>
+            {autoTrash && !autoTrash.profile_ready ? (
+              <span className="text-[10px] font-normal text-amber-300/90">Learning…</span>
+            ) : null}
+          </label>
+        </div>
+      ) : null}
+
       {isFolderMail && !isDraftsView && filterRibbonOpen ? (
         <div className="rounded-xl border border-slate-700 bg-slate-900 p-3.5 space-y-3 shadow-sm shrink-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -1948,6 +2097,42 @@ export function InboxPage({
                   </button>
                 );
               })}
+              <label
+                className={`ml-auto inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-semibold cursor-pointer select-none ${
+                  autoTrash?.enabled
+                    ? "border-rose-500/50 bg-rose-500/15 text-rose-100"
+                    : "border-slate-600 bg-slate-950/60 text-slate-300 hover:border-slate-500"
+                }`}
+                title={
+                  autoTrash?.profile_ready
+                    ? "When ON, this mailbox inbox is scanned and matching noise is moved to Trash automatically (learned from shared Trash)."
+                    : "Learning from Trash of info@, marketing@, essence@, and Khalid — turn ON when ready, or leave ON to start as soon as learning finishes."
+                }
+              >
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={Boolean(autoTrash?.enabled)}
+                  disabled={autoTrashSaving || !autoTrash}
+                  onChange={(e) => void toggleAutoTrash(e.target.checked)}
+                />
+                <span
+                  className={`relative w-9 h-5 rounded-full transition-colors ${
+                    autoTrash?.enabled ? "bg-rose-500" : "bg-slate-600"
+                  }`}
+                  aria-hidden
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                      autoTrash?.enabled ? "translate-x-4" : ""
+                    }`}
+                  />
+                </span>
+                <span>Auto Trash</span>
+                {autoTrash && !autoTrash.profile_ready ? (
+                  <span className="text-[10px] font-normal text-amber-300/90">Learning…</span>
+                ) : null}
+              </label>
             </div>
           ) : null}
           <div

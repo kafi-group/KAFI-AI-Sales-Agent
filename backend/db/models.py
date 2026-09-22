@@ -1166,4 +1166,54 @@ class AiSalesAgentState(Base):
     )
 
 
+class AutoTrashSettings(Base):
+    """Per-mailbox-user Auto Trash toggle (only that user's inbox is scanned when ON)."""
+
+    __tablename__ = "auto_trash_settings"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("app_users.id", ondelete="CASCADE"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_scan_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AutoTrashProfile(Base):
+    """Global learned trash patterns (from shared learning mailboxes' Trash folders)."""
+
+    __tablename__ = "auto_trash_profile"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    rules: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    samples_seen: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_learned_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AutoTrashLog(Base):
+    """Audit of emails auto-moved to Trash."""
+
+    __tablename__ = "auto_trash_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    message_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    from_email: Mapped[Optional[str]] = mapped_column(String(255))
+    subject: Mapped[Optional[str]] = mapped_column(String(500))
+    reason: Mapped[Optional[str]] = mapped_column(String(255))
+    triage_category: Mapped[Optional[str]] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="moved")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 

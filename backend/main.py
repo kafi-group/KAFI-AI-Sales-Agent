@@ -140,6 +140,34 @@ def _run_ai_sales_processes_job():
         print(f"AI Data Update job failed: {exc}", flush=True)
 
 
+def _run_auto_trash_apply_job():
+    try:
+        from jobs.auto_trash_runner import run_apply_tick
+
+        result = run_apply_tick()
+        moved = int(result.get("moved") or 0)
+        if moved or result.get("users"):
+            print(
+                f"Auto Trash apply: users={result.get('users')} moved={moved}",
+                flush=True,
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Auto Trash apply failed: {exc}", flush=True)
+
+
+def _run_auto_trash_learn_job():
+    try:
+        from jobs.auto_trash_runner import run_learn_tick
+
+        result = run_learn_tick()
+        print(
+            f"Auto Trash learn: ready={result.get('ready')} samples={result.get('samples_seen')}",
+            flush=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Auto Trash learn failed: {exc}", flush=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import os
@@ -288,6 +316,23 @@ async def lifespan(app: FastAPI):
             "interval",
             minutes=1,
             id="ai_sales_processes",
+            max_instances=1,
+            coalesce=True,
+        )
+        apscheduler.add_job(
+            _run_auto_trash_apply_job,
+            "interval",
+            minutes=5,
+            id="auto_trash_apply",
+            max_instances=1,
+            coalesce=True,
+        )
+        apscheduler.add_job(
+            _run_auto_trash_learn_job,
+            "cron",
+            hour=3,
+            minute=15,
+            id="auto_trash_learn",
             max_instances=1,
             coalesce=True,
         )
