@@ -45,6 +45,68 @@ APPLY_INBOX_LIMIT = 35
 _EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
 _TOKEN_RE = re.compile(r"[a-z0-9]{4,}")
 
+# Obvious scam / lottery spam — trash when Auto Trash is ON+Ready even if the
+# sender was never seen in Trash (consumer Gmail one-offs, prize "tests", etc.).
+_SPAM_SCAM_PHRASES = (
+    "you have won",
+    "you've won",
+    "youve won",
+    "congratulations you won",
+    "congratulation you won",
+    "claim your prize",
+    "claim your reward",
+    "claim now",
+    "lottery winner",
+    "jackpot",
+    "prize winner",
+    "won a $",
+    "won $",
+    "won usd",
+    "shopping voucher",
+    "shopping spree",
+    "gift card winner",
+    "million dollars",
+    "nigerian prince",
+    "wire transfer urgently",
+    "share your bank details",
+    "verify your account immediately to claim",
+)
+_SPAM_SCAM_COMBO_A = (
+    "congratulat",
+    "winner",
+    "prize",
+    "lottery",
+    "jackpot",
+)
+_SPAM_SCAM_COMBO_B = (
+    "$",
+    "usd",
+    "cash",
+    "voucher",
+    "gift card",
+    "shopping",
+    "claim",
+)
+
+
+def looks_like_obvious_spam_scam(*, subject: str | None, body: str | None) -> str | None:
+    """High-confidence scam/lottery patterns (not learned-from-Trash)."""
+    text = f"{subject or ''}\n{body or ''}".lower()
+    if not text.strip():
+        return None
+    for phrase in _SPAM_SCAM_PHRASES:
+        if phrase in text:
+            return f"obvious spam/scam phrase ({phrase})"
+    hit_a = [p for p in _SPAM_SCAM_COMBO_A if p in text]
+    hit_b = [p for p in _SPAM_SCAM_COMBO_B if p in text]
+    if hit_a and hit_b:
+        return f"obvious spam/scam combo ({hit_a[0]}+{hit_b[0]})"
+    # Subject-only lottery style: Congratulations + money amount
+    subj = (subject or "").lower()
+    if "congratulat" in subj and re.search(r"\$\s*\d|\d[\d,]*\s*(usd|dollars?)", subj):
+        return "obvious spam/scam (congratulations + money in subject)"
+    return None
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -287,10 +349,17 @@ def learn_from_trash(db: Session) -> dict[str, Any]:
 
 
 def match_reason(msg: dict[str, Any], rules: dict[str, Any]) -> str | None:
-    """Return reason string if message looks like trash-trained noise; else None."""
+    """Return reason string if message should auto-trash; else None."""
     from_email = _norm_email(msg.get("from_email"))
     subject = str(msg.get("subject") or "")
     body = str(msg.get("preview") or msg.get("snippet") or msg.get("body") or "")
+
+    # 1) Obvious lottery / prize / scam — do not wait for Trash training, and do
+    # not let default triage (action_required) protect these.
+    spam_reason = looks_like_obvious_spam_scam(subject=subject, body=body)
+    if spam_reason:
+        return spam_reason
+
     triage = classify_email_triage(subject=subject, body=body, from_email=from_email)
     if triage in PROTECTED_TRIAGE:
         return None

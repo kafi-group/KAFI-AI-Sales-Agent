@@ -102,6 +102,14 @@ def classify_email_triage(
         "media kit",
         "banner ad",
         "banner advertising",
+        "you have won",
+        "you've won",
+        "congratulations",
+        "claim your prize",
+        "lottery",
+        "jackpot",
+        "shopping voucher",
+        "gift card",
     )
     if any(term in text for term in advertising_terms):
         return "advertising"
