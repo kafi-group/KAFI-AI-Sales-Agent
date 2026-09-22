@@ -974,7 +974,12 @@ def assign_tasks(
                 continue
             # Already assigned historically — put back in queue for another dial; never drop.
             existing["status"] = "queued"
-            existing["ready"] = bool(contact_phone or existing.get("contact_phone"))
+            existing["ready"] = bool(
+                contact_phone
+                or contact_email
+                or existing.get("contact_phone")
+                or existing.get("contact_email")
+            )
             existing["contact_phone"] = contact_phone or existing.get("contact_phone")
             existing["contact_email"] = contact_email or existing.get("contact_email")
             existing["contact_name"] = contact_name or existing.get("contact_name")
@@ -1003,8 +1008,12 @@ def assign_tasks(
             "grading": (buyer.company_grading if buyer else None),
             "status": "queued",
             "queue_lane": "outreach",
-            "ready": bool(contact_phone),
-            "warnings": [] if contact_phone else ["No phone on this contact"],
+            "ready": bool(contact_phone or contact_email),
+            "warnings": (
+                []
+                if (contact_phone or contact_email)
+                else ["No phone or email on this contact"]
+            ),
             "created_at": _now_iso(),
             "followup_sent": False,
         }
@@ -1254,13 +1263,25 @@ def _bulk_email_queued(
         t
         for t in _TASKS
         if t.get("persona") == persona
-        and t.get("status") == "queued"
-        and t.get("ready", True)
         and _task_lane(t) == "outreach"
+        and t.get("status") not in ("in_progress", "running")
     ]
+    # Bulk email: anyone still assigned to this agent (queued or already completed
+    # from an earlier pass). Re-open completed rows so Start can send again.
+    for t in queued:
+        if t.get("status") != "queued":
+            t["status"] = "queued"
+        # Email-ready if they have an address (phone not required for bulk email).
+        if (t.get("contact_email") or "").strip():
+            t["ready"] = True
+    queued = [t for t in queued if t.get("ready", True)]
     if not queued:
-        raise HTTPException(400, "No ready contacts in this agent's queue to email.")
-
+        raise HTTPException(
+            400,
+            "No contacts on this agent's Outreach queue to email. "
+            "From Testing (or any list): select rows → Assign to AI Sales Agent → Sara, "
+            "then Start Sara again.",
+        )
     sent = 0
     failed = 0
     delay = float(getattr(app_settings, "bulk_email_message_delay_seconds", 0) or 0)
