@@ -159,6 +159,9 @@ interface LeadsTablePageProps {
   onOpenAiSalesAgent?: () => void;
   /** Modify → AI Research & Update with selected table rows. */
   onOpenAiResearchUpdate?: (contacts: LeadTableRow[]) => void;
+  /** Restore checkbox selection after returning from AI Research & Update. */
+  restoreSelectedIds?: number[] | null;
+  onRestoreSelectedConsumed?: () => void;
 }
 
 type SortField =
@@ -1118,6 +1121,8 @@ export function LeadsTablePage({
   onFocusEditConsumed,
   onOpenAiSalesAgent,
   onOpenAiResearchUpdate,
+  restoreSelectedIds = null,
+  onRestoreSelectedConsumed,
 }: LeadsTablePageProps) {
   const { isAdmin, user } = useAuth();
   const initialTableViewRef = useRef(readStoredTableView(user?.id, section));
@@ -1906,9 +1911,20 @@ export function LeadsTablePage({
     setShowCsvImport(false);
     setShowCreateLead(false);
     setBulkAssignValue("");
-    clearSelection();
+    // Do not clear when App is restoring selection after AI Research return.
+    if (!(restoreSelectedIds && restoreSelectedIds.length > 0)) {
+      clearSelection();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only reset on section change
   }, [clearSelection, section]);
 
+  // Apply after section effect so remount does not wipe the restored checkboxes.
+  useEffect(() => {
+    if (!restoreSelectedIds?.length) return;
+    setSelected(new Set(restoreSelectedIds));
+    setAllMatchingSelected(false);
+    onRestoreSelectedConsumed?.();
+  }, [restoreSelectedIds, onRestoreSelectedConsumed]);
   useEffect(() => {
     const company = (focusEditCompany || "").trim();
     if (!company && focusEditLeadId == null) return;

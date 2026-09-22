@@ -129,6 +129,15 @@ def _run_ai_sales_processes_job():
             print(f"AI Sales processes job: ran {result.get('ran')} process(es).", flush=True)
     except Exception as exc:  # noqa: BLE001
         print(f"AI Sales processes job failed: {exc}", flush=True)
+    try:
+        from jobs.ai_sales_data_update_runner import run_data_update_tick
+
+        du = run_data_update_tick()
+        acted = [r for r in (du.get("results") or []) if r.get("action") not in ("cooldown",)]
+        if acted:
+            print(f"AI Data Update tick: {acted}", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"AI Data Update job failed: {exc}", flush=True)
 
 
 @asynccontextmanager

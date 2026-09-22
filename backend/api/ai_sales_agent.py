@@ -458,7 +458,11 @@ def _send_task_followup(
 
 def _refresh_runner_counts() -> None:
     for r in _RUNNERS:
-        persona_tasks = [t for t in _TASKS if t.get("persona") == r["persona"]]
+        persona_tasks = [
+            t
+            for t in _TASKS
+            if t.get("persona") == r["persona"] and _task_lane(t) == "outreach"
+        ]
         pending = [t for t in persona_tasks if t.get("status") in ("queued", "in_progress")]
         r["pending_count"] = len(pending)
         in_prog = next((t for t in persona_tasks if t.get("status") == "in_progress"), None)
@@ -529,6 +533,11 @@ def _dial_task(
     return call_result
 
 
+def _task_lane(task: dict[str, Any]) -> str:
+    lane = str(task.get("queue_lane") or "outreach").strip().lower()
+    return lane if lane in ("outreach", "data_update") else "outreach"
+
+
 def _next_queued(persona: str) -> dict[str, Any] | None:
     return next(
         (
@@ -538,6 +547,7 @@ def _next_queued(persona: str) -> dict[str, Any] | None:
             and t.get("status") == "queued"
             and t.get("ready")
             and t.get("contact_phone")
+            and _task_lane(t) == "outreach"
         ),
         None,
     )
@@ -993,6 +1003,7 @@ def assign_tasks(
             "designation": (contact.designation if contact else None),
             "grading": (buyer.company_grading if buyer else None),
             "status": "queued",
+            "queue_lane": "outreach",
             "ready": bool(contact_phone),
             "warnings": [] if contact_phone else ["No phone on this contact"],
             "created_at": _now_iso(),
@@ -1201,7 +1212,10 @@ def _bulk_email_queued(
     queued = [
         t
         for t in _TASKS
-        if t.get("persona") == persona and t.get("status") == "queued" and t.get("ready", True)
+        if t.get("persona") == persona
+        and t.get("status") == "queued"
+        and t.get("ready", True)
+        and _task_lane(t) == "outreach"
     ]
     if not queued:
         raise HTTPException(400, "No ready contacts in this agent's queue to email.")
@@ -1436,6 +1450,101 @@ def put_ai_auto_mode(
 
     patch = payload.model_dump(exclude_none=True)
     return update_auto_mode_settings(patch)
+
+
+class SetTaskLaneRequest(BaseModel):
+    task_ids: list[int]
+    queue_lane: str  # outreach | data_update
+
+
+@router.post("/tasks/set-lane")
+def set_task_lane(
+    payload: SetTaskLaneRequest,
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Move tasks between Outreach and Data Update (mutually exclusive)."""
+    _ = user
+    lane = str(payload.queue_lane or "").strip().lower()
+    if lane not in ("outreach", "data_update"):
+        raise HTTPException(400, "queue_lane must be outreach or data_update")
+    updated = 0
+    id_set = set(int(x) for x in (payload.task_ids or []) if int(x) > 0)
+    for t in _TASKS:
+        if t.get("id") in id_set:
+            t["queue_lane"] = lane
+            # Returning to outreach keeps them dialable.
+            if lane == "outreach" and t.get("status") not in ("in_progress",):
+                t["status"] = "queued"
+            updated += 1
+    _refresh_runner_counts()
+    return {"updated": updated, "queue_lane": lane}
+
+
+class DataUpdateScheduleUpdate(BaseModel):
+    persona: str
+    enabled: bool | None = None
+    time: str | None = None
+    weekdays: list[str] | None = None
+    cooldown_sec: int | None = None
+
+
+@router.get("/data-update")
+def get_data_update_status(user: AppUser = Depends(get_current_user)) -> dict[str, Any]:
+    _ = user
+    from modules import ai_sales_data_update as du
+
+    status = du.get_status()
+    queues: dict[str, list[dict[str, Any]]] = {"female": [], "male": []}
+    for t in _TASKS:
+        if _task_lane(t) != "data_update":
+            continue
+        persona = t.get("persona")
+        if persona in queues:
+            queues[persona].append(t)
+    status["queues"] = queues
+    return status
+
+
+@router.put("/data-update/schedule")
+def put_data_update_schedule(
+    payload: DataUpdateScheduleUpdate,
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    _ = user
+    from modules import ai_sales_data_update as du
+
+    persona = str(payload.persona or "").strip().lower()
+    if persona not in ("male", "female"):
+        raise HTTPException(400, "persona must be male or female")
+    return du.update_schedule(persona, payload.model_dump(exclude_none=True))
+
+
+@router.post("/data-update/run-now")
+def run_data_update_now(
+    persona: str = Query(...),
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    _ = user
+    from modules import ai_sales_data_update as du
+
+    p = str(persona or "").strip().lower()
+    if p not in ("male", "female"):
+        raise HTTPException(400, "persona must be male or female")
+    pending = [
+        t
+        for t in _TASKS
+        if t.get("persona") == p and _task_lane(t) == "data_update"
+    ]
+    if not pending:
+        raise HTTPException(400, "No contacts in this agent's Data Update queue.")
+    # Reset run markers so all current queue items are processed.
+    run_data = du.start_run(p, total=len(pending), force=True)
+    run_id = run_data["run_state"][p].get("run_id")
+    for t in pending:
+        t.pop("data_update_run_id", None)
+        t["status"] = "queued"
+    _persist_queue()
+    return {"ok": True, "run_id": run_id, "total": len(pending), "status": run_data}
 
 
 class WorkspaceAutopilotUpdate(BaseModel):

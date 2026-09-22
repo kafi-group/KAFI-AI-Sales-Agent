@@ -30,6 +30,7 @@ export function AiAutoModePanel({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [open, setOpen] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,20 +78,29 @@ export function AiAutoModePanel({
 
   return (
     <div
-      className={`rounded-xl border border-violet-500/40 bg-gradient-to-br from-violet-950/40 to-slate-900/60 p-4 space-y-3 ${
+      className={`rounded-xl border border-violet-500/40 bg-gradient-to-br from-violet-950/40 to-slate-900/60 ${
         compact ? "" : "shadow-lg shadow-violet-950/20"
       }`}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex flex-wrap items-start justify-between gap-3 px-4 py-3 text-left"
+      >
         <div className="min-w-0 flex-1">
           <h3 className="text-base font-semibold text-slate-100">AI Auto Mode</h3>
           <p className="text-xs text-slate-400 mt-0.5">
             The toggle only saves which actions are allowed. Use <strong className="text-slate-300">Start</strong>{" "}
-            to run now on that agent&apos;s queue, or <strong className="text-slate-300">Schedule</strong> to
-            create recurring processes below.
+            to run now on that agent&apos;s Outreach queue, or <strong className="text-slate-300">Schedule</strong>{" "}
+            to create recurring processes below.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <span className="text-slate-400 text-sm shrink-0 pt-0.5">{open ? "▾" : "▸"}</span>
+      </button>
+
+      {open ? (
+        <div className="px-4 pb-4 space-y-3 border-t border-violet-500/20 pt-3">
+      <div className="flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
             disabled={saving}
@@ -114,7 +124,7 @@ export function AiAutoModePanel({
                 disabled={!settings.enabled || startingPersona === "female"}
                 onClick={() => onStartAgent("female")}
                 className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40"
-                title="Start Sara now using Auto Mode actions on her queue"
+                title="Start Sara now using Auto Mode actions on her Outreach queue"
               >
                 {startingPersona === "female" ? "Starting…" : "Start Sara"}
               </button>
@@ -123,7 +133,7 @@ export function AiAutoModePanel({
                 disabled={!settings.enabled || startingPersona === "male"}
                 onClick={() => onStartAgent("male")}
                 className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40"
-                title="Start Rayan now using Auto Mode actions on his queue"
+                title="Start Rayan now using Auto Mode actions on his Outreach queue"
               >
                 {startingPersona === "male" ? "Starting…" : "Start Rayan"}
               </button>
@@ -141,7 +151,6 @@ export function AiAutoModePanel({
               </button>
             </>
           ) : null}
-        </div>
       </div>
 
       {notice ? <p className="text-xs text-emerald-300">{notice}</p> : null}
@@ -188,6 +197,8 @@ export function AiAutoModePanel({
           <span className="text-slate-300">Call Center → AI Train</span>.
         </p>
       </fieldset>
+        </div>
+      ) : null}
     </div>
   );
 }

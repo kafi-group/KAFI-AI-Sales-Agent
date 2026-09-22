@@ -172,6 +172,7 @@ function DashboardApp() {
   >(null);
   const [aiResearchReturnSection, setAiResearchReturnSection] =
     useState<LeadsTableSection | null>(null);
+  const [aiResearchRestoreIds, setAiResearchRestoreIds] = useState<number[] | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpenPreference);
   const [mailDraftCount, setMailDraftCount] = useState(0);
@@ -1882,8 +1883,11 @@ function DashboardApp() {
                 onOpenAiResearchUpdate={(contacts) => {
                   setAiResearchContacts(contacts.map(snapshotLeadForAiResearch));
                   setAiResearchReturnSection(tableSection);
+                  setAiResearchRestoreIds(contacts.map((c) => c.id));
                   setTab("chatbot");
                 }}
+                restoreSelectedIds={aiResearchRestoreIds}
+                onRestoreSelectedConsumed={() => setAiResearchRestoreIds(null)}
               />
             )}
             {tab === "inbox" && (
@@ -1958,11 +1962,17 @@ function DashboardApp() {
               <ChatbotPage
                 onError={setError}
                 researchContacts={aiResearchContacts}
+                researchSection={aiResearchReturnSection}
                 onClearResearchContacts={() => setAiResearchContacts(null)}
-                onReturnToTable={() => {
+                onReturnToTable={(leadIds) => {
                   const section = aiResearchReturnSection ?? tableSection;
+                  const ids =
+                    leadIds?.length
+                      ? leadIds
+                      : aiResearchContacts?.map((c) => c.id) ?? aiResearchRestoreIds ?? [];
                   setAiResearchContacts(null);
                   setAiResearchReturnSection(null);
+                  if (ids.length) setAiResearchRestoreIds(ids);
                   setTableSection(section);
                   setLeadsTableRefreshToken((t) => t + 1);
                   setTab("table");

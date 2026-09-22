@@ -21,6 +21,7 @@ import {
 } from "../components/TelegramComposeLink";
 import { ComposeMailModal } from "../components/ComposeMailModal";
 import { AiAutoModePanel } from "../components/AiAutoModePanel";
+import { AiAutoDataUpdatePanel } from "../components/AiAutoDataUpdatePanel";
 import { AiSalesProcessesPanel } from "../components/AiSalesProcessesPanel";
 
 interface AiSalesAgentPageProps {
@@ -460,6 +461,12 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         onError={onError}
         onStartAgent={(persona) => void handleAutoModeStart(persona)}
         startingPersona={startingAutoPersona}
+      />
+
+      <AiAutoDataUpdatePanel
+        onError={onError}
+        tasks={tasks}
+        onTasksChanged={() => void load()}
       />
 
       <AiSalesProcessesPanel onError={onError} />

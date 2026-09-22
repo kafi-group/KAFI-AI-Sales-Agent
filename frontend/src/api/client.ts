@@ -4523,6 +4523,34 @@ export const client = {
       { method: "POST" },
     ),
 
+  setAiSalesTaskLane: (data: { task_ids: number[]; queue_lane: "outreach" | "data_update" }) =>
+    request<{ updated: number; queue_lane: string }>("/ai-sales-agent/tasks/set-lane", {
+      method: "POST",
+      headers: aiSalesAgentHeaders(),
+      body: JSON.stringify(data),
+    }),
+  getAiSalesDataUpdate: () =>
+    request<AiSalesDataUpdateStatus>("/ai-sales-agent/data-update", {
+      headers: aiSalesAgentHeaders(),
+    }),
+  updateAiSalesDataUpdateSchedule: (data: {
+    persona: "female" | "male";
+    enabled?: boolean;
+    time?: string;
+    weekdays?: string[];
+    cooldown_sec?: number;
+  }) =>
+    request<AiSalesDataUpdateStatus>("/ai-sales-agent/data-update/schedule", {
+      method: "PUT",
+      headers: aiSalesAgentHeaders(),
+      body: JSON.stringify(data),
+    }),
+  runAiSalesDataUpdateNow: (persona: "female" | "male") =>
+    request<{ ok: boolean; run_id: string; total: number; status: AiSalesDataUpdateStatus }>(
+      `/ai-sales-agent/data-update/run-now?persona=${encodeURIComponent(persona)}`,
+      { method: "POST", headers: aiSalesAgentHeaders() },
+    ),
+
   // ── Catalogues ─────────────────────────────────────────────────────────────
   listCatalogues: () => request<CatalogueItem[]>("/catalogues"),
   attachCatalogues: (catalogue_ids: string[]) =>
@@ -5119,6 +5147,7 @@ export interface AiSalesAgentTask {
   contact_email?: string | null;
   country?: string | null;
   status: string;
+  queue_lane?: "outreach" | "data_update" | string | null;
   interaction_id: number | null;
   call_sid: string | null;
   outcome: string | null;
@@ -5130,6 +5159,49 @@ export interface AiSalesAgentTask {
   created_at: string | null;
   started_at: string | null;
   completed_at: string | null;
+}
+
+export interface AiSalesDataUpdateSchedule {
+  enabled: boolean;
+  time: string;
+  weekdays: string[];
+  cooldown_sec: number;
+  last_run_key?: string | null;
+  last_started_at?: string | null;
+}
+
+export interface AiSalesDataUpdateRunState {
+  status: string;
+  current_buyer_id?: number | null;
+  current_label?: string | null;
+  next_allowed_at?: string | null;
+  progress?: {
+    done: number;
+    total: number;
+    succeeded: number;
+    failed: number;
+    skipped: number;
+    filled_total: number;
+  };
+  log?: Array<Record<string, unknown>>;
+  last_report?: Record<string, unknown> | null;
+  updated_at?: string | null;
+  run_id?: string | null;
+}
+
+export interface AiSalesDataUpdateStatus {
+  schedules: {
+    female: AiSalesDataUpdateSchedule;
+    male: AiSalesDataUpdateSchedule;
+  };
+  run_state: {
+    female: AiSalesDataUpdateRunState;
+    male: AiSalesDataUpdateRunState;
+  };
+  queues?: {
+    female: AiSalesAgentTask[];
+    male: AiSalesAgentTask[];
+  };
 }
 
 export interface AiSalesAgentBriefing {
