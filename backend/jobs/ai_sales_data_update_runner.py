@@ -80,8 +80,10 @@ def run_data_update_tick() -> dict[str, Any]:
             task["data_update_last"] = {
                 "ok": result.get("ok"),
                 "filled": result.get("filled") or [],
+                "changes": result.get("changes") or [],
                 "skipped": result.get("skipped"),
                 "error": result.get("error"),
+                "reason": result.get("reason"),
             }
             asa._persist_queue()  # noqa: SLF001
 

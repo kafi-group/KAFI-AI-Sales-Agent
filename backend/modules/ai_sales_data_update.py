@@ -438,7 +438,7 @@ def research_and_update_buyer(db: Any, buyer_id: int) -> dict[str, Any]:
 
     row = leads_module.get_lead_table_row(db, buyer_id)
     if not row:
-        return {"ok": False, "error": "Lead not found", "filled": []}
+        return {"ok": False, "error": "Lead not found", "filled": [], "changes": []}
 
     missing = [k for k in PRIORITY_FIELDS if _is_blank(row.get(k))]
     if not missing:
@@ -447,6 +447,7 @@ def research_and_update_buyer(db: Any, buyer_id: int) -> dict[str, Any]:
             "skipped": True,
             "reason": "No priority fields missing",
             "filled": [],
+            "changes": [],
             "label": row.get("company_name") or row.get("contact_name") or f"#{buyer_id}",
         }
 
@@ -500,10 +501,20 @@ def research_and_update_buyer(db: Any, buyer_id: int) -> dict[str, Any]:
             pass
 
     filled: list[str] = []
+    changes: list[dict[str, str]] = []
     if update_payload:
         updated = leads_module.update_lead_table_row(db, buyer_id, update_payload)
         if updated:
             filled = list(update_payload.keys())
+            for key in filled:
+                changes.append(
+                    {
+                        "field": key,
+                        "label": FIELD_LABELS.get(key, key),
+                        "before": str(row.get(key) or "").strip() or "(empty)",
+                        "after": str(update_payload.get(key) or "").strip(),
+                    }
+                )
 
     # Re-read to report what changed after enrich/onboard path
     after = leads_module.get_lead_table_row(db, buyer_id) or row
@@ -511,11 +522,20 @@ def research_and_update_buyer(db: Any, buyer_id: int) -> dict[str, Any]:
         for key in PRIORITY_FIELDS:
             if _is_blank(row.get(key)) and not _is_blank(after.get(key)):
                 filled.append(key)
+                changes.append(
+                    {
+                        "field": key,
+                        "label": FIELD_LABELS.get(key, key),
+                        "before": "(empty)",
+                        "after": str(after.get(key) or "").strip(),
+                    }
+                )
 
     return {
         "ok": True,
         "skipped": False,
         "filled": filled,
+        "changes": changes,
         "provider": provider,
         "label": after.get("company_name") or after.get("contact_name") or f"#{buyer_id}",
         "missing_before": missing,
@@ -559,8 +579,10 @@ def record_contact_result(
             "ok": bool(result.get("ok")),
             "skipped": bool(result.get("skipped")),
             "filled": result.get("filled") or [],
+            "changes": result.get("changes") or [],
             "error": result.get("error"),
             "provider": result.get("provider"),
+            "reason": result.get("reason"),
         },
     )
     data["run_state"][persona] = st

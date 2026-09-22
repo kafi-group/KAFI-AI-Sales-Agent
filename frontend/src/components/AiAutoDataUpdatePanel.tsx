@@ -26,6 +26,13 @@ const PERSONAS = [
   { id: "male" as const, label: "Rayan" },
 ];
 
+type DataUpdateFieldChange = {
+  field?: string;
+  label?: string;
+  before?: string;
+  after?: string;
+};
+
 type DataUpdateLogEntry = {
   at?: string;
   buyer_id?: number;
@@ -33,8 +40,10 @@ type DataUpdateLogEntry = {
   ok?: boolean;
   skipped?: boolean;
   filled?: string[];
+  changes?: DataUpdateFieldChange[];
   error?: string | null;
   provider?: string | null;
+  reason?: string | null;
 };
 
 type DataUpdateLastReport = {
@@ -65,7 +74,8 @@ function formatLogTime(iso?: string): string {
 
 function logResultLabel(entry: DataUpdateLogEntry): { text: string; cls: string } {
   if (entry.skipped) return { text: "Skipped", cls: "text-slate-400" };
-  if (entry.ok && entry.filled?.length) return { text: "Updated", cls: "text-emerald-300" };
+  if (entry.ok && (entry.filled?.length || entry.changes?.length))
+    return { text: "Updated", cls: "text-emerald-300" };
   if (entry.ok) return { text: "OK (nothing new)", cls: "text-slate-400" };
   return { text: "Failed", cls: "text-rose-300" };
 }
@@ -77,6 +87,8 @@ function DataUpdateActivityLog({
   liveLog: DataUpdateLogEntry[];
   lastReport?: DataUpdateLastReport | null;
 }) {
+  const [open, setOpen] = useState(true);
+  const [viewEntry, setViewEntry] = useState<DataUpdateLogEntry | null>(null);
   const entries =
     liveLog.length > 0
       ? liveLog
@@ -86,55 +98,163 @@ function DataUpdateActivityLog({
   if (!entries.length && !lastReport) return null;
 
   return (
-    <div className="rounded-md border border-slate-700 bg-slate-950/60 p-2.5 space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h5 className="text-xs font-semibold text-slate-100">Activity log</h5>
-        {lastReport ? (
-          <span className="text-[10px] text-slate-500">
-            Finished {formatLogTime(lastReport.finished_at)} · ok {lastReport.succeeded ?? 0} ·
-            skip {lastReport.skipped ?? 0} · fail {lastReport.failed ?? 0}
-            {typeof lastReport.filled_total === "number"
-              ? ` · fields filled ${lastReport.filled_total}`
-              : ""}
+    <>
+      <div className="rounded-md border border-slate-700 bg-slate-950/60 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="w-full flex flex-wrap items-center justify-between gap-2 px-2.5 py-2 text-left hover:bg-slate-900/60"
+        >
+          <span className="text-xs font-semibold text-slate-100 inline-flex items-center gap-1.5">
+            <span className="text-slate-400">{open ? "▾" : "▸"}</span>
+            Activity log
+            {entries.length ? (
+              <span className="text-[10px] font-normal text-slate-500">({entries.length})</span>
+            ) : null}
           </span>
-        ) : (
-          <span className="text-[10px] text-cyan-300/80">Live this run</span>
-        )}
+          {lastReport ? (
+            <span className="text-[10px] text-slate-500">
+              Finished {formatLogTime(lastReport.finished_at)} · ok {lastReport.succeeded ?? 0} ·
+              skip {lastReport.skipped ?? 0} · fail {lastReport.failed ?? 0}
+            </span>
+          ) : (
+            <span className="text-[10px] text-cyan-300/80">Live this run</span>
+          )}
+        </button>
+
+        {open ? (
+          <div className="px-2.5 pb-2.5 space-y-2 border-t border-slate-800 pt-2">
+            {entries.length === 0 ? (
+              <p className="text-[11px] text-slate-500">No per-contact lines yet.</p>
+            ) : (
+              <ul className="max-h-52 overflow-y-auto space-y-1.5">
+                {[...entries].reverse().map((entry, idx) => {
+                  const result = logResultLabel(entry);
+                  return (
+                    <li
+                      key={`${entry.buyer_id ?? "x"}-${entry.at ?? idx}`}
+                      className="rounded border border-slate-800 px-2 py-1.5 text-[11px]"
+                    >
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="text-slate-500 tabular-nums shrink-0">
+                          {formatLogTime(entry.at)}
+                        </span>
+                        <span className="font-medium text-slate-100 truncate min-w-0 flex-1">
+                          {entry.label || `Lead #${entry.buyer_id ?? "?"}`}
+                        </span>
+                        <span className={`font-semibold ${result.cls}`}>{result.text}</span>
+                        <button
+                          type="button"
+                          onClick={() => setViewEntry(entry)}
+                          className="shrink-0 px-2 py-0.5 rounded border border-cyan-500/40 text-cyan-200 hover:bg-cyan-500/15 text-[10px] font-semibold"
+                        >
+                          View
+                        </button>
+                      </div>
+                      {entry.filled?.length ? (
+                        <p className="text-emerald-300/90 mt-0.5">
+                          Filled: {entry.filled.join(", ")}
+                        </p>
+                      ) : null}
+                      {entry.error ? (
+                        <p className="text-rose-300/90 mt-0.5 break-words">{String(entry.error)}</p>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        ) : null}
       </div>
-      {entries.length === 0 ? (
-        <p className="text-[11px] text-slate-500">No per-contact lines yet.</p>
-      ) : (
-        <ul className="max-h-52 overflow-y-auto space-y-1.5">
-          {[...entries].reverse().map((entry, idx) => {
-            const result = logResultLabel(entry);
-            return (
-              <li
-                key={`${entry.buyer_id ?? "x"}-${entry.at ?? idx}`}
-                className="rounded border border-slate-800 px-2 py-1.5 text-[11px]"
+
+      {viewEntry ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+          <div className="w-full max-w-lg max-h-[85vh] overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl flex flex-col">
+            <div className="px-4 py-3 border-b border-slate-800 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-100">
+                  {viewEntry.label || `Lead #${viewEntry.buyer_id ?? "?"}`}
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {formatLogTime(viewEntry.at)} · {logResultLabel(viewEntry).text}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewEntry(null)}
+                className="text-slate-400 hover:text-slate-200 text-lg leading-none"
+                aria-label="Close"
               >
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                  <span className="text-slate-500 tabular-nums shrink-0">
-                    {formatLogTime(entry.at)}
-                  </span>
-                  <span className="font-medium text-slate-100 truncate">
-                    {entry.label || `Lead #${entry.buyer_id ?? "?"}`}
-                  </span>
-                  <span className={`ml-auto font-semibold ${result.cls}`}>{result.text}</span>
-                </div>
-                {entry.filled?.length ? (
-                  <p className="text-emerald-300/90 mt-0.5">
-                    Filled: {entry.filled.join(", ")}
+                ×
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+              {viewEntry.reason ? (
+                <p className="text-xs text-slate-400">{viewEntry.reason}</p>
+              ) : null}
+              {viewEntry.error ? (
+                <p className="text-xs text-rose-300">{String(viewEntry.error)}</p>
+              ) : null}
+              {(viewEntry.changes?.length ?? 0) > 0 ? (
+                <ul className="space-y-2">
+                  {viewEntry.changes!.map((ch) => (
+                    <li
+                      key={`${viewEntry.buyer_id}-${ch.field}`}
+                      className="rounded-lg border border-slate-700 bg-slate-950/60 p-3 text-xs"
+                    >
+                      <p className="font-semibold text-slate-200 mb-2">
+                        {ch.label || ch.field}
+                      </p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+                            Before
+                          </p>
+                          <p className="text-slate-400 break-words">{ch.before || "(empty)"}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wide text-emerald-400/80 mb-1">
+                            After
+                          </p>
+                          <p className="text-emerald-200 break-words">{ch.after || "(empty)"}</p>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : viewEntry.filled?.length ? (
+                <div className="text-xs text-slate-300 space-y-1">
+                  <p>Fields filled (this run was before before/after capture):</p>
+                  <ul className="list-disc pl-4 text-emerald-300">
+                    {viewEntry.filled.map((f) => (
+                      <li key={f}>{f}</li>
+                    ))}
+                  </ul>
+                  <p className="text-slate-500 pt-1">
+                    Run Data Update again to store full before/after values.
                   </p>
-                ) : null}
-                {entry.error ? (
-                  <p className="text-rose-300/90 mt-0.5 break-words">{String(entry.error)}</p>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">
+                  No field changes recorded for this contact
+                  {viewEntry.reason ? ` — ${viewEntry.reason}` : "."}
+                </p>
+              )}
+            </div>
+            <div className="px-4 py-3 border-t border-slate-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setViewEntry(null)}
+                className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm text-slate-200"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 
