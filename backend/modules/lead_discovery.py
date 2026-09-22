@@ -3662,15 +3662,10 @@ def import_candidates(
     persist_each_row = not skip_enrichment
     pending_since_flush = 0
     FLUSH_EVERY = 75
-    # Large imports (1000-2000+ rows) used to run as ONE transaction that only
-    # committed at the very end. Any row that replaced a duplicate (DELETE FROM
-    # contacts/buyers) held that lock for the entire import — long enough for
-    # unrelated queries (someone loading/deleting leads elsewhere) to hit
-    # Postgres's statement_timeout waiting on the lock. Commit periodically so
-    # locks are released in small batches instead of one multi-minute hold, and
-    # so a mid-import failure only loses a small window of rows (see the
-    # commit-then-rollback fallback in the except block below for the rest).
-    COMMIT_EVERY = 50
+    # Spreadsheet imports: commit every row so a single bad row / lock / blip cannot
+    # strand the rest of the sheet (e.g. stop at 133/284 with only ~133 saved).
+    # Discover/enrichment imports keep larger checkpoints.
+    COMMIT_EVERY = 1 if skip_enrichment else 50
     rows_since_checkpoint = 0
     # How much of `created` / `replaced` is actually committed to the DB right
     # now (vs. only staged in this Python-level list). `skipped` never needs
@@ -3723,280 +3718,301 @@ def import_candidates(
             raw = _normalize_import_contact_fields(dict(raw))
             name = (raw.get("company_name") or "").strip()
             _report_progress(row_index, name or "(unnamed)")
+            try:
+                candidate = _import_raw_to_candidate(raw)
+                if not skip_enrichment and _needs_import_enrichment(raw):
+                    _enrich_candidate_contact(candidate, keep_row=True)
 
-            candidate = _import_raw_to_candidate(raw)
-            if not skip_enrichment and _needs_import_enrichment(raw):
-                _enrich_candidate_contact(candidate, keep_row=True)
-
-            # Spreadsheet table imports (skip_enrichment): copy every row as-is,
-            # including blank/sparse company names — research & score later.
-            # Discover / research imports still filter "not a valid business".
-            if not skip_enrichment:
-                if not name:
-                    skipped.append(
-                        {"company_name": "(empty)", "reason": "Missing company name"}
-                    )
-                    _checkpoint_commit()
-                    continue
-                valid, invalid_reason = _validate_business_candidate(candidate)
-                if not valid:
-                    skipped.append(
-                        {
-                            "company_name": name,
-                            "reason": f"Not a valid business — {invalid_reason}",
-                        }
-                    )
-                    _checkpoint_commit()
-                    continue
-
-            raw = _sync_candidate_to_raw(candidate, raw)
-            name = (raw.get("company_name") or "").strip()
-            # DB requires company_name NOT NULL — store blank string when sheet had none.
-            if not name and skip_enrichment:
-                raw["company_name"] = ""
-                name = ""
-
-            if skip_enrichment and batch_source_norm == "old_clients":
-                from modules.incomplete_archives import is_fragmentary_import_row
-
-                if is_fragmentary_import_row(raw):
-                    raw["source"] = "incomplete_archives"
-
-            name_key = _normalize_name(name) if name else ""
-            domain = _dedupe_domain(raw.get("website_url"))
-
-            # Block cross-section duplicates (e.g. discovery matching an old client).
-            if (name_key and name_key in other_names) or (
-                domain and domain in other_domains
-            ):
-                reason = (
-                    "Already an old client"
-                    if batch_source_norm not in {"old_clients", "incomplete_archives"}
-                    else "Already in Discover / Leads table"
-                )
-                skipped.append(
-                    {"company_name": name or "(unnamed)", "reason": reason}
-                )
-                _checkpoint_commit()
-                continue
-
-            existing = (by_name.get(name_key) if name_key else None) or (
-                by_domain.get(domain) if domain else None
-            )
-            if existing is None:
-                for kind, contact_key in _import_contact_duplicate_keys(raw):
-                    if kind == "email":
-                        existing = by_email.get(contact_key)
-                    else:
-                        existing = by_phone.get(contact_key)
-                    if existing is not None:
-                        break
-            if existing is not None:
-                should_replace = False
-                if replace_duplicates:
-                    existing_score = existing_scores.get(
-                        existing.id, buyers_module.buyer_data_score(db, existing)
-                    )
-                    import_score = _import_data_score(raw)
-                    should_replace = existing_score < 8 or import_score > existing_score
-
-                if should_replace:
-                    if assigned_to_user_id is not None and existing.assigned_to_user_id not in (
-                        None,
-                        assigned_to_user_id,
-                    ):
+                # Spreadsheet table imports (skip_enrichment): copy every row as-is,
+                # including blank/sparse company names — research & score later.
+                # Discover / research imports still filter "not a valid business".
+                if not skip_enrichment:
+                    if not name:
+                        skipped.append(
+                            {"company_name": "(empty)", "reason": "Missing company name"}
+                        )
+                        _checkpoint_commit()
+                        continue
+                    valid, invalid_reason = _validate_business_candidate(candidate)
+                    if not valid:
                         skipped.append(
                             {
                                 "company_name": name,
-                                "reason": "Already in leads (assigned to another user)",
+                                "reason": f"Not a valid business — {invalid_reason}",
                             }
                         )
                         _checkpoint_commit()
                         continue
-                    _flush_pending()
-                    leads_module.delete_lead_table_row(
-                        db, existing.id, commit=persist_each_row
+
+                raw = _sync_candidate_to_raw(candidate, raw)
+                name = (raw.get("company_name") or "").strip()
+                # DB requires company_name NOT NULL — store blank string when sheet had none.
+                if not name and skip_enrichment:
+                    raw["company_name"] = ""
+                    name = ""
+
+                if skip_enrichment and batch_source_norm == "old_clients":
+                    from modules.incomplete_archives import is_fragmentary_import_row
+
+                    if is_fragmentary_import_row(raw):
+                        raw["source"] = "incomplete_archives"
+
+                name_key = _normalize_name(name) if name else ""
+                domain = _dedupe_domain(raw.get("website_url"))
+
+                # Block cross-section duplicates (e.g. discovery matching an old client).
+                if (name_key and name_key in other_names) or (
+                    domain and domain in other_domains
+                ):
+                    reason = (
+                        "Already an old client"
+                        if batch_source_norm not in {"old_clients", "incomplete_archives"}
+                        else "Already in Discover / Leads table"
                     )
-                    existing_names.discard(_normalize_name(existing.company_name))
-                    by_name.pop(_normalize_name(existing.company_name), None)
-                    existing_domain = _dedupe_domain(existing.website_url)
-                    if existing_domain:
-                        existing_domains.discard(existing_domain)
-                        by_domain.pop(existing_domain, None)
-                    existing_scores.pop(existing.id, None)
-                    replaced.append(
-                        {
-                            "company_name": name,
-                            "replaced_id": existing.id,
-                            "reason": "Replaced sparse duplicate with fresh CSV data",
-                        }
+                    skipped.append(
+                        {"company_name": name or "(unnamed)", "reason": reason}
                     )
-                else:
-                    is_clients = batch_source_norm == "old_clients"
-                    is_incomplete = batch_source_norm == "incomplete_archives"
-                    if assigned_to_user_id is not None:
-                        reason = (
-                            "Already in your clients table"
-                            if is_clients
-                            else "Already in incomplete archives"
-                            if is_incomplete
-                            else "Already in your leads"
-                        )
-                    else:
-                        reason = (
-                            "Already in clients table"
-                            if is_clients
-                            else "Already in incomplete archives"
-                            if is_incomplete
-                            else "Already in leads"
-                        )
-                    skipped.append({"company_name": name, "reason": reason})
                     _checkpoint_commit()
                     continue
 
-            buyer = buyers_module.create_buyer(
-                db,
-                {
-                    "company_name": name,
-                    "website_url": raw.get("website_url") or None,
-                    "country": raw.get("country") or None,
-                    "industry": raw.get("industry") or None,
-                    "linkedin_company_url": _value_or_none(raw.get("linkedin_url")),
-                    "facebook_company_url": _value_or_none(raw.get("facebook_url")),
-                    "instagram_company_url": _value_or_none(raw.get("instagram_url")),
-                    "source": raw.get("source") or "discovery",
-                    "intake_method": (
-                        "upload"
-                        if skip_enrichment
-                        and batch_source_norm
-                        in {
-                            "hyperstore_targeted",
-                            "targeted_distributor",
-                            "targeted_client",
-                            "khalid_focused_sales",
-                            "old_clients",
-                            "incomplete_archives",
-                        }
-                        else (
-                            "discover"
-                            if batch_source_norm
-                            in {"hyperstore_targeted", "targeted_distributor", "targeted_client", "khalid_focused_sales"}
-                            else None
-                        )
-                    ),
-                    "legacy_serial_no": raw.get("legacy_serial_no"),
-                    "company_grading": (raw.get("company_grading") or None),
-                    "product_interest": (raw.get("product_interest") or None),
-                    "city": (raw.get("city") or None),
-                    "address": (raw.get("address") or None),
-                    "remarks": (raw.get("remarks") or None),
-                    "remarks_03": (raw.get("remarks_03") or None),
-                    "remarks_04": (raw.get("remarks_04") or None),
-                },
-                commit=persist_each_row,
-                flush=True,
-            )
-            if assigned_to_user_id is not None:
-                leads_module.apply_buyer_assignee(db, buyer, assigned_to_user_id)
-                if persist_each_row:
-                    db.commit()
-                    db.refresh(buyer)
-            if name_key:
-                existing_names.add(name_key)
-                by_name[name_key] = buyer
-            if domain:
-                existing_domains.add(domain)
-                by_domain[domain] = buyer
-            for kind, contact_key in _import_contact_duplicate_keys(raw):
-                if kind == "email":
-                    by_email[contact_key] = buyer
-                else:
-                    by_phone[contact_key] = buyer
-            existing_scores[buyer.id] = _import_data_score(raw)
-            created.append(buyer)
-            if persist_each_row:
-                log_action(
-                    db,
-                    entity_type="buyer",
-                    entity_id=buyer.id,
-                    action="discovered_import",
-                    details={
-                        "source": raw.get("source"),
-                        "email": _value_or_none(raw.get("email")),
-                        "phone": _value_or_none(raw.get("phone")),
-                        "facebook_url": _value_or_none(raw.get("facebook_url")),
-                        "instagram_url": _value_or_none(raw.get("instagram_url")),
-                        "linkedin_url": _value_or_none(raw.get("linkedin_url")),
-                        "skip_enrichment": skip_enrichment,
-                    },
+                existing = (by_name.get(name_key) if name_key else None) or (
+                    by_domain.get(domain) if domain else None
                 )
+                if existing is None:
+                    for kind, contact_key in _import_contact_duplicate_keys(raw):
+                        if kind == "email":
+                            existing = by_email.get(contact_key)
+                        else:
+                            existing = by_phone.get(contact_key)
+                        if existing is not None:
+                            break
+                if existing is not None:
+                    should_replace = False
+                    if replace_duplicates:
+                        existing_score = existing_scores.get(
+                            existing.id, buyers_module.buyer_data_score(db, existing)
+                        )
+                        import_score = _import_data_score(raw)
+                        should_replace = existing_score < 8 or import_score > existing_score
 
-            email = _value_or_none(raw.get("email"))
-            phone = _value_or_none(raw.get("phone"))
-            contact_name = (raw.get("contact_name") or "").strip() or "General contact"
-            designation = (raw.get("designation") or "").strip() or None
-            secondary_mobile = (raw.get("secondary_mobile") or "").strip() or None
-            primary_phone = (raw.get("primary_phone") or "").strip() or None
-            secondary_phone = (raw.get("secondary_phone") or "").strip() or None
-            secondary_email = (raw.get("secondary_email") or "").strip() or None
-            has_contact_details = any(
-                [
-                    email,
-                    phone,
-                    contact_name != "General contact",
-                    designation,
-                    secondary_mobile,
-                    primary_phone,
-                    secondary_phone,
-                    secondary_email,
-                ]
-            )
-            if has_contact_details:
-                buyers_module.create_contact(
+                    if should_replace:
+                        if assigned_to_user_id is not None and existing.assigned_to_user_id not in (
+                            None,
+                            assigned_to_user_id,
+                        ):
+                            skipped.append(
+                                {
+                                    "company_name": name,
+                                    "reason": "Already in leads (assigned to another user)",
+                                }
+                            )
+                            _checkpoint_commit()
+                            continue
+                        _flush_pending()
+                        leads_module.delete_lead_table_row(
+                            db, existing.id, commit=persist_each_row
+                        )
+                        existing_names.discard(_normalize_name(existing.company_name))
+                        by_name.pop(_normalize_name(existing.company_name), None)
+                        existing_domain = _dedupe_domain(existing.website_url)
+                        if existing_domain:
+                            existing_domains.discard(existing_domain)
+                            by_domain.pop(existing_domain, None)
+                        existing_scores.pop(existing.id, None)
+                        replaced.append(
+                            {
+                                "company_name": name,
+                                "replaced_id": existing.id,
+                                "reason": "Replaced sparse duplicate with fresh CSV data",
+                            }
+                        )
+                    else:
+                        is_clients = batch_source_norm == "old_clients"
+                        is_incomplete = batch_source_norm == "incomplete_archives"
+                        if assigned_to_user_id is not None:
+                            reason = (
+                                "Already in your clients table"
+                                if is_clients
+                                else "Already in incomplete archives"
+                                if is_incomplete
+                                else "Already in your leads"
+                            )
+                        else:
+                            reason = (
+                                "Already in clients table"
+                                if is_clients
+                                else "Already in incomplete archives"
+                                if is_incomplete
+                                else "Already in leads"
+                            )
+                        skipped.append({"company_name": name, "reason": reason})
+                        _checkpoint_commit()
+                        continue
+
+                buyer = buyers_module.create_buyer(
                     db,
                     {
-                        "buyer_id": buyer.id,
-                        "full_name": contact_name,
-                        "email": email,
-                        "phone": phone,
-                        "designation": designation,
-                        "secondary_mobile": secondary_mobile,
-                        "primary_phone": primary_phone,
-                        "secondary_phone": secondary_phone,
-                        "secondary_email": secondary_email,
-                        "linkedin_profile_url": _value_or_none(raw.get("linkedin_url")),
-                        "data_source": "discovery",
-                        "consent_status": "unknown",
+                        "company_name": name,
+                        "website_url": raw.get("website_url") or None,
+                        "country": raw.get("country") or None,
+                        "industry": raw.get("industry") or None,
+                        "linkedin_company_url": _value_or_none(raw.get("linkedin_url")),
+                        "facebook_company_url": _value_or_none(raw.get("facebook_url")),
+                        "instagram_company_url": _value_or_none(raw.get("instagram_url")),
+                        "source": raw.get("source") or "discovery",
+                        "intake_method": (
+                            "upload"
+                            if skip_enrichment
+                            and batch_source_norm
+                            in {
+                                "hyperstore_targeted",
+                                "targeted_distributor",
+                                "targeted_client",
+                                "khalid_focused_sales",
+                                "old_clients",
+                                "incomplete_archives",
+                            }
+                            else (
+                                "discover"
+                                if batch_source_norm
+                                in {"hyperstore_targeted", "targeted_distributor", "targeted_client", "khalid_focused_sales"}
+                                else None
+                            )
+                        ),
+                        "legacy_serial_no": raw.get("legacy_serial_no"),
+                        "company_grading": (raw.get("company_grading") or None),
+                        "product_interest": (raw.get("product_interest") or None),
+                        "city": (raw.get("city") or None),
+                        "address": (raw.get("address") or None),
+                        "remarks": (raw.get("remarks") or None),
+                        "remarks_03": (raw.get("remarks_03") or None),
+                        "remarks_04": (raw.get("remarks_04") or None),
                     },
                     commit=persist_each_row,
-                    flush=persist_each_row,
+                    flush=True,
                 )
-                if not persist_each_row:
-                    pending_since_flush += 1
-                    if pending_since_flush >= FLUSH_EVERY:
-                        _flush_pending()
+                if assigned_to_user_id is not None:
+                    leads_module.apply_buyer_assignee(db, buyer, assigned_to_user_id)
+                    if persist_each_row:
+                        db.commit()
+                        db.refresh(buyer)
+                if name_key:
+                    existing_names.add(name_key)
+                    by_name[name_key] = buyer
+                if domain:
+                    existing_domains.add(domain)
+                    by_domain[domain] = buyer
+                for kind, contact_key in _import_contact_duplicate_keys(raw):
+                    if kind == "email":
+                        by_email[contact_key] = buyer
+                    else:
+                        by_phone[contact_key] = buyer
+                existing_scores[buyer.id] = _import_data_score(raw)
+                created.append(buyer)
+                if persist_each_row:
+                    log_action(
+                        db,
+                        entity_type="buyer",
+                        entity_id=buyer.id,
+                        action="discovered_import",
+                        details={
+                            "source": raw.get("source"),
+                            "email": _value_or_none(raw.get("email")),
+                            "phone": _value_or_none(raw.get("phone")),
+                            "facebook_url": _value_or_none(raw.get("facebook_url")),
+                            "instagram_url": _value_or_none(raw.get("instagram_url")),
+                            "linkedin_url": _value_or_none(raw.get("linkedin_url")),
+                            "skip_enrichment": skip_enrichment,
+                        },
+                    )
 
-            if auto_onboard:
+                email = _value_or_none(raw.get("email"))
+                phone = _value_or_none(raw.get("phone"))
+                contact_name = (raw.get("contact_name") or "").strip() or "General contact"
+                designation = (raw.get("designation") or "").strip() or None
+                secondary_mobile = (raw.get("secondary_mobile") or "").strip() or None
+                primary_phone = (raw.get("primary_phone") or "").strip() or None
+                secondary_phone = (raw.get("secondary_phone") or "").strip() or None
+                secondary_email = (raw.get("secondary_email") or "").strip() or None
+                has_contact_details = any(
+                    [
+                        email,
+                        phone,
+                        contact_name != "General contact",
+                        designation,
+                        secondary_mobile,
+                        primary_phone,
+                        secondary_phone,
+                        secondary_email,
+                    ]
+                )
+                if has_contact_details:
+                    buyers_module.create_contact(
+                        db,
+                        {
+                            "buyer_id": buyer.id,
+                            "full_name": contact_name,
+                            "email": email,
+                            "phone": phone,
+                            "designation": designation,
+                            "secondary_mobile": secondary_mobile,
+                            "primary_phone": primary_phone,
+                            "secondary_phone": secondary_phone,
+                            "secondary_email": secondary_email,
+                            "linkedin_profile_url": _value_or_none(raw.get("linkedin_url")),
+                            "data_source": "discovery",
+                            "consent_status": "unknown",
+                        },
+                        commit=persist_each_row,
+                        flush=persist_each_row,
+                    )
+                    if not persist_each_row:
+                        pending_since_flush += 1
+                        if pending_since_flush >= FLUSH_EVERY:
+                            _flush_pending()
+
+                if auto_onboard:
+                    try:
+                        onboard = leads_module.onboard_buyer(db, buyer.id)
+                        onboard_results.append(
+                            {
+                                "buyer_id": buyer.id,
+                                "company_name": buyer.company_name,
+                                "score": onboard.get("score"),
+                                "reasoning": onboard.get("reasoning"),
+                            }
+                        )
+                    except Exception as exc:
+                        onboard_results.append(
+                            {
+                                "buyer_id": buyer.id,
+                                "company_name": buyer.company_name,
+                                "error": str(exc),
+                            }
+                        )
+
+                _checkpoint_commit()
+            except Exception as row_exc:  # noqa: BLE001 — keep importing remaining rows
+                if not skip_enrichment:
+                    raise
                 try:
-                    onboard = leads_module.onboard_buyer(db, buyer.id)
-                    onboard_results.append(
-                        {
-                            "buyer_id": buyer.id,
-                            "company_name": buyer.company_name,
-                            "score": onboard.get("score"),
-                            "reasoning": onboard.get("reasoning"),
-                        }
-                    )
-                except Exception as exc:
-                    onboard_results.append(
-                        {
-                            "buyer_id": buyer.id,
-                            "company_name": buyer.company_name,
-                            "error": str(exc),
-                        }
-                    )
-
-            _checkpoint_commit()
+                    db.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+                # Drop anything staged after the last successful commit.
+                if len(created) > committed_created:
+                    del created[committed_created:]
+                if len(replaced) > committed_replaced:
+                    del replaced[committed_replaced:]
+                pending_since_flush = 0
+                rows_since_checkpoint = 0
+                skipped.append(
+                    {
+                        "company_name": name or f"(row {row_index + 1})",
+                        "reason": f"Row error — {str(row_exc)[:180]}",
+                    }
+                )
+                continue
 
         # Final report before commit — the job runner shows this as "committing".
         _report_progress(len(candidates), "")

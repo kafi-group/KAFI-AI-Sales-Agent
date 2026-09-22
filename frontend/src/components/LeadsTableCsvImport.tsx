@@ -6,11 +6,11 @@ import { client, type DiscoveryCandidate, type ImportJobStatus } from "../api/cl
 // (e.g. interrupted at ~130/284 left only ~100 rows after the last commit).
 const MAX_CSV_IMPORT = 20000;
 /** Rows per backend job — keep small enough for Railway/proxy + DB lock windows. */
-const IMPORT_BATCH_SIZE = 80;
+const IMPORT_BATCH_SIZE = 40;
 const IMPORT_PREVIEW_ROWS = 50;
 const IMPORT_FILE_ACCEPT = ".csv,.xlsx,.xls,.xlsm,.tsv";
 const JOB_POLL_INTERVAL_MS = 800;
-const MAX_POLL_FAILURES = 6;
+const MAX_POLL_FAILURES = 12;
 const BATCH_PAUSE_MS = 400;
 
 function sleep(ms: number): Promise<void> {
@@ -385,7 +385,8 @@ export function LeadsTableCsvImport({
           e instanceof Error
             ? e.message
             : `Could not start import batch ${batchIndex + 1}`;
-        break;
+        await sleep(BATCH_PAUSE_MS);
+        continue;
       }
 
       let finalStatus: ImportJobStatus | null = null;
@@ -411,7 +412,12 @@ export function LeadsTableCsvImport({
       }
 
       if (!finalStatus) {
-        break;
+        // Connection lost — keep going with remaining batches; duplicates will skip.
+        failedBatchError =
+          (failedBatchError ? `${failedBatchError} ` : "") +
+          `Batch ${batchIndex + 1} may be incomplete; continuing with the next batch…`;
+        await sleep(BATCH_PAUSE_MS);
+        continue;
       }
 
       if (finalStatus.status === "failed") {
@@ -428,11 +434,25 @@ export function LeadsTableCsvImport({
           allSkipped.push(item);
           skipReasonCounts[item.reason] = (skipReasonCounts[item.reason] ?? 0) + 1;
         }
+        // Partial batch failure: keep importing later batches (re-run skips dupes).
         failedBatchError =
           finalStatus.error ||
-          `Import batch ${batchIndex + 1} of ${batches.length} failed. ` +
-            `${overallCreated} lead(s) saved so far — re-import to finish the remaining rows.`;
-        break;
+          `Batch ${batchIndex + 1} of ${batches.length} had errors; continuing…`;
+        publishProgress(
+          baseProcessed + batch.length,
+          {
+            ...finalStatus,
+            created_count: 0,
+            skipped_count: 0,
+            replaced_count: 0,
+          },
+          batchIndex,
+          false,
+        );
+        if (batchIndex < batches.length - 1) {
+          await sleep(BATCH_PAUSE_MS);
+        }
+        continue;
       }
 
       overallCreated += finalStatus.created_count ?? 0;
@@ -467,13 +487,17 @@ export function LeadsTableCsvImport({
       }
     }
 
-    if (failedBatchError) {
+    // Warn if any batch had issues, but still show results when something landed.
+    if (failedBatchError && overallCreated === 0 && allCreatedNames.size === 0) {
       onError(failedBatchError);
       setImporting(false);
-      if (overallCreated > 0 || overallSkipped > 0) {
-        onImported();
-      }
       return;
+    }
+    if (failedBatchError) {
+      onError(
+        `${failedBatchError} Saved ${overallCreated} new lead(s) so far. ` +
+          `Re-import the same file to fill any remaining rows (duplicates skip).`,
+      );
     }
 
     publishProgress(toImport.length, null, batches.length - 1, true);
