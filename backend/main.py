@@ -130,6 +130,17 @@ def _run_ai_sales_processes_job():
     except Exception as exc:  # noqa: BLE001
         print(f"AI Sales processes job failed: {exc}", flush=True)
     try:
+        from jobs.ai_sales_auto_mode_start_runner import run_due_auto_mode_starts
+
+        scheduled = run_due_auto_mode_starts()
+        if scheduled.get("ran"):
+            print(
+                f"AI Auto Mode scheduled starts: {scheduled.get('results')}",
+                flush=True,
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(f"AI Auto Mode scheduled starts failed: {exc}", flush=True)
+    try:
         from jobs.ai_sales_data_update_runner import run_data_update_tick
 
         du = run_data_update_tick()

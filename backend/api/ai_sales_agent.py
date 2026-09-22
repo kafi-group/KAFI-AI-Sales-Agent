@@ -1583,6 +1583,56 @@ def put_ai_auto_mode(
     return update_auto_mode_settings(patch)
 
 
+class AutoModeScheduleStartRequest(BaseModel):
+    persona: str  # female | male
+    run_at: str  # ISO or datetime-local (Asia/Karachi if no tz)
+
+
+@router.post("/auto-mode/schedule-start")
+def post_auto_mode_schedule_start(
+    payload: AutoModeScheduleStartRequest,
+    user: AppUser = Depends(get_current_user),
+):
+    """Schedule Start Sara/Rayan at a future date/time (same actions as Start now)."""
+    from modules.ai_sales_auto_mode import get_auto_mode_settings, schedule_start
+
+    persona = str(payload.persona or "").strip().lower()
+    if persona not in ("female", "male"):
+        raise HTTPException(400, "persona must be female (Sara) or male (Rayan)")
+    settings = get_auto_mode_settings()
+    if not settings.get("enabled"):
+        raise HTTPException(400, "Turn AI Auto Mode ON before scheduling a start")
+    try:
+        entry = schedule_start(
+            persona=persona,
+            run_at=payload.run_at,
+            created_by=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    name = "Sara" if persona == "female" else "Rayan"
+    return {
+        "ok": True,
+        "schedule": entry,
+        "message": f"{name} will start at the scheduled time (checks about every minute).",
+    }
+
+
+@router.delete("/auto-mode/schedule-start/{schedule_id}")
+def delete_auto_mode_schedule_start(
+    schedule_id: str,
+    user: AppUser = Depends(get_current_user),
+):
+    _ = user
+    from modules.ai_sales_auto_mode import cancel_scheduled_start
+
+    try:
+        entry = cancel_scheduled_start(schedule_id)
+    except ValueError as exc:
+        raise HTTPException(404 if "not found" in str(exc).lower() else 400, str(exc)) from exc
+    return {"ok": True, "schedule": entry}
+
+
 class SetTaskLaneRequest(BaseModel):
     task_ids: list[int]
     queue_lane: str  # outreach | data_update

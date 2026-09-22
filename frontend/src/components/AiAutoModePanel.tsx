@@ -3,6 +3,7 @@ import {
   client,
   type AiSalesAutoModeSettings,
   type AiSalesBulkEmailPersonaSettings,
+  type AiSalesScheduledStart,
   type EmailTemplate,
 } from "../api/client";
 import { EmailBodyEditor } from "./EmailBodyEditor";
@@ -42,9 +43,32 @@ const DEFAULTS: AiSalesAutoModeSettings = {
     female: { ...EMPTY_BULK },
     male: { ...EMPTY_BULK },
   },
+  scheduled_starts: [],
 };
 
 type MailboxOption = { user_id: number; email: string; label?: string };
+
+function toDatetimeLocalValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function defaultScheduleLocal(): string {
+  const d = new Date(Date.now() + 15 * 60 * 1000);
+  d.setSeconds(0, 0);
+  return toDatetimeLocalValue(d);
+}
+
+function formatRunAt(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  } catch {
+    return iso;
+  }
+}
 
 export function AiAutoModePanel({
   onError,
@@ -63,6 +87,10 @@ export function AiAutoModePanel({
   const [bulkDraft, setBulkDraft] = useState<AiSalesBulkEmailPersonaSettings>({
     ...EMPTY_BULK,
   });
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [schedulePersona, setSchedulePersona] = useState<"female" | "male">("female");
+  const [scheduleAt, setScheduleAt] = useState(defaultScheduleLocal);
+  const [scheduling, setScheduling] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,6 +109,7 @@ export function AiAutoModePanel({
             ...(data.bulk_email_by_persona?.male || {}),
           },
         },
+        scheduled_starts: data.scheduled_starts || [],
       };
       setSettings(merged);
       setBulkDraft({
@@ -152,6 +181,7 @@ export function AiAutoModePanel({
             ...(next.bulk_email_by_persona?.male || {}),
           },
         },
+        scheduled_starts: next.scheduled_starts || settings.scheduled_starts || [],
       };
       setSettings(merged);
       setNotice("AI Auto Mode settings saved (does not start outreach by itself).");
@@ -163,9 +193,86 @@ export function AiAutoModePanel({
   }
 
   function toggle(key: keyof AiSalesAutoModeSettings) {
-    if (key === "product_brief" || key === "bulk_email_by_persona") return;
+    if (
+      key === "product_brief" ||
+      key === "bulk_email_by_persona" ||
+      key === "scheduled_starts"
+    ) {
+      return;
+    }
     const next = !settings[key];
     void save({ [key]: next });
+  }
+
+  function openScheduleDialog() {
+    if (!settings.enabled) {
+      onError("Turn AI Auto Mode ON before scheduling.");
+      return;
+    }
+    setSchedulePersona(bulkPersona);
+    setScheduleAt(defaultScheduleLocal());
+    setScheduleOpen(true);
+  }
+
+  async function confirmSchedule() {
+    if (!scheduleAt.trim()) {
+      onError("Pick a date and time.");
+      return;
+    }
+    if (
+      settings.enabled &&
+      !settings.call_mode &&
+      settings.bulk_email_when_no_call
+    ) {
+      const cfg = settings.bulk_email_by_persona?.[schedulePersona];
+      if (!cfg?.subject?.trim() || !cfg?.body?.trim()) {
+        onError(
+          `Save bulk email setup for ${schedulePersona === "female" ? "Sara" : "Rayan"} first.`,
+        );
+        setBulkPersona(schedulePersona);
+        setScheduleOpen(false);
+        return;
+      }
+    }
+    setScheduling(true);
+    setNotice(null);
+    try {
+      const res = await client.scheduleAiSalesAutoModeStart({
+        persona: schedulePersona,
+        run_at: scheduleAt,
+      });
+      const next = await client.getAiSalesAutoMode();
+      setSettings({
+        ...DEFAULTS,
+        ...next,
+        bulk_email_by_persona: {
+          female: { ...EMPTY_BULK, ...(next.bulk_email_by_persona?.female || {}) },
+          male: { ...EMPTY_BULK, ...(next.bulk_email_by_persona?.male || {}) },
+        },
+        scheduled_starts: next.scheduled_starts || [],
+      });
+      setScheduleOpen(false);
+      setNotice(res.message || "Start scheduled.");
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to schedule start");
+    } finally {
+      setScheduling(false);
+    }
+  }
+
+  async function cancelSchedule(id: string) {
+    try {
+      await client.cancelAiSalesAutoModeStart(id);
+      const next = await client.getAiSalesAutoMode();
+      setSettings((prev) => ({
+        ...prev,
+        ...next,
+        scheduled_starts: next.scheduled_starts || [],
+      }));
+      setNotice("Scheduled start cancelled.");
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to cancel schedule");
+    }
   }
 
   function applyTemplate(templateId: number) {
@@ -264,8 +371,8 @@ export function AiAutoModePanel({
           <p className="text-xs text-slate-400 mt-0.5">
             The toggle only saves which actions are allowed. Use{" "}
             <strong className="text-slate-300">Start</strong> to run now on that agent&apos;s
-            Outreach queue, or <strong className="text-slate-300">Schedule</strong> to create
-            recurring processes below.
+            Outreach queue, or <strong className="text-slate-300">Schedule</strong> to pick a
+            date and time for Start (e.g. bulk email).
           </p>
         </div>
         <span className="text-slate-400 text-sm shrink-0 pt-0.5">{open ? "▾" : "▸"}</span>
@@ -312,19 +419,109 @@ export function AiAutoModePanel({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    document.getElementById("ai-sales-processes")?.scrollIntoView({
-                      behavior: "smooth",
-                      block: "start",
-                    });
-                  }}
-                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-violet-400/50 text-violet-100 hover:bg-violet-500/20"
+                  disabled={!settings.enabled || scheduling}
+                  onClick={() => openScheduleDialog()}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-violet-400/50 text-violet-100 hover:bg-violet-500/20 disabled:opacity-40"
+                  title="Pick date and time — Start runs automatically then"
                 >
                   Schedule
                 </button>
               </>
             ) : null}
           </div>
+
+          {scheduleOpen ? (
+            <div className="rounded-lg border border-violet-500/40 bg-slate-950/80 p-3 space-y-3">
+              <p className="text-xs font-semibold text-violet-200">
+                Schedule Start — date &amp; time
+              </p>
+              <p className="text-[11px] text-slate-400">
+                At that time the agent runs the same actions as Start now (with call mode off,
+                that means bulk email using the template / From / CC you saved).
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="block text-xs text-slate-400">
+                  Agent
+                  <select
+                    value={schedulePersona}
+                    disabled={scheduling}
+                    onChange={(e) =>
+                      setSchedulePersona(e.target.value === "male" ? "male" : "female")
+                    }
+                    className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-100"
+                  >
+                    <option value="female">Sara</option>
+                    <option value="male">Rayan</option>
+                  </select>
+                </label>
+                <label className="block text-xs text-slate-400">
+                  Date &amp; time (your local time)
+                  <input
+                    type="datetime-local"
+                    value={scheduleAt}
+                    disabled={scheduling}
+                    min={toDatetimeLocalValue(new Date())}
+                    onChange={(e) => setScheduleAt(e.target.value)}
+                    className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-100"
+                  />
+                </label>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={scheduling}
+                  onClick={() => setScheduleOpen(false)}
+                  className="px-3 py-1.5 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={scheduling || !scheduleAt}
+                  onClick={() => void confirmSchedule()}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40"
+                >
+                  {scheduling ? "Scheduling…" : "Confirm schedule"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {(() => {
+            const pending = (settings.scheduled_starts || []).filter(
+              (s: AiSalesScheduledStart) =>
+                s.status === "pending" || s.status === "running",
+            );
+            if (!pending.length) return null;
+            return (
+              <ul className="space-y-1.5 rounded-lg border border-violet-500/30 bg-violet-950/20 p-2">
+                {pending.map((s) => {
+                  const name = s.persona === "female" ? "Sara" : "Rayan";
+                  return (
+                    <li
+                      key={s.id}
+                      className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-200"
+                    >
+                      <span>
+                        {name} starts{" "}
+                        <strong className="text-violet-200">{formatRunAt(s.run_at)}</strong>
+                        {s.status === "running" ? " (starting…)" : ""}
+                      </span>
+                      {s.status === "pending" ? (
+                        <button
+                          type="button"
+                          onClick={() => void cancelSchedule(s.id)}
+                          className="text-[11px] text-red-300 hover:text-red-200 underline"
+                        >
+                          Cancel
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            );
+          })()}
 
           {notice ? <p className="text-xs text-emerald-300">{notice}</p> : null}
 

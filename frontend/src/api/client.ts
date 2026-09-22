@@ -4577,6 +4577,19 @@ export const client = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+  scheduleAiSalesAutoModeStart: (data: { persona: "female" | "male"; run_at: string }) =>
+    request<{ ok: boolean; schedule: AiSalesScheduledStart; message: string }>(
+      "/ai-sales-agent/auto-mode/schedule-start",
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    ),
+  cancelAiSalesAutoModeStart: (scheduleId: string) =>
+    request<{ ok: boolean; schedule: AiSalesScheduledStart }>(
+      `/ai-sales-agent/auto-mode/schedule-start/${encodeURIComponent(scheduleId)}`,
+      { method: "DELETE" },
+    ),
   getWorkspaceAiAutopilot: () =>
     request<WorkspaceAiAutopilotSettings>("/ai-sales-agent/workspace-autopilot"),
   updateWorkspaceAiAutopilot: (data: Partial<WorkspaceAiAutopilotSettings>) =>
@@ -5183,6 +5196,18 @@ export interface AiSalesBulkEmailPersonaSettings {
   body: string;
 }
 
+export interface AiSalesScheduledStart {
+  id: string;
+  persona: "female" | "male";
+  run_at: string;
+  status: "pending" | "running" | "done" | "failed" | "cancelled";
+  created_by?: number | null;
+  created_at?: string;
+  finished_at?: string | null;
+  error?: string | null;
+  result_message?: string | null;
+}
+
 export interface AiSalesAutoModeSettings {
   enabled: boolean;
   study_contacts: boolean;
@@ -5196,6 +5221,7 @@ export interface AiSalesAutoModeSettings {
     female: AiSalesBulkEmailPersonaSettings;
     male: AiSalesBulkEmailPersonaSettings;
   };
+  scheduled_starts?: AiSalesScheduledStart[];
 }
 
 export interface WorkspaceAiAutopilotSettings {
