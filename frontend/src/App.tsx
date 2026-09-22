@@ -30,6 +30,11 @@ import {
   snapshotLeadForAiResearch,
   type AiResearchContactSnapshot,
 } from "./utils/aiResearchUpdate";
+import {
+  listAiResearchLog,
+  type AiResearchLogEntry,
+} from "./utils/aiResearchLog";
+import { AiResearchLogModal } from "./components/AiResearchLogModal";
 import { InboxAlertToasts } from "./components/InboxAlertToasts";
 import { UrgentEmailAlertModal, isGenuineNewInquiry } from "./components/UrgentEmailAlertModal";
 import { WorkspaceAiAutopilotButton } from "./components/WorkspaceAiAutopilotButton";
@@ -173,6 +178,8 @@ function DashboardApp() {
   const [aiResearchReturnSection, setAiResearchReturnSection] =
     useState<LeadsTableSection | null>(null);
   const [aiResearchRestoreIds, setAiResearchRestoreIds] = useState<number[] | null>(null);
+  const [showAiResearchLog, setShowAiResearchLog] = useState(false);
+  const [aiResearchLogEntries, setAiResearchLogEntries] = useState<AiResearchLogEntry[]>([]);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpenPreference);
   const [mailDraftCount, setMailDraftCount] = useState(0);
@@ -603,6 +610,35 @@ function DashboardApp() {
         </span>
       ) : null}
     </button>
+  );
+
+  const aiResearchLogsHeaderButton =
+    tab === "chatbot" ? (
+      <button
+        type="button"
+        onClick={() => {
+          setAiResearchLogEntries(listAiResearchLog());
+          setShowAiResearchLog(true);
+        }}
+        className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-amber-500/50 bg-amber-500/15 px-2.5 py-1 text-[11px] sm:text-xs font-semibold text-amber-100 hover:bg-amber-500/25"
+        title="AI Research activity log"
+      >
+        Logs
+      </button>
+    ) : null;
+
+  const returnToTableWithSelection = useCallback(
+    (leadIds: number[], section?: string | null) => {
+      const nextSection = (section || aiResearchReturnSection || tableSection) as LeadsTableSection;
+      setShowAiResearchLog(false);
+      setAiResearchContacts(null);
+      setAiResearchReturnSection(null);
+      if (leadIds.length) setAiResearchRestoreIds(leadIds);
+      setTableSection(nextSection);
+      setLeadsTableRefreshToken((t) => t + 1);
+      setTab("table");
+    },
+    [aiResearchReturnSection, tableSection],
   );
 
   const pollUrgentEmails = useCallback(() => {
@@ -1677,6 +1713,7 @@ function DashboardApp() {
               <WorkspaceAiAutopilotButton compact onError={setError} />
             ) : null}
             {urgentHeaderButton}
+            {aiResearchLogsHeaderButton}
             {asimMailboxSwitcher}
             <AppTopActions
               compact
@@ -1715,6 +1752,7 @@ function DashboardApp() {
               <WorkspaceAiAutopilotButton onError={setError} />
             ) : null}
             {urgentHeaderButton}
+            {aiResearchLogsHeaderButton}
             {asimMailboxSwitcher ? (
               <div className="flex-1 min-w-0 flex items-center">{asimMailboxSwitcher}</div>
             ) : isWhatsAppMobile ? (
@@ -1965,17 +2003,11 @@ function DashboardApp() {
                 researchSection={aiResearchReturnSection}
                 onClearResearchContacts={() => setAiResearchContacts(null)}
                 onReturnToTable={(leadIds) => {
-                  const section = aiResearchReturnSection ?? tableSection;
                   const ids =
                     leadIds?.length
                       ? leadIds
                       : aiResearchContacts?.map((c) => c.id) ?? aiResearchRestoreIds ?? [];
-                  setAiResearchContacts(null);
-                  setAiResearchReturnSection(null);
-                  if (ids.length) setAiResearchRestoreIds(ids);
-                  setTableSection(section);
-                  setLeadsTableRefreshToken((t) => t + 1);
-                  setTab("table");
+                  returnToTableWithSelection(ids, aiResearchReturnSection);
                 }}
               />
             )}
@@ -2022,6 +2054,16 @@ function DashboardApp() {
           onDismiss={() => setUrgentAlertDismissed(true)}
         />
       )}
+      {showAiResearchLog ? (
+        <AiResearchLogModal
+          entries={aiResearchLogEntries}
+          onClose={() => setShowAiResearchLog(false)}
+          onEntriesChange={setAiResearchLogEntries}
+          onOpenContacts={(leadIds, section) =>
+            returnToTableWithSelection(leadIds, section)
+          }
+        />
+      ) : null}
       <ManageModulesModal
         isOpen={showManageModulesModal}
         onClose={() => setShowManageModulesModal(false)}
