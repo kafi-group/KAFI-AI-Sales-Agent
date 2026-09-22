@@ -434,6 +434,9 @@ def _import_scope_for_source(import_source: str | None) -> dict[str, str | None]
     Used for section-scoped replace/dedupe during import. Discovery "already
     exists" checks intentionally use all buyers (see discover paths) so an
     old client cannot be re-imported as a new discovery.
+
+    Custom lists (e.g. new_salt_data_sep_2026) and targeted pools stay scoped
+    to their own source key so imports only collide within that list.
     """
     normalized = (import_source or "").strip().lower()
     if normalized == "old_clients":
@@ -443,7 +446,24 @@ def _import_scope_for_source(import_source: str | None) -> dict[str, str | None]
     if normalized == "csv":
         # Leads-table spreadsheet imports only collide with other leads-table rows.
         return {"source": "csv", "exclude_source": None}
-    if normalized in {"hyperstore_targeted", "targeted_distributor", "targeted_client", "khalid_focused_sales"}:
+    if normalized in {
+        "hyperstore_targeted",
+        "targeted_distributor",
+        "targeted_client",
+        "khalid_focused_sales",
+        "testing",
+        "schedule_meeting",
+    }:
+        return {"source": normalized, "exclude_source": None}
+    # Dynamic custom modules / user-created lists — isolate to that source.
+    if normalized and normalized not in {
+        "",
+        "manual",
+        "manual_dial",
+        "discovery",
+        "web_search",
+        "website_links",
+    }:
         return {"source": normalized, "exclude_source": None}
     return {"source": None, "exclude_source": "old_clients"}
 
@@ -3585,8 +3605,7 @@ def import_candidates(
     existing_domains = set(by_domain.keys())
 
     # Cross-section block: Discover / generic imports must not recreate Old clients.
-    # Targeted-pool imports (Hyperstore, Distributors, Targeted Client) are standalone
-    # lists — same company name in Old clients is allowed as a separate row.
+    # Targeted pools + custom lists are standalone — same company in Old clients is OK.
     other_names: set[str] = set()
     other_domains: set[str] = set()
     batch_source_norm = (batch_source or "").strip().lower()
@@ -3597,8 +3616,14 @@ def import_candidates(
         "targeted_distributor",
         "targeted_client",
         "khalid_focused_sales",
+        "testing",
+        "schedule_meeting",
     }
-    if batch_source_norm not in _standalone_import:
+    scope_source = (scope.get("source") or "").strip().lower()
+    is_standalone_list = batch_source_norm in _standalone_import or (
+        bool(scope_source) and scope_source == batch_source_norm and batch_source_norm not in {"csv", ""}
+    )
+    if not is_standalone_list:
         other_names, other_domains = _existing_buyer_keys(
             db,
             source="old_clients",

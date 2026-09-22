@@ -78,7 +78,7 @@ export function parseBrandAssistantLead(text: string): ParsedBrandLead {
       "");
 
   const industry = pickLine(text, [
-    /^(?:\*\*)?(?:business type|industry|sector|company overview)(?:\*\*)?:\s*(.+)$/i,
+    /^(?:\*\*)?(?:business type|industry|sector)(?:\*\*)?:\s*(.+)$/i,
   ]);
 
   const websiteRaw = pickLine(text, [
@@ -100,7 +100,11 @@ export function parseBrandAssistantLead(text: string): ParsedBrandLead {
     pickEmail(text);
 
   const designation = pickLine(text, [
-    /^(?:\*\*)?(?:business type|designation|role)(?:\*\*)?:\s*(.+)$/i,
+    /^(?:\*\*)?(?:designation|role|job title)(?:\*\*)?:\s*(.+)$/i,
+  ]);
+
+  const contactName = pickLine(text, [
+    /^(?:\*\*)?(?:contact person|contact name|person name)(?:\*\*)?:\s*(.+)$/i,
   ]);
 
   return {
@@ -112,7 +116,7 @@ export function parseBrandAssistantLead(text: string): ParsedBrandLead {
     address,
     contact_phone: phone,
     contact_email: email,
-    contact_name: "",
+    contact_name: contactName,
     contact_designation: designation,
   };
 }

@@ -26,6 +26,10 @@ import {
 import { mailLabelSectionId } from "./lib/mailLabelRules";
 import { displayDashboardUserLabel } from "./utils/displayUserName";
 import { canOpenRestrictedAiTab } from "./lib/aiToolsGate";
+import {
+  snapshotLeadForAiResearch,
+  type AiResearchContactSnapshot,
+} from "./utils/aiResearchUpdate";
 import { InboxAlertToasts } from "./components/InboxAlertToasts";
 import { UrgentEmailAlertModal, isGenuineNewInquiry } from "./components/UrgentEmailAlertModal";
 import { WorkspaceAiAutopilotButton } from "./components/WorkspaceAiAutopilotButton";
@@ -163,6 +167,11 @@ function DashboardApp() {
   const [mailSection, setMailSection] = useState<MailSection>("inbox");
   const [focusEditLeadId, setFocusEditLeadId] = useState<number | null>(null);
   const [focusEditCompany, setFocusEditCompany] = useState<string | null>(null);
+  const [aiResearchContacts, setAiResearchContacts] = useState<
+    AiResearchContactSnapshot[] | null
+  >(null);
+  const [aiResearchReturnSection, setAiResearchReturnSection] =
+    useState<LeadsTableSection | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpenPreference);
   const [mailDraftCount, setMailDraftCount] = useState(0);
@@ -1870,6 +1879,11 @@ function DashboardApp() {
                   setFocusEditCompany(null);
                 }}
                 onOpenAiSalesAgent={() => handleSelectTab("ai-sales-agent")}
+                onOpenAiResearchUpdate={(contacts) => {
+                  setAiResearchContacts(contacts.map(snapshotLeadForAiResearch));
+                  setAiResearchReturnSection(tableSection);
+                  setTab("chatbot");
+                }}
               />
             )}
             {tab === "inbox" && (
@@ -1940,7 +1954,21 @@ function DashboardApp() {
                 onError={setError}
               />
             )}
-            {tab === "chatbot" && <ChatbotPage onError={setError} />}
+            {tab === "chatbot" && (
+              <ChatbotPage
+                onError={setError}
+                researchContacts={aiResearchContacts}
+                onClearResearchContacts={() => setAiResearchContacts(null)}
+                onReturnToTable={() => {
+                  const section = aiResearchReturnSection ?? tableSection;
+                  setAiResearchContacts(null);
+                  setAiResearchReturnSection(null);
+                  setTableSection(section);
+                  setLeadsTableRefreshToken((t) => t + 1);
+                  setTab("table");
+                }}
+              />
+            )}
             {tab === "ai-mode" && (
               <AiModePage
                 onError={setError}

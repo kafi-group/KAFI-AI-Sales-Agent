@@ -69,6 +69,7 @@ import {
   IconX,
   IconXCircle,
   IconRobot,
+  IconSparkles,
 } from "../components/icons/AppIcons";
 import {
   useColumnVisibility,
@@ -157,6 +158,8 @@ interface LeadsTablePageProps {
   onFocusEditConsumed?: () => void;
   /** After assigning to Sara/Rayan queue — open AI Sales Agent pipeline. */
   onOpenAiSalesAgent?: () => void;
+  /** Modify → AI Research & Update with selected table rows. */
+  onOpenAiResearchUpdate?: (contacts: LeadTableRow[]) => void;
 }
 
 type SortField =
@@ -1117,6 +1120,7 @@ export function LeadsTablePage({
   focusEditCompany = null,
   onFocusEditConsumed,
   onOpenAiSalesAgent,
+  onOpenAiResearchUpdate,
 }: LeadsTablePageProps) {
   const { isAdmin, user } = useAuth();
   const initialTableViewRef = useRef(readStoredTableView(user?.id, section));
@@ -3522,7 +3526,7 @@ export function LeadsTablePage({
                 : `Delete (${selected.size})`}
             </ToolbarMenuItem>
             <ToolbarMenuItem
-              icon={IconSearch}
+              icon={IconSparkles}
               tone="emerald"
               disabled={
                 selected.size === 0 ||
@@ -3530,16 +3534,30 @@ export function LeadsTablePage({
                 deletingSelected ||
                 deletingId !== null ||
                 deduping ||
-                editMode
+                editMode ||
+                !onOpenAiResearchUpdate
               }
-              title="Research and score"
-              onClick={() => void bulkResearchAndScore()}
+              title="Open AI Research & Update with selected contacts"
+              onClick={() => {
+                if (!onOpenAiResearchUpdate) return;
+                const selectedRows = rows.filter((r) => selected.has(r.id));
+                if (selectedRows.length === 0) {
+                  onError("Select at least one contact first.");
+                  return;
+                }
+                // If selection spans pages, prefer drafts/cache then fetch missing ids later via page rows only.
+                // Load any selected ids not on the current page from known rows; ask user if incomplete.
+                if (selectedRows.length < selected.size) {
+                  onError(
+                    `Only ${selectedRows.length} of ${selected.size} selected contacts are on this page. ` +
+                      `Scroll/load those rows or select contacts visible on the current page.`,
+                  );
+                  return;
+                }
+                onOpenAiResearchUpdate(selectedRows);
+              }}
             >
-              {bulkOnboarding
-                ? actionProgress?.mode === "determinate" && actionProgress.total
-                  ? `Researching ${actionProgress.current ?? 0}/${actionProgress.total}…`
-                  : "Starting…"
-                : `Research (${selected.size})`}
+              {`AI Research & Update (${selected.size})`}
             </ToolbarMenuItem>
             <ToolbarMenuItem
               icon={editMode ? IconCheck : IconEdit}
@@ -5255,7 +5273,7 @@ export function LeadsTablePage({
               ? isAdmin
                 ? "Old clients"
                 : "Clients"
-              : isTargetedPool
+              : isTargetedPool || isCustomModule || isTestingModule
                 ? sectionTitle(section, assigneeUsername, isAdmin)
                 : undefined
           }
@@ -5264,8 +5282,8 @@ export function LeadsTablePage({
               ? isAdmin
                 ? "Import old clients"
                 : "Import clients"
-              : isTargetedPool
-                ? `Import ${sectionTitle(section, assigneeUsername, isAdmin)}`
+              : isTargetedPool || isCustomModule || isTestingModule
+                ? `Import into ${sectionTitle(section, assigneeUsername, isAdmin)}`
                 : "Import leads"
           }
           description={
@@ -5273,8 +5291,8 @@ export function LeadsTablePage({
               ? isAdmin
                 ? "Upload CSV or Excel (.xlsx). Columns are mapped to the Old clients table. Import only saves rows as-is — research and score later from the table."
                 : "Upload CSV or Excel (.xlsx). Columns are mapped to your Clients table. Import only saves rows as-is — research and score later from the table."
-              : isTargetedPool
-                ? "Upload CSV or Excel (.xlsx). Rows stay in this list only — they will not appear in Old clients or any other table."
+              : isTargetedPool || isCustomModule || isTestingModule
+                ? `Upload CSV or Excel (.xlsx). Rows stay in “${sectionTitle(section, assigneeUsername, isAdmin)}” only — they will not appear in Old clients or other lists (Master / All Contacts can still show them when viewing everything).`
                 : "Upload CSV or Excel (.xlsx). Rows are saved into your leads table as-is — research and score them from the table when ready."
           }
         />
