@@ -26,6 +26,118 @@ const PERSONAS = [
   { id: "male" as const, label: "Rayan" },
 ];
 
+type DataUpdateLogEntry = {
+  at?: string;
+  buyer_id?: number;
+  label?: string;
+  ok?: boolean;
+  skipped?: boolean;
+  filled?: string[];
+  error?: string | null;
+  provider?: string | null;
+};
+
+type DataUpdateLastReport = {
+  finished_at?: string;
+  succeeded?: number;
+  failed?: number;
+  skipped?: number;
+  filled_total?: number;
+  done?: number;
+  total?: number;
+  log?: DataUpdateLogEntry[];
+};
+
+function formatLogTime(iso?: string): string {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function logResultLabel(entry: DataUpdateLogEntry): { text: string; cls: string } {
+  if (entry.skipped) return { text: "Skipped", cls: "text-slate-400" };
+  if (entry.ok && entry.filled?.length) return { text: "Updated", cls: "text-emerald-300" };
+  if (entry.ok) return { text: "OK (nothing new)", cls: "text-slate-400" };
+  return { text: "Failed", cls: "text-rose-300" };
+}
+
+function DataUpdateActivityLog({
+  liveLog,
+  lastReport,
+}: {
+  liveLog: DataUpdateLogEntry[];
+  lastReport?: DataUpdateLastReport | null;
+}) {
+  const entries =
+    liveLog.length > 0
+      ? liveLog
+      : Array.isArray(lastReport?.log)
+        ? lastReport!.log!
+        : [];
+  if (!entries.length && !lastReport) return null;
+
+  return (
+    <div className="rounded-md border border-slate-700 bg-slate-950/60 p-2.5 space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h5 className="text-xs font-semibold text-slate-100">Activity log</h5>
+        {lastReport ? (
+          <span className="text-[10px] text-slate-500">
+            Finished {formatLogTime(lastReport.finished_at)} · ok {lastReport.succeeded ?? 0} ·
+            skip {lastReport.skipped ?? 0} · fail {lastReport.failed ?? 0}
+            {typeof lastReport.filled_total === "number"
+              ? ` · fields filled ${lastReport.filled_total}`
+              : ""}
+          </span>
+        ) : (
+          <span className="text-[10px] text-cyan-300/80">Live this run</span>
+        )}
+      </div>
+      {entries.length === 0 ? (
+        <p className="text-[11px] text-slate-500">No per-contact lines yet.</p>
+      ) : (
+        <ul className="max-h-52 overflow-y-auto space-y-1.5">
+          {[...entries].reverse().map((entry, idx) => {
+            const result = logResultLabel(entry);
+            return (
+              <li
+                key={`${entry.buyer_id ?? "x"}-${entry.at ?? idx}`}
+                className="rounded border border-slate-800 px-2 py-1.5 text-[11px]"
+              >
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span className="text-slate-500 tabular-nums shrink-0">
+                    {formatLogTime(entry.at)}
+                  </span>
+                  <span className="font-medium text-slate-100 truncate">
+                    {entry.label || `Lead #${entry.buyer_id ?? "?"}`}
+                  </span>
+                  <span className={`ml-auto font-semibold ${result.cls}`}>{result.text}</span>
+                </div>
+                {entry.filled?.length ? (
+                  <p className="text-emerald-300/90 mt-0.5">
+                    Filled: {entry.filled.join(", ")}
+                  </p>
+                ) : null}
+                {entry.error ? (
+                  <p className="text-rose-300/90 mt-0.5 break-words">{String(entry.error)}</p>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props) {
   const [open, setOpen] = useState(true);
   const [status, setStatus] = useState<AiSalesDataUpdateStatus | null>(null);
@@ -360,14 +472,10 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
                     <p className="text-[11px] text-cyan-200/90">Now: {run.current_label}</p>
                   ) : null}
 
-                  {run?.last_report ? (
-                    <details className="text-[11px] text-slate-400">
-                      <summary className="cursor-pointer text-slate-300">Last report</summary>
-                      <pre className="mt-1 whitespace-pre-wrap rounded bg-slate-900/80 p-2 overflow-auto max-h-40">
-                        {JSON.stringify(run.last_report, null, 2)}
-                      </pre>
-                    </details>
-                  ) : null}
+                  <DataUpdateActivityLog
+                    liveLog={(run?.log as DataUpdateLogEntry[] | undefined) || []}
+                    lastReport={run?.last_report as DataUpdateLastReport | null | undefined}
+                  />
 
                   {/* Per-agent queues */}
                   <div className="grid gap-2 pt-1">
