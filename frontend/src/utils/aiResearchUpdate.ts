@@ -219,11 +219,12 @@ export function buildAiResearchReviewItems(
 
     if (changes.length === 0) continue;
 
-    // Never wipe existing contact data — only patch fields we filled, and
+    // Never wipe existing contact/company data — only patch fields we filled, and
     // target the same contact row when we know its id.
     if (snap.contact_id != null) {
       updatePayload.contact_id = snap.contact_id;
     }
+    updatePayload.fill_missing_only = true;
 
     const displayName =
       snap.company_name?.trim() ||

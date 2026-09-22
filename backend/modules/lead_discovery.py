@@ -2836,9 +2836,8 @@ def enrich_existing_buyer(db: Session, buyer_id: int) -> dict[str, Any]:
     existing_site_junk = _is_junk_website(buyer.website_url)
     if candidate.website_url and (not buyer.website_url or existing_site_junk):
         buyer_updates["website_url"] = candidate.website_url
-    elif existing_site_junk and not candidate.website_url:
-        # Clear firmographic junk even when we don't have a replacement yet.
-        buyer_updates["website_url"] = None
+    # Never clear an existing website (even junk) during AI Auto Data Update /
+    # enrichment fills — only upgrade when we have a replacement URL.
     if not buyer.facebook_company_url and _value_or_none(candidate.facebook_url):
         buyer_updates["facebook_company_url"] = _value_or_none(candidate.facebook_url)
     if not buyer.instagram_company_url and _value_or_none(candidate.instagram_url):
@@ -2850,19 +2849,11 @@ def enrich_existing_buyer(db: Session, buyer_id: int) -> dict[str, Any]:
     if not buyer.industry and candidate.industry:
         buyer_updates["industry"] = candidate.industry
 
-    # Location — highest priority write-back for clients table.
+    # Location — fill empty cells only (never overwrite existing city/address).
     cleaned_city = _clean_city_value(candidate.city)
     if cleaned_city and (not buyer.city or not _is_plausible_city(buyer.city)):
         buyer_updates["city"] = cleaned_city
     if candidate.address and not (buyer.address or "").strip():
-        buyer_updates["address"] = candidate.address
-    elif (
-        is_clients_table
-        and candidate.address
-        and buyer.address
-        and len(candidate.address.strip()) > len(buyer.address.strip()) + 8
-    ):
-        # Prefer a richer street address when the CSV only had a stub.
         buyer_updates["address"] = candidate.address
 
     if buyer_updates:

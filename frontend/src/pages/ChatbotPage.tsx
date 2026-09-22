@@ -540,7 +540,9 @@ export function ChatbotPage({
     setSavingReview(true);
     try {
       for (const item of reviewItems) {
-        await client.updateLeadTableRow(item.leadId, item.updatePayload);
+        await client.updateLeadTableRow(item.leadId, item.updatePayload, {
+          fillMissingOnly: true,
+        });
       }
       const savedIds = reviewItems.map((i) => i.leadId);
       const logContacts = reviewItems.map((item) => {

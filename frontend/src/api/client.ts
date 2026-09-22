@@ -1792,6 +1792,8 @@ export interface LeadTableRowUpdate {
   contact_primary_phone?: string | null;
   contact_secondary_phone?: string | null;
   contact_secondary_email?: string | null;
+  /** AI fills only — never wipe existing CRM columns. */
+  fill_missing_only?: boolean;
 }
 
 export interface LeadTableResponse {
@@ -2349,10 +2351,19 @@ export const client = {
       method: "POST",
       body: JSON.stringify(data),
     }),
-  updateLeadTableRow: (leadId: number, data: LeadTableRowUpdate) =>
+  updateLeadTableRow: (
+    leadId: number,
+    data: LeadTableRowUpdate,
+    options?: { fillMissingOnly?: boolean },
+  ) =>
     request<LeadTableRow>(`/leads/table/${leadId}`, {
       method: "PATCH",
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        ...data,
+        ...(options?.fillMissingOnly || data.fill_missing_only
+          ? { fill_missing_only: true }
+          : {}),
+      }),
     }),
   deleteLeadTableRow: (leadId: number) =>
     request<void>(`/leads/table/${leadId}`, { method: "DELETE" }),

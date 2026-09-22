@@ -517,18 +517,28 @@ def research_and_update_buyer(db: Any, buyer_id: int) -> dict[str, Any]:
     changes: list[dict[str, str]] = []
     patch_keys = [k for k in update_payload if k != "contact_id"]
     if patch_keys:
-        updated = leads_module.update_lead_table_row(db, buyer_id, update_payload)
+        updated = leads_module.update_lead_table_row(
+            db,
+            buyer_id,
+            update_payload,
+            fill_missing_only=True,
+        )
         if updated:
-            filled = list(patch_keys)
-            for key in filled:
-                changes.append(
-                    {
-                        "field": key,
-                        "label": FIELD_LABELS.get(key, key),
-                        "before": str(row.get(key) or "").strip() or "(empty)",
-                        "after": str(update_payload.get(key) or "").strip(),
-                    }
-                )
+            # Recompute what actually landed (guard may have dropped some keys).
+            after_row = updated
+            filled = []
+            changes = []
+            for key in patch_keys:
+                if _is_blank(row.get(key)) and not _is_blank(after_row.get(key)):
+                    filled.append(key)
+                    changes.append(
+                        {
+                            "field": key,
+                            "label": FIELD_LABELS.get(key, key),
+                            "before": str(row.get(key) or "").strip() or "(empty)",
+                            "after": str(after_row.get(key) or "").strip(),
+                        }
+                    )
     else:
         # Buyer-only / enrich path — still merge stranded phones onto the display contact.
         try:

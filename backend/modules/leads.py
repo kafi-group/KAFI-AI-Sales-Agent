@@ -2098,6 +2098,103 @@ def get_lead_table_row(db: Session, buyer_id: int) -> dict[str, object] | None:
     }
 
 
+def _crm_value_blank(value: object) -> bool:
+    """True when a CRM cell should be treated as empty (safe to fill)."""
+    if value is None:
+        return True
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return False
+    text = str(value).strip()
+    if not text:
+        return True
+    lowered = text.lower()
+    if lowered in {"—", "-", "n/a", "na", "none", "null", "unknown", "tbd"}:
+        return True
+    if re.match(r"^not\s+found\b", lowered):
+        return True
+    return False
+
+
+def _filter_fill_missing_only_payload(
+    db: Session,
+    buyer: Buyer,
+    data: dict,
+) -> dict:
+    """Drop patches that would wipe or replace any already-filled column.
+
+    Used by AI Research & Update and Sara/Rayan Auto Data Update.
+    Manual table edits do not use this filter.
+    """
+    contacts = buyers_module.list_contacts_for_buyer(db, buyer.id)
+    contact = None
+    if data.get("contact_id") is not None:
+        cid = data.get("contact_id")
+        contact = next((c for c in contacts if c.id == cid), None)
+    if contact is None and contacts:
+        contact = next(
+            (
+                c
+                for c in contacts
+                if (c.phone or c.primary_phone or c.email or c.full_name)
+            ),
+            contacts[0],
+        )
+
+    buyer_current = {
+        "company_name": buyer.company_name,
+        "country": buyer.country,
+        "industry": buyer.industry,
+        "website_url": buyer.website_url,
+        "linkedin_company_url": buyer.linkedin_company_url,
+        "facebook_company_url": buyer.facebook_company_url,
+        "instagram_company_url": buyer.instagram_company_url,
+        "legacy_serial_no": buyer.legacy_serial_no,
+        "company_grading": buyer.company_grading,
+        "product_interest": buyer.product_interest,
+        "city": buyer.city,
+        "address": buyer.address,
+        "remarks": buyer.remarks,
+        "remarks_03": getattr(buyer, "remarks_03", None),
+        "remarks_04": getattr(buyer, "remarks_04", None),
+    }
+    contact_current = {
+        "contact_name": contact.full_name if contact else None,
+        "contact_email": contact.email if contact else None,
+        "contact_phone": contact.phone if contact else None,
+        "contact_designation": contact.designation if contact else None,
+        "contact_secondary_mobile": contact.secondary_mobile if contact else None,
+        "contact_primary_phone": contact.primary_phone if contact else None,
+        "contact_secondary_phone": contact.secondary_phone if contact else None,
+        "contact_secondary_email": contact.secondary_email if contact else None,
+    }
+
+    out: dict = {}
+    if "contact_id" in data and data.get("contact_id") is not None:
+        out["contact_id"] = data["contact_id"]
+    elif contact is not None:
+        out["contact_id"] = contact.id
+
+    for key, value in data.items():
+        if key in {"contact_id", "assigned_to", "assigned_to_user_id", "fill_missing_only"}:
+            continue
+        # Never write blank / Not found into any column from AI fills.
+        if _crm_value_blank(value):
+            continue
+        if key in buyer_current:
+            if not _crm_value_blank(buyer_current.get(key)):
+                continue  # keep existing company/website/address/etc.
+            out[key] = value
+            continue
+        if key in contact_current:
+            if not _crm_value_blank(contact_current.get(key)):
+                continue  # keep existing phone/email/name/etc.
+            out[key] = value
+            continue
+        # Unknown keys: only allow non-blank (defensive).
+        out[key] = value
+    return out
+
+
 def update_lead_table_row(
     db: Session,
     buyer_id: int,
@@ -2105,12 +2202,16 @@ def update_lead_table_row(
     *,
     remarks_by: str | None = None,
     by_user_id: int | None = None,
+    fill_missing_only: bool = False,
 ) -> dict[str, object] | None:
     from modules.audit import log_action
 
     buyer = buyers_module.get_buyer(db, buyer_id)
     if not buyer:
         return None
+
+    data = dict(data or {})
+    data.pop("fill_missing_only", None)
 
     if "assigned_to_user_id" in data:
         previous_assignee_id = buyer.assigned_to_user_id
@@ -2141,6 +2242,12 @@ def update_lead_table_row(
         db.commit()
         db.refresh(buyer)
         data = {k: v for k, v in data.items() if k not in {"assigned_to_user_id", "assigned_to"}}
+
+    if fill_missing_only:
+        data = _filter_fill_missing_only_payload(db, buyer, data)
+        if not data or (set(data.keys()) <= {"contact_id"}):
+            buyers_module.merge_stranded_contact_fields(db, buyer_id)
+            return get_lead_table_row(db, buyer_id)
 
     buyer_fields = {
         key: data[key]

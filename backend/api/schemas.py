@@ -613,6 +613,8 @@ class LeadTableRowUpdate(BaseModel):
     contact_primary_phone: Optional[str] = None
     contact_secondary_phone: Optional[str] = None
     contact_secondary_email: Optional[str] = None
+    # AI Research / Auto Data Update: only write into empty cells; never wipe.
+    fill_missing_only: Optional[bool] = None
 
 
 class LeadTableResponse(BaseModel):

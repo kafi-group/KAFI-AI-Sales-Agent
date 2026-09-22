@@ -779,6 +779,7 @@ def update_lead_table_row(
 
     _require_buyer_access(db, user, lead_id)
     data = payload.model_dump(exclude_unset=True)
+    fill_missing_only = bool(data.pop("fill_missing_only", False))
     if "assigned_to_user_id" in data or "assigned_to" in data:
         if not _is_admin(user):
             # Non-admin row edits may still include the current assignee field —
@@ -797,7 +798,12 @@ def update_lead_table_row(
             data.pop("assigned_to", None)
     try:
         row = leads_module.update_lead_table_row(
-            db, lead_id, data, remarks_by=user.username, by_user_id=user.id
+            db,
+            lead_id,
+            data,
+            remarks_by=user.username,
+            by_user_id=user.id,
+            fill_missing_only=fill_missing_only,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
