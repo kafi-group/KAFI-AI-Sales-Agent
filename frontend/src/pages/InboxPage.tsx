@@ -382,7 +382,6 @@ export function InboxPage({
   const [filterRibbonOpen, setFilterRibbonOpen] = useState(false);
   const [autoTrash, setAutoTrash] = useState<AutoTrashSettings | null>(null);
   const [autoTrashSaving, setAutoTrashSaving] = useState(false);
-  const [autoTrashLearning, setAutoTrashLearning] = useState(false);
   const [autoTrashLogDays, setAutoTrashLogDays] = useState<AutoTrashDailyLogDay[]>([]);
   const [autoTrashLogLoading, setAutoTrashLogLoading] = useState(false);
 
@@ -1147,35 +1146,13 @@ export function InboxPage({
         next
           ? row.profile_ready
             ? "Auto Trash ON — matching inbox mail will move to Trash automatically."
-            : "Auto Trash ON — still learning from Trash; auto-moves start once the profile is ready."
+            : "Auto Trash ON — still learning from Trash; auto-moves start once the profile is ready (Settings → Study Trash now)."
           : "Auto Trash OFF for this mailbox.",
       );
     } catch (e) {
       onError(e instanceof Error ? e.message : "Could not update Auto Trash");
     } finally {
       setAutoTrashSaving(false);
-    }
-  }
-
-  async function studyTrashNow() {
-    setAutoTrashLearning(true);
-    try {
-      const res = await client.runAutoTrashLearn();
-      const row = await client.getAutoTrashSettings(mailboxUserIdRef.current);
-      setAutoTrash(row);
-      const mb = (res.mailboxes || [])
-        .map((m) => `${m.email || "mailbox"}: ${m.trash_sampled}`)
-        .slice(0, 6)
-        .join(" · ");
-      setNotice(
-        res.ready
-          ? `Auto Trash ready — studied ${res.samples_seen} trash emails across mailboxes${mb ? ` (${mb})` : ""}. You can turn it ON.`
-          : `Studied ${res.samples_seen} trash emails so far${mb ? ` (${mb})` : ""}. Still learning — run again after more mail is in Trash, or wait for the nightly study.`,
-      );
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Could not study Trash");
-    } finally {
-      setAutoTrashLearning(false);
     }
   }
 
@@ -1965,22 +1942,12 @@ export function InboxPage({
               <h3 className="text-sm font-semibold text-slate-100">Auto Trash log</h3>
               <p className="text-xs text-slate-400 mt-0.5">
                 Emails moved automatically — day-wise counts per mailbox user (last 14 days).
-                Training uses Trash from every configured mailbox (not only this folder).
+                Retrain from Settings → Study Trash now.
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                disabled={autoTrashLearning}
-                onClick={() => void studyTrashNow()}
-                className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20 disabled:opacity-40"
-              >
-                {autoTrashLearning ? "Studying…" : "Study Trash now"}
-              </button>
-              {autoTrashLogLoading ? (
-                <span className="text-xs text-slate-500">Loading…</span>
-              ) : null}
-            </div>
+            {autoTrashLogLoading ? (
+              <span className="text-xs text-slate-500">Loading…</span>
+            ) : null}
           </div>
           {autoTrashLogDays.length === 0 && !autoTrashLogLoading ? (
             <p className="text-xs text-slate-500">No auto-trashed emails logged yet.</p>
@@ -2020,15 +1987,6 @@ export function InboxPage({
 
       {section === "inbox" && !filterRibbonOpen ? (
         <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
-          <button
-            type="button"
-            disabled={autoTrashLearning}
-            onClick={() => void studyTrashNow()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-100 text-sm font-semibold hover:bg-amber-500/20 disabled:opacity-40"
-            title="Scan Trash on all configured mailboxes and train Auto Trash now"
-          >
-            {autoTrashLearning ? "Studying Trash…" : "Study Trash now"}
-          </button>
           {autoTrash ? (
             <span className="text-[11px] text-slate-500">
               {autoTrash.profile_ready
@@ -2042,7 +2000,7 @@ export function InboxPage({
                 ? "border-rose-500/50 bg-rose-500/15 text-rose-100"
                 : "border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-500"
             }`}
-            title="When ON, this mailbox inbox is scanned and matching noise is moved to Trash automatically."
+            title="When ON, this mailbox inbox is scanned and matching noise is moved to Trash automatically. Retrain in Settings."
           >
             <input
               type="checkbox"
@@ -2149,32 +2107,16 @@ export function InboxPage({
                   </button>
                 );
               })}
-              <button
-                type="button"
-                disabled={autoTrashLearning}
-                onClick={() => void studyTrashNow()}
-                className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-100 text-sm font-semibold hover:bg-amber-500/20 disabled:opacity-40"
-                title="Scan Trash on all configured mailboxes and train Auto Trash now"
-              >
-                {autoTrashLearning ? "Studying…" : "Study Trash now"}
-              </button>
-              {autoTrash ? (
-                <span className="text-[11px] text-slate-500">
-                  {autoTrash.profile_ready
-                    ? `Ready · ${autoTrash.samples_seen}`
-                    : `${autoTrash.samples_seen} samples`}
-                </span>
-              ) : null}
               <label
-                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-semibold cursor-pointer select-none ${
+                className={`ml-auto inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-semibold cursor-pointer select-none ${
                   autoTrash?.enabled
                     ? "border-rose-500/50 bg-rose-500/15 text-rose-100"
                     : "border-slate-600 bg-slate-950/60 text-slate-300 hover:border-slate-500"
                 }`}
                 title={
                   autoTrash?.profile_ready
-                    ? "When ON, this mailbox inbox is scanned and matching noise is moved to Trash automatically (learned from all Trash folders)."
-                    : "Click Study Trash now to train from all mailboxes' Trash, then turn Auto Trash ON."
+                    ? "When ON, this mailbox inbox is scanned and matching noise is moved to Trash automatically."
+                    : "Profile still learning — retrain in Settings → Study Trash now, then turn ON."
                 }
               >
                 <input

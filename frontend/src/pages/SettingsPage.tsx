@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { client, type TwilioBalance, type VoiceEngineSettings } from "../api/client";
+import {
+  client,
+  type AutoTrashSettings,
+  type TwilioBalance,
+  type VoiceEngineSettings,
+} from "../api/client";
 import { ActionButton } from "../components/ui/ActionButton";
 import { IconRefresh } from "../components/icons/AppIcons";
 import {
@@ -80,6 +85,9 @@ export function SettingsPage({ onError, onOpenRestrictedAi }: SettingsPageProps)
   const [savingHangup, setSavingHangup] = useState(false);
   const [researchPatience, setResearchPatience] = useState<ResearchPatience>(() => loadResearchPatience());
   const [narrator, setNarrator] = useState<NarratorPrefs>(() => loadNarratorPrefs());
+  const [autoTrash, setAutoTrash] = useState<AutoTrashSettings | null>(null);
+  const [autoTrashLearning, setAutoTrashLearning] = useState(false);
+  const [autoTrashNotice, setAutoTrashNotice] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -113,6 +121,44 @@ export function SettingsPage({ onError, onOpenRestrictedAi }: SettingsPageProps)
       cancelled = true;
     };
   }, [onError]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void client
+      .getAutoTrashSettings()
+      .then((row) => {
+        if (!cancelled) setAutoTrash(row);
+      })
+      .catch(() => {
+        if (!cancelled) setAutoTrash(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function studyTrashNow() {
+    setAutoTrashLearning(true);
+    setAutoTrashNotice(null);
+    try {
+      const res = await client.runAutoTrashLearn();
+      const row = await client.getAutoTrashSettings();
+      setAutoTrash(row);
+      const mb = (res.mailboxes || [])
+        .map((m) => `${m.email || "mailbox"}: ${m.trash_sampled}`)
+        .slice(0, 8)
+        .join(" · ");
+      setAutoTrashNotice(
+        res.ready
+          ? `Ready — studied ${res.samples_seen} trash emails${mb ? ` (${mb})` : ""}. Users can turn Auto Trash ON in Inbox.`
+          : `Studied ${res.samples_seen} trash emails so far${mb ? ` (${mb})` : ""}. Run again after more mail is in Trash.`,
+      );
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Could not study Trash");
+    } finally {
+      setAutoTrashLearning(false);
+    }
+  }
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -648,6 +694,49 @@ export function SettingsPage({ onError, onOpenRestrictedAi }: SettingsPageProps)
             </button>
           </div>
         </div>
+      </section>
+
+      <section className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 sm:p-6 space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-medium text-slate-100">Auto Trash training</h3>
+            <p className="mt-1 text-sm text-slate-400">
+              Scan Trash on every configured mailbox and refresh the shared Auto Trash profile.
+              Users turn Auto Trash on/off in their Inbox; training stays here.
+            </p>
+          </div>
+          {autoTrash ? (
+            <span
+              className={`text-xs px-2.5 py-1 rounded-full border ${
+                autoTrash.profile_ready
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                  : "border-amber-500/40 bg-amber-500/10 text-amber-200"
+              }`}
+            >
+              {autoTrash.profile_ready
+                ? `Ready · ${autoTrash.samples_seen} samples`
+                : `Learning · ${autoTrash.samples_seen} samples`}
+            </span>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={autoTrashLearning}
+            onClick={() => void studyTrashNow()}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-amber-500/40 bg-amber-500/15 text-amber-100 text-sm font-semibold hover:bg-amber-500/25 disabled:opacity-40"
+          >
+            {autoTrashLearning ? "Studying Trash…" : "Study Trash now"}
+          </button>
+          {autoTrash?.last_learned_at ? (
+            <span className="text-xs text-slate-500">
+              Last studied {new Date(autoTrash.last_learned_at).toLocaleString()}
+            </span>
+          ) : null}
+        </div>
+        {autoTrashNotice ? (
+          <p className="text-sm text-emerald-300/90">{autoTrashNotice}</p>
+        ) : null}
       </section>
 
       <section className="rounded-xl border border-slate-700/80 bg-slate-900/60 p-5 sm:p-6">
