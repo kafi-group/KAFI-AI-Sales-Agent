@@ -413,7 +413,7 @@ export function ChatbotPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- start once per handoff key
   }, [researchContacts]);
 
-  async function requestCompanyDetails(priorAssistantContent: string, leadId?: number) {
+  async function requestCompanyDetails(leadId?: number) {
     setDetailsLoading(true);
     // Prefer the lead tagged on the bubble; else last batch contact.
     const linkedLeadId =
@@ -610,7 +610,7 @@ export function ChatbotPage({
             detailsLoading={detailsLoading}
             onProvideCompanyDetails={
               msg.role === "assistant" && !msg.loading && msg.id !== "welcome"
-                ? () => void requestCompanyDetails(msg.content, msg.leadId)
+                ? () => void requestCompanyDetails(msg.leadId)
                 : undefined
             }
           />

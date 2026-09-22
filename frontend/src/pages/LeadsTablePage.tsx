@@ -77,7 +77,6 @@ import {
 } from "../hooks/useColumnVisibility";
 import { exportLeadsTableCsv } from "../utils/exportCsv";
 import { UNASSIGNED } from "../utils/leadAssignees";
-import { loadResearchPatience, RESEARCH_PATIENCE } from "../lib/researchPatience";
 
 const SORT_FILTER_OPTIONS = [
   { value: "company_name", label: "Company name" },
@@ -708,8 +707,6 @@ function ExpandableCell({
   );
 }
 
-const MAX_BULK_ONBOARD = 25;
-const BULK_ONBOARD_DELAY_MS = 1000;
 const BULK_DELETE_CHUNK = 40;
 /** Keep each move request small enough for Vercel→Railway proxy timeouts. */
 const BULK_MOVE_CHUNK = 100;
@@ -1150,8 +1147,7 @@ export function LeadsTablePage({
   const [selectingAll, setSelectingAll] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deletingSelected, setDeletingSelected] = useState(false);
-  const [bulkOnboarding, setBulkOnboarding] = useState(false);
-  const [researchPatience] = useState(() => loadResearchPatience());
+  const [bulkOnboarding] = useState(false);
   const [actionProgress, setActionProgress] = useState<BulkActionProgress | null>(null);
   const [bulkResults, setBulkResults] = useState<BulkOnboardRowResult[] | null>(null);
   const [showBulkEmail, setShowBulkEmail] = useState(false);
@@ -2678,108 +2674,6 @@ export function LeadsTablePage({
     } finally {
       setSelectingAll(false);
     }
-  }
-
-  async function bulkResearchAndScore() {
-    const ids = [...selected];
-    if (ids.length === 0) return;
-
-    if (ids.length > MAX_BULK_ONBOARD) {
-      onError(`Select at most ${MAX_BULK_ONBOARD} leads per batch`);
-      return;
-    }
-
-    const patience = RESEARCH_PATIENCE[researchPatience];
-    const withoutWebsite = rows.filter((row) => ids.includes(row.id) && !row.website_url?.trim());
-    const estimateSec = Math.round(
-      ids.length * (patience.expectedSec + BULK_ONBOARD_DELAY_MS / 1000),
-    );
-    const estimateLabel =
-      estimateSec < 60
-        ? `~${estimateSec}s`
-        : `~${Math.floor(estimateSec / 60)}m ${estimateSec % 60}s`;
-    const confirmed = window.confirm(
-      `Research & score ${ids.length} lead${ids.length === 1 ? "" : "s"}?\n\n` +
-        `• Looks up company details and fills empty table fields (not just the score).\n` +
-        (isOldClients
-          ? `• Clients table priority: city & address first, then phone/email/designation.\n`
-          : `• Scrapped Leads priority: website, email, phone, socials, country.\n`) +
-        `• Patience: ${patience.label} (${patience.timeoutMs / 1000}s max per lead).\n` +
-        `• Runs one at a time (${estimateLabel} estimated for this batch).\n` +
-        (withoutWebsite.length > 0
-          ? `• ${withoutWebsite.length} selected lead${withoutWebsite.length === 1 ? " has" : "s have"} no website — fit signals will be weaker.\n`
-          : "") +
-        `\nContinue?`,
-    );
-    if (!confirmed) return;
-
-    setBulkOnboarding(true);
-    setBulkResults(null);
-    setSaveNotice(null);
-    const startedAt = Date.now();
-    const patienceLabel = `${patience.label} · ${patience.timeoutMs / 1000}s/lead`;
-
-    const results: BulkOnboardRowResult[] = [];
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i];
-      const row = rows.find((r) => r.id === id);
-      const companyName = row?.company_name ?? `Lead #${id}`;
-      const itemStartedAt = Date.now();
-      setActionProgress({
-        title: "Researching & scoring leads",
-        mode: "determinate",
-        current: i,
-        total: ids.length,
-        detail: companyName,
-        startedAt,
-        accent: "emerald",
-        itemStartedAt,
-        itemTimeoutMs: patience.timeoutMs,
-        expectedSecPerItem: patience.expectedSec + BULK_ONBOARD_DELAY_MS / 1000,
-        patienceLabel,
-      });
-
-      try {
-        const result = await client.onboardLead(id, { timeoutMs: patience.timeoutMs });
-        results.push({
-          id,
-          company_name: companyName,
-          status: "success",
-          score: result.score,
-          reasoning: result.reasoning,
-          filled_fields: result.enrichment?.filled_fields ?? [],
-        });
-      } catch (e) {
-        results.push({
-          id,
-          company_name: companyName,
-          status: "failed",
-          error: e instanceof Error ? e.message : "Research & score failed",
-        });
-      }
-
-      setActionProgress({
-        title: "Researching & scoring leads",
-        mode: "determinate",
-        current: i + 1,
-        total: ids.length,
-        detail: companyName,
-        startedAt,
-        accent: "emerald",
-        patienceLabel,
-        expectedSecPerItem: patience.expectedSec + BULK_ONBOARD_DELAY_MS / 1000,
-      });
-
-      if (i < ids.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, BULK_ONBOARD_DELAY_MS));
-      }
-    }
-
-    setActionProgress(null);
-    setBulkOnboarding(false);
-    setBulkResults(results);
-    clearSelection();
-    await loadTable();
   }
 
   async function runPostImportClean(opts?: { afterImport?: boolean }) {
