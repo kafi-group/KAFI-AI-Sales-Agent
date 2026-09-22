@@ -1684,6 +1684,8 @@ class OutlookClient:
         attachments: list[dict] | None = None,
         interaction_id: int | None = None,
         send_mode: str = "individual",
+        cc: str | None = None,
+        bcc: str | None = None,
     ) -> dict[str, Any]:
         """Send an approved outbound email (quotations, outreach, bulk campaigns)."""
         return self.send_reply(
@@ -1693,6 +1695,8 @@ class OutlookClient:
             attachments=attachments,
             interaction_id=interaction_id,
             send_mode=send_mode,
+            cc=cc,
+            bcc=bcc,
         )
 
 

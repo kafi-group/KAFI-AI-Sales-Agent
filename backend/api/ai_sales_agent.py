@@ -1206,9 +1206,50 @@ def _bulk_email_queued(
     runner: dict[str, Any],
 ) -> dict[str, Any]:
     """When Auto Mode has call_mode off: email all ready queued contacts for this agent."""
+    import html as html_mod
+    import time
+
+    from config import settings as app_settings
     from integrations.mail_client import mail_client
+    from modules.ai_sales_auto_mode import get_bulk_email_config
+    from modules.email_templates import get_template, render_template_text
 
     agent_name = "Sara" if persona == "female" else "Rayan"
+    cfg = get_bulk_email_config(persona)
+    subject_tpl = (cfg.get("subject") or "").strip()
+    body_tpl = (cfg.get("body") or "").strip()
+    template_id = cfg.get("template_id")
+    template = get_template(db, int(template_id)) if template_id else None
+    if template and (not subject_tpl or not body_tpl):
+        if not subject_tpl:
+            subject_tpl = (template.subject or "").strip()
+        if not body_tpl:
+            body_tpl = (template.body or "").strip()
+    if not subject_tpl or not body_tpl:
+        raise HTTPException(
+            400,
+            f"Set a template (and edit subject/body/signature) for {agent_name} "
+            "under AI Auto Mode → bulk email setup before starting.",
+        )
+
+    from_email = (cfg.get("from_mailbox_email") or "").strip().lower()
+    mailbox_user = user
+    if from_email:
+        match = (
+            db.query(AppUser)
+            .filter(AppUser.mailbox_email.isnot(None))
+            .filter(AppUser.mailbox_email.ilike(from_email))
+            .first()
+        )
+        if match is None:
+            raise HTTPException(
+                400,
+                f"From mailbox {from_email} is not linked to a Sales Agent user. "
+                "Pick essence@ / marketing@ / info@ (or your own) from the From list.",
+            )
+        mailbox_user = match
+    cc = (cfg.get("cc") or "").strip() or None
+
     queued = [
         t
         for t in _TASKS
@@ -1222,7 +1263,14 @@ def _bulk_email_queued(
 
     sent = 0
     failed = 0
-    for task in queued:
+    delay = float(getattr(app_settings, "bulk_email_message_delay_seconds", 0) or 0)
+
+    class _MergeStub:
+        def __init__(self, **kwargs: Any) -> None:
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+    for index, task in enumerate(queued):
         email = (task.get("contact_email") or "").strip()
         greet = (task.get("contact_name") or "there").strip() or "there"
         company = (task.get("company_name") or "").strip()
@@ -1236,24 +1284,41 @@ def _bulk_email_queued(
             }
             failed += 1
             continue
-        subject = f"Introduction — {agent_name}, Kafi Commodities"
-        body = (
-            f"<p>Dear {greet},</p>"
-            f"<p>This is <strong>{agent_name}</strong> from "
-            "<strong>Kafi Commodities (Pvt.) Ltd. (Brand: ESSENCE)</strong>"
-            f"{f' regarding {company}' if company else ''}.</p>"
-            "<p>We would like to introduce our export range (rice, Himalayan salt, "
-            "pickles, chutneys, sauces, spices) and share catalogues or CNF/FOB pricing "
-            "for your market.</p>"
-            f"<p>Best regards,<br/><strong>{agent_name}</strong><br/>"
-            "Kafi Commodities Export Team</p>"
-        )
+
+        buyer_id = task.get("buyer_id")
+        buyer = db.get(Buyer, int(buyer_id)) if buyer_id else None
+        contact = None
+        contact_id = task.get("contact_id")
+        if contact_id:
+            contact = db.get(Contact, int(contact_id))
+        if buyer is None:
+            buyer = _MergeStub(
+                company_name=company,
+                country=task.get("country") or "",
+                industry="",
+                website_url="",
+            )
+        if contact is None:
+            contact = _MergeStub(
+                full_name=greet,
+                designation=task.get("designation") or "",
+                email=email,
+            )
+
+        subject = render_template_text(subject_tpl, buyer=buyer, contact=contact)
+        body = render_template_text(body_tpl, buyer=buyer, contact=contact)
+        send_body = body
+        if body and "<" not in body:
+            send_body = html_mod.escape(body).replace("\n", "<br/>\n")
+
         try:
             send_result = mail_client.send_approved(
                 to=email,
                 subject=subject,
-                body=body,
-                mailbox_user=user,
+                body=send_body,
+                mailbox_user=mailbox_user,
+                cc=cc,
+                send_mode="bulk",
             )
             status = send_result.get("status") or "error"
             task["status"] = "completed"
@@ -1262,6 +1327,9 @@ def _bulk_email_queued(
                 "email_status": status,
                 "email_message": send_result.get("message") or status,
                 "email_to": email,
+                "email_from": from_email or (mailbox_user.mailbox_email or ""),
+                "email_cc": cc,
+                "email_template_id": template_id,
                 "whatsapp_status": "skipped",
                 "whatsapp_message": "Call mode off — WhatsApp not sent in bulk-email pass.",
             }
@@ -1279,14 +1347,27 @@ def _bulk_email_queued(
             }
             failed += 1
 
+        if index < len(queued) - 1 and delay > 0:
+            time.sleep(delay)
+
     runner["status"] = "idle"
     runner["sequence_mode"] = False
     runner["operator_user_id"] = user.id
     runner["current_task_id"] = None
     runner["current_task"] = None
-    runner["bulk_email_result"] = {"sent": sent, "failed": failed, "total": len(queued)}
+    runner["bulk_email_result"] = {
+        "sent": sent,
+        "failed": failed,
+        "total": len(queued),
+        "from": from_email or (mailbox_user.mailbox_email or ""),
+        "cc": cc,
+        "template_id": template_id,
+        "agent": agent_name,
+    }
     _refresh_runner_counts()
+    _persist_queue()
     return runner
+
 
 
 @router.post("/runners/start")
@@ -1421,6 +1502,14 @@ def update_ai_sales_rules(payload: UpdateRulesRequest, user: AppUser = Depends(g
     return update_custom_rules(payload.rules)
 
 
+class BulkEmailPersonaSettings(BaseModel):
+    template_id: int | None = None
+    from_mailbox_email: str | None = None
+    cc: str | None = None
+    subject: str | None = None
+    body: str | None = None
+
+
 class AutoModeSettingsUpdate(BaseModel):
     enabled: bool | None = None
     study_contacts: bool | None = None
@@ -1430,6 +1519,7 @@ class AutoModeSettingsUpdate(BaseModel):
     bulk_email_when_no_call: bool | None = None
     study_products: bool | None = None
     product_brief: str | None = None
+    bulk_email_by_persona: dict[str, BulkEmailPersonaSettings] | None = None
 
 
 @router.get("/auto-mode")
@@ -1449,6 +1539,13 @@ def put_ai_auto_mode(
     from modules.ai_sales_auto_mode import update_auto_mode_settings
 
     patch = payload.model_dump(exclude_none=True)
+    # Nested persona dicts: convert Pydantic models already dumped to plain dicts.
+    by_persona = patch.get("bulk_email_by_persona")
+    if isinstance(by_persona, dict):
+        patch["bulk_email_by_persona"] = {
+            key: (val if isinstance(val, dict) else dict(val))
+            for key, val in by_persona.items()
+        }
     return update_auto_mode_settings(patch)
 
 

@@ -49,6 +49,7 @@ class MailClient:
         interaction_id: int | None = None,
         send_mode: str = "individual",
         mailbox_user: AppUser | None = None,
+        cc: str | None = None,
     ) -> dict[str, Any]:
         account = resolve_user_mailbox(mailbox_user) if mailbox_user is not None else None
         if mailbox_user is not None and account is None:
@@ -81,6 +82,7 @@ class MailClient:
                 attachments=attachments,
                 interaction_id=interaction_id,
                 send_mode=send_mode,
+                cc=cc,
             )
 
 

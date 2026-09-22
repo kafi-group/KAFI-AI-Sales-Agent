@@ -5175,6 +5175,14 @@ export interface AiSalesAgentRunner {
   sequence_mode?: boolean;
 }
 
+export interface AiSalesBulkEmailPersonaSettings {
+  template_id: number | null;
+  from_mailbox_email: string;
+  cc: string;
+  subject: string;
+  body: string;
+}
+
 export interface AiSalesAutoModeSettings {
   enabled: boolean;
   study_contacts: boolean;
@@ -5184,6 +5192,10 @@ export interface AiSalesAutoModeSettings {
   bulk_email_when_no_call: boolean;
   study_products: boolean;
   product_brief: string;
+  bulk_email_by_persona?: {
+    female: AiSalesBulkEmailPersonaSettings;
+    male: AiSalesBulkEmailPersonaSettings;
+  };
 }
 
 export interface WorkspaceAiAutopilotSettings {
