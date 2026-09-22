@@ -18,7 +18,7 @@ import { CallRecommendationBadge } from "../components/CallRecommendationBadge";
 import { ProducerTierBadge } from "../components/ProducerTierBadge";
 import { AssignedToSelect, type AssigneeOption } from "../components/AssignedToSelect";
 import { FollowUpScheduleControl } from "../components/FollowUpScheduleControl";
-import { CreateLeadForm } from "../components/CreateLeadForm";
+import { CreateLeadForm, leadRowToDuplicateFormValues } from "../components/CreateLeadForm";
 import { LeadsTableCsvImport } from "../components/LeadsTableCsvImport";
 import { SocialLinksCell } from "../components/SocialLinksCell";
 import { BulkEmailModal } from "../components/BulkEmailModal";
@@ -52,6 +52,7 @@ import {
   IconCheck,
   IconCheckSquare,
   IconCalendar,
+  IconCopy,
   IconDownload,
   IconEdit,
   IconGear,
@@ -1208,6 +1209,10 @@ export function LeadsTablePage({
   const [removingFromPool, setRemovingFromPool] = useState(false);
   const [promotingIncomplete, setPromotingIncomplete] = useState(false);
   const [showCreateLead, setShowCreateLead] = useState(false);
+  const [createLeadDuplicate, setCreateLeadDuplicate] = useState(false);
+  const [createLeadInitial, setCreateLeadInitial] = useState<ReturnType<
+    typeof leadRowToDuplicateFormValues
+  > | null>(null);
   const [bulkEmailNotice, setBulkEmailNotice] = useState<string | null>(null);
   const [deduping, setDeduping] = useState(false);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
@@ -1951,6 +1956,8 @@ export function LeadsTablePage({
     setSaveNotice(null);
     setShowCsvImport(false);
     setShowCreateLead(false);
+    setCreateLeadDuplicate(false);
+    setCreateLeadInitial(null);
     setBulkAssignValue("");
     // Do not clear when App is restoring selection after AI Research return.
     if (!(restoreSelectedIds && restoreSelectedIds.length > 0)) {
@@ -3495,11 +3502,51 @@ export function LeadsTablePage({
                 disabled={bulkOnboarding || deletingSelected || deletingId !== null || editMode}
                 title="Add a new lead to this table"
                 onClick={() => {
+                  setCreateLeadDuplicate(false);
+                  setCreateLeadInitial(null);
                   setShowCreateLead(true);
                   setShowCsvImport(false);
                 }}
               >
                 Add lead
+              </ToolbarMenuItem>
+            ) : null}
+            {!showCreateLead ? (
+              <ToolbarMenuItem
+                icon={IconCopy}
+                tone="emerald"
+                disabled={
+                  selected.size !== 1 ||
+                  bulkOnboarding ||
+                  deletingSelected ||
+                  deletingId !== null ||
+                  editMode
+                }
+                title={
+                  selected.size === 1
+                    ? "Open Add lead pre-filled from the selected contact — edit phone/email/name, then save as a new row"
+                    : "Select exactly one contact to Duplicate and Update"
+                }
+                onClick={() => {
+                  if (selected.size !== 1) {
+                    onError("Select exactly one contact to Duplicate and Update.");
+                    return;
+                  }
+                  const selectedId = [...selected][0];
+                  const row = rows.find((r) => r.id === selectedId);
+                  if (!row) {
+                    onError(
+                      "Selected contact is not on this page. Select the row visible on the current page, then try again.",
+                    );
+                    return;
+                  }
+                  setCreateLeadDuplicate(true);
+                  setCreateLeadInitial(leadRowToDuplicateFormValues(row));
+                  setShowCreateLead(true);
+                  setShowCsvImport(false);
+                }}
+              >
+                Duplicate and Update
               </ToolbarMenuItem>
             ) : null}
             {canImportSpreadsheet ? (
@@ -3772,19 +3819,46 @@ export function LeadsTablePage({
         </p>
       )}
 
-      {showCreateLead && canAddLead && (
+      {showCreateLead && (canAddLead || createLeadDuplicate) && (
         <CreateLeadForm
+          key={
+            createLeadDuplicate && createLeadInitial
+              ? `dup-${createLeadInitial.company_name}-${createLeadInitial.contact_phone}`
+              : "create"
+          }
           source={createLeadSource}
-          title={isOldClients && !isAdmin ? "Add new client" : "Add new lead"}
-          onCancel={() => setShowCreateLead(false)}
+          title={
+            createLeadDuplicate
+              ? "Duplicate and Update"
+              : isOldClients && !isAdmin
+                ? "Add new client"
+                : "Add new lead"
+          }
+          initialValues={createLeadInitial ?? undefined}
+          allowDuplicateCompany={createLeadDuplicate}
+          submitLabel={createLeadDuplicate ? "Save as new contact" : undefined}
+          onCancel={() => {
+            setShowCreateLead(false);
+            setCreateLeadDuplicate(false);
+            setCreateLeadInitial(null);
+          }}
           onError={onError}
           onOpenExisting={(leadId) => {
             setShowCreateLead(false);
+            setCreateLeadDuplicate(false);
+            setCreateLeadInitial(null);
             onSelectLead(leadId);
           }}
           onSuccess={async (leadId) => {
+            const wasDuplicate = createLeadDuplicate;
             setShowCreateLead(false);
-            setSaveNotice("Lead added to your table.");
+            setCreateLeadDuplicate(false);
+            setCreateLeadInitial(null);
+            setSaveNotice(
+              wasDuplicate
+                ? "New contact saved — same company details, updated contact fields."
+                : "Lead added to your table.",
+            );
             clearFilters();
             setPage(1);
             await loadTable();
@@ -4180,6 +4254,8 @@ export function LeadsTablePage({
                 <button
                   type="button"
                   onClick={() => {
+                    setCreateLeadDuplicate(false);
+                    setCreateLeadInitial(null);
                     setShowCreateLead(true);
                     setShowCsvImport(false);
                   }}
