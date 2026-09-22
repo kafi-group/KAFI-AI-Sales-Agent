@@ -15,8 +15,13 @@ export function htmlHasDataUriImages(html: string): boolean {
   return /data:image\//i.test(html || "");
 }
 
-function inlineMediaPublicUrl(attachmentId: string): string {
+export function inlineMediaPublicUrl(attachmentId: string): string {
   return `${RAILWAY_API}/mailer/inline-media/${attachmentId}`;
+}
+
+/** Absolute API origin used for inline email images in previews/sends. */
+export function emailMediaApiBase(): string {
+  return RAILWAY_API.replace(/\/api$/, "");
 }
 
 /** Shrink large pastes so each upload fits under Vercel's proxy body limit. */

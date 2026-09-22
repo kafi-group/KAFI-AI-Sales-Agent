@@ -6,6 +6,7 @@ import {
   EmailBodyEditor,
   emailBodyHasContent,
 } from "../components/EmailBodyEditor";
+import { HtmlEmailPreview } from "../components/HtmlEmailPreview";
 import {
   estimateJsonBytes,
   hostDataUriImagesInHtml,
@@ -394,6 +395,27 @@ export function EmailTemplatesPage({ onError, onCountChange }: EmailTemplatesPag
                     }
                   }}
                 />
+                {templateForm.body.trim() ? (
+                  <div className="mt-3 space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-slate-300">
+                        Template preview
+                      </span>
+                      <span className="text-[10px] text-slate-500">
+                        Formatting &amp; images as recipients see them
+                      </span>
+                    </div>
+                    <div className="rounded-lg border border-slate-700 bg-slate-950/80 p-2 space-y-2">
+                      <p className="text-[11px] text-slate-400 px-1">
+                        Subject:{" "}
+                        <span className="text-slate-200">
+                          {templateForm.subject || "(no subject)"}
+                        </span>
+                      </p>
+                      <HtmlEmailPreview html={templateForm.body} maxHeight={480} />
+                    </div>
+                  </div>
+                ) : null}
               </div>
               <EmailAttachmentsField
                 attachments={templateForm.attachments}

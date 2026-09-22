@@ -9,6 +9,7 @@ import {
 } from "../api/client";
 import { EmailAttachmentsField } from "./EmailAttachmentsField";
 import { EmailBodyEditor, emailBodyHasContent } from "./EmailBodyEditor";
+import { HtmlEmailPreview } from "./HtmlEmailPreview";
 import { capitalizeFirstLetter } from "../utils/spelling";
 
 type ComposeTab = "manual" | "template";
@@ -321,14 +322,7 @@ export function LeadEmailComposeModal({
                       <p className="text-sm text-slate-400">
                         To: {preview.contact_email || toEmail}
                       </p>
-                      <div
-                        className="email-body-editor text-sm text-slate-300"
-                        dangerouslySetInnerHTML={{
-                          __html: /<\/?[a-z][\s\S]*>/i.test(preview.body || "")
-                            ? preview.body
-                            : (preview.body || "").replace(/\n/g, "<br>"),
-                        }}
-                      />
+                      <HtmlEmailPreview html={preview.body || ""} maxHeight={420} />
                     </>
                   ) : (
                     <p className="text-sm text-slate-500">Preview unavailable.</p>

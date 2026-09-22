@@ -1241,6 +1241,18 @@ def _bulk_email_queued(
             "under AI Auto Mode → bulk email setup before starting.",
         )
 
+    send_attachments: list[dict[str, Any]] = []
+    if template and getattr(template, "attachments", None):
+        try:
+            from modules.email_attachments import copy_attachments, resolve_attachment_list
+
+            send_attachments = copy_attachments(
+                resolve_attachment_list(template.attachments)
+            )
+        except Exception as att_exc:  # noqa: BLE001
+            print(f"Bulk email: could not load template attachments: {att_exc}", flush=True)
+            send_attachments = []
+
     from_email = (cfg.get("from_mailbox_email") or "").strip().lower()
     mailbox_user = user
     if from_email:
@@ -1340,6 +1352,7 @@ def _bulk_email_queued(
                 mailbox_user=mailbox_user,
                 cc=cc,
                 send_mode="bulk",
+                attachments=send_attachments or None,
             )
             status = send_result.get("status") or "error"
             task["status"] = "completed"

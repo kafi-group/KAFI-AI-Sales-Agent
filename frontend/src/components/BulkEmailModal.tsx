@@ -15,6 +15,7 @@ import {
   htmlToPlainText,
   plainTextToEditorHtml,
 } from "./EmailBodyEditor";
+import { HtmlEmailPreview } from "./HtmlEmailPreview";
 import {
   DEFAULT_TEMPLATE_BODY,
   DEFAULT_TEMPLATE_SUBJECT,
@@ -333,14 +334,7 @@ export function BulkEmailModal({
                       <p className="text-sm text-slate-400">
                         To: {manualPreview.contact_email || "—"}
                       </p>
-                      <div
-                        className="email-body-editor text-sm text-slate-300"
-                        dangerouslySetInnerHTML={{
-                          __html: /<\/?[a-z][\s\S]*>/i.test(manualPreview.body || "")
-                            ? manualPreview.body
-                            : (manualPreview.body || "").replace(/\n/g, "<br>"),
-                        }}
-                      />
+                      <HtmlEmailPreview html={manualPreview.body || ""} maxHeight={360} />
                     </>
                   ) : (
                     <p className="text-sm text-slate-500">
@@ -410,9 +404,7 @@ export function BulkEmailModal({
                       <p className="text-sm text-slate-400">
                         To: {templatePreview.contact_email || "—"}
                       </p>
-                      <pre className="text-sm text-slate-300 whitespace-pre-wrap font-sans">
-                        {templatePreview.body}
-                      </pre>
+                      <HtmlEmailPreview html={templatePreview.body || ""} maxHeight={420} />
                     </>
                   ) : (
                     <p className="text-sm text-slate-500">Preview unavailable.</p>

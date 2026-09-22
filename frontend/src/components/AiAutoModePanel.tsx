@@ -5,6 +5,13 @@ import {
   type AiSalesBulkEmailPersonaSettings,
   type EmailTemplate,
 } from "../api/client";
+import { EmailBodyEditor } from "./EmailBodyEditor";
+import { HtmlEmailPreview } from "./HtmlEmailPreview";
+import {
+  hostDataUriImagesInHtml,
+  htmlHasDataUriImages,
+  inlineMediaPublicUrl,
+} from "../lib/hostInlineImages";
 
 interface AiAutoModePanelProps {
   onError: (message: string) => void;
@@ -180,6 +187,15 @@ export function AiAutoModePanel({
       onError("Subject and body are required (pick a template, then edit the signature).");
       return;
     }
+    let body = bulkDraft.body;
+    try {
+      if (htmlHasDataUriImages(body)) {
+        body = await hostDataUriImagesInHtml(body);
+      }
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Could not host inline images");
+      return;
+    }
     await save({
       bulk_email_by_persona: {
         [bulkPersona]: {
@@ -187,10 +203,11 @@ export function AiAutoModePanel({
           from_mailbox_email: bulkDraft.from_mailbox_email.trim(),
           cc: bulkDraft.cc.trim(),
           subject: bulkDraft.subject,
-          body: bulkDraft.body,
+          body,
         },
       } as AiSalesAutoModeSettings["bulk_email_by_persona"],
     });
+    setBulkDraft((prev) => ({ ...prev, body }));
   }
 
   function handleStart(persona: "female" | "male") {
@@ -453,19 +470,71 @@ export function AiAutoModePanel({
                   />
                 </label>
 
-                <label className="block text-xs text-slate-400">
-                  Body (edit signature here)
-                  <textarea
+                <div className="space-y-1.5">
+                  <span className="block text-xs text-slate-400">
+                    Body (edit signature / formatting — images stay in the template)
+                  </span>
+                  <EmailBodyEditor
+                    rows={10}
                     value={bulkDraft.body}
                     disabled={saving}
-                    rows={8}
-                    onChange={(e) =>
-                      setBulkDraft((prev) => ({ ...prev, body: e.target.value }))
-                    }
-                    className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-100 font-sans"
-                    placeholder={`Dear {{contact_name}},\n\n…\n\nBest regards,\nSara\nSales Manager`}
+                    adaptTextToTheme
+                    onChange={(body) => setBulkDraft((prev) => ({ ...prev, body }))}
+                    placeholder="Pick a template above, then edit the signature (e.g. Sara — Sales Manager)…"
+                    onAttachFiles={async (files) => {
+                      for (const file of files) {
+                        try {
+                          const uploaded = await client.uploadEmailAttachment(file);
+                          if (!uploaded.id) continue;
+                          const url = inlineMediaPublicUrl(String(uploaded.id));
+                          const alt = (uploaded.filename || "image").replace(/"/g, "");
+                          setBulkDraft((prev) => ({
+                            ...prev,
+                            body:
+                              prev.body +
+                              `<p><img src="${url}" alt="${alt}" style="max-width:100%;height:auto;" /></p>`,
+                          }));
+                        } catch (err) {
+                          onError(
+                            err instanceof Error ? err.message : "Failed to attach image",
+                          );
+                        }
+                      }
+                    }}
                   />
-                </label>
+                </div>
+
+                {bulkDraft.body.trim() ? (
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-slate-300">
+                        Email preview
+                      </span>
+                      <span className="text-[10px] text-slate-500">
+                        How recipients see formatting &amp; images
+                      </span>
+                    </div>
+                    <div className="rounded-lg border border-slate-700 bg-slate-950/80 p-2 space-y-2">
+                      <p className="text-[11px] text-slate-400 px-1">
+                        Subject:{" "}
+                        <span className="text-slate-200">{bulkDraft.subject || "(no subject)"}</span>
+                      </p>
+                      <HtmlEmailPreview html={bulkDraft.body} maxHeight={480} />
+                    </div>
+                    {(() => {
+                      const tpl = templates.find((t) => t.id === bulkDraft.template_id);
+                      const atts = tpl?.attachments ?? [];
+                      if (!atts.length) return null;
+                      return (
+                        <p className="text-[11px] text-slate-500">
+                          Template also sends {atts.length} attachment
+                          {atts.length === 1 ? "" : "s"}:{" "}
+                          {atts.map((a) => a.filename || a.id).filter(Boolean).join(", ")}
+                        </p>
+                      );
+                    })()}
+                  </div>
+                ) : null}
 
                 <div className="flex justify-end">
                   <button
