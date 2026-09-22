@@ -4594,6 +4594,12 @@ export const client = {
       headers: aiSalesAgentHeaders(),
       body: JSON.stringify(data),
     }),
+  bulkDeleteAiSalesAgentTasks: (taskIds: number[]) =>
+    request<{ ok: boolean; removed: number }>("/ai-sales-agent/tasks/bulk-delete", {
+      method: "POST",
+      headers: aiSalesAgentHeaders(),
+      body: JSON.stringify({ task_ids: taskIds }),
+    }),
   getAiSalesDataUpdate: () =>
     request<AiSalesDataUpdateStatus>("/ai-sales-agent/data-update", {
       headers: aiSalesAgentHeaders(),
@@ -4602,6 +4608,8 @@ export const client = {
     persona: "female" | "male";
     enabled?: boolean;
     time?: string;
+    end_time?: string;
+    stop_mode?: "until_done" | "until_end_time";
     weekdays?: string[];
     cooldown_sec?: number;
   }) =>
@@ -5229,6 +5237,8 @@ export interface AiSalesAgentTask {
 export interface AiSalesDataUpdateSchedule {
   enabled: boolean;
   time: string;
+  end_time?: string;
+  stop_mode?: "until_done" | "until_end_time" | string;
   weekdays: string[];
   cooldown_sec: number;
   last_run_key?: string | null;

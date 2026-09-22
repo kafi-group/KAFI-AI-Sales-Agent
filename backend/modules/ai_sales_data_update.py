@@ -54,6 +54,8 @@ def _default_persona_schedule() -> dict[str, Any]:
     return {
         "enabled": False,
         "time": "10:00",
+        "end_time": "",  # optional HH:MM — used when stop_mode is until_end_time
+        "stop_mode": "until_done",  # until_done | until_end_time
         "weekdays": list(WEEKDAY_NAMES),
         "cooldown_sec": DEFAULT_COOLDOWN_SEC,
         "last_run_key": None,
@@ -116,6 +118,12 @@ def _load() -> dict[str, Any]:
             merged = _default_persona_schedule()
             merged["enabled"] = bool(sch.get("enabled", False))
             merged["time"] = str(sch.get("time") or "10:00").strip() or "10:00"
+            end_t = str(sch.get("end_time") or "").strip()
+            merged["end_time"] = end_t
+            stop_mode = str(sch.get("stop_mode") or "until_done").strip().lower()
+            merged["stop_mode"] = (
+                stop_mode if stop_mode in ("until_done", "until_end_time") else "until_done"
+            )
             wds = sch.get("weekdays")
             if isinstance(wds, list) and wds:
                 cleaned = [str(d).strip().lower()[:3] for d in wds if str(d).strip()]
@@ -161,6 +169,15 @@ def update_schedule(persona: str, patch: dict[str, Any]) -> dict[str, Any]:
         if len(t) == 4 and t[1] == ":":
             t = f"0{t}"
         sch["time"] = t
+    if "end_time" in patch:
+        et = str(patch.get("end_time") or "").strip()
+        if et and len(et) == 4 and et[1] == ":":
+            et = f"0{et}"
+        sch["end_time"] = et
+    if "stop_mode" in patch and patch["stop_mode"] is not None:
+        mode = str(patch["stop_mode"]).strip().lower()
+        if mode in ("until_done", "until_end_time"):
+            sch["stop_mode"] = mode
     if "weekdays" in patch and isinstance(patch["weekdays"], list):
         cleaned = [str(d).strip().lower()[:3] for d in patch["weekdays"] if str(d).strip()]
         cleaned = [d for d in cleaned if d in WEEKDAY_NAMES]
@@ -174,6 +191,32 @@ def update_schedule(persona: str, patch: dict[str, Any]) -> dict[str, Any]:
     data["schedules"][persona] = sch
     _save(data)
     return data
+
+
+def _parse_hhmm(value: str) -> tuple[int, int] | None:
+    try:
+        parts = str(value or "").strip().split(":")
+        return int(parts[0]), int(parts[1])
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def past_end_time(sch: dict[str, Any]) -> bool:
+    """True when stop_mode is until_end_time and local time is past end_time."""
+    if str(sch.get("stop_mode") or "") != "until_end_time":
+        return False
+    parsed = _parse_hhmm(str(sch.get("end_time") or ""))
+    if not parsed:
+        return False
+    hour, minute = parsed
+    now = datetime.now(_TZ)
+    return (now.hour, now.minute) > (hour, minute)
+
+
+def should_stop_running(persona: str) -> bool:
+    data = _load()
+    persona = "female" if persona not in ("male", "female") else persona
+    return past_end_time(data["schedules"][persona])
 
 
 def _is_blank(value: Any) -> bool:

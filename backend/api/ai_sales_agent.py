@@ -1181,6 +1181,7 @@ def delete_task(
     global _TASKS
     _TASKS = [t for t in _TASKS if t.get("id") != task_id]
     _refresh_runner_counts()
+    _persist_queue()
     return {"ok": True}
 
 
@@ -1477,6 +1478,7 @@ def set_task_lane(
                 t["status"] = "queued"
             updated += 1
     _refresh_runner_counts()
+    _persist_queue()
     return {"updated": updated, "queue_lane": lane}
 
 
@@ -1484,8 +1486,28 @@ class DataUpdateScheduleUpdate(BaseModel):
     persona: str
     enabled: bool | None = None
     time: str | None = None
+    end_time: str | None = None
+    stop_mode: str | None = None  # until_done | until_end_time
     weekdays: list[str] | None = None
     cooldown_sec: int | None = None
+
+
+@router.post("/tasks/bulk-delete")
+def bulk_delete_tasks(
+    payload: dict[str, Any],
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    _ = user
+    global _TASKS
+    ids = payload.get("task_ids") or []
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(400, "task_ids required")
+    id_set = {int(x) for x in ids if str(x).strip().isdigit() or isinstance(x, int)}
+    before = len(_TASKS)
+    _TASKS = [t for t in _TASKS if int(t.get("id") or 0) not in id_set]
+    _refresh_runner_counts()
+    _persist_queue()
+    return {"ok": True, "removed": before - len(_TASKS)}
 
 
 @router.get("/data-update")
@@ -1494,13 +1516,16 @@ def get_data_update_status(user: AppUser = Depends(get_current_user)) -> dict[st
     from modules import ai_sales_data_update as du
 
     status = du.get_status()
-    queues: dict[str, list[dict[str, Any]]] = {"female": [], "male": []}
+    queues: dict[str, dict[str, list[dict[str, Any]]]] = {
+        "female": {"outreach": [], "data_update": []},
+        "male": {"outreach": [], "data_update": []},
+    }
     for t in _TASKS:
-        if _task_lane(t) != "data_update":
-            continue
         persona = t.get("persona")
-        if persona in queues:
-            queues[persona].append(t)
+        if persona not in queues:
+            continue
+        lane = _task_lane(t)
+        queues[persona][lane].append(t)
     status["queues"] = queues
     return status
 

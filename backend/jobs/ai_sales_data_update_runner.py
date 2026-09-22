@@ -31,6 +31,11 @@ def run_data_update_tick() -> dict[str, Any]:
             results.append({"persona": persona, "action": "start_failed", "error": str(exc)[:200]})
 
     for persona in du.running_personas():
+        if du.should_stop_running(persona):
+            du.complete_run(persona)
+            results.append({"persona": persona, "action": "stopped_end_time"})
+            continue
+
         if not du.cooldown_elapsed(persona):
             results.append({"persona": persona, "action": "cooldown"})
             continue

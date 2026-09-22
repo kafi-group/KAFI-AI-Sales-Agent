@@ -59,6 +59,8 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailModalInitial, setEmailModalInitial] = useState<{ to: string; subject: string } | null>(null);
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<number>>(new Set());
+  const [bulkRemoving, setBulkRemoving] = useState(false);
 
   useEffect(() => {
     setUnlocked(Boolean(getAiSalesAgentAccessCode()));
@@ -388,10 +390,52 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   async function handleRemove(taskId: number) {
     try {
       await client.deleteAiSalesAgentTask(taskId);
+      setSelectedTaskIds((prev) => {
+        const next = new Set(prev);
+        next.delete(taskId);
+        return next;
+      });
       await load();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Remove failed");
     }
+  }
+
+  async function handleBulkRemove() {
+    const ids = [...selectedTaskIds];
+    if (!ids.length) return;
+    if (!window.confirm(`Remove ${ids.length} contact(s) from the assigned pipeline?`)) return;
+    setBulkRemoving(true);
+    try {
+      await client.bulkDeleteAiSalesAgentTasks(ids);
+      setSelectedTaskIds(new Set());
+      await load();
+      setQueueNotice(`Removed ${ids.length} contact(s) from the pipeline.`);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Bulk remove failed");
+    } finally {
+      setBulkRemoving(false);
+    }
+  }
+
+  function toggleTaskSelected(taskId: number) {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  }
+
+  function toggleSelectAllVisible(on: boolean) {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      for (const t of tasks) {
+        if (on) next.add(t.id);
+        else next.delete(t.id);
+      }
+      return next;
+    });
   }
 
   if (!unlocked) {
@@ -717,6 +761,29 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
           >
             Refresh
           </button>
+          {isAdmin && tasks.length > 0 ? (
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <label className="inline-flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="accent-violet-500"
+                  checked={tasks.length > 0 && tasks.every((t) => selectedTaskIds.has(t.id))}
+                  onChange={(e) => toggleSelectAllVisible(e.target.checked)}
+                />
+                Select all
+              </label>
+              <button
+                type="button"
+                disabled={bulkRemoving || selectedTaskIds.size === 0}
+                onClick={() => void handleBulkRemove()}
+                className="px-3 py-1 text-xs font-semibold rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20 disabled:opacity-40"
+              >
+                {bulkRemoving
+                  ? "Removing…"
+                  : `Remove selected (${[...selectedTaskIds].filter((id) => tasks.some((t) => t.id === id)).length})`}
+              </button>
+            </div>
+          ) : null}
         </div>
 
         {!tasks.length ? (
@@ -728,19 +795,23 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
           <div className="rounded-xl border border-slate-700/80 overflow-hidden">
             <table className="w-full table-fixed text-sm text-left">
               <colgroup>
+                <col className="w-[4%]" />
                 <col className="w-[9%]" />
-                <col className="w-[16%]" />
-                <col className="w-[14%]" />
-                <col className="w-[7%]" />
-                <col className="w-[7%]" />
-                <col className="w-[8%]" />
-                <col className="w-[9%]" />
-                <col className="w-[7%]" />
-                <col className="w-[8%]" />
                 <col className="w-[15%]" />
+                <col className="w-[13%]" />
+                <col className="w-[7%]" />
+                <col className="w-[7%]" />
+                <col className="w-[8%]" />
+                <col className="w-[9%]" />
+                <col className="w-[7%]" />
+                <col className="w-[7%]" />
+                <col className="w-[14%]" />
               </colgroup>
               <thead className="bg-slate-900/60 text-slate-400">
                 <tr>
+                  <th className="px-2 py-2.5 font-medium">
+                    <span className="sr-only">Select</span>
+                  </th>
                   <th className="px-3 py-2.5 font-medium">Agent</th>
                   <th className="px-3 py-2.5 font-medium">Company</th>
                   <th className="px-3 py-2.5 font-medium">Contact / phone</th>
@@ -756,6 +827,15 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
               <tbody className="divide-y divide-slate-800">
                 {tasks.map((task) => (
                   <tr key={task.id} className="text-slate-200 align-top">
+                    <td className="px-2 py-2.5">
+                      <input
+                        type="checkbox"
+                        className="accent-violet-500"
+                        checked={selectedTaskIds.has(task.id)}
+                        onChange={() => toggleTaskSelected(task.id)}
+                        aria-label={`Select ${task.company_name || task.id}`}
+                      />
+                    </td>
                     <td className="px-3 py-2.5">
                       {PERSONA_LABELS[task.persona] ?? task.persona}
                     </td>
@@ -908,6 +988,29 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                 ))}
               </tbody>
             </table>
+            {isAdmin ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border-t border-slate-800 bg-slate-950/50">
+                <label className="inline-flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="accent-violet-500"
+                    checked={tasks.length > 0 && tasks.every((t) => selectedTaskIds.has(t.id))}
+                    onChange={(e) => toggleSelectAllVisible(e.target.checked)}
+                  />
+                  Select all ({tasks.length})
+                </label>
+                <button
+                  type="button"
+                  disabled={bulkRemoving || selectedTaskIds.size === 0}
+                  onClick={() => void handleBulkRemove()}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20 disabled:opacity-40"
+                >
+                  {bulkRemoving
+                    ? "Removing…"
+                    : `Remove selected (${[...selectedTaskIds].filter((id) => tasks.some((t) => t.id === id)).length})`}
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
       </div>
