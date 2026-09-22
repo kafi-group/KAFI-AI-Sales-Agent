@@ -8,10 +8,15 @@ import {
 } from "react";
 import { IconPaperclip } from "./icons/AppIcons";
 import {
+  getComposeDefaultTextColor,
+  normalizeEditorTextColor,
+} from "../lib/emailTextColor";
+import {
   hostDataUriImagesInHtml,
   htmlHasDataUriImages,
   uploadPastedImageFile,
 } from "../lib/hostInlineImages";
+import { useTheme } from "../theme/ThemeContext";
 
 export type EmailBodyEditorProps = {
   value: string;
@@ -30,6 +35,11 @@ export type EmailBodyEditorProps = {
   attachmentCount?: number;
   /** Whether an attachment is currently uploading */
   isUploadingAttachment?: boolean;
+  /**
+   * Email templates only: remap hard-coded white/black body colors so they
+   * stay readable when the app theme toggles light ↔ dark.
+   */
+  adaptTextToTheme?: boolean;
 };
 
 const FONT_SIZES = [
@@ -191,11 +201,18 @@ export function EmailBodyEditor({
   onAttachFiles,
   attachmentCount,
   isUploadingAttachment = false,
+  adaptTextToTheme = false,
 }: EmailBodyEditorProps) {
+  const { theme } = useTheme();
   const editorRef = useRef<HTMLDivElement>(null);
   const lastHtml = useRef<string>("");
   const reactId = useId();
   const multiImageInputRef = useRef<HTMLInputElement>(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const defaultTextColor = adaptTextToTheme
+    ? getComposeDefaultTextColor(theme)
+    : "#ffffff";
 
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [pendingImages, setPendingImages] = useState<File[]>([]);
@@ -346,10 +363,15 @@ export function EmailBodyEditor({
   }
 
   // Sync external value → editor (avoid cursor jumps when unchanged).
+  // When adaptTextToTheme is on, remap hard-coded colors for the current theme.
   useEffect(() => {
     const el = editorRef.current;
     if (!el) return;
-    const next = plainTextToEditorHtml(value);
+    const raw = plainTextToEditorHtml(value);
+    const next =
+      adaptTextToTheme && raw
+        ? normalizeEditorTextColor(raw, theme)
+        : raw;
     if (next === lastHtml.current) return;
     if (el.innerHTML === next) {
       lastHtml.current = next;
@@ -357,7 +379,10 @@ export function EmailBodyEditor({
     }
     el.innerHTML = next || "";
     lastHtml.current = next;
-  }, [value]);
+    if (adaptTextToTheme && next !== raw) {
+      onChangeRef.current(next);
+    }
+  }, [value, adaptTextToTheme, theme]);
 
   /** Uppercase the first letter in the contentEditable document (live typing). */
   function ensureLeadingCapital(root: HTMLElement) {
@@ -469,9 +494,10 @@ export function EmailBodyEditor({
           Text color
         </label>
         <select
+          key={adaptTextToTheme ? `color-${theme}` : "color"}
           id={`${reactId}-color`}
           disabled={disabled}
-          defaultValue={COLORS[0].value}
+          defaultValue={defaultTextColor}
           title="Text color"
           onMouseDown={(e) => e.stopPropagation()}
           onChange={(e) => run("foreColor", e.target.value)}
@@ -588,7 +614,7 @@ export function EmailBodyEditor({
         className={`email-body-editor w-full px-3 py-2 text-sm outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-slate-600 transition-colors ${
           isDraggingOver ? "bg-emerald-950/20 ring-2 ring-emerald-500/50" : ""
         } ${editorClassName}`}
-        style={{ minHeight: `${minHeight}rem`, color: "#ffffff" }}
+        style={{ minHeight: `${minHeight}rem`, color: defaultTextColor }}
       />
 
       {pendingImages.length > 0 && (

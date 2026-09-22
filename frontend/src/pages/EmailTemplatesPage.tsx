@@ -379,6 +379,7 @@ export function EmailTemplatesPage({ onError, onCountChange }: EmailTemplatesPag
                   value={templateForm.body}
                   onChange={(body) => setTemplateForm((p) => ({ ...p, body }))}
                   placeholder="Write the template body…"
+                  adaptTextToTheme
                   onAttachFiles={async (files) => {
                     for (const file of files) {
                       try {
