@@ -50,3 +50,22 @@ def phone_dedupe_key(value: str | None) -> str | None:
     if len(set(digits)) <= 2:
         return None
     return digits
+
+
+def contact_name_dedupe_key(value: str | None) -> str | None:
+    """Normalize a person name for import/table dedupe (letters only, lowercased)."""
+    import re
+
+    name = re.sub(r"[^a-z]", "", (value or "").strip().lower())
+    if len(name) < 2:
+        return None
+    return name
+
+
+def person_email_dedupe_key(contact_name: str | None, email: str | None) -> str | None:
+    """Contact person + email — primary identity for spreadsheet imports."""
+    person = contact_name_dedupe_key(contact_name)
+    email_key = email_dedupe_key(email)
+    if not person or not email_key:
+        return None
+    return f"{person}|{email_key}"

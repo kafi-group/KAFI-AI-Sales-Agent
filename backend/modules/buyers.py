@@ -183,17 +183,24 @@ def build_buyer_lookup_index(
     dict[int, int],
     dict[str, Buyer],
     dict[str, Buyer],
+    dict[str, Buyer],
 ]:
-    """One scoped load for import dedupe: name, domain, email, phone → buyer.
+    """One scoped load for import dedupe.
 
-    When ``assigned_to_user_id`` is set (sales-user import), only that user's
-    assigned rows count as duplicates — admin/other users' clients are ignored.
-    When None (admin import), dedupe is section-wide as before.
+    Returns:
+      by_name, by_domain, scores, by_email, by_phone, by_person_email
+
+    ``by_person_email`` keys are ``contact_name|email`` (primary duplicate key).
+    Company name / website alone must not skip multi-contact imports.
     """
     from sqlalchemy import func as sa_func
 
     from db.models import Contact
-    from modules.field_clean import email_dedupe_key, phone_dedupe_key
+    from modules.field_clean import (
+        email_dedupe_key,
+        person_email_dedupe_key,
+        phone_dedupe_key,
+    )
 
     excluded = {
         part.strip().lower()
@@ -221,6 +228,7 @@ def build_buyer_lookup_index(
     by_domain: dict[str, Buyer] = {}
     by_email: dict[str, Buyer] = {}
     by_phone: dict[str, Buyer] = {}
+    by_person_email: dict[str, Buyer] = {}
     for buyer in buyers:
         name_key = normalize_buyer_key(buyer.company_name)
         if name_key and name_key not in by_name:
@@ -233,13 +241,18 @@ def build_buyer_lookup_index(
                 email_key = email_dedupe_key(getattr(contact, field, None))
                 if email_key and email_key not in by_email:
                     by_email[email_key] = buyer
+                person_key = person_email_dedupe_key(
+                    contact.full_name, getattr(contact, field, None)
+                )
+                if person_key and person_key not in by_person_email:
+                    by_person_email[person_key] = buyer
             for field in ("phone", "primary_phone", "secondary_phone", "secondary_mobile"):
                 phone_key = phone_dedupe_key(getattr(contact, field, None))
                 if phone_key and phone_key not in by_phone:
                     by_phone[phone_key] = buyer
 
     scores = preload_buyer_data_scores(db, buyers)
-    return by_name, by_domain, scores, by_email, by_phone
+    return by_name, by_domain, scores, by_email, by_phone, by_person_email
 
 
 def find_buyer_by_name_or_domain(
@@ -251,7 +264,7 @@ def find_buyer_by_name_or_domain(
     exclude_source: str | None = None,
     assigned_to_user_id: int | None = None,
 ) -> Buyer | None:
-    by_name, by_domain, _, _, _ = build_buyer_lookup_index(
+    by_name, by_domain, _, _, _, _ = build_buyer_lookup_index(
         db,
         source=source,
         exclude_source=exclude_source,

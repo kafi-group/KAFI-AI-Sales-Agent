@@ -2570,11 +2570,19 @@ def dedupe_leads_table(
     assigned_to_user_id: int | None = None,
     unassigned_only: bool = False,
 ) -> dict[str, object]:
-    """Remove duplicate leads within a section, keeping the richest record in each cluster."""
+    """Remove duplicate leads within a section, keeping the richest record in each cluster.
+
+    Clusters by contact identity only (person+email, then phone) — never by company
+    name alone, so multi-buyer rows like Al Jaleel × N contacts stay intact.
+    """
     from collections import defaultdict
 
     from modules.audit import log_action
-    from modules.lead_discovery import _domain, _normalize_name
+    from modules.field_clean import (
+        email_dedupe_key,
+        person_email_dedupe_key,
+        phone_dedupe_key,
+    )
 
     buyers = _section_buyers_query(
         db,
@@ -2600,36 +2608,38 @@ def dedupe_leads_table(
         if root_a != root_b:
             parent[root_b] = root_a
 
-    by_name: dict[str, list[int]] = defaultdict(list)
-    by_domain: dict[str, list[int]] = defaultdict(list)
-    for buyer in buyers:
-        name_key = _normalize_name(buyer.company_name)
-        if name_key:
-            by_name[name_key].append(buyer.id)
-        domain = _domain(buyer.website_url)
-        if domain:
-            by_domain[domain].append(buyer.id)
-
-    for ids in by_name.values():
-        for other_id in ids[1:]:
-            union(ids[0], other_id)
-    for ids in by_domain.values():
-        for other_id in ids[1:]:
-            union(ids[0], other_id)
-
-    # Same contact person + country → likely duplicate companies (e.g. ENZE / ENZE Canada Ltd).
-    buyer_country = {buyer.id: buyer.country for buyer in buyers}
-    by_contact_country: dict[str, list[int]] = defaultdict(list)
-    if buyers:
-        buyer_id_set = [buyer.id for buyer in buyers]
+    buyer_id_set = [buyer.id for buyer in buyers]
+    by_person_email: dict[str, list[int]] = defaultdict(list)
+    by_email: dict[str, list[int]] = defaultdict(list)
+    by_phone: dict[str, list[int]] = defaultdict(list)
+    if buyer_id_set:
         for contact in db.query(Contact).filter(Contact.buyer_id.in_(buyer_id_set)).all():
-            key = _contact_country_dedupe_key(contact.full_name, buyer_country.get(contact.buyer_id))
-            if key:
-                by_contact_country[key].append(contact.buyer_id)
-    for ids in by_contact_country.values():
+            for field in ("email", "secondary_email"):
+                email_val = getattr(contact, field, None)
+                combo = person_email_dedupe_key(contact.full_name, email_val)
+                if combo:
+                    by_person_email[combo].append(contact.buyer_id)
+                email_key = email_dedupe_key(email_val)
+                if email_key:
+                    by_email[email_key].append(contact.buyer_id)
+            for field in ("phone", "primary_phone", "secondary_phone", "secondary_mobile"):
+                phone_key = phone_dedupe_key(getattr(contact, field, None))
+                if phone_key:
+                    by_phone[phone_key].append(contact.buyer_id)
+
+    # Priority clusters: person+email, then phone. Email-alone only when no person+email key.
+    for ids in by_person_email.values():
         unique_ids = list(dict.fromkeys(ids))
-        if len(unique_ids) < 2:
-            continue
+        for other_id in unique_ids[1:]:
+            union(unique_ids[0], other_id)
+    for ids in by_phone.values():
+        unique_ids = list(dict.fromkeys(ids))
+        for other_id in unique_ids[1:]:
+            union(unique_ids[0], other_id)
+    # Email alone: merge only buyers that share email and were not already linked
+    # via person+email (covers blank/mismatched contact names on re-import).
+    for ids in by_email.values():
+        unique_ids = list(dict.fromkeys(ids))
         for other_id in unique_ids[1:]:
             union(unique_ids[0], other_id)
 

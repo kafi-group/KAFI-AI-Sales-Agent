@@ -524,6 +524,42 @@ def _mark_existing(
             candidate.already_exists = True
 
 
+def _mark_existing_by_contact(
+    db: Session,
+    candidates: list[DiscoveryCandidate],
+    *,
+    source: str | None = None,
+    exclude_source: str | None = None,
+    assigned_to_user_id: int | None = None,
+) -> None:
+    """Flag spreadsheet rows that match an existing contact (person+email, then phone)."""
+    from modules import buyers as buyers_module
+
+    _, _, _, by_email, by_phone, by_person_email = buyers_module.build_buyer_lookup_index(
+        db,
+        source=source,
+        exclude_source=exclude_source,
+        assigned_to_user_id=assigned_to_user_id,
+    )
+    for candidate in candidates:
+        raw = {
+            "contact_name": candidate.contact_name,
+            "email": candidate.email,
+            "secondary_email": getattr(candidate, "secondary_email", None),
+            "phone": candidate.phone,
+            "primary_phone": getattr(candidate, "primary_phone", None),
+            "secondary_phone": getattr(candidate, "secondary_phone", None),
+            "secondary_mobile": getattr(candidate, "secondary_mobile", None),
+        }
+        if _find_import_duplicate_buyer(
+            raw,
+            by_person_email=by_person_email,
+            by_email=by_email,
+            by_phone=by_phone,
+        ):
+            candidate.already_exists = True
+
+
 def _dedupe_candidates(candidates: list[DiscoveryCandidate]) -> list[DiscoveryCandidate]:
     seen_names: set[str] = set()
     seen_domains: set[str] = set()
@@ -3336,6 +3372,62 @@ def _import_contact_duplicate_keys(raw: dict[str, Any]) -> list[tuple[str, str]]
     return keys
 
 
+def _find_import_duplicate_buyer(
+    raw: dict[str, Any],
+    *,
+    by_person_email: dict[str, Any],
+    by_email: dict[str, Any],
+    by_phone: dict[str, Any],
+) -> Any | None:
+    """Match existing lead by contact identity — never by company name alone.
+
+    Priority:
+      1) contact person + email
+      2) phone / mobile
+      3) email alone (when contact name is blank / missing)
+    """
+    from modules.field_clean import (
+        contact_name_dedupe_key,
+        email_dedupe_key,
+        person_email_dedupe_key,
+        phone_dedupe_key,
+    )
+
+    contact_name = (raw.get("contact_name") or raw.get("contact_person") or "").strip()
+    person_key = contact_name_dedupe_key(contact_name)
+
+    email_vals = []
+    for field in ("email", "secondary_email", "contact_email"):
+        val = raw.get(field)
+        if val and str(val).strip() not in {"", _NOT_FOUND}:
+            email_vals.append(str(val))
+
+    # 1) Contact person + email
+    if person_key:
+        for email_val in email_vals:
+            combo = person_email_dedupe_key(contact_name, email_val)
+            if combo and combo in by_person_email:
+                return by_person_email[combo]
+
+    # 2) Phone / mobile
+    for field in ("phone", "primary_phone", "secondary_phone", "secondary_mobile", "contact_phone"):
+        val = raw.get(field)
+        if not val or str(val).strip() in {"", _NOT_FOUND}:
+            continue
+        phone_key = phone_dedupe_key(str(val))
+        if phone_key and phone_key in by_phone:
+            return by_phone[phone_key]
+
+    # 3) Email alone when we have no usable contact person
+    if not person_key:
+        for email_val in email_vals:
+            email_key = email_dedupe_key(email_val)
+            if email_key and email_key in by_email:
+                return by_email[email_key]
+
+    return None
+
+
 def _field_or_not_found(raw: dict[str, Any], *keys: str) -> str:
     for key in keys:
         value = (raw.get(key) or "").strip()
@@ -3514,24 +3606,7 @@ def discover_from_csv(
             candidate.source = pool_source
 
     scope_source = import_source if import_source else None
-    if for_leads_table:
-        # Table spreadsheet preview: only flag dupes in this user's own rows
-        # (sales) or the whole section (admin / assigned_to_user_id=None).
-        existing_names, existing_domains = _existing_buyer_keys(
-            db,
-            **_import_scope_for_source(scope_source or "csv"),
-            assigned_to_user_id=assigned_to_user_id,
-        )
-    elif (scope_source or "").strip().lower() in {"old_clients", "incomplete_archives"}:
-        existing_names, existing_domains = _existing_buyer_keys(
-            db,
-            **_import_scope_for_source(scope_source.strip().lower()),
-            assigned_to_user_id=assigned_to_user_id,
-        )
-    else:
-        # Discover panel: still flag against all buyers so we don't rediscover
-        # companies that already exist anywhere in the CRM.
-        existing_names, existing_domains = _discovery_existing_keys(db)
+    scope = _import_scope_for_source(scope_source or ("csv" if for_leads_table else ""))
     invalid_count = _flag_invalid_candidates(
         candidates, for_spreadsheet=for_leads_table
     )
@@ -3542,6 +3617,7 @@ def discover_from_csv(
     if for_leads_table:
         result.messages.append(
             f"Loaded {len(candidates)} row(s) from file. "
+            "Same company name can appear many times; duplicates are contact + email, then phone. "
             "Use Import only to save mapped fields as-is, or Research & score later from the table."
         )
         without_website = sum(1 for c in candidates if not _homepage_url(c.website_url))
@@ -3550,9 +3626,29 @@ def discover_from_csv(
                 f"{without_website} row(s) have no website — Research & score later uses "
                 "SerpAPI + DuckDuckGo + Google CSE + Wikidata (+ CompanyLens when configured)."
             )
-    else:
+        # Spreadsheet / all list imports: never flag by company name alone.
+        _mark_existing_by_contact(
+            db,
+            candidates,
+            source=scope.get("source"),
+            exclude_source=scope.get("exclude_source"),
+            assigned_to_user_id=assigned_to_user_id,
+        )
+    elif (scope_source or "").strip().lower() in {"old_clients", "incomplete_archives"}:
+        _mark_existing_by_contact(
+            db,
+            candidates,
+            source=scope.get("source"),
+            exclude_source=scope.get("exclude_source"),
+            assigned_to_user_id=assigned_to_user_id,
+        )
         _enrich_candidates(candidates)
-    _mark_existing(candidates, existing_names, existing_domains)
+    else:
+        # Discover panel: still flag against company/domain so we don't rediscover
+        # companies that already exist anywhere in the CRM.
+        existing_names, existing_domains = _discovery_existing_keys(db)
+        _enrich_candidates(candidates)
+        _mark_existing(candidates, existing_names, existing_domains)
     result.candidates = candidates
     return result
 
@@ -3581,10 +3677,12 @@ def import_candidates(
     scope = _import_scope_for_source(batch_source)
     # Sales imports: only collide with that user's own assigned rows.
     # Admin imports (assigned_to_user_id=None): section-wide dedupe as before.
-    by_name, by_domain, existing_scores, by_email, by_phone = buyers_module.build_buyer_lookup_index(
-        db,
-        **scope,
-        assigned_to_user_id=assigned_to_user_id,
+    by_name, by_domain, existing_scores, by_email, by_phone, by_person_email = (
+        buyers_module.build_buyer_lookup_index(
+            db,
+            **scope,
+            assigned_to_user_id=assigned_to_user_id,
+        )
     )
     # Junk/social hosts must not make unrelated companies look like duplicates.
     by_domain = {
@@ -3775,17 +3873,12 @@ def import_candidates(
                     _checkpoint_commit()
                     continue
 
-                existing = (by_name.get(name_key) if name_key else None) or (
-                    by_domain.get(domain) if domain else None
+                existing = _find_import_duplicate_buyer(
+                    raw,
+                    by_person_email=by_person_email,
+                    by_email=by_email,
+                    by_phone=by_phone,
                 )
-                if existing is None:
-                    for kind, contact_key in _import_contact_duplicate_keys(raw):
-                        if kind == "email":
-                            existing = by_email.get(contact_key)
-                        else:
-                            existing = by_phone.get(contact_key)
-                        if existing is not None:
-                            break
                 if existing is not None:
                     should_replace = False
                     if replace_duplicates:
@@ -3902,9 +3995,19 @@ def import_candidates(
                 if domain:
                     existing_domains.add(domain)
                     by_domain[domain] = buyer
+                from modules.field_clean import person_email_dedupe_key
+
+                contact_name_for_key = (raw.get("contact_name") or "").strip()
                 for kind, contact_key in _import_contact_duplicate_keys(raw):
                     if kind == "email":
                         by_email[contact_key] = buyer
+                        # Also register person+email for within-batch multi-contact imports
+                        for email_field in ("email", "secondary_email", "contact_email"):
+                            combo = person_email_dedupe_key(
+                                contact_name_for_key, raw.get(email_field)
+                            )
+                            if combo:
+                                by_person_email[combo] = buyer
                     else:
                         by_phone[contact_key] = buyer
                 existing_scores[buyer.id] = _import_data_score(raw)

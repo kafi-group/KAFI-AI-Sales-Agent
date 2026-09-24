@@ -297,7 +297,8 @@ export function LeadsTableCsvImport({
     const confirmed = window.confirm(
       `Import ${toImport.length} lead${toImport.length === 1 ? "" : "s"} as-is?\n\n` +
         `• Spreadsheet rows are copied exactly (including blank/sparse fields).\n` +
-        `• Only duplicates in your own table are skipped or replaced.\n` +
+        `• Same company name is allowed many times (e.g. Al Jaleel × several people).\n` +
+        `• Only true contact duplicates are skipped (contact + email, then phone).\n` +
         `• Use Research & score later to enrich missing details.` +
         batchNote +
         `\n\nContinue?`,
