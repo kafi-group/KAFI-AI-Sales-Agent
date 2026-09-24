@@ -889,7 +889,7 @@ export function EmailActivityPage({
                     ) : null}
                     <p className="text-xs opacity-60 mt-2">{formatWhen(event.created_at)}</p>
                   </div>
-                  {unread && event.id > 0 && (
+                  {!isWhatsApp && unread && event.id > 0 && (
                     <button
                       type="button"
                       onClick={() => void markOneRead(event.id)}
