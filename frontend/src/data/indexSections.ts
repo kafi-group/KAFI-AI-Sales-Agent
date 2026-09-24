@@ -76,7 +76,7 @@ export const INDEX_SECTIONS: IndexSection[] = [
       },
       {
         id: "1.2",
-        title: "WhatsApp templates",
+        title: "WhatsApp Templates Draft",
         description: "Meta-approved templates — bulk or single send from leads table.",
         icon: "template",
         action: { type: "whatsapp", section: "whatsapp-templates" },

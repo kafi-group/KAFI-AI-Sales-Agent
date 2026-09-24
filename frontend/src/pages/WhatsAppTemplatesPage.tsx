@@ -424,8 +424,7 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
     <section className="space-y-6 w-full min-w-0">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-medium text-slate-100">WhatsApp templates</h2>
-          <div className="mt-3 flex gap-1 border-b border-slate-800">
+          <div className="flex gap-1 border-b border-slate-800">
             <button
               type="button"
               onClick={() => setLibraryTab("meta")}
@@ -435,7 +434,7 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
                   : "border-transparent text-slate-400 hover:text-slate-200"
               }`}
             >
-              WhatsApp Meta
+              WhatsApp Meta Drafts
             </button>
             <button
               type="button"
@@ -446,7 +445,7 @@ export function WhatsAppTemplatesPage({ onError, onCountChange }: WhatsAppTempla
                   : "border-transparent text-slate-400 hover:text-slate-200"
               }`}
             >
-              WhatsApp Personal
+              WhatsApp Personal Drafts
             </button>
           </div>
           {libraryTab === "meta" ? (

@@ -1432,7 +1432,7 @@ function DashboardApp() {
         },
         {
           id: "whatsapp-templates",
-          label: "WhatsApp templates",
+          label: "WhatsApp Templates Draft",
           count: whatsappTemplateCount,
         },
         {
