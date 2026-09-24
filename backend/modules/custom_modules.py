@@ -75,26 +75,49 @@ DEFAULT_STAFF_RECIPIENTS = [
 ]
 
 
-def list_custom_modules(db: Session, include_disabled: bool = True) -> list[dict[str, Any]]:
-    """List all custom lead modules with their live lead counts."""
+def list_custom_modules(
+    db: Session,
+    include_disabled: bool = True,
+    *,
+    master_type: str | None = "fmcg",
+    assigned_to_user_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """List all custom lead modules with live lead counts.
+
+    Counts use the same master_type / assignee scope as the leads table and
+    sidebar section-counts so badges match “X in section”.
+    """
+    from sqlalchemy import func as sa_func
+
     query = db.query(CustomLeadModule)
     if not include_disabled:
         query = query.filter(CustomLeadModule.is_enabled.is_(True))
     modules = query.order_by(CustomLeadModule.order_index.asc(), CustomLeadModule.id.asc()).all()
 
-    # Pre-calculate counts by source
-    source_counts: dict[str, int] = dict(
-        db.query(func.lower(Buyer.source), func.count(Buyer.id))
-        .filter(Buyer.source.isnot(None))
-        .group_by(func.lower(Buyer.source))
-        .all()
+    count_q = db.query(sa_func.lower(Buyer.source), sa_func.count(Buyer.id)).filter(
+        Buyer.source.isnot(None)
     )
+    if master_type:
+        mt = master_type.strip().lower()
+        if mt == "fmcg":
+            count_q = count_q.filter(
+                or_(
+                    sa_func.lower(Buyer.master_type) == "fmcg",
+                    Buyer.master_type.is_(None),
+                    Buyer.master_type == "",
+                )
+            )
+        else:
+            count_q = count_q.filter(sa_func.lower(Buyer.master_type) == mt)
+    if assigned_to_user_id is not None:
+        count_q = count_q.filter(Buyer.assigned_to_user_id == assigned_to_user_id)
+
+    source_counts: dict[str, int] = dict(count_q.group_by(sa_func.lower(Buyer.source)).all())
 
     result = []
     for m in modules:
         key_clean = (m.key or "").strip().lower()
-        # For testing / custom modules, count exact source
-        count = source_counts.get(key_clean, 0)
+        count = int(source_counts.get(key_clean, 0) or 0)
 
         result.append(
             {

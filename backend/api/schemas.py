@@ -676,6 +676,10 @@ class ClientHistoryAddRequest(BaseModel):
 
 
 class LeadTableSectionCountsResponse(BaseModel):
+    """Sidebar / module badge counts. Extra keys = custom list sources."""
+
+    model_config = ConfigDict(extra="allow")
+
     all: int
     old_clients: int
     interested_clients: int
@@ -691,6 +695,8 @@ class LeadTableSectionCountsResponse(BaseModel):
     incomplete_archives: int = 0
     my_assigned: int = 0
     all_contacts: int = 0
+    testing: int = 0
+    schedule_meeting: int = 0
 
 
 class LeadTablePromoteIncompleteArchivesRequest(BaseModel):

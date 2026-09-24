@@ -718,7 +718,7 @@ function ExpandableCell({
   );
 }
 
-const BULK_DELETE_CHUNK = 40;
+const BULK_DELETE_CHUNK = 12;
 /** Keep each move request small enough for Vercel→Railway proxy timeouts. */
 const BULK_MOVE_CHUNK = 100;
 
@@ -1562,12 +1562,12 @@ export function LeadsTablePage({
 
   const loadCustomModules = useCallback(async () => {
     try {
-      const list = await client.listCustomModules(false);
+      const list = await client.listCustomModules(false, masterType);
       setCustomModules(list);
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [masterType]);
 
   useEffect(() => {
     void loadCustomModules();
@@ -1828,12 +1828,24 @@ export function LeadsTablePage({
       setFilteredCount(result.filtered_count);
       setTotalPages(result.total_pages);
       setPage(result.page);
+      // Keep sidebar badge for this section in sync with table "in section" total.
+      const sectionKey = section;
+      setSectionCounts((prev) => {
+        const next = { ...prev, [sectionKey]: result.total };
+        if (onSectionCountsChange) {
+          onSectionCountsChange({
+            ...(next as unknown as LeadTableSectionCountsResponse),
+            by_assignee: (next as any).by_assignee ?? {},
+          });
+        }
+        return next;
+      });
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to load leads table");
     } finally {
       setLoading(false);
     }
-  }, [onError, page, tableQueryParams]);
+  }, [onError, onSectionCountsChange, page, section, tableQueryParams]);
 
   useEffect(() => {
     setPage(1);
@@ -2776,14 +2788,20 @@ export function LeadsTablePage({
     try {
       const result = await client.listLeadsTableIds(tableQueryParams);
       const ids = result.ids || [];
+      const apiCount = Number(result.filtered_count ?? ids.length);
       if (ids.length === 0) {
         onError("No leads matched the current filters — nothing selected.");
+        setFilteredCount(0);
         return;
       }
-      if (filteredCount > 0 && ids.length !== filteredCount) {
+      // Trust the IDs endpoint as source of truth for matching count.
+      if (apiCount !== filteredCount) {
+        setFilteredCount(apiCount);
+      }
+      if (ids.length !== apiCount) {
         const proceed = window.confirm(
-          `Filter shows ${filteredCount} matching, but Select all loaded ${ids.length} IDs.\n\n` +
-            `Use the ${ids.length} loaded IDs? (Cancel to abort — do not move until counts match.)`,
+          `Select all loaded ${ids.length} IDs but the server reports ${apiCount} matching.\n\n` +
+            `Continue with the ${ids.length} loaded IDs? (Cancel to abort.)`,
         );
         if (!proceed) return;
       }
@@ -2914,6 +2932,7 @@ export function LeadsTablePage({
 
     try {
       const deletedIds: number[] = [];
+      let failedChunkError: string | null = null;
       if (rowIds.length === 1) {
         await client.deleteLeadTableRow(rowIds[0]);
         deletedIds.push(rowIds[0]);
@@ -2925,50 +2944,60 @@ export function LeadsTablePage({
           setActionProgress({
             title: "Deleting selected leads",
             mode: "determinate",
-            current: i,
+            current: deletedIds.length,
             total: rowIds.length,
-            detail: firstName,
+            detail: `${deletedIds.length}/${rowIds.length} · ${firstName}`,
             startedAt,
             accent: "red",
           });
-          const result = await client.bulkDeleteLeadTableRows(chunk);
-          deletedIds.push(...(result.deleted_ids ?? chunk));
+          try {
+            const result = await client.bulkDeleteLeadTableRows(chunk);
+            deletedIds.push(...(result.deleted_ids ?? chunk));
+          } catch (chunkErr) {
+            failedChunkError =
+              chunkErr instanceof Error ? chunkErr.message : "Delete batch failed";
+            // Continue remaining batches so a timeout does not strand the rest.
+            onError(
+              `Delete batch failed at ${deletedIds.length}/${rowIds.length}: ${failedChunkError}. Continuing…`,
+            );
+          }
           setActionProgress({
             title: "Deleting selected leads",
             mode: "determinate",
-            current: Math.min(i + chunk.length, rowIds.length),
+            current: Math.min(deletedIds.length, rowIds.length),
             total: rowIds.length,
-            detail: firstName,
+            detail: `${deletedIds.length}/${rowIds.length}`,
             startedAt,
             accent: "red",
           });
         }
       }
-      const removed = new Set(deletedIds.length > 0 ? deletedIds : rowIds);
-      setRows((prev) => prev.filter((row) => !removed.has(row.id)));
-      setTotal((prev) => Math.max(0, prev - removed.size));
-      setFilteredCount((prev) => Math.max(0, prev - removed.size));
-      setSelected((prev) => {
-        const next = new Set(prev);
-        for (const rowId of removed) next.delete(rowId);
-        return next;
-      });
-      setDrafts((prev) => {
-        const next = { ...prev };
-        for (const rowId of removed) delete next[rowId];
-        return next;
-      });
-      setOriginalKeys((prev) => {
-        const next = { ...prev };
-        for (const rowId of removed) delete next[rowId];
-        return next;
-      });
-      setSaveNotice(`Deleted ${removed.size} lead${removed.size === 1 ? "" : "s"}`);
-      const updatedFilters = await client.listLeadTableFilters();
-      setFilters(updatedFilters);
+      clearSelection();
+      setDrafts({});
+      setOriginalKeys({});
+      // Always reload table + counts from server (no local guesswork).
+      await loadTable();
       await loadSectionCounts();
+      await loadCustomModules();
+      const removed = deletedIds.length;
+      if (removed === 0 && failedChunkError) {
+        onError(`Delete failed: ${failedChunkError}`);
+      } else if (failedChunkError) {
+        setSaveNotice(
+          `Deleted ${removed} of ${rowIds.length} lead${rowIds.length === 1 ? "" : "s"} (some batches failed — refresh if counts look off).`,
+        );
+      } else {
+        setSaveNotice(`Deleted ${removed} lead${removed === 1 ? "" : "s"}`);
+      }
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to delete lead(s)");
+      try {
+        await loadTable();
+        await loadSectionCounts();
+        await loadCustomModules();
+      } catch {
+        /* ignore refresh errors */
+      }
     } finally {
       setActionProgress(null);
       setDeletingId(null);

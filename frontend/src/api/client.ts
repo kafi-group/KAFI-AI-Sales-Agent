@@ -1691,6 +1691,9 @@ export interface LeadTableSectionCountsResponse {
   incomplete_archives?: number;
   my_assigned?: number;
   all_contacts?: number;
+  testing?: number;
+  /** Custom list keys (e.g. new_salt_data_sep_2026) and any other section badges. */
+  [key: string]: number | Record<string, number> | undefined;
 }
 
 export interface LeadTableBulkDeleteResponse {
@@ -4705,8 +4708,10 @@ export const client = {
     }),
 
   // ── Custom Lead Modules & Testing Lists ─────────────────────────────────────
-  listCustomModules: (includeDisabled = true) =>
-    request<CustomLeadModule[]>(`/leads/custom-modules?include_disabled=${includeDisabled}`),
+  listCustomModules: (includeDisabled = true, masterType = "fmcg") =>
+    request<CustomLeadModule[]>(
+      `/leads/custom-modules?include_disabled=${includeDisabled}&master_type=${encodeURIComponent(masterType)}`,
+    ),
   createCustomModule: (payload: CustomModuleCreatePayload) =>
     request<CustomLeadModule>("/leads/custom-modules", {
       method: "POST",

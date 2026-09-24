@@ -1908,7 +1908,7 @@ def list_leads_table(
     }
 
 
-_SECTION_COUNTS_TTL = 20.0
+_SECTION_COUNTS_TTL = 5.0
 _SECTION_COUNTS_PREFIX = "section_counts:"
 
 

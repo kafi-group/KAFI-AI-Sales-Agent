@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db
-from db.models import AppUser
+from db.models import AppUser, AppUserRole
 from modules import custom_modules as cm_module
 
 router = APIRouter(prefix="/leads/custom-modules", tags=["custom-modules"])
@@ -47,11 +47,19 @@ class AddRecipientRequest(BaseModel):
 @router.get("")
 def get_custom_modules_list(
     include_disabled: bool = True,
+    master_type: str = "fmcg",
     db: Session = Depends(get_db),
-    _user: AppUser = Depends(get_current_user),
+    user: AppUser = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """List all custom & built-in modules under Old clients with their live counts."""
-    return cm_module.list_custom_modules(db, include_disabled=include_disabled)
+    """List all custom & built-in modules with counts matching the leads table scope."""
+    role = user.role.value if isinstance(user.role, AppUserRole) else str(user.role)
+    assignee = None if role == AppUserRole.admin.value else user.id
+    return cm_module.list_custom_modules(
+        db,
+        include_disabled=include_disabled,
+        master_type=master_type or "fmcg",
+        assigned_to_user_id=assignee,
+    )
 
 
 @router.post("")

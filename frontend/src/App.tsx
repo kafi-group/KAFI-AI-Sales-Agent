@@ -405,12 +405,12 @@ function DashboardApp() {
 
   const loadCustomModules = useCallback(async () => {
     try {
-      const list = await client.listCustomModules(false);
+      const list = await client.listCustomModules(false, masterType);
       setCustomModules(list);
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [masterType]);
 
   const loadAssigneeNavUsers = useCallback(async () => {
     try {
