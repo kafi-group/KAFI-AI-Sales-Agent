@@ -2,7 +2,7 @@ import re
 import time
 from datetime import datetime
 
-from sqlalchemy import func as sa_func
+from sqlalchemy import String, cast, func as sa_func
 from sqlalchemy.orm import Session
 
 from db.models import (
@@ -1549,15 +1549,32 @@ def get_lead_table_column_values(
     counts: dict[str, int] = {}
     blank_count = 0
 
+    # Aliases used by table header filter modal (must cover every SortField on the UI).
+    field_key = (field or "").strip().lower()
+    if field_key in {"product", "product_interest"}:
+        field_key = "product"
+    elif field_key in {"ai_grading", "latest_score", "score"}:
+        field_key = "ai_grading"
+    elif field_key in {"assigned_to", "assigned_to_user_id"}:
+        field_key = "assigned_to"
+    elif field_key in {"website", "website_url"}:
+        field_key = "website"
+
     buyer_col_map = {
+        "company_name": Buyer.company_name,
+        "country": Buyer.country,
         "excel_file_grading": Buyer.company_grading,
         "company_grading": Buyer.company_grading,
         "business_type": Buyer.industry,
         "industry": Buyer.industry,
+        "product": Buyer.product_interest,
         "city": Buyer.city,
         "website": Buyer.website_url,
         "address": Buyer.address,
         "remarks": Buyer.remarks,
+        "assigned_to": Buyer.assigned_to,
+        "market_role": Buyer.market_role,
+        "source": Buyer.source,
     }
     contact_col_map = {
         "designation": Contact.designation,
@@ -1570,8 +1587,77 @@ def get_lead_table_column_values(
         "secondary_email": Contact.secondary_email,
     }
 
-    if field in buyer_col_map:
-        col = buyer_col_map[field]
+    def _norm_cell(raw_val: object) -> str:
+        if raw_val is None:
+            return ""
+        if hasattr(raw_val, "value"):
+            raw_val = getattr(raw_val, "value")
+        return str(raw_val).strip()
+
+    if field_key == "ai_grading":
+        # Latest lead score per buyer (same as table "AI grading" column).
+        score_subq = (
+            db.query(
+                LeadScore.buyer_id.label("buyer_id"),
+                LeadScore.score.label("score"),
+                sa_func.row_number()
+                .over(
+                    partition_by=LeadScore.buyer_id,
+                    order_by=LeadScore.scored_at.desc(),
+                )
+                .label("rn"),
+            )
+            .filter(LeadScore.buyer_id.in_(matching_buyer_ids))
+            .subquery()
+        )
+        grouped = (
+            db.query(score_subq.c.score, sa_func.count())
+            .filter(score_subq.c.rn == 1)
+            .group_by(score_subq.c.score)
+            .all()
+        )
+        scored_buyers = set(
+            b_id
+            for (b_id,) in db.query(score_subq.c.buyer_id).filter(score_subq.c.rn == 1).all()
+        )
+        blank_count = len(matching_buyer_ids) - len(scored_buyers)
+        for raw_val, cnt in grouped:
+            v = _norm_cell(raw_val)
+            if not v or v in {"—", "-", "unscored"}:
+                blank_count += cnt
+            else:
+                counts[v] = counts.get(v, 0) + cnt
+    elif field_key == "created_at":
+        day_col = sa_func.date(Buyer.created_at)
+        grouped = (
+            db.query(day_col, sa_func.count(Buyer.id))
+            .filter(Buyer.id.in_(matching_buyer_ids))
+            .group_by(day_col)
+            .all()
+        )
+        for raw_val, cnt in grouped:
+            if raw_val is None:
+                blank_count += cnt
+                continue
+            v = str(raw_val)
+            counts[v] = counts.get(v, 0) + cnt
+    elif field_key == "id":
+        # Prefer spreadsheet serial when present (matches S. No column display).
+        id_expr = sa_func.coalesce(cast(Buyer.legacy_serial_no, String), cast(Buyer.id, String))
+        grouped = (
+            db.query(id_expr, sa_func.count(Buyer.id))
+            .filter(Buyer.id.in_(matching_buyer_ids))
+            .group_by(id_expr)
+            .all()
+        )
+        for raw_val, cnt in grouped:
+            v = _norm_cell(raw_val)
+            if not v:
+                blank_count += cnt
+            else:
+                counts[v] = counts.get(v, 0) + cnt
+    elif field_key in buyer_col_map:
+        col = buyer_col_map[field_key]
         grouped = (
             db.query(col, sa_func.count(Buyer.id))
             .filter(Buyer.id.in_(matching_buyer_ids))
@@ -1579,13 +1665,17 @@ def get_lead_table_column_values(
             .all()
         )
         for raw_val, cnt in grouped:
-            v = (raw_val or "").strip()
-            if not v or v in {"—", "-"}:
-                blank_count += cnt
+            v = _norm_cell(raw_val)
+            if not v or v in {"—", "-", "unassigned", "unknown"}:
+                # Keep "unassigned"/"unknown" as real filter options when they are intentional labels
+                if v in {"unassigned", "unknown"} and field_key in {"assigned_to", "market_role"}:
+                    counts[v] = counts.get(v, 0) + cnt
+                else:
+                    blank_count += cnt
             else:
                 counts[v] = counts.get(v, 0) + cnt
-    elif field in contact_col_map:
-        ccol = contact_col_map[field]
+    elif field_key in contact_col_map:
+        ccol = contact_col_map[field_key]
         grouped = (
             db.query(ccol, sa_func.count(Contact.id))
             .filter(Contact.buyer_id.in_(matching_buyer_ids))
@@ -1606,11 +1696,11 @@ def get_lead_table_column_values(
         )
         blank_count = len(matching_buyer_ids) - len(has_val_buyers)
         for raw_val, cnt in grouped:
-            v = (raw_val or "").strip()
+            v = _norm_cell(raw_val)
             if v and v not in {"—", "-"}:
                 counts[v] = counts.get(v, 0) + cnt
 
-    if field in {"excel_file_grading", "company_grading"}:
+    if field_key in {"excel_file_grading", "company_grading"}:
         standard_tiers = ["AAAA", "AAA", "AA", "A"]
         for tier in standard_tiers:
             if tier not in counts:
