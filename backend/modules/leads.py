@@ -2572,15 +2572,18 @@ def dedupe_leads_table(
 ) -> dict[str, object]:
     """Remove duplicate leads within a section, keeping the richest record in each cluster.
 
-    Clusters by contact identity only (person+email, then phone) — never by company
-    name alone, so multi-buyer rows like Al Jaleel × N contacts stay intact.
+    Clusters by contact identity only (person+email, then person+phone) — never by
+    company name or shared switchboard phone alone, so multi-buyer rows like
+    Al Jaleel × N contacts stay intact. Nameless rows may still merge on email/phone.
     """
     from collections import defaultdict
 
     from modules.audit import log_action
     from modules.field_clean import (
+        contact_name_dedupe_key,
         email_dedupe_key,
         person_email_dedupe_key,
+        person_phone_dedupe_key,
         phone_dedupe_key,
     )
 
@@ -2610,35 +2613,44 @@ def dedupe_leads_table(
 
     buyer_id_set = [buyer.id for buyer in buyers]
     by_person_email: dict[str, list[int]] = defaultdict(list)
-    by_email: dict[str, list[int]] = defaultdict(list)
-    by_phone: dict[str, list[int]] = defaultdict(list)
+    by_person_phone: dict[str, list[int]] = defaultdict(list)
+    by_email_nameless: dict[str, list[int]] = defaultdict(list)
+    by_phone_nameless: dict[str, list[int]] = defaultdict(list)
     if buyer_id_set:
         for contact in db.query(Contact).filter(Contact.buyer_id.in_(buyer_id_set)).all():
+            has_person = bool(contact_name_dedupe_key(contact.full_name))
             for field in ("email", "secondary_email"):
                 email_val = getattr(contact, field, None)
                 combo = person_email_dedupe_key(contact.full_name, email_val)
                 if combo:
                     by_person_email[combo].append(contact.buyer_id)
-                email_key = email_dedupe_key(email_val)
-                if email_key:
-                    by_email[email_key].append(contact.buyer_id)
+                elif not has_person:
+                    email_key = email_dedupe_key(email_val)
+                    if email_key:
+                        by_email_nameless[email_key].append(contact.buyer_id)
             for field in ("phone", "primary_phone", "secondary_phone", "secondary_mobile"):
-                phone_key = phone_dedupe_key(getattr(contact, field, None))
-                if phone_key:
-                    by_phone[phone_key].append(contact.buyer_id)
+                phone_val = getattr(contact, field, None)
+                combo = person_phone_dedupe_key(contact.full_name, phone_val)
+                if combo:
+                    by_person_phone[combo].append(contact.buyer_id)
+                elif not has_person:
+                    phone_key = phone_dedupe_key(phone_val)
+                    if phone_key:
+                        by_phone_nameless[phone_key].append(contact.buyer_id)
 
-    # Priority clusters: person+email, then phone. Email-alone only when no person+email key.
     for ids in by_person_email.values():
         unique_ids = list(dict.fromkeys(ids))
         for other_id in unique_ids[1:]:
             union(unique_ids[0], other_id)
-    for ids in by_phone.values():
+    for ids in by_person_phone.values():
         unique_ids = list(dict.fromkeys(ids))
         for other_id in unique_ids[1:]:
             union(unique_ids[0], other_id)
-    # Email alone: merge only buyers that share email and were not already linked
-    # via person+email (covers blank/mismatched contact names on re-import).
-    for ids in by_email.values():
+    for ids in by_email_nameless.values():
+        unique_ids = list(dict.fromkeys(ids))
+        for other_id in unique_ids[1:]:
+            union(unique_ids[0], other_id)
+    for ids in by_phone_nameless.values():
         unique_ids = list(dict.fromkeys(ids))
         for other_id in unique_ids[1:]:
             union(unique_ids[0], other_id)

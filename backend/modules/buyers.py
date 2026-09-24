@@ -184,21 +184,25 @@ def build_buyer_lookup_index(
     dict[str, Buyer],
     dict[str, Buyer],
     dict[str, Buyer],
+    dict[str, Buyer],
 ]:
     """One scoped load for import dedupe.
 
     Returns:
-      by_name, by_domain, scores, by_email, by_phone, by_person_email
+      by_name, by_domain, scores, by_email, by_phone, by_person_email, by_person_phone
 
-    ``by_person_email`` keys are ``contact_name|email`` (primary duplicate key).
+    Primary duplicate keys are person+email and person+phone. Phone/email alone
+    are only used when the contact person is blank (nameless rows).
     Company name / website alone must not skip multi-contact imports.
     """
     from sqlalchemy import func as sa_func
 
     from db.models import Contact
     from modules.field_clean import (
+        contact_name_dedupe_key,
         email_dedupe_key,
         person_email_dedupe_key,
+        person_phone_dedupe_key,
         phone_dedupe_key,
     )
 
@@ -229,6 +233,7 @@ def build_buyer_lookup_index(
     by_email: dict[str, Buyer] = {}
     by_phone: dict[str, Buyer] = {}
     by_person_email: dict[str, Buyer] = {}
+    by_person_phone: dict[str, Buyer] = {}
     for buyer in buyers:
         name_key = normalize_buyer_key(buyer.company_name)
         if name_key and name_key not in by_name:
@@ -237,22 +242,27 @@ def build_buyer_lookup_index(
         if domain and domain not in by_domain:
             by_domain[domain] = buyer
         for contact in contacts_by_buyer.get(buyer.id, []):
+            has_person = bool(contact_name_dedupe_key(contact.full_name))
             for field in ("email", "secondary_email"):
-                email_key = email_dedupe_key(getattr(contact, field, None))
-                if email_key and email_key not in by_email:
-                    by_email[email_key] = buyer
-                person_key = person_email_dedupe_key(
-                    contact.full_name, getattr(contact, field, None)
-                )
+                email_val = getattr(contact, field, None)
+                person_key = person_email_dedupe_key(contact.full_name, email_val)
                 if person_key and person_key not in by_person_email:
                     by_person_email[person_key] = buyer
+                email_key = email_dedupe_key(email_val)
+                # Email alone only indexes nameless contacts (shared inboxes otherwise collide).
+                if email_key and not has_person and email_key not in by_email:
+                    by_email[email_key] = buyer
             for field in ("phone", "primary_phone", "secondary_phone", "secondary_mobile"):
-                phone_key = phone_dedupe_key(getattr(contact, field, None))
-                if phone_key and phone_key not in by_phone:
+                phone_val = getattr(contact, field, None)
+                person_phone = person_phone_dedupe_key(contact.full_name, phone_val)
+                if person_phone and person_phone not in by_person_phone:
+                    by_person_phone[person_phone] = buyer
+                phone_key = phone_dedupe_key(phone_val)
+                if phone_key and not has_person and phone_key not in by_phone:
                     by_phone[phone_key] = buyer
 
     scores = preload_buyer_data_scores(db, buyers)
-    return by_name, by_domain, scores, by_email, by_phone, by_person_email
+    return by_name, by_domain, scores, by_email, by_phone, by_person_email, by_person_phone
 
 
 def find_buyer_by_name_or_domain(
@@ -264,7 +274,7 @@ def find_buyer_by_name_or_domain(
     exclude_source: str | None = None,
     assigned_to_user_id: int | None = None,
 ) -> Buyer | None:
-    by_name, by_domain, _, _, _, _ = build_buyer_lookup_index(
+    by_name, by_domain, _, _, _, _, _ = build_buyer_lookup_index(
         db,
         source=source,
         exclude_source=exclude_source,

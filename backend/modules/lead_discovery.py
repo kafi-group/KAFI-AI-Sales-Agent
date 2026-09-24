@@ -532,14 +532,16 @@ def _mark_existing_by_contact(
     exclude_source: str | None = None,
     assigned_to_user_id: int | None = None,
 ) -> None:
-    """Flag spreadsheet rows that match an existing contact (person+email, then phone)."""
+    """Flag spreadsheet rows that match an existing contact (person+email / person+phone)."""
     from modules import buyers as buyers_module
 
-    _, _, _, by_email, by_phone, by_person_email = buyers_module.build_buyer_lookup_index(
-        db,
-        source=source,
-        exclude_source=exclude_source,
-        assigned_to_user_id=assigned_to_user_id,
+    _, _, _, by_email, by_phone, by_person_email, by_person_phone = (
+        buyers_module.build_buyer_lookup_index(
+            db,
+            source=source,
+            exclude_source=exclude_source,
+            assigned_to_user_id=assigned_to_user_id,
+        )
     )
     for candidate in candidates:
         raw = {
@@ -554,6 +556,7 @@ def _mark_existing_by_contact(
         if _find_import_duplicate_buyer(
             raw,
             by_person_email=by_person_email,
+            by_person_phone=by_person_phone,
             by_email=by_email,
             by_phone=by_phone,
         ):
@@ -3376,6 +3379,7 @@ def _find_import_duplicate_buyer(
     raw: dict[str, Any],
     *,
     by_person_email: dict[str, Any],
+    by_person_phone: dict[str, Any],
     by_email: dict[str, Any],
     by_phone: dict[str, Any],
 ) -> Any | None:
@@ -3383,13 +3387,15 @@ def _find_import_duplicate_buyer(
 
     Priority:
       1) contact person + email
-      2) phone / mobile
-      3) email alone (when contact name is blank / missing)
+      2) contact person + phone
+      3) email alone / phone alone only when contact person is blank
+    Shared switchboard phones must not collapse different buyers at one company.
     """
     from modules.field_clean import (
         contact_name_dedupe_key,
         email_dedupe_key,
         person_email_dedupe_key,
+        person_phone_dedupe_key,
         phone_dedupe_key,
     )
 
@@ -3402,6 +3408,12 @@ def _find_import_duplicate_buyer(
         if val and str(val).strip() not in {"", _NOT_FOUND}:
             email_vals.append(str(val))
 
+    phone_vals = []
+    for field in ("phone", "primary_phone", "secondary_phone", "secondary_mobile", "contact_phone"):
+        val = raw.get(field)
+        if val and str(val).strip() not in {"", _NOT_FOUND}:
+            phone_vals.append(str(val))
+
     # 1) Contact person + email
     if person_key:
         for email_val in email_vals:
@@ -3409,21 +3421,22 @@ def _find_import_duplicate_buyer(
             if combo and combo in by_person_email:
                 return by_person_email[combo]
 
-    # 2) Phone / mobile
-    for field in ("phone", "primary_phone", "secondary_phone", "secondary_mobile", "contact_phone"):
-        val = raw.get(field)
-        if not val or str(val).strip() in {"", _NOT_FOUND}:
-            continue
-        phone_key = phone_dedupe_key(str(val))
+        # 2) Contact person + phone (different people can share a company line)
+        for phone_val in phone_vals:
+            combo = person_phone_dedupe_key(contact_name, phone_val)
+            if combo and combo in by_person_phone:
+                return by_person_phone[combo]
+        return None
+
+    # 3) Nameless rows only: email alone, then phone alone
+    for email_val in email_vals:
+        email_key = email_dedupe_key(email_val)
+        if email_key and email_key in by_email:
+            return by_email[email_key]
+    for phone_val in phone_vals:
+        phone_key = phone_dedupe_key(phone_val)
         if phone_key and phone_key in by_phone:
             return by_phone[phone_key]
-
-    # 3) Email alone when we have no usable contact person
-    if not person_key:
-        for email_val in email_vals:
-            email_key = email_dedupe_key(email_val)
-            if email_key and email_key in by_email:
-                return by_email[email_key]
 
     return None
 
@@ -3617,7 +3630,8 @@ def discover_from_csv(
     if for_leads_table:
         result.messages.append(
             f"Loaded {len(candidates)} row(s) from file. "
-            "Same company name can appear many times; duplicates are contact + email, then phone. "
+            "Same company name can appear many times; duplicates are contact+email or "
+            "contact+phone (shared company lines keep separate people). "
             "Use Import only to save mapped fields as-is, or Research & score later from the table."
         )
         without_website = sum(1 for c in candidates if not _homepage_url(c.website_url))
@@ -3677,7 +3691,7 @@ def import_candidates(
     scope = _import_scope_for_source(batch_source)
     # Sales imports: only collide with that user's own assigned rows.
     # Admin imports (assigned_to_user_id=None): section-wide dedupe as before.
-    by_name, by_domain, existing_scores, by_email, by_phone, by_person_email = (
+    by_name, by_domain, existing_scores, by_email, by_phone, by_person_email, by_person_phone = (
         buyers_module.build_buyer_lookup_index(
             db,
             **scope,
@@ -3876,6 +3890,7 @@ def import_candidates(
                 existing = _find_import_duplicate_buyer(
                     raw,
                     by_person_email=by_person_email,
+                    by_person_phone=by_person_phone,
                     by_email=by_email,
                     by_phone=by_phone,
                 )
@@ -3995,13 +4010,18 @@ def import_candidates(
                 if domain:
                     existing_domains.add(domain)
                     by_domain[domain] = buyer
-                from modules.field_clean import person_email_dedupe_key
+                from modules.field_clean import (
+                    contact_name_dedupe_key,
+                    person_email_dedupe_key,
+                    person_phone_dedupe_key,
+                )
 
                 contact_name_for_key = (raw.get("contact_name") or "").strip()
+                has_person = bool(contact_name_dedupe_key(contact_name_for_key))
                 for kind, contact_key in _import_contact_duplicate_keys(raw):
                     if kind == "email":
-                        by_email[contact_key] = buyer
-                        # Also register person+email for within-batch multi-contact imports
+                        if not has_person:
+                            by_email[contact_key] = buyer
                         for email_field in ("email", "secondary_email", "contact_email"):
                             combo = person_email_dedupe_key(
                                 contact_name_for_key, raw.get(email_field)
@@ -4009,7 +4029,20 @@ def import_candidates(
                             if combo:
                                 by_person_email[combo] = buyer
                     else:
-                        by_phone[contact_key] = buyer
+                        if not has_person:
+                            by_phone[contact_key] = buyer
+                        for phone_field in (
+                            "phone",
+                            "primary_phone",
+                            "secondary_phone",
+                            "secondary_mobile",
+                            "contact_phone",
+                        ):
+                            combo = person_phone_dedupe_key(
+                                contact_name_for_key, raw.get(phone_field)
+                            )
+                            if combo:
+                                by_person_phone[combo] = buyer
                 existing_scores[buyer.id] = _import_data_score(raw)
                 created.append(buyer)
                 if persist_each_row:

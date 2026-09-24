@@ -69,3 +69,12 @@ def person_email_dedupe_key(contact_name: str | None, email: str | None) -> str 
     if not person or not email_key:
         return None
     return f"{person}|{email_key}"
+
+
+def person_phone_dedupe_key(contact_name: str | None, phone: str | None) -> str | None:
+    """Contact person + phone — same person on a shared company line stays distinct from others."""
+    person = contact_name_dedupe_key(contact_name)
+    phone_key = phone_dedupe_key(phone)
+    if not person or not phone_key:
+        return None
+    return f"{person}|{phone_key}"
