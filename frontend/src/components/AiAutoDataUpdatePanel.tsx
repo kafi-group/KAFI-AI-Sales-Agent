@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   client,
   type AiSalesAgentTask,
@@ -809,6 +809,16 @@ function QueueLaneBlock({
     onBulkMove: () => void;
   }>;
 }) {
+  // Long lists start collapsed so Sara/Rayan cards stay short (e.g. old-clients dump).
+  const [open, setOpen] = useState(() => tasks.length <= 12);
+  const prevLenRef = useRef(tasks.length);
+  useEffect(() => {
+    const prev = prevLenRef.current;
+    prevLenRef.current = tasks.length;
+    // Auto-collapse when the list grows past a comfortable size.
+    if (prev <= 12 && tasks.length > 12) setOpen(false);
+  }, [tasks.length]);
+
   const allSelected = tasks.length > 0 && tasks.every((t) => selected.has(t.id));
   const someSelected = tasks.some((t) => selected.has(t.id));
   const selectedInLane = [...selected].filter((id) => tasks.some((t) => t.id === id)).length;
@@ -828,59 +838,106 @@ function QueueLaneBlock({
       : "border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20";
   return (
     <div className={`rounded-md border p-2 ${borderClass}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-        <div>
-          <h5 className="text-xs font-semibold text-slate-100">{title}</h5>
-          <p className="text-[10px] text-slate-500">{hint}</p>
-        </div>
-        {tasks.length > 0 ? (
-          <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer">
-            <input
-              type="checkbox"
-              className="accent-cyan-500"
-              checked={allSelected}
-              onChange={(e) => onSelectAll(e.target.checked)}
-            />
-            Select all
-          </label>
-        ) : null}
-      </div>
-      <ul className="space-y-1 max-h-40 overflow-y-auto text-xs">
-        {tasks.length === 0 ? (
-          <li className="text-slate-600 px-1 py-1">Empty</li>
-        ) : (
-          tasks.map((t) => (
-            <li
-              key={t.id}
-              className="flex items-center gap-2 rounded border border-slate-800/80 px-2 py-1.5"
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-start gap-2 text-left min-w-0 flex-1 hover:opacity-90"
+          title={open ? "Collapse list" : "Expand list"}
+          aria-expanded={open}
+        >
+          <span className="text-slate-400 text-xs shrink-0 pt-0.5 w-3">{open ? "▾" : "▸"}</span>
+          <span className="min-w-0">
+            <h5 className="text-xs font-semibold text-slate-100">{title}</h5>
+            <p className="text-[10px] text-slate-500">{hint}</p>
+            {!open && tasks.length > 0 ? (
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                {tasks.length.toLocaleString()} contact{tasks.length === 1 ? "" : "s"} hidden — click to
+                open
+                {selectedInLane > 0 ? ` · ${selectedInLane} selected` : ""}
+              </p>
+            ) : null}
+          </span>
+        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {tasks.length > 0 ? (
+            <label
+              className="inline-flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer"
+              onClick={(e) => e.stopPropagation()}
             >
               <input
                 type="checkbox"
-                className="accent-cyan-500 shrink-0"
-                checked={selected.has(t.id)}
-                onChange={() => onToggle(t.id)}
+                className="accent-cyan-500"
+                checked={allSelected}
+                onChange={(e) => onSelectAll(e.target.checked)}
               />
-              <span className="text-slate-200 truncate flex-1 min-w-0">
-                {t.company_name || t.contact_name || `#${t.buyer_id}`}
-              </span>
-              <span className="flex shrink-0 flex-wrap gap-1 justify-end">
-                {moveTargets.map((mt) => (
-                  <button
-                    key={mt.lane}
-                    type="button"
-                    disabled={moving}
-                    onClick={() => mt.onMoveOne(t.id)}
-                    className={`text-[10px] px-1.5 py-0.5 rounded border disabled:opacity-40 ${btnClass}`}
-                  >
-                    {mt.label}
-                  </button>
-                ))}
-              </span>
-            </li>
-          ))
-        )}
-      </ul>
-      {someSelected ? (
+              Select all
+            </label>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="text-[11px] px-2 py-0.5 rounded border border-slate-600 text-slate-300 hover:bg-slate-800"
+            title={open ? "Collapse list" : "Expand list"}
+          >
+            {open ? "Close" : "Open"}
+          </button>
+        </div>
+      </div>
+      {open ? (
+        <>
+          <ul className="space-y-1 max-h-48 overflow-y-auto text-xs mt-1">
+            {tasks.length === 0 ? (
+              <li className="text-slate-600 px-1 py-1">Empty</li>
+            ) : (
+              tasks.map((t) => (
+                <li
+                  key={t.id}
+                  className="flex items-center gap-2 rounded border border-slate-800/80 px-2 py-1.5"
+                >
+                  <input
+                    type="checkbox"
+                    className="accent-cyan-500 shrink-0"
+                    checked={selected.has(t.id)}
+                    onChange={() => onToggle(t.id)}
+                  />
+                  <span className="text-slate-200 truncate flex-1 min-w-0">
+                    {t.company_name || t.contact_name || `#${t.buyer_id}`}
+                  </span>
+                  <span className="flex shrink-0 flex-wrap gap-1 justify-end">
+                    {moveTargets.map((mt) => (
+                      <button
+                        key={mt.lane}
+                        type="button"
+                        disabled={moving}
+                        onClick={() => mt.onMoveOne(t.id)}
+                        className={`text-[10px] px-1.5 py-0.5 rounded border disabled:opacity-40 ${btnClass}`}
+                      >
+                        {mt.label}
+                      </button>
+                    ))}
+                  </span>
+                </li>
+              ))
+            )}
+          </ul>
+          {someSelected ? (
+            <div className="mt-2 flex flex-col gap-1">
+              {moveTargets.map((mt) => (
+                <button
+                  key={mt.lane}
+                  type="button"
+                  disabled={moving}
+                  onClick={mt.onBulkMove}
+                  className={`w-full text-[11px] px-2 py-1.5 rounded-lg border disabled:opacity-40 ${bulkClass}`}
+                >
+                  Move selected {mt.label} ({selectedInLane})
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </>
+      ) : someSelected ? (
         <div className="mt-2 flex flex-col gap-1">
           {moveTargets.map((mt) => (
             <button
