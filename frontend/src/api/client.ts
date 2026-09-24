@@ -2550,6 +2550,36 @@ export const client = {
       { method: "POST", timeoutMs: 600_000 },
     );
   },
+  getImportRollbackStatus: (source: string, opts?: { force?: boolean }) => {
+    const q = new URLSearchParams();
+    q.set("source", source);
+    if (opts?.force) q.set("force", "true");
+    return request<{
+      available: boolean;
+      source: string;
+      batch_id?: number | null;
+      created_count?: number;
+      buyer_ids_count?: number;
+      created_at?: string | null;
+      expires_at?: string | null;
+      remaining_seconds?: number;
+      reason?: string;
+      heuristic?: boolean;
+    }>(`/leads/table/import-rollback?${q.toString()}`);
+  },
+  rollbackLastImport: (source: string, opts?: { force?: boolean }) =>
+    request<{
+      ok: boolean;
+      source: string;
+      removed_count: number;
+      remaining_count: number;
+      batch_id?: number | null;
+      heuristic?: boolean;
+    }>("/leads/table/import-rollback", {
+      method: "POST",
+      body: JSON.stringify({ source, force: Boolean(opts?.force) }),
+      timeoutMs: 300_000,
+    }),
   createLead: (data: LeadCreate) =>
     request<Lead>("/leads", { method: "POST", body: JSON.stringify(data) }),
   suggestCompanyNames: (q: string, limit = 12) => {

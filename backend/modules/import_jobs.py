@@ -331,10 +331,31 @@ def _finalize_import_result(
                     "skipped_count": len(skipped_rows),
                     "replaced_count": len(replaced_rows),
                     "import_job_id": job_id,
+                    "import_source": import_source,
                 },
             )
         except Exception:  # noqa: BLE001 — activity log must not fail the import
             pass
+
+    if created_count > 0 and import_source:
+        try:
+            from modules.import_rollback import record_import_batch
+
+            created_buyers = list(result.get("created") or [])
+            buyer_ids = [
+                int(getattr(b, "id", 0) or (b.get("id") if isinstance(b, dict) else 0) or 0)
+                for b in created_buyers
+            ]
+            record_import_batch(
+                db,
+                source=import_source,
+                buyer_ids=buyer_ids,
+                created_by_user_id=user_id,
+                import_job_id=job_id,
+                commit=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"Import batch record skipped: {exc}", flush=True)
 
     _post_import_country_repair(
         db,

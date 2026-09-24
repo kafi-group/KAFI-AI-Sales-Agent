@@ -1479,6 +1479,46 @@ def get_import_job_status(
     return ImportJobStatusResponse(**job)
 
 
+@router.get("/table/import-rollback")
+def get_import_rollback_status(
+    source: str = Query(..., min_length=1),
+    force: bool = Query(False),
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(require_admin),
+):
+    """Admin only — whether Undo last import is available for this list (1 hour window)."""
+    _ = user
+    from modules.import_rollback import get_rollback_status
+
+    return get_rollback_status(db, source, allow_expired=bool(force))
+
+
+class ImportRollbackRequest(BaseModel):
+    source: str
+    # Admin emergency: allow undo past the 1-hour window (still only last import).
+    force: bool = False
+
+
+@router.post("/table/import-rollback")
+def post_import_rollback(
+    payload: ImportRollbackRequest,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(require_admin),
+):
+    """Admin only — undo the last spreadsheet import into this list (within 1 hour)."""
+    from modules.import_rollback import rollback_last_import
+
+    try:
+        return rollback_last_import(
+            db,
+            source=payload.source,
+            actor_user_id=user.id,
+            allow_expired=bool(payload.force),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get("/{lead_id}/cross-sell")
 def cross_sell_recommendations(
     lead_id: int,

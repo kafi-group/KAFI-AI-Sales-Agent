@@ -1006,6 +1006,28 @@ class HorekaLineItem(Base):
     )
 
 
+class LeadImportBatch(Base):
+    """One spreadsheet import into a list/source — used for admin Undo last import."""
+
+    __tablename__ = "lead_import_batches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    buyer_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    created_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    import_job_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    rolled_back_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    rolled_back_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 class CustomLeadModule(Base):
     """Dynamic custom lead module/list under Old clients."""
 

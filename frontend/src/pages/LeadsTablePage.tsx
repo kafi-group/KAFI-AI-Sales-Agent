@@ -1215,6 +1215,14 @@ export function LeadsTablePage({
   > | null>(null);
   const [bulkEmailNotice, setBulkEmailNotice] = useState<string | null>(null);
   const [deduping, setDeduping] = useState(false);
+  const [undoingImport, setUndoingImport] = useState(false);
+  const [importRollback, setImportRollback] = useState<{
+    available: boolean;
+    source: string;
+    created_count?: number;
+    remaining_seconds?: number;
+    reason?: string;
+  } | null>(null);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [tableZoom, setTableZoom] = useState(TABLE_ZOOM_DEFAULT);
@@ -1622,6 +1630,53 @@ export function LeadsTablePage({
     : isTargetedPool || isCustomModule || isTestingModule
       ? section
       : "csv";
+
+  const canUndoLastImport =
+    isAdmin &&
+    Boolean(importSource) &&
+    importSource !== "csv" &&
+    (isOldClients ||
+      isIncompleteArchives ||
+      isTargetedPool ||
+      isCustomModule ||
+      isTestingModule);
+
+  useEffect(() => {
+    if (!canUndoLastImport) {
+      setImportRollback(null);
+      return;
+    }
+    let active = true;
+    const load = () => {
+      void client
+        .getImportRollbackStatus(importSource)
+        .then(async (status) => {
+          if (!active) return;
+          if (status.available) {
+            setImportRollback(status);
+            return;
+          }
+          // Still show last-import info for admin force-undo when window expired.
+          try {
+            const forced = await client.getImportRollbackStatus(importSource, {
+              force: true,
+            });
+            if (active) setImportRollback(forced.available ? forced : status);
+          } catch {
+            if (active) setImportRollback(status);
+          }
+        })
+        .catch(() => {
+          if (active) setImportRollback(null);
+        });
+    };
+    load();
+    const t = window.setInterval(load, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(t);
+    };
+  }, [canUndoLastImport, importSource, total]);
   const isCallOutcomeSection =
     section === "interested_clients" ||
     section === "sales_interested_clients" ||
@@ -2866,6 +2921,53 @@ export function LeadsTablePage({
     }
   }
 
+  async function undoLastImport() {
+    if (!isAdmin || !canUndoLastImport || undoingImport) return;
+    let status = importRollback;
+    if (!status?.available) {
+      try {
+        status = await client.getImportRollbackStatus(importSource, { force: true });
+        setImportRollback(status);
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!status?.available) {
+      onError(status?.reason || "No last import to undo for this list.");
+      return;
+    }
+    const count = status.created_count ?? 0;
+    const expired = (status.remaining_seconds ?? 0) <= 0;
+    const confirmed = window.confirm(
+      `Undo last spreadsheet import into this list?\n\n` +
+        `Deletes ~${count} contact(s) from the last import only.\n` +
+        `Earlier contacts stay. (Empty → import → undo → empty again.)\n\n` +
+        (expired
+          ? "WARNING: This import is older than 1 hour. Force undo as admin?\n\n"
+          : `Window remaining: ~${Math.ceil((status.remaining_seconds ?? 0) / 60)} min.\n\n`) +
+        `Continue?`,
+    );
+    if (!confirmed) return;
+    setUndoingImport(true);
+    setSaveNotice(null);
+    try {
+      const result = await client.rollbackLastImport(importSource, { force: expired });
+      await loadTable();
+      await loadSectionCounts();
+      await loadCustomModules();
+      setSaveNotice(
+        `Undid last import — removed ${result.removed_count} contact(s). ` +
+          `${result.remaining_count} remain in this list.`,
+      );
+      const next = await client.getImportRollbackStatus(importSource);
+      setImportRollback(next);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Undo last import failed");
+    } finally {
+      setUndoingImport(false);
+    }
+  }
+
   async function removeOldClientOverlaps() {
     if (!isAdmin || isOldClients) return;
     const confirmed = window.confirm(
@@ -3775,6 +3877,30 @@ export function LeadsTablePage({
           >
             {exporting ? "Exporting…" : "Export"}
           </ActionButton>
+          {canUndoLastImport ? (
+            <ActionButton
+              icon={IconXCircle}
+              variant="violet"
+              onClick={() => void undoLastImport()}
+              disabled={undoingImport || loading || editMode}
+              title={
+                importRollback?.available
+                  ? `Undo / roll back last spreadsheet import (~${importRollback.created_count ?? "?"} contacts). Admin only · normally within 1 hour.`
+                  : "Undo / roll back last spreadsheet import (admin). Uses force if older than 1 hour."
+              }
+            >
+              {undoingImport
+                ? "Undoing…"
+                : importRollback?.available
+                  ? `Undo last import (${importRollback.created_count ?? "…"}${
+                      importRollback.remaining_seconds != null &&
+                      importRollback.remaining_seconds > 0
+                        ? ` · ${Math.ceil(importRollback.remaining_seconds / 60)}m left`
+                        : ""
+                    })`
+                  : "Undo last import"}
+            </ActionButton>
+          ) : null}
           {selected.size > 0 && section !== "schedule_meeting" ? (
             <ActionButton
               icon={IconCheck}

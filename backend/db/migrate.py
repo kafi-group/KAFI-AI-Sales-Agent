@@ -371,6 +371,16 @@ def _ensure_custom_lead_modules_table() -> None:
         db.close()
 
 
+def _ensure_lead_import_batches_table() -> None:
+    """Ensure lead_import_batches exists for admin Undo last import."""
+    from db.models import Base
+
+    inspector = inspect(engine)
+    if "lead_import_batches" not in inspector.get_table_names():
+        Base.metadata.tables["lead_import_batches"].create(engine, checkfirst=True)
+        print("Created lead_import_batches table.", flush=True)
+
+
 def _ensure_target_workspace_tables() -> None:
     """Ensure Target and Workspace module tables exist and seed initial defaults."""
     from db.models import Base
@@ -418,6 +428,7 @@ def run_migrations() -> None:
         _ensure_horeka_table()
         _ensure_custom_lead_modules_table()
         _ensure_target_workspace_tables()
+        _ensure_lead_import_batches_table()
     except Exception as exc:
         print(f"WARNING: post-migrate schema ensure failed (continuing): {exc}", flush=True)
 
