@@ -26,6 +26,21 @@ const PERSONAS = [
   { id: "male" as const, label: "Rayan" },
 ];
 
+type QueueLane = "outreach" | "data_update" | "auto_mode";
+
+const LANE_LABEL: Record<QueueLane, string> = {
+  outreach: "Outreach",
+  data_update: "Data Update",
+  auto_mode: "AI Auto Mode",
+};
+
+function normalizeLane(raw: string | null | undefined): QueueLane {
+  const v = (raw || "outreach").trim().toLowerCase();
+  if (v === "data_update") return "data_update";
+  if (v === "auto_mode") return "auto_mode";
+  return "outreach";
+}
+
 type DataUpdateFieldChange = {
   field?: string;
   label?: string;
@@ -398,17 +413,14 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
   }, [load]);
 
   const queues = useMemo(() => {
-    const out: Record<
-      "female" | "male",
-      { outreach: AiSalesAgentTask[]; data_update: AiSalesAgentTask[] }
-    > = {
-      female: { outreach: [], data_update: [] },
-      male: { outreach: [], data_update: [] },
+    const out: Record<"female" | "male", Record<QueueLane, AiSalesAgentTask[]>> = {
+      female: { outreach: [], data_update: [], auto_mode: [] },
+      male: { outreach: [], data_update: [], auto_mode: [] },
     };
     for (const t of tasks) {
+      if (t.persona !== "male" && t.persona !== "female") continue;
       const persona = t.persona === "male" ? "male" : "female";
-      const lane = (t.queue_lane || "outreach") === "data_update" ? "data_update" : "outreach";
-      out[persona][lane].push(t);
+      out[persona][normalizeLane(t.queue_lane)].push(t);
     }
     return out;
   }, [tasks]);
@@ -463,11 +475,7 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
     });
   }
 
-  function selectAllInLane(
-    persona: "female" | "male",
-    lane: "outreach" | "data_update",
-    on: boolean,
-  ) {
+  function selectAllInLane(persona: "female" | "male", lane: QueueLane, on: boolean) {
     const ids = queues[persona][lane].map((t) => t.id);
     setSelectedByPersona((prev) => {
       const next = new Set(prev[persona]);
@@ -479,13 +487,11 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
     });
   }
 
-  async function moveSelected(
-    persona: "female" | "male",
-    lane: "outreach" | "data_update",
-  ) {
-    const ids = [...selectedByPersona[persona]].filter((id) =>
-      queues[persona].outreach.concat(queues[persona].data_update).some((t) => t.id === id),
-    );
+  async function moveSelected(persona: "female" | "male", lane: QueueLane) {
+    const allIds = (
+      ["outreach", "data_update", "auto_mode"] as QueueLane[]
+    ).flatMap((l) => queues[persona][l].map((t) => t.id));
+    const ids = [...selectedByPersona[persona]].filter((id) => allIds.includes(id));
     if (!ids.length) {
       onError("Select one or more contacts first.");
       return;
@@ -497,7 +503,9 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
       onTasksChanged();
       await load();
       setNotice(
-        `Moved ${ids.length} contact(s) to ${lane === "data_update" ? "Data Update" : "Outreach"} — still on ${persona === "female" ? "Sara" : "Rayan"}.`,
+        `Moved ${ids.length} contact(s) to ${LANE_LABEL[lane]} — still on ${
+          persona === "female" ? "Sara" : "Rayan"
+        }.`,
       );
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to move contacts");
@@ -506,7 +514,7 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
     }
   }
 
-  async function setLane(taskId: number, lane: "outreach" | "data_update") {
+  async function setLane(taskId: number, lane: QueueLane) {
     setMoving(true);
     try {
       await client.setAiSalesTaskLane({ task_ids: [taskId], queue_lane: lane });
@@ -537,8 +545,9 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
         <div>
           <h3 className="text-base font-semibold text-slate-100">AI Auto Data Update Schedule</h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Sara and Rayan each keep their own contacts. Within an agent, a contact is either
-            Outreach or Data Update — moving lanes never switches agents.
+            Sara and Rayan each keep their own contacts. Split each agent&apos;s list into Outreach
+            (calls), Data Update (research), or AI Auto Mode (emails / Auto Mode actions) — one
+            contact, one lane.
           </p>
         </div>
         <span className="text-slate-400 text-sm shrink-0">{open ? "▾" : "▸"}</span>
@@ -555,8 +564,11 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
               const prog = run?.progress;
               const outreach = queues[p.id].outreach;
               const dataUpdate = queues[p.id].data_update;
+              const autoMode = queues[p.id].auto_mode;
               const selected = selectedByPersona[p.id];
               const stopMode = (sch?.stop_mode || "until_done") as "until_done" | "until_end_time";
+              const otherLanes = (from: QueueLane): QueueLane[] =>
+                (["outreach", "data_update", "auto_mode"] as QueueLane[]).filter((l) => l !== from);
               return (
                 <div
                   key={p.id}
@@ -715,16 +727,18 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
                   <div className="grid gap-2 pt-1">
                     <QueueLaneBlock
                       title={`Outreach (${outreach.length})`}
-                      hint="Calling / Auto Mode uses this list only."
+                      hint="Calling only — Start calling / dialer uses this list."
                       tasks={outreach}
                       selected={selected}
                       moving={moving}
                       onToggle={(id) => toggleSelect(p.id, id)}
                       onSelectAll={(on) => selectAllInLane(p.id, "outreach", on)}
-                      onMoveOne={(id) => void setLane(id, "data_update")}
-                      moveLabel="→ Data Update"
-                      onBulkMove={() => void moveSelected(p.id, "data_update")}
-                      bulkLabel="Move selected → Data Update"
+                      moveTargets={otherLanes("outreach").map((lane) => ({
+                        lane,
+                        label: `→ ${LANE_LABEL[lane]}`,
+                        onMoveOne: (id: number) => void setLane(id, lane),
+                        onBulkMove: () => void moveSelected(p.id, lane),
+                      }))}
                     />
                     <QueueLaneBlock
                       title={`Data Update (${dataUpdate.length})`}
@@ -732,13 +746,31 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
                       tasks={dataUpdate}
                       selected={selected}
                       moving={moving}
-                      accent
+                      accent="cyan"
                       onToggle={(id) => toggleSelect(p.id, id)}
                       onSelectAll={(on) => selectAllInLane(p.id, "data_update", on)}
-                      onMoveOne={(id) => void setLane(id, "outreach")}
-                      moveLabel="→ Outreach"
-                      onBulkMove={() => void moveSelected(p.id, "outreach")}
-                      bulkLabel="Move selected → Outreach"
+                      moveTargets={otherLanes("data_update").map((lane) => ({
+                        lane,
+                        label: `→ ${LANE_LABEL[lane]}`,
+                        onMoveOne: (id: number) => void setLane(id, lane),
+                        onBulkMove: () => void moveSelected(p.id, lane),
+                      }))}
+                    />
+                    <QueueLaneBlock
+                      title={`AI Auto Mode (${autoMode.length})`}
+                      hint="Email templates / Auto Mode Start — only these contacts."
+                      tasks={autoMode}
+                      selected={selected}
+                      moving={moving}
+                      accent="violet"
+                      onToggle={(id) => toggleSelect(p.id, id)}
+                      onSelectAll={(on) => selectAllInLane(p.id, "auto_mode", on)}
+                      moveTargets={otherLanes("auto_mode").map((lane) => ({
+                        lane,
+                        label: `→ ${LANE_LABEL[lane]}`,
+                        onMoveOne: (id: number) => void setLane(id, lane),
+                        onBulkMove: () => void moveSelected(p.id, lane),
+                      }))}
                     />
                   </div>
                 </div>
@@ -760,32 +792,42 @@ function QueueLaneBlock({
   accent,
   onToggle,
   onSelectAll,
-  onMoveOne,
-  moveLabel,
-  onBulkMove,
-  bulkLabel,
+  moveTargets,
 }: {
   title: string;
   hint: string;
   tasks: AiSalesAgentTask[];
   selected: Set<number>;
   moving: boolean;
-  accent?: boolean;
+  accent?: "cyan" | "violet";
   onToggle: (id: number) => void;
   onSelectAll: (on: boolean) => void;
-  onMoveOne: (id: number) => void;
-  moveLabel: string;
-  onBulkMove: () => void;
-  bulkLabel: string;
+  moveTargets: Array<{
+    lane: QueueLane;
+    label: string;
+    onMoveOne: (id: number) => void;
+    onBulkMove: () => void;
+  }>;
 }) {
   const allSelected = tasks.length > 0 && tasks.every((t) => selected.has(t.id));
   const someSelected = tasks.some((t) => selected.has(t.id));
+  const selectedInLane = [...selected].filter((id) => tasks.some((t) => t.id === id)).length;
+  const borderClass =
+    accent === "violet"
+      ? "border-violet-700/40 bg-violet-950/20"
+      : accent === "cyan"
+        ? "border-cyan-700/40 bg-cyan-950/20"
+        : "border-slate-800 bg-slate-950/40";
+  const btnClass =
+    accent === "violet"
+      ? "border-violet-500/40 text-violet-200 hover:bg-violet-500/15"
+      : "border-cyan-500/40 text-cyan-200 hover:bg-cyan-500/15";
+  const bulkClass =
+    accent === "violet"
+      ? "border-violet-500/40 bg-violet-500/10 text-violet-100 hover:bg-violet-500/20"
+      : "border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20";
   return (
-    <div
-      className={`rounded-md border p-2 ${
-        accent ? "border-cyan-700/40 bg-cyan-950/20" : "border-slate-800 bg-slate-950/40"
-      }`}
-    >
+    <div className={`rounded-md border p-2 ${borderClass}`}>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
         <div>
           <h5 className="text-xs font-semibold text-slate-100">{title}</h5>
@@ -821,27 +863,37 @@ function QueueLaneBlock({
               <span className="text-slate-200 truncate flex-1 min-w-0">
                 {t.company_name || t.contact_name || `#${t.buyer_id}`}
               </span>
-              <button
-                type="button"
-                disabled={moving}
-                onClick={() => onMoveOne(t.id)}
-                className="shrink-0 text-[11px] px-2 py-0.5 rounded border border-cyan-500/40 text-cyan-200 hover:bg-cyan-500/15 disabled:opacity-40"
-              >
-                {moveLabel}
-              </button>
+              <span className="flex shrink-0 flex-wrap gap-1 justify-end">
+                {moveTargets.map((mt) => (
+                  <button
+                    key={mt.lane}
+                    type="button"
+                    disabled={moving}
+                    onClick={() => mt.onMoveOne(t.id)}
+                    className={`text-[10px] px-1.5 py-0.5 rounded border disabled:opacity-40 ${btnClass}`}
+                  >
+                    {mt.label}
+                  </button>
+                ))}
+              </span>
             </li>
           ))
         )}
       </ul>
       {someSelected ? (
-        <button
-          type="button"
-          disabled={moving}
-          onClick={onBulkMove}
-          className="mt-2 w-full text-[11px] px-2 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-40"
-        >
-          {bulkLabel} ({[...selected].filter((id) => tasks.some((t) => t.id === id)).length})
-        </button>
+        <div className="mt-2 flex flex-col gap-1">
+          {moveTargets.map((mt) => (
+            <button
+              key={mt.lane}
+              type="button"
+              disabled={moving}
+              onClick={mt.onBulkMove}
+              className={`w-full text-[11px] px-2 py-1.5 rounded-lg border disabled:opacity-40 ${bulkClass}`}
+            >
+              Move selected {mt.label} ({selectedInLane})
+            </button>
+          ))}
+        </div>
       ) : null}
     </div>
   );

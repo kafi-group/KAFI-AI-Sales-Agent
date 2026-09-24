@@ -338,7 +338,7 @@ export function AiAutoModePanel({
           `From: ${cfg.from_mailbox_email || "(your mailbox)"}\n` +
           `CC: ${cfg.cc || "(none)"}\n` +
           `Subject: ${cfg.subject.slice(0, 80)}${cfg.subject.length > 80 ? "…" : ""}\n\n` +
-          `Queued Outreach contacts for ${agent} will each get a personalized copy.`,
+          `Contacts on ${agent}'s AI Auto Mode list will each get a personalized copy.`,
       );
       if (!ok) return;
     }
@@ -370,9 +370,10 @@ export function AiAutoModePanel({
           <h3 className="text-base font-semibold text-slate-100">AI Auto Mode</h3>
           <p className="text-xs text-slate-400 mt-0.5">
             The toggle only saves which actions are allowed. Use{" "}
-            <strong className="text-slate-300">Start</strong> to run now on that agent&apos;s
-            Outreach queue, or <strong className="text-slate-300">Schedule</strong> to pick a
-            date and time for Start (e.g. bulk email).
+            <strong className="text-slate-300">Start</strong> to run now on that agent&apos;s{" "}
+            <strong className="text-slate-300">AI Auto Mode</strong> list (move contacts there under
+            the schedule panel), or <strong className="text-slate-300">Schedule</strong> a date/time
+            for Start.
           </p>
         </div>
         <span className="text-slate-400 text-sm shrink-0 pt-0.5">{open ? "▾" : "▸"}</span>
@@ -404,7 +405,7 @@ export function AiAutoModePanel({
                   disabled={!settings.enabled || startingPersona === "female"}
                   onClick={() => handleStart("female")}
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40"
-                  title="Start Sara now using Auto Mode actions on her Outreach queue"
+                  title="Start Sara now using Auto Mode actions on her AI Auto Mode list"
                 >
                   {startingPersona === "female" ? "Starting…" : "Start Sara"}
                 </button>
@@ -413,7 +414,7 @@ export function AiAutoModePanel({
                   disabled={!settings.enabled || startingPersona === "male"}
                   onClick={() => handleStart("male")}
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40"
-                  title="Start Rayan now using Auto Mode actions on his Outreach queue"
+                  title="Start Rayan now using Auto Mode actions on his AI Auto Mode list"
                 >
                   {startingPersona === "male" ? "Starting…" : "Start Rayan"}
                 </button>

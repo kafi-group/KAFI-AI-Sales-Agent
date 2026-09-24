@@ -49,7 +49,12 @@ def run_due_auto_mode_starts() -> dict[str, Any]:
                 continue
             try:
                 result = asa.start_runner(
-                    RunnerControlRequest(persona=persona, sequence=True, task_id=None),
+                    RunnerControlRequest(
+                        persona=persona,
+                        sequence=True,
+                        task_id=None,
+                        queue_lane="auto_mode",
+                    ),
                     db=db,
                     user=user,
                 )

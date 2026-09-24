@@ -64,6 +64,14 @@ class RunnerControlRequest(BaseModel):
     persona: str
     task_id: int | None = None
     sequence: bool = True
+    # When set (e.g. auto_mode from AI Auto Mode Start), dial/email that lane only.
+    queue_lane: str | None = None
+
+
+_VALID_QUEUE_LANES = frozenset({"outreach", "data_update", "auto_mode"})
+_AGENT_PERSONAS = frozenset({"male", "female"})
+_PIPELINE_PERSONA = "pipeline"
+_ASSIGNABLE_PERSONAS = frozenset({"male", "female", "pipeline"})
 
 
 # Global mock/live runner state
@@ -535,10 +543,11 @@ def _dial_task(
 
 def _task_lane(task: dict[str, Any]) -> str:
     lane = str(task.get("queue_lane") or "outreach").strip().lower()
-    return lane if lane in ("outreach", "data_update") else "outreach"
+    return lane if lane in _VALID_QUEUE_LANES else "outreach"
 
 
-def _next_queued(persona: str) -> dict[str, Any] | None:
+def _next_queued(persona: str, *, lane: str = "outreach") -> dict[str, Any] | None:
+    want = lane if lane in _VALID_QUEUE_LANES else "outreach"
     return next(
         (
             t
@@ -547,7 +556,7 @@ def _next_queued(persona: str) -> dict[str, Any] | None:
             and t.get("status") == "queued"
             and t.get("ready")
             and t.get("contact_phone")
-            and _task_lane(t) == "outreach"
+            and _task_lane(t) == want
         ),
         None,
     )
@@ -587,7 +596,10 @@ def _advance_sequence_locked(
         t.get("persona") == persona and t.get("status") == "in_progress" for t in _TASKS
     ):
         return
-    nxt = _next_queued(persona)
+    dial_lane = str(runner.get("queue_lane") or "outreach").strip().lower()
+    if dial_lane not in _VALID_QUEUE_LANES:
+        dial_lane = "outreach"
+    nxt = _next_queued(persona, lane=dial_lane)
     if not nxt:
         runner["status"] = "idle"
         runner["sequence_mode"] = False
@@ -895,6 +907,17 @@ def list_tasks(
     return {"tasks": filtered[:limit]}
 
 
+def _persona_label(persona: str) -> str:
+    p = (persona or "").strip().lower()
+    if p == "female":
+        return "Sara"
+    if p == "male":
+        return "Rayan"
+    if p == _PIPELINE_PERSONA:
+        return "AI Sales Agent list"
+    return p or "unknown"
+
+
 @router.post("/tasks/assign")
 def assign_tasks(
     payload: AssignTaskRequest,
@@ -902,13 +925,15 @@ def assign_tasks(
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     _ = user
-    if payload.persona not in ("male", "female"):
-        raise HTTPException(400, "Persona must be male (Rayan) or female (Sara).")
+    target = str(payload.persona or "").strip().lower()
+    if target not in _ASSIGNABLE_PERSONAS:
+        raise HTTPException(
+            400,
+            "Persona must be pipeline (AI Sales Agent list), female (Sara), or male (Rayan).",
+        )
     created = []
     skipped: list[dict[str, Any]] = []
-    other_persona = "male" if payload.persona == "female" else "female"
-    other_label = "Rayan" if other_persona == "male" else "Sara"
-    self_label = "Sara" if payload.persona == "female" else "Rayan"
+    self_label = _persona_label(target)
     contact_ids = payload.contact_ids or []
 
     def _same_contact(t: dict[str, Any], bid: int, cid: int | None, phone: str | None) -> bool:
@@ -919,6 +944,12 @@ def assign_tasks(
         if cid is None and phone is None and t.get("buyer_id") == bid and t.get("contact_id") is None:
             return True
         return False
+
+    def _find_same(bid: int, cid: int | None, phone: str | None) -> dict[str, Any] | None:
+        return next(
+            (t for t in _TASKS if _same_contact(t, bid, cid, phone)),
+            None,
+        )
 
     for index, bid in enumerate(payload.buyer_ids):
         buyer = db.get(Buyer, bid)
@@ -936,43 +967,63 @@ def assign_tasks(
         contact_email = _contact_email(contact)
         contact_id = contact.id if contact else None
 
-        # Already on the other agent — never duplicate across Sara/Rayan.
-        on_other = next(
-            (
-                t
-                for t in _TASKS
-                if t.get("persona") == other_persona
-                and _same_contact(t, bid, contact_id, contact_phone)
-            ),
-            None,
-        )
-        if on_other:
-            skipped.append(
-                {
-                    "buyer_id": bid,
-                    "contact_id": contact_id,
-                    "company_name": company_name,
-                    "reason": f"Already assigned to {other_label} — remove from {other_label} first.",
-                    "other_task_id": on_other.get("id"),
-                }
-            )
-            continue
-
-        # Keep one row per agent+buyer+contact until manually removed.
-        existing = next(
-            (
-                t
-                for t in _TASKS
-                if t.get("persona") == payload.persona
-                and _same_contact(t, bid, contact_id, contact_phone)
-            ),
-            None,
-        )
+        existing = _find_same(bid, contact_id, contact_phone)
         if existing:
-            if existing.get("status") in ("queued", "in_progress"):
+            cur = str(existing.get("persona") or "").strip().lower()
+            # Already on a different agent — do not silently steal.
+            if cur in _AGENT_PERSONAS and target != cur:
+                if target == _PIPELINE_PERSONA:
+                    skipped.append(
+                        {
+                            "buyer_id": bid,
+                            "contact_id": contact_id,
+                            "company_name": company_name,
+                            "reason": (
+                                f"Already assigned to {_persona_label(cur)} — "
+                                f"remove from {_persona_label(cur)} first."
+                            ),
+                            "other_task_id": existing.get("id"),
+                        }
+                    )
+                    continue
+                if cur != target:
+                    skipped.append(
+                        {
+                            "buyer_id": bid,
+                            "contact_id": contact_id,
+                            "company_name": company_name,
+                            "reason": (
+                                f"Already assigned to {_persona_label(cur)} — "
+                                f"remove from {_persona_label(cur)} first."
+                            ),
+                            "other_task_id": existing.get("id"),
+                        }
+                    )
+                    continue
+
+            # Staging → Sara/Rayan: promote in place.
+            if cur == _PIPELINE_PERSONA and target in _AGENT_PERSONAS:
+                existing["persona"] = target
+                existing["status"] = "queued"
+                existing["ready"] = bool(
+                    contact_phone
+                    or contact_email
+                    or existing.get("contact_phone")
+                    or existing.get("contact_email")
+                )
+                existing["contact_phone"] = contact_phone or existing.get("contact_phone")
+                existing["contact_email"] = contact_email or existing.get("contact_email")
+                existing["contact_name"] = contact_name or existing.get("contact_name")
+                existing["company_name"] = company_name or existing.get("company_name")
+                existing["remarks"] = f"Assigned to {_persona_label(target)} from AI Sales Agent list."
                 created.append(existing)
                 continue
-            # Already assigned historically — put back in queue for another dial; never drop.
+
+            if existing.get("status") in ("queued", "in_progress") and cur == target:
+                created.append(existing)
+                continue
+            # Already assigned historically — put back in queue; never drop.
+            existing["persona"] = target
             existing["status"] = "queued"
             existing["ready"] = bool(
                 contact_phone
@@ -996,7 +1047,7 @@ def assign_tasks(
 
         task = {
             "id": _next_task_id(),
-            "persona": payload.persona,
+            "persona": target,
             "buyer_id": bid,
             "contact_id": contact_id,
             "company_name": company_name,
@@ -1007,7 +1058,8 @@ def assign_tasks(
             "designation": (contact.designation if contact else None),
             "grading": (buyer.company_grading if buyer else None),
             "status": "queued",
-            "queue_lane": "outreach",
+            # Staging list has no lane yet; agents default to Outreach until moved.
+            "queue_lane": "outreach" if target in _AGENT_PERSONAS else None,
             "ready": bool(contact_phone or contact_email),
             "warnings": (
                 []
@@ -1027,10 +1079,56 @@ def assign_tasks(
         )
         extra = f" (+{len(skipped) - 5} more)" if len(skipped) > 5 else ""
         notice = (
-            f"{len(skipped)} contact(s) already on {other_label} and were not added to {self_label}: "
-            f"{names}{extra}. Remove them from {other_label} first to reassign."
+            f"{len(skipped)} contact(s) were not added to {self_label}: "
+            f"{names}{extra}."
         )
     return {"tasks": created, "skipped": skipped, "notice": notice}
+
+
+class SetTaskPersonaRequest(BaseModel):
+    task_ids: list[int]
+    persona: str  # female | male
+
+
+@router.post("/tasks/set-persona")
+def set_task_persona(
+    payload: SetTaskPersonaRequest,
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Move staging (pipeline) contacts onto Sara or Rayan."""
+    _ = user
+    target = str(payload.persona or "").strip().lower()
+    if target not in _AGENT_PERSONAS:
+        raise HTTPException(400, "persona must be female (Sara) or male (Rayan)")
+    id_set = {int(x) for x in (payload.task_ids or []) if int(x) > 0}
+    updated = 0
+    skipped = 0
+    for t in _TASKS:
+        if t.get("id") not in id_set:
+            continue
+        cur = str(t.get("persona") or "").strip().lower()
+        if cur == target:
+            updated += 1
+            continue
+        # Only promote from staging, or allow Sara↔Rayan reassignment.
+        if cur not in (_PIPELINE_PERSONA, *_AGENT_PERSONAS):
+            skipped += 1
+            continue
+        t["persona"] = target
+        if t.get("status") not in ("in_progress",):
+            t["status"] = "queued"
+        if not t.get("queue_lane"):
+            t["queue_lane"] = "outreach"
+        t["remarks"] = f"Assigned to {_persona_label(target)}."
+        updated += 1
+    _refresh_runner_counts()
+    _persist_queue()
+    return {
+        "updated": updated,
+        "skipped": skipped,
+        "persona": target,
+        "label": _persona_label(target),
+    }
 
 
 @router.post("/tasks/self-test")
@@ -1214,7 +1312,7 @@ def _bulk_email_queued(
     user: AppUser,
     runner: dict[str, Any],
 ) -> dict[str, Any]:
-    """When Auto Mode has call_mode off: email all ready queued contacts for this agent."""
+    """When Auto Mode has call_mode off: email contacts on this agent's AI Auto Mode lane."""
     import html as html_mod
     import time
 
@@ -1224,6 +1322,7 @@ def _bulk_email_queued(
     from modules.email_templates import get_template, render_template_text
 
     agent_name = "Sara" if persona == "female" else "Rayan"
+    runner["queue_lane"] = "auto_mode"
     cfg = get_bulk_email_config(persona)
     subject_tpl = (cfg.get("subject") or "").strip()
     body_tpl = (cfg.get("body") or "").strip()
@@ -1275,11 +1374,11 @@ def _bulk_email_queued(
         t
         for t in _TASKS
         if t.get("persona") == persona
-        and _task_lane(t) == "outreach"
+        and _task_lane(t) == "auto_mode"
         and t.get("status") not in ("in_progress", "running")
     ]
-    # Bulk email: anyone still assigned to this agent (queued or already completed
-    # from an earlier pass). Re-open completed rows so Start can send again.
+    # Bulk email: AI Auto Mode lane only (queued or already completed from an
+    # earlier pass). Re-open completed rows so Start can send again.
     for t in queued:
         if t.get("status") != "queued":
             t["status"] = "queued"
@@ -1290,9 +1389,8 @@ def _bulk_email_queued(
     if not queued:
         raise HTTPException(
             400,
-            "No contacts on this agent's Outreach queue to email. "
-            "From Testing (or any list): select rows → Assign to AI Sales Agent → Sara, "
-            "then Start Sara again.",
+            f"No contacts on {agent_name}'s AI Auto Mode list to email. "
+            "Assign contacts to the agent, move them into AI Auto Mode, then Start again.",
         )
     sent = 0
     failed = 0
@@ -1417,20 +1515,38 @@ def start_runner(
         raise HTTPException(404, "Runner persona not found")
 
     auto = get_auto_mode_settings()
-    # Auto Mode ON + call mode OFF → bulk email queued contacts instead of dialling.
+    requested_lane = str(payload.queue_lane or "").strip().lower() or None
+    if requested_lane and requested_lane not in _VALID_QUEUE_LANES:
+        raise HTTPException(400, "queue_lane must be outreach, data_update, or auto_mode")
+    # Bulk email AI Auto Mode list when call mode is off:
+    # - explicit Auto Mode Start (queue_lane=auto_mode), or
+    # - legacy: Auto Mode enabled and Start without a lane.
     if (
-        auto.get("enabled")
+        payload.task_id is None
         and not auto.get("call_mode")
         and auto.get("bulk_email_when_no_call")
-        and payload.task_id is None
+        and (
+            requested_lane == "auto_mode"
+            or (bool(auto.get("enabled")) and requested_lane is None)
+        )
     ):
         return _bulk_email_queued(db, persona=payload.persona, user=user, runner=runner)
+
+    dial_lane = requested_lane or "outreach"
+    if dial_lane == "data_update":
+        raise HTTPException(
+            400,
+            "Data Update contacts are researched by Data Update Start, not the call runner.",
+        )
+    runner["queue_lane"] = dial_lane
 
     in_prog = next(
         (
             t
             for t in _TASKS
-            if t.get("persona") == payload.persona and t.get("status") in ("in_progress", "running")
+            if t.get("persona") == payload.persona
+            and t.get("status") in ("in_progress", "running")
+            and _task_lane(t) == dial_lane
         ),
         None,
     )
@@ -1451,12 +1567,17 @@ def start_runner(
         if nxt.get("status") != "queued":
             raise HTTPException(400, "That queue item is not waiting to be called.")
         runner["sequence_mode"] = False
+        runner["queue_lane"] = _task_lane(nxt)
     else:
-        nxt = _next_queued(payload.persona)
+        nxt = _next_queued(payload.persona, lane=dial_lane)
         runner["sequence_mode"] = bool(payload.sequence)
         if not nxt:
             runner["status"] = "idle"
-            raise HTTPException(400, "No ready contacts in this agent's queue.")
+            lane_label = "AI Auto Mode" if dial_lane == "auto_mode" else "Outreach"
+            raise HTTPException(
+                400,
+                f"No ready contacts in this agent's {lane_label} list.",
+            )
 
     runner["operator_user_id"] = user.id
     _dial_task(db, task=nxt, user=user)
@@ -1635,7 +1756,7 @@ def delete_auto_mode_schedule_start(
 
 class SetTaskLaneRequest(BaseModel):
     task_ids: list[int]
-    queue_lane: str  # outreach | data_update
+    queue_lane: str  # outreach | data_update | auto_mode
 
 
 @router.post("/tasks/set-lane")
@@ -1643,18 +1764,18 @@ def set_task_lane(
     payload: SetTaskLaneRequest,
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Move tasks between Outreach and Data Update (mutually exclusive)."""
+    """Move tasks between Outreach, Data Update, and AI Auto Mode (mutually exclusive)."""
     _ = user
     lane = str(payload.queue_lane or "").strip().lower()
-    if lane not in ("outreach", "data_update"):
-        raise HTTPException(400, "queue_lane must be outreach or data_update")
+    if lane not in _VALID_QUEUE_LANES:
+        raise HTTPException(400, "queue_lane must be outreach, data_update, or auto_mode")
     updated = 0
     id_set = set(int(x) for x in (payload.task_ids or []) if int(x) > 0)
     for t in _TASKS:
         if t.get("id") in id_set:
             t["queue_lane"] = lane
-            # Returning to outreach keeps them dialable.
-            if lane == "outreach" and t.get("status") not in ("in_progress",):
+            # Returning to a runnable lane keeps them dialable / emailable.
+            if lane in ("outreach", "auto_mode") and t.get("status") not in ("in_progress",):
                 t["status"] = "queued"
             updated += 1
     _refresh_runner_counts()
@@ -1697,14 +1818,16 @@ def get_data_update_status(user: AppUser = Depends(get_current_user)) -> dict[st
 
     status = du.get_status()
     queues: dict[str, dict[str, list[dict[str, Any]]]] = {
-        "female": {"outreach": [], "data_update": []},
-        "male": {"outreach": [], "data_update": []},
+        "female": {"outreach": [], "data_update": [], "auto_mode": []},
+        "male": {"outreach": [], "data_update": [], "auto_mode": []},
     }
     for t in _TASKS:
         persona = t.get("persona")
         if persona not in queues:
             continue
         lane = _task_lane(t)
+        if lane not in queues[persona]:
+            queues[persona][lane] = []
         queues[persona][lane].append(t)
     status["queues"] = queues
     return status

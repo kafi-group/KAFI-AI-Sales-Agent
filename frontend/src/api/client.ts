@@ -4512,7 +4512,10 @@ export const client = {
       method: "POST",
       headers: aiSalesAgentHeaders(),
     }),
-  startAiSalesAgentRunner: (persona: string, opts?: { task_id?: number; sequence?: boolean }) =>
+  startAiSalesAgentRunner: (
+    persona: string,
+    opts?: { task_id?: number; sequence?: boolean; queue_lane?: "outreach" | "data_update" | "auto_mode" },
+  ) =>
     request<AiSalesAgentRunner>("/ai-sales-agent/runners/start", {
       method: "POST",
       headers: aiSalesAgentHeaders(),
@@ -4520,6 +4523,7 @@ export const client = {
         persona,
         task_id: opts?.task_id,
         sequence: opts?.sequence ?? true,
+        queue_lane: opts?.queue_lane,
       }),
     }),
   pauseAiSalesAgentRunner: (persona: string) =>
@@ -4622,12 +4626,27 @@ export const client = {
       { method: "POST" },
     ),
 
-  setAiSalesTaskLane: (data: { task_ids: number[]; queue_lane: "outreach" | "data_update" }) =>
+  setAiSalesTaskLane: (data: {
+    task_ids: number[];
+    queue_lane: "outreach" | "data_update" | "auto_mode";
+  }) =>
     request<{ updated: number; queue_lane: string }>("/ai-sales-agent/tasks/set-lane", {
       method: "POST",
       headers: aiSalesAgentHeaders(),
       body: JSON.stringify(data),
     }),
+  setAiSalesTaskPersona: (data: {
+    task_ids: number[];
+    persona: "female" | "male";
+  }) =>
+    request<{ updated: number; skipped: number; persona: string; label: string }>(
+      "/ai-sales-agent/tasks/set-persona",
+      {
+        method: "POST",
+        headers: aiSalesAgentHeaders(),
+        body: JSON.stringify(data),
+      },
+    ),
   bulkDeleteAiSalesAgentTasks: (taskIds: number[]) =>
     request<{ ok: boolean; removed: number }>("/ai-sales-agent/tasks/bulk-delete", {
       method: "POST",
@@ -5281,7 +5300,7 @@ export interface AiSalesAgentTask {
   contact_email?: string | null;
   country?: string | null;
   status: string;
-  queue_lane?: "outreach" | "data_update" | string | null;
+  queue_lane?: "outreach" | "data_update" | "auto_mode" | string | null;
   interaction_id: number | null;
   call_sid: string | null;
   outcome: string | null;
@@ -5337,8 +5356,16 @@ export interface AiSalesDataUpdateStatus {
     male: AiSalesDataUpdateRunState;
   };
   queues?: {
-    female: AiSalesAgentTask[];
-    male: AiSalesAgentTask[];
+    female: {
+      outreach: AiSalesAgentTask[];
+      data_update: AiSalesAgentTask[];
+      auto_mode: AiSalesAgentTask[];
+    };
+    male: {
+      outreach: AiSalesAgentTask[];
+      data_update: AiSalesAgentTask[];
+      auto_mode: AiSalesAgentTask[];
+    };
   };
 }
 

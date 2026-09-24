@@ -2302,16 +2302,23 @@ export function LeadsTablePage({
     }
   }
 
-  async function assignSelectedToAiSalesAgent(persona: "female" | "male") {
+  async function assignSelectedToAiSalesAgent(persona: "female" | "male" | "pipeline") {
     if (selected.size === 0 || assigningToAi) return;
     const buyerIds = [...selected];
     const contactIds = buyerIds.map((id) => {
       const row = rows.find((r) => r.id === id) ?? drafts[id];
       return row?.contact_id ?? null;
     });
-    const agentName = persona === "female" ? "Sara" : "Rayan";
+    const agentName =
+      persona === "pipeline"
+        ? "AI Sales Agent list"
+        : persona === "female"
+          ? "Sara"
+          : "Rayan";
     const confirmed = window.confirm(
-      `Assign ${buyerIds.length} contact${buyerIds.length === 1 ? "" : "s"} to ${agentName}'s AI Sales Agent queue?`,
+      persona === "pipeline"
+        ? `Add ${buyerIds.length} contact${buyerIds.length === 1 ? "" : "s"} to the AI Sales Agent list (not yet Sara/Rayan)?\n\nYou can assign them to Sara or Rayan on the AI Sales Agent page.`
+        : `Assign ${buyerIds.length} contact${buyerIds.length === 1 ? "" : "s"} to ${agentName}'s queue?`,
     );
     if (!confirmed) return;
 
@@ -2327,9 +2334,11 @@ export function LeadsTablePage({
       const skipNote = result.notice ? ` ${result.notice}` : "";
       setSaveNotice(
         added > 0
-          ? `Assigned ${added} contact${added === 1 ? "" : "s"} to ${agentName}. Open Call Center → AI Sales Agent → Sara / Rayan pipeline.${skipNote}`
+          ? persona === "pipeline"
+            ? `Added ${added} contact${added === 1 ? "" : "s"} to AI Sales Agent list. Open AI → AI Sales Agent Pipeline to assign Sara / Rayan.${skipNote}`
+            : `Assigned ${added} contact${added === 1 ? "" : "s"} to ${agentName}. Open AI → AI Sales Agent Pipeline.${skipNote}`
           : result.notice ||
-              `No new contacts added for ${agentName} (already queued on the other agent, already on ${agentName}, or missing).`,
+              `No new contacts added for ${agentName} (already queued elsewhere, or missing).`,
       );
       window.setTimeout(() => setSaveNotice(null), result.notice ? 14000 : 8000);
       clearSelection();
@@ -3779,17 +3788,26 @@ export function LeadsTablePage({
           ) : null}
           {selected.size > 0 ? (
             <ToolbarDropdown
-              label={assigningToAi ? "Assigning…" : "Assign to AI Sales Agent"}
+              label={assigningToAi ? "Assigning…" : "AI Sales Agent Pipeline"}
               icon={IconRobot}
               variant="sky"
-              menuClassName="min-w-[220px]"
+              menuClassName="min-w-[240px]"
             >
-              <ToolbarMenuLabel>Add selected to agent queue</ToolbarMenuLabel>
+              <ToolbarMenuLabel>Add selected to pipeline</ToolbarMenuLabel>
+              <ToolbarMenuItem
+                icon={IconRobot}
+                tone="violet"
+                disabled={assigningToAi}
+                title="Add to AI Sales Agent list — assign Sara/Rayan later"
+                onClick={() => void assignSelectedToAiSalesAgent("pipeline")}
+              >
+                AI Sales Agent list
+              </ToolbarMenuItem>
               <ToolbarMenuItem
                 icon={IconRobot}
                 tone="emerald"
                 disabled={assigningToAi}
-                title="Queue for Sara (female voice agent)"
+                title="Queue directly for Sara (female voice agent)"
                 onClick={() => void assignSelectedToAiSalesAgent("female")}
               >
                 Sara (female)
@@ -3798,7 +3816,7 @@ export function LeadsTablePage({
                 icon={IconRobot}
                 tone="sky"
                 disabled={assigningToAi}
-                title="Queue for Rayan (male voice agent)"
+                title="Queue directly for Rayan (male voice agent)"
                 onClick={() => void assignSelectedToAiSalesAgent("male")}
               >
                 Rayan (male)

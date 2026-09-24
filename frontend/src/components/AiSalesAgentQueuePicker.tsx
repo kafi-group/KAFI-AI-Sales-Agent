@@ -12,8 +12,8 @@ function contactKey(item: DialableContactSuggestion): string {
 }
 
 interface AiSalesAgentQueuePickerProps {
-  persona: "male" | "female";
-  onPersonaChange: (persona: "male" | "female") => void;
+  persona: "male" | "female" | "pipeline";
+  onPersonaChange: (persona: "male" | "female" | "pipeline") => void;
   assigning: boolean;
   onAssign: (contacts: DialableContactSuggestion[]) => void;
 }
@@ -156,19 +156,23 @@ export function AiSalesAgentQueuePicker({
     <div className="space-y-3">
       <div className="flex flex-wrap gap-3 items-end">
         <label className="text-sm text-slate-400">
-          Agent
+          Add to
           <select
             value={persona}
-            onChange={(e) => onPersonaChange(e.target.value as "male" | "female")}
-            className="mt-1 block w-full min-w-[140px] rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100"
+            onChange={(e) =>
+              onPersonaChange(e.target.value as "male" | "female" | "pipeline")
+            }
+            className="mt-1 block w-full min-w-[180px] rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100"
           >
+            <option value="pipeline">AI Sales Agent list</option>
             <option value="female">Sara (female)</option>
             <option value="male">Rayan (male)</option>
           </select>
         </label>
         <p className="text-xs text-slate-500 flex-1 min-w-[220px] pb-1">
-          Filter Master Table contacts, tick names, then add them to {persona === "female" ? "Sara" : "Rayan"}
-          &apos;s queue. After the queue is ready, call one number or start the full sequence.
+          {persona === "pipeline"
+            ? "Add to the shared list first — then assign Sara or Rayan and pick Outreach / Data Update / AI Auto Mode."
+            : `Add directly to ${persona === "female" ? "Sara" : "Rayan"}'s queue (default Outreach).`}
         </p>
       </div>
 
@@ -383,7 +387,11 @@ export function AiSalesAgentQueuePicker({
           {assigning
             ? "Adding…"
             : `Add ${selected.length || ""} ticked contact${selected.length === 1 ? "" : "s"} to ${
-                persona === "female" ? "Sara" : "Rayan"
+                persona === "pipeline"
+                  ? "AI Sales Agent list"
+                  : persona === "female"
+                    ? "Sara"
+                    : "Rayan"
               }`}
         </button>
       </div>

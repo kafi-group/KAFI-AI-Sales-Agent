@@ -31,6 +31,7 @@ interface AiSalesAgentPageProps {
 const PERSONA_LABELS: Record<string, string> = {
   male: "Rayan (male)",
   female: "Sara (female)",
+  pipeline: "AI Sales Agent list",
 };
 
 export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
@@ -42,7 +43,9 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   const [runners, setRunners] = useState<AiSalesAgentRunner[]>([]);
   const [tasks, setTasks] = useState<AiSalesAgentTask[]>([]);
   const [loading, setLoading] = useState(true);
-  const [assignPersona, setAssignPersona] = useState<"male" | "female">("female");
+  const [assignPersona, setAssignPersona] = useState<"male" | "female" | "pipeline">(
+    "pipeline",
+  );
   const [buyerIdsRaw, setBuyerIdsRaw] = useState("");
   const [assigning, setAssigning] = useState(false);
   const [filterPersona, setFilterPersona] = useState<string>("");
@@ -82,8 +85,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       const [runnerRes, taskRes] = await Promise.all([
         client.listAiSalesAgentRunners(),
         client.listAiSalesAgentTasks({
-          persona: filterPersona || undefined,
-          limit: 200,
+          limit: 500,
         }),
       ]);
       setRunners(runnerRes.runners);
@@ -93,7 +95,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [filterPersona, onError]);
+  }, [onError]);
 
   useEffect(() => {
     if (!unlocked) return;
@@ -255,9 +257,16 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         contact_ids: contacts.map((row) => row.contact_id),
       });
       setFilterPersona(assignPersona);
-      const base = `Added ${result.tasks.length} Master Table contact(s) to ${
-        assignPersona === "female" ? "Sara" : "Rayan"
-      }'s queue. Use Start calling (all in sequence) or Start Sara/Rayan so every contact is dialled — Call this only does one number.`;
+      const dest =
+        assignPersona === "pipeline"
+          ? "AI Sales Agent list"
+          : assignPersona === "female"
+            ? "Sara"
+            : "Rayan";
+      const base =
+        assignPersona === "pipeline"
+          ? `Added ${result.tasks.length} contact(s) to AI Sales Agent list. Assign them to Sara or Rayan below, then split Outreach / Data Update / AI Auto Mode.`
+          : `Added ${result.tasks.length} Master Table contact(s) to ${dest}'s queue. Use Start calling or set lanes under Data Update / Auto Mode.`;
       setQueueNotice(result.notice ? `${base} ${result.notice}` : base);
       setTimeout(() => setQueueNotice(null), result.notice ? 16000 : 8000);
       await load();
@@ -271,10 +280,13 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   async function handleAutoModeStart(persona: "female" | "male") {
     setStartingAutoPersona(persona);
     try {
-      await client.startAiSalesAgentRunner(persona, { sequence: true });
+      await client.startAiSalesAgentRunner(persona, {
+        sequence: true,
+        queue_lane: "auto_mode",
+      });
       const name = persona === "female" ? "Sara" : "Rayan";
       setQueueNotice(
-        `${name} started with AI Auto Mode actions on the queue. Check the Sara / Rayan pipeline below.`,
+        `${name} started AI Auto Mode on the AI Auto Mode list only. Outreach and Data Update lists are untouched.`,
       );
       setTimeout(() => setQueueNotice(null), 10000);
       await load();
@@ -286,6 +298,10 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   }
 
   async function handleCallOne(task: AiSalesAgentTask) {
+    if (task.persona === "pipeline") {
+      onError("Assign this contact to Sara or Rayan first.");
+      return;
+    }
     setCallingTaskId(task.id);
     try {
       await client.startAiSalesAgentRunner(task.persona, {
@@ -404,7 +420,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   async function handleBulkRemove() {
     const ids = [...selectedTaskIds];
     if (!ids.length) return;
-    if (!window.confirm(`Remove ${ids.length} contact(s) from the assigned pipeline?`)) return;
+    if (!window.confirm(`Remove ${ids.length} contact(s) from the AI Sales Agent Pipeline?`)) return;
     setBulkRemoving(true);
     try {
       await client.bulkDeleteAiSalesAgentTasks(ids);
@@ -418,6 +434,34 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     }
   }
 
+  async function handleAssignToAgent(persona: "female" | "male", taskIds?: number[]) {
+    const ids =
+      taskIds ??
+      [...selectedTaskIds].filter((id) =>
+        tasks.some((t) => t.id === id && t.persona === "pipeline"),
+      );
+    if (!ids.length) {
+      onError("Select contacts from the AI Sales Agent list first.");
+      return;
+    }
+    const name = persona === "female" ? "Sara" : "Rayan";
+    setAssigning(true);
+    try {
+      const res = await client.setAiSalesTaskPersona({ task_ids: ids, persona });
+      setSelectedTaskIds(new Set());
+      setFilterPersona(persona);
+      setQueueNotice(
+        `Assigned ${res.updated} contact(s) to ${name}. Split them into Outreach / Data Update / AI Auto Mode under the schedule panel.`,
+      );
+      setTimeout(() => setQueueNotice(null), 12000);
+      await load();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to assign to agent");
+    } finally {
+      setAssigning(false);
+    }
+  }
+
   function toggleTaskSelected(taskId: number) {
     setSelectedTaskIds((prev) => {
       const next = new Set(prev);
@@ -428,15 +472,26 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   }
 
   function toggleSelectAllVisible(on: boolean) {
+    const visible = filterPersona
+      ? tasks.filter((t) => t.persona === filterPersona)
+      : tasks;
     setSelectedTaskIds((prev) => {
       const next = new Set(prev);
-      for (const t of tasks) {
+      for (const t of visible) {
         if (on) next.add(t.id);
         else next.delete(t.id);
       }
       return next;
     });
   }
+
+  const pipelineTasks = tasks.filter((t) => t.persona === "pipeline");
+  const visibleTasks = filterPersona
+    ? tasks.filter((t) => t.persona === filterPersona)
+    : tasks;
+  const selectedPipelineIds = [...selectedTaskIds].filter((id) =>
+    tasks.some((t) => t.id === id && t.persona === "pipeline"),
+  );
 
   if (!unlocked) {
     return (
@@ -689,12 +744,11 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
 
       {isAdmin && (
         <div className="rounded-xl border border-cyan-500/30 bg-slate-900/40 p-4 space-y-3">
-          <h3 className="font-medium text-slate-100">Add contacts to queue</h3>
+          <h3 className="font-medium text-slate-100">Add contacts to AI Sales Agent Pipeline</h3>
           <p className="text-xs text-slate-500">
-            Contacts come from the <strong className="text-slate-300">Master Table</strong>. Choose
-            country, grade, and designation first so the searchable list shrinks, then tick names
-            and add them. Sara or Rayan can then call one number or the whole queue in sequence.
-            After each call they send WhatsApp and email themselves — they do not ask you to draft.
+            Prefer <strong className="text-slate-300">AI Sales Agent list</strong> first, then assign
+            Sara or Rayan and split Outreach / Data Update / AI Auto Mode. You can still add directly
+            to Sara or Rayan. Contacts come from the Master Table — filter, tick, and add.
           </p>
           <AiSalesAgentQueuePicker
             persona={assignPersona}
@@ -736,23 +790,22 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
 
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
-          <h3 className="font-medium text-slate-100">Sara / Rayan pipeline</h3>
+          <h3 className="font-medium text-slate-100">AI Sales Agent Pipeline</h3>
           <p className="w-full text-xs text-slate-500">
-            Assigned contacts stay here until you click <strong className="text-slate-300">Remove</strong>{" "}
-            — including after calls complete or the server restarts. A contact on Sara cannot also be
-            on Rayan (and vice versa). Use{" "}
-            <strong className="text-slate-300">Start calling (all in sequence)</strong> or{" "}
-            <strong className="text-slate-300">Start Sara / Rayan</strong> to dial everyone still
-            queued. &quot;Call this only&quot; does one number and stops.
+            Flow: <strong className="text-slate-300">list</strong> →{" "}
+            <strong className="text-slate-300">Sara / Rayan</strong> →{" "}
+            <strong className="text-slate-300">Outreach / Data Update / AI Auto Mode</strong>. Contacts
+            stay until you Remove them. A contact cannot be on both Sara and Rayan.
           </p>
           <select
             value={filterPersona}
             onChange={(e) => setFilterPersona(e.target.value)}
             className="text-sm rounded-lg border border-slate-600 bg-slate-950 px-2 py-1 text-slate-200"
           >
-            <option value="">All agents</option>
-            <option value="male">Rayan</option>
+            <option value="">All</option>
+            <option value="pipeline">AI Sales Agent list</option>
             <option value="female">Sara</option>
+            <option value="male">Rayan</option>
           </select>
           <button
             type="button"
@@ -767,11 +820,30 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                 <input
                   type="checkbox"
                   className="accent-violet-500"
-                  checked={tasks.length > 0 && tasks.every((t) => selectedTaskIds.has(t.id))}
+                  checked={
+                    visibleTasks.length > 0 &&
+                    visibleTasks.every((t) => selectedTaskIds.has(t.id))
+                  }
                   onChange={(e) => toggleSelectAllVisible(e.target.checked)}
                 />
                 Select all
               </label>
+              <button
+                type="button"
+                disabled={assigning || selectedPipelineIds.length === 0}
+                onClick={() => void handleAssignToAgent("female")}
+                className="px-3 py-1 text-xs font-semibold rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
+              >
+                → Sara ({selectedPipelineIds.length})
+              </button>
+              <button
+                type="button"
+                disabled={assigning || selectedPipelineIds.length === 0}
+                onClick={() => void handleAssignToAgent("male")}
+                className="px-3 py-1 text-xs font-semibold rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 disabled:opacity-40"
+              >
+                → Rayan ({selectedPipelineIds.length})
+              </button>
               <button
                 type="button"
                 disabled={bulkRemoving || selectedTaskIds.size === 0}
@@ -780,16 +852,24 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
               >
                 {bulkRemoving
                   ? "Removing…"
-                  : `Remove selected (${[...selectedTaskIds].filter((id) => tasks.some((t) => t.id === id)).length})`}
+                  : `Remove selected (${[...selectedTaskIds].filter((id) => visibleTasks.some((t) => t.id === id)).length})`}
               </button>
             </div>
           ) : null}
         </div>
 
-        {!tasks.length ? (
+        {pipelineTasks.length > 0 && (filterPersona === "" || filterPersona === "pipeline") ? (
+          <div className="rounded-lg border border-violet-500/40 bg-violet-950/20 px-3 py-2 text-xs text-violet-100">
+            <strong className="font-semibold">{pipelineTasks.length}</strong> on AI Sales Agent list
+            (not yet Sara/Rayan). Select rows → <strong>→ Sara</strong> / <strong>→ Rayan</strong>, then
+            split lanes under the schedule panel.
+          </div>
+        ) : null}
+
+        {!visibleTasks.length ? (
           <p className="text-sm text-slate-500">
-            No tasks in the queue yet. Filter Master Table contacts above, tick names, and add them
-            to Sara or Rayan.
+            No contacts in the pipeline yet. Add to <strong className="text-slate-300">AI Sales Agent list</strong>{" "}
+            above (or from any Master list → AI Sales Agent Pipeline).
           </p>
         ) : (
           <div className="rounded-xl border border-slate-700/80 overflow-hidden">
@@ -825,7 +905,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                {tasks.map((task) => (
+                {visibleTasks.map((task) => (
                   <tr key={task.id} className="text-slate-200 align-top">
                     <td className="px-2 py-2.5">
                       <input
@@ -962,7 +1042,29 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                             Remove
                           </button>
                         )}
-                        {isAdmin && (task.status === "queued" || task.status === "pending") && (
+                        {isAdmin && task.persona === "pipeline" && task.status === "queued" ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled={assigning}
+                              onClick={() => void handleAssignToAgent("female", [task.id])}
+                              className="px-2 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-200 border border-emerald-500/30 text-xs font-semibold disabled:opacity-40"
+                            >
+                              → Sara
+                            </button>
+                            <button
+                              type="button"
+                              disabled={assigning}
+                              onClick={() => void handleAssignToAgent("male", [task.id])}
+                              className="px-2 py-1 rounded bg-sky-600/20 hover:bg-sky-600/30 text-sky-200 border border-sky-500/30 text-xs font-semibold disabled:opacity-40"
+                            >
+                              → Rayan
+                            </button>
+                          </>
+                        ) : null}
+                        {isAdmin &&
+                          task.persona !== "pipeline" &&
+                          (task.status === "queued" || task.status === "pending") && (
                           <>
                             <button
                               type="button"
@@ -994,10 +1096,13 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                   <input
                     type="checkbox"
                     className="accent-violet-500"
-                    checked={tasks.length > 0 && tasks.every((t) => selectedTaskIds.has(t.id))}
+                    checked={
+                      visibleTasks.length > 0 &&
+                      visibleTasks.every((t) => selectedTaskIds.has(t.id))
+                    }
                     onChange={(e) => toggleSelectAllVisible(e.target.checked)}
                   />
-                  Select all ({tasks.length})
+                  Select all ({visibleTasks.length})
                 </label>
                 <button
                   type="button"
@@ -1007,7 +1112,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                 >
                   {bulkRemoving
                     ? "Removing…"
-                    : `Remove selected (${[...selectedTaskIds].filter((id) => tasks.some((t) => t.id === id)).length})`}
+                    : `Remove selected (${[...selectedTaskIds].filter((id) => visibleTasks.some((t) => t.id === id)).length})`}
                 </button>
               </div>
             ) : null}
