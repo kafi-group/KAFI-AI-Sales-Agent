@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   client,
   setAiSalesAgentAccessCode,
@@ -63,6 +63,9 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   const [emailModalInitial, setEmailModalInitial] = useState<{ to: string; subject: string } | null>(null);
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<number>>(new Set());
+  // Long staging lists start collapsed (same pattern as Outreach / Data Update / Auto Mode lanes).
+  const [pipelineListOpen, setPipelineListOpen] = useState(true);
+  const pipelineLenRef = useRef(0);
   const [bulkRemoving, setBulkRemoving] = useState(false);
 
   useEffect(() => {
@@ -493,6 +496,12 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     tasks.some((t) => t.id === id && t.persona === "pipeline"),
   );
 
+  useEffect(() => {
+    const prev = pipelineLenRef.current;
+    pipelineLenRef.current = visibleTasks.length;
+    if (prev <= 12 && visibleTasks.length > 12) setPipelineListOpen(false);
+  }, [visibleTasks.length]);
+
   if (!unlocked) {
     return (
       <section className="max-w-3xl space-y-5">
@@ -790,13 +799,41 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
 
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
-          <h3 className="font-medium text-slate-100">AI Sales Agent Pipeline</h3>
+          <button
+            type="button"
+            onClick={() => setPipelineListOpen((v) => !v)}
+            className="flex items-center gap-2 text-left min-w-0 hover:opacity-90"
+            title={pipelineListOpen ? "Collapse list" : "Expand list"}
+            aria-expanded={pipelineListOpen}
+          >
+            <span className="text-slate-400 text-xs shrink-0 w-3">
+              {pipelineListOpen ? "▾" : "▸"}
+            </span>
+            <h3 className="font-medium text-slate-100">AI Sales Agent Pipeline</h3>
+          </button>
+          <button
+            type="button"
+            onClick={() => setPipelineListOpen((v) => !v)}
+            className="text-[11px] px-2 py-0.5 rounded border border-slate-600 text-slate-300 hover:bg-slate-800"
+            title={pipelineListOpen ? "Collapse list" : "Expand list"}
+          >
+            {pipelineListOpen ? "Close" : "Open"}
+          </button>
           <p className="w-full text-xs text-slate-500">
             Flow: <strong className="text-slate-300">list</strong> →{" "}
             <strong className="text-slate-300">Sara / Rayan</strong> →{" "}
             <strong className="text-slate-300">Outreach / Data Update / AI Auto Mode</strong>. Contacts
             stay until you Remove them. A contact cannot be on both Sara and Rayan.
           </p>
+          {!pipelineListOpen && visibleTasks.length > 0 ? (
+            <p className="w-full text-xs text-slate-400 -mt-1">
+              {visibleTasks.length.toLocaleString()} contact
+              {visibleTasks.length === 1 ? "" : "s"} hidden — click Open to view
+              {selectedTaskIds.size > 0
+                ? ` · ${[...selectedTaskIds].filter((id) => visibleTasks.some((t) => t.id === id)).length} selected`
+                : ""}
+            </p>
+          ) : null}
           <select
             value={filterPersona}
             onChange={(e) => setFilterPersona(e.target.value)}
@@ -858,83 +895,88 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
           ) : null}
         </div>
 
-        {pipelineTasks.length > 0 && (filterPersona === "" || filterPersona === "pipeline") ? (
-          <div className="rounded-lg border border-violet-500/40 bg-violet-950/20 px-3 py-2 text-xs text-violet-100">
-            <strong className="font-semibold">{pipelineTasks.length}</strong> on AI Sales Agent list
-            (not yet Sara/Rayan). Select rows → <strong>→ Sara</strong> / <strong>→ Rayan</strong>, then
-            split lanes under the schedule panel.
-          </div>
-        ) : null}
+        {pipelineListOpen ? (
+          <>
+            {pipelineTasks.length > 0 && (filterPersona === "" || filterPersona === "pipeline") ? (
+              <div className="rounded-lg border border-violet-500/40 bg-violet-950/20 px-3 py-2 text-xs text-violet-100">
+                <strong className="font-semibold">{pipelineTasks.length}</strong> on AI Sales Agent list
+                (not yet Sara/Rayan). Select rows → <strong>→ Sara</strong> / <strong>→ Rayan</strong>, then
+                split lanes under the schedule panel.
+              </div>
+            ) : null}
 
-        {!visibleTasks.length ? (
-          <p className="text-sm text-slate-500">
-            No contacts in the pipeline yet. Add to <strong className="text-slate-300">AI Sales Agent list</strong>{" "}
-            above (or from any Master list → AI Sales Agent Pipeline).
-          </p>
-        ) : (
-          <div className="rounded-xl border border-slate-700/80 overflow-hidden">
-            <table className="w-full table-fixed text-sm text-left">
-              <colgroup>
-                <col className="w-[4%]" />
-                <col className="w-[9%]" />
-                <col className="w-[15%]" />
-                <col className="w-[13%]" />
-                <col className="w-[7%]" />
-                <col className="w-[7%]" />
-                <col className="w-[8%]" />
-                <col className="w-[9%]" />
-                <col className="w-[7%]" />
-                <col className="w-[7%]" />
-                <col className="w-[14%]" />
-              </colgroup>
-              <thead className="bg-slate-900/60 text-slate-400">
-                <tr>
-                  <th className="px-2 py-2.5 font-medium">
-                    <span className="sr-only">Select</span>
-                  </th>
-                  <th className="px-3 py-2.5 font-medium">Agent</th>
-                  <th className="px-3 py-2.5 font-medium">Company</th>
-                  <th className="px-3 py-2.5 font-medium">Contact / phone</th>
-                  <th className="px-3 py-2.5 font-medium">Status</th>
-                  <th className="px-3 py-2.5 font-medium">Call</th>
-                  <th className="px-3 py-2.5 font-medium">Email sent</th>
-                  <th className="px-3 py-2.5 font-medium">WhatsApp sent</th>
-                  <th className="px-3 py-2.5 font-medium">Email reply</th>
-                  <th className="px-3 py-2.5 font-medium">Outcome</th>
-                  <th className="px-3 py-2.5 font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {visibleTasks.map((task) => (
-                  <tr key={task.id} className="text-slate-200 align-top">
-                    <td className="px-2 py-2.5">
-                      <input
-                        type="checkbox"
-                        className="accent-violet-500"
-                        checked={selectedTaskIds.has(task.id)}
-                        onChange={() => toggleTaskSelected(task.id)}
-                        aria-label={`Select ${task.company_name || task.id}`}
-                      />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {PERSONA_LABELS[task.persona] ?? task.persona}
-                    </td>
-                    <td className="px-3 py-2.5 break-words">
-                      {task.company_name ?? `#${task.buyer_id}`}
-                      {task.country ? (
-                        <span className="text-slate-500 text-xs ml-1">
-                          ({task.country})
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-2.5 break-words">
-                      {task.contact_name ?? "—"}
-                      {task.contact_phone ? (
-                        <div className="text-xs text-sky-300/90 font-mono break-all">{task.contact_phone}</div>
-                      ) : (
-                        <div className="text-xs text-amber-400">No phone on lead</div>
-                      )}
-                    </td>
+            {!visibleTasks.length ? (
+              <p className="text-sm text-slate-500">
+                No contacts in the pipeline yet. Add to{" "}
+                <strong className="text-slate-300">AI Sales Agent list</strong> above (or from any Master
+                list → AI Sales Agent Pipeline).
+              </p>
+            ) : (
+              <div className="rounded-xl border border-slate-700/80 overflow-hidden">
+                <table className="w-full table-fixed text-sm text-left">
+                  <colgroup>
+                    <col className="w-[4%]" />
+                    <col className="w-[9%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[7%]" />
+                    <col className="w-[7%]" />
+                    <col className="w-[8%]" />
+                    <col className="w-[9%]" />
+                    <col className="w-[7%]" />
+                    <col className="w-[7%]" />
+                    <col className="w-[14%]" />
+                  </colgroup>
+                  <thead className="bg-slate-900/60 text-slate-400">
+                    <tr>
+                      <th className="px-2 py-2.5 font-medium">
+                        <span className="sr-only">Select</span>
+                      </th>
+                      <th className="px-3 py-2.5 font-medium">Agent</th>
+                      <th className="px-3 py-2.5 font-medium">Company</th>
+                      <th className="px-3 py-2.5 font-medium">Contact / phone</th>
+                      <th className="px-3 py-2.5 font-medium">Status</th>
+                      <th className="px-3 py-2.5 font-medium">Call</th>
+                      <th className="px-3 py-2.5 font-medium">Email sent</th>
+                      <th className="px-3 py-2.5 font-medium">WhatsApp sent</th>
+                      <th className="px-3 py-2.5 font-medium">Email reply</th>
+                      <th className="px-3 py-2.5 font-medium">Outcome</th>
+                      <th className="px-3 py-2.5 font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800">
+                    {visibleTasks.map((task) => (
+                      <tr key={task.id} className="text-slate-200 align-top">
+                        <td className="px-2 py-2.5">
+                          <input
+                            type="checkbox"
+                            className="accent-violet-500"
+                            checked={selectedTaskIds.has(task.id)}
+                            onChange={() => toggleTaskSelected(task.id)}
+                            aria-label={`Select ${task.company_name || task.id}`}
+                          />
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {PERSONA_LABELS[task.persona] ?? task.persona}
+                        </td>
+                        <td className="px-3 py-2.5 break-words">
+                          {task.company_name ?? `#${task.buyer_id}`}
+                          {task.country ? (
+                            <span className="text-slate-500 text-xs ml-1">
+                              ({task.country})
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2.5 break-words">
+                          {task.contact_name ?? "—"}
+                          {task.contact_phone ? (
+                            <div className="text-xs text-sky-300/90 font-mono break-all">
+                              {task.contact_phone}
+                            </div>
+                          ) : (
+                            <div className="text-xs text-amber-400">No phone on lead</div>
+                          )}
+                        </td>
                     <td className="px-3 py-2.5 capitalize">{task.status}</td>
                     <td className="px-3 py-2.5 text-xs">
                       {task.status === "completed" || task.status === "in_progress" || task.call_sid ? (
@@ -1116,8 +1158,10 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                 </button>
               </div>
             ) : null}
-          </div>
-        )}
+              </div>
+            )}
+          </>
+        ) : null}
       </div>
 
       {whatsAppModalTarget && (
