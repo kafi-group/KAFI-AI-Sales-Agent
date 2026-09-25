@@ -460,6 +460,8 @@ _CORS_ORIGINS = list(
         [
             *settings.cors_origin_list,
             "https://kafi-sales-agent.vercel.app",
+            "https://www.kafi-group.com",
+            "https://kafi-group.com",
         ]
     )
 )
