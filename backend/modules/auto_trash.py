@@ -159,25 +159,47 @@ def _subject_tokens(subject: str | None) -> list[str]:
 
 
 def get_or_create_settings(db: Session, user_id: int) -> AutoTrashSettings:
-    row = db.get(AutoTrashSettings, int(user_id))
-    if row:
+    try:
+        row = db.get(AutoTrashSettings, int(user_id))
+        if row:
+            return row
+        row = AutoTrashSettings(user_id=int(user_id), enabled=False)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
         return row
-    row = AutoTrashSettings(user_id=int(user_id), enabled=False)
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
+    except Exception:
+        db.rollback()
+        raise
 
 
 def get_or_create_profile(db: Session) -> AutoTrashProfile:
-    row = db.get(AutoTrashProfile, 1)
-    if row:
+    try:
+        row = db.get(AutoTrashProfile, 1)
+        if row:
+            return row
+        row = AutoTrashProfile(id=1, ready=False, rules={}, samples_seen=0)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
         return row
-    row = AutoTrashProfile(id=1, ready=False, rules={}, samples_seen=0)
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
+    except Exception:
+        db.rollback()
+        raise
+
+
+def settings_fallback_dict(user_id: int) -> dict[str, Any]:
+    """Returned when auto_trash tables are missing so the Inbox toggle stays usable."""
+    return {
+        "user_id": int(user_id),
+        "enabled": False,
+        "last_scan_at": None,
+        "updated_at": None,
+        "profile_ready": False,
+        "samples_seen": 0,
+        "last_learned_at": None,
+        "can_auto_trash": False,
+    }
 
 
 def settings_to_dict(row: AutoTrashSettings, profile: AutoTrashProfile | None = None) -> dict[str, Any]:

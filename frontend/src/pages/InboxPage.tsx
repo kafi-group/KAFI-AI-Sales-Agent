@@ -23,6 +23,17 @@ import {
 } from "../components/AppSidebar";
 import { CreateLabelModal } from "../components/CreateLabelModal";
 import { ComposeMailModal } from "../components/ComposeMailModal";
+
+const DEFAULT_AUTO_TRASH: AutoTrashSettings = {
+  user_id: 0,
+  enabled: false,
+  last_scan_at: null,
+  updated_at: null,
+  profile_ready: false,
+  samples_seen: 0,
+  last_learned_at: null,
+  can_auto_trash: false,
+};
 import { ComposeRecipientsPickerModal } from "../components/ComposeRecipientsPickerModal";
 import { AttachedFilesList } from "../components/AttachedFilesList";
 import { AttachCatalogueModal } from "../components/AttachCatalogueModal";
@@ -380,7 +391,7 @@ export function InboxPage({
   const [moving, setMoving] = useState(false);
   const [emptyingTrash, setEmptyingTrash] = useState(false);
   const [filterRibbonOpen, setFilterRibbonOpen] = useState(false);
-  const [autoTrash, setAutoTrash] = useState<AutoTrashSettings | null>(null);
+  const [autoTrash, setAutoTrash] = useState<AutoTrashSettings>(DEFAULT_AUTO_TRASH);
   const [autoTrashSaving, setAutoTrashSaving] = useState(false);
   const [autoTrashLogDays, setAutoTrashLogDays] = useState<AutoTrashDailyLogDay[]>([]);
   const [autoTrashLogLoading, setAutoTrashLogLoading] = useState(false);
@@ -1107,7 +1118,8 @@ export function InboxPage({
         if (!cancelled) setAutoTrash(row);
       })
       .catch(() => {
-        if (!cancelled) setAutoTrash(null);
+        // Keep a local default so the toggle stays clickable; PUT creates settings.
+        if (!cancelled) setAutoTrash((prev) => ({ ...DEFAULT_AUTO_TRASH, enabled: prev.enabled }));
       });
     return () => {
       cancelled = true;
@@ -1135,7 +1147,15 @@ export function InboxPage({
   }, [section]);
 
   async function toggleAutoTrash(next: boolean) {
+    if (autoTrashSaving) return;
+    const previous = autoTrash;
     setAutoTrashSaving(true);
+    // Optimistic — never leave the switch dead while the request is in flight.
+    setAutoTrash((prev) => ({
+      ...prev,
+      enabled: next,
+      can_auto_trash: next && prev.profile_ready,
+    }));
     try {
       const row = await client.updateAutoTrashSettings(
         { enabled: next },
@@ -1150,6 +1170,7 @@ export function InboxPage({
           : "Auto Trash OFF for this mailbox.",
       );
     } catch (e) {
+      setAutoTrash(previous);
       onError(e instanceof Error ? e.message : "Could not update Auto Trash");
     } finally {
       setAutoTrashSaving(false);
@@ -1996,37 +2017,37 @@ export function InboxPage({
           ) : null}
           <label
             className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-semibold cursor-pointer select-none ${
-              autoTrash?.enabled
+              autoTrash.enabled
                 ? "border-rose-500/50 bg-rose-500/15 text-rose-100"
                 : "border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-500"
-            }`}
+            } ${autoTrashSaving ? "opacity-70" : ""}`}
             title="When ON, this mailbox inbox is scanned and matching noise is moved to Trash automatically. Retrain in Settings."
           >
             <input
               type="checkbox"
               className="sr-only"
-              checked={Boolean(autoTrash?.enabled)}
-              disabled={autoTrashSaving || !autoTrash}
+              checked={Boolean(autoTrash.enabled)}
+              disabled={autoTrashSaving}
               onChange={(e) => void toggleAutoTrash(e.target.checked)}
             />
             <span
               className={`relative w-9 h-5 rounded-full transition-colors ${
-                autoTrash?.enabled ? "bg-rose-500" : "bg-slate-600"
+                autoTrash.enabled ? "bg-rose-500" : "bg-slate-600"
               }`}
               aria-hidden
             >
               <span
                 className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                  autoTrash?.enabled ? "translate-x-4" : ""
+                  autoTrash.enabled ? "translate-x-4" : ""
                 }`}
               />
             </span>
             <span>Auto Trash</span>
-            {autoTrash && !autoTrash.profile_ready ? (
+            {!autoTrash.profile_ready ? (
               <span className="text-[10px] font-normal text-amber-300/90">Learning…</span>
-            ) : autoTrash?.profile_ready ? (
+            ) : (
               <span className="text-[10px] font-normal text-emerald-300/90">Ready</span>
-            ) : null}
+            )}
           </label>
         </div>
       ) : null}
@@ -2109,12 +2130,12 @@ export function InboxPage({
               })}
               <label
                 className={`ml-auto inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-semibold cursor-pointer select-none ${
-                  autoTrash?.enabled
+                  autoTrash.enabled
                     ? "border-rose-500/50 bg-rose-500/15 text-rose-100"
                     : "border-slate-600 bg-slate-950/60 text-slate-300 hover:border-slate-500"
-                }`}
+                } ${autoTrashSaving ? "opacity-70" : ""}`}
                 title={
-                  autoTrash?.profile_ready
+                  autoTrash.profile_ready
                     ? "When ON, this mailbox inbox is scanned and matching noise is moved to Trash automatically."
                     : "Profile still learning — retrain in Settings → Study Trash now, then turn ON."
                 }
@@ -2122,28 +2143,28 @@ export function InboxPage({
                 <input
                   type="checkbox"
                   className="sr-only"
-                  checked={Boolean(autoTrash?.enabled)}
-                  disabled={autoTrashSaving || !autoTrash}
+                  checked={Boolean(autoTrash.enabled)}
+                  disabled={autoTrashSaving}
                   onChange={(e) => void toggleAutoTrash(e.target.checked)}
                 />
                 <span
                   className={`relative w-9 h-5 rounded-full transition-colors ${
-                    autoTrash?.enabled ? "bg-rose-500" : "bg-slate-600"
+                    autoTrash.enabled ? "bg-rose-500" : "bg-slate-600"
                   }`}
                   aria-hidden
                 >
                   <span
                     className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                      autoTrash?.enabled ? "translate-x-4" : ""
+                      autoTrash.enabled ? "translate-x-4" : ""
                     }`}
                   />
                 </span>
                 <span>Auto Trash</span>
-                {autoTrash && !autoTrash.profile_ready ? (
+                {!autoTrash.profile_ready ? (
                   <span className="text-[10px] font-normal text-amber-300/90">Learning…</span>
-                ) : autoTrash?.profile_ready ? (
+                ) : (
                   <span className="text-[10px] font-normal text-emerald-300/90">Ready</span>
-                ) : null}
+                )}
               </label>
             </div>
           ) : null}

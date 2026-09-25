@@ -4706,15 +4706,35 @@ export const client = {
       `/ai-sales-agent/data-update/run-now?persona=${encodeURIComponent(persona)}`,
       { method: "POST", headers: aiSalesAgentHeaders() },
     ),
-  listAiSalesAgentLogs: (params: { limit?: number; event_kind?: "assign" | "run_start" } = {}) => {
+  listAiSalesAgentLogs: async (params: { limit?: number; event_kind?: "assign" | "run_start" } = {}) => {
     const qs = new URLSearchParams();
     if (params.limit != null) qs.set("limit", String(params.limit));
     if (params.event_kind) qs.set("event_kind", params.event_kind);
     const q = qs.toString();
-    return request<AiSalesAgentLogsResponse>(
-      `/ai-sales-agent/logs${q ? `?${q}` : ""}`,
-      { headers: aiSalesAgentHeaders() },
-    );
+    try {
+      return await request<AiSalesAgentLogsResponse>(
+        `/ai-sales-agent/logs${q ? `?${q}` : ""}`,
+        { headers: aiSalesAgentHeaders() },
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Older backends without /logs — return empty so the modal stays usable.
+      if (/not found|404/i.test(msg)) {
+        return {
+          events: [],
+          runs: [],
+          summary: {
+            total_assigned: 0,
+            total_used: 0,
+            total_difference: 0,
+            total_runs: 0,
+            by_user: [],
+            by_date: [],
+          },
+        };
+      }
+      throw e;
+    }
   },
 
   // ── Catalogues ─────────────────────────────────────────────────────────────

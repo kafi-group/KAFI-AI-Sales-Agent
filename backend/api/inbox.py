@@ -654,9 +654,13 @@ def get_auto_trash_settings(
     from modules import auto_trash
 
     target = _resolve_mailbox_user(user, mailbox_user_id)
-    row = auto_trash.get_or_create_settings(db, target.id)
-    profile = auto_trash.get_or_create_profile(db)
-    return auto_trash.settings_to_dict(row, profile)
+    try:
+        row = auto_trash.get_or_create_settings(db, target.id)
+        profile = auto_trash.get_or_create_profile(db)
+        return auto_trash.settings_to_dict(row, profile)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Auto Trash settings read failed: {exc}", flush=True)
+        return auto_trash.settings_fallback_dict(target.id)
 
 
 @router.put("/auto-trash/settings")
@@ -669,7 +673,15 @@ def put_auto_trash_settings(
     from modules import auto_trash
 
     target = _resolve_mailbox_user(user, mailbox_user_id)
-    return auto_trash.set_enabled(db, target.id, payload.enabled)
+    try:
+        return auto_trash.set_enabled(db, target.id, payload.enabled)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Auto Trash settings write failed: {exc}", flush=True)
+        # Surface a clear error so the UI can roll back optimistic toggle.
+        raise HTTPException(
+            503,
+            "Auto Trash settings are not ready yet. Wait a moment and try again.",
+        ) from exc
 
 
 @router.get("/auto-trash/daily-log")

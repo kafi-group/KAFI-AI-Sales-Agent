@@ -391,6 +391,18 @@ def _ensure_ai_sales_agent_run_log_table() -> None:
         print("Created ai_sales_agent_run_log table.", flush=True)
 
 
+def _ensure_auto_trash_tables() -> None:
+    """Ensure Auto Trash tables exist so the Inbox toggle can load/save."""
+    from db.models import Base
+
+    inspector = inspect(engine)
+    existing = set(inspector.get_table_names())
+    for tbl_name in ("auto_trash_settings", "auto_trash_profile", "auto_trash_log"):
+        if tbl_name not in existing and tbl_name in Base.metadata.tables:
+            Base.metadata.tables[tbl_name].create(engine, checkfirst=True)
+            print(f"Created {tbl_name} table.", flush=True)
+
+
 def _ensure_target_workspace_tables() -> None:
     """Ensure Target and Workspace module tables exist and seed initial defaults."""
     from db.models import Base
@@ -440,6 +452,7 @@ def run_migrations() -> None:
         _ensure_target_workspace_tables()
         _ensure_lead_import_batches_table()
         _ensure_ai_sales_agent_run_log_table()
+        _ensure_auto_trash_tables()
     except Exception as exc:
         print(f"WARNING: post-migrate schema ensure failed (continuing): {exc}", flush=True)
 
