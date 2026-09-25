@@ -381,6 +381,16 @@ def _ensure_lead_import_batches_table() -> None:
         print("Created lead_import_batches table.", flush=True)
 
 
+def _ensure_ai_sales_agent_run_log_table() -> None:
+    """Ensure AI Sales Agent assign/run log table exists (safe if Alembic skipped)."""
+    from db.models import Base
+
+    inspector = inspect(engine)
+    if "ai_sales_agent_run_log" not in inspector.get_table_names():
+        Base.metadata.tables["ai_sales_agent_run_log"].create(engine, checkfirst=True)
+        print("Created ai_sales_agent_run_log table.", flush=True)
+
+
 def _ensure_target_workspace_tables() -> None:
     """Ensure Target and Workspace module tables exist and seed initial defaults."""
     from db.models import Base
@@ -429,6 +439,7 @@ def run_migrations() -> None:
         _ensure_custom_lead_modules_table()
         _ensure_target_workspace_tables()
         _ensure_lead_import_batches_table()
+        _ensure_ai_sales_agent_run_log_table()
     except Exception as exc:
         print(f"WARNING: post-migrate schema ensure failed (continuing): {exc}", flush=True)
 

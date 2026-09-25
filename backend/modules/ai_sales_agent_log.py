@@ -98,9 +98,11 @@ def record_event(
         try:
             db.commit()
             db.refresh(row)
-        except Exception:
+        except Exception as exc:
             db.rollback()
-            raise
+            # Missing table / transient DB — never take down the request path.
+            print(f"AI Sales Agent log write skipped: {exc}", flush=True)
+            return None
     return _row_to_dict(row)
 
 

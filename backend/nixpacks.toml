@@ -11,4 +11,5 @@ cmds = [
 ]
 
 [start]
-cmd = "python -c \"from db.migrate import run_migrations; run_migrations()\" && KAFI_SKIP_LIFESPAN_MIGRATE=1 uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1"
+# Prefer start.sh (45s migrate cap). Fallback keeps boot from hanging forever on Alembic.
+cmd = "sh start.sh"

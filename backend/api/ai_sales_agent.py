@@ -1929,9 +1929,13 @@ def list_ai_sales_agent_logs(
     # Non-admins only see their own rows.
     role = user.role.value if hasattr(user.role, "value") else str(user.role)
     filter_user_id = None if role == "admin" else user.id
-    events = asal.list_events(
-        db, limit=limit, event_kind=kind, user_id=filter_user_id
-    )
+    try:
+        events = asal.list_events(
+            db, limit=limit, event_kind=kind, user_id=filter_user_id
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"AI Sales Agent logs read failed: {exc}", flush=True)
+        events = []
     runs = [e for e in events if e.get("event_kind") == asal.EVENT_RUN_START]
     return {
         "events": events,
