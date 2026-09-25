@@ -278,6 +278,11 @@ const RETRY_BACKOFF_MS = [600, 1_800, 3_500] as const;
 export type ApiRequestOptions = RequestInit & {
   /** Override the path-based client abort timeout. */
   timeoutMs?: number;
+  /**
+   * Absolute API root (e.g. Railway production). Used when the Vercel /api
+   * rewrite still points at a stale host missing newer routes like Auto Trash.
+   */
+  apiBase?: string;
 };
 
 function timeoutForPath(path: string): number {
@@ -344,7 +349,7 @@ function networkErrorMessage(isTimeout: boolean): string {
 }
 
 async function request<T>(path: string, options?: ApiRequestOptions): Promise<T> {
-  const { timeoutMs: timeoutOverride, ...fetchOptions } = options ?? {};
+  const { timeoutMs: timeoutOverride, apiBase: apiBaseOverride, ...fetchOptions } = options ?? {};
   const headers = new Headers(authHeaders({ "Content-Type": "application/json" }));
   if (fetchOptions.headers) {
     const extra = new Headers(fetchOptions.headers);
@@ -355,6 +360,7 @@ async function request<T>(path: string, options?: ApiRequestOptions): Promise<T>
   const canRetry = method === "GET" || method === "HEAD";
   const timeoutMs = timeoutOverride ?? timeoutForPath(path);
   const maxAttempts = canRetry ? RETRY_BACKOFF_MS.length + 1 : 1;
+  const base = (apiBaseOverride || API_BASE).replace(/\/+$/, "");
   let lastNetworkError: Error | null = null;
   let lastWasTimeout = false;
 
@@ -362,7 +368,7 @@ async function request<T>(path: string, options?: ApiRequestOptions): Promise<T>
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetch(`${API_BASE}${path}`, {
+      const res = await fetch(`${base}${path}`, {
         ...fetchOptions,
         headers,
         credentials: "include",
@@ -3509,7 +3515,10 @@ export const client = {
       mailboxUserId != null && Number.isFinite(mailboxUserId)
         ? `?mailbox_user_id=${mailboxUserId}`
         : "";
-    return request<AutoTrashSettings>(`/inbox/auto-trash/settings${qs}`);
+    // Hit Railway production directly — stale Vercel rewrite host lacks these routes (404 Not Found).
+    return request<AutoTrashSettings>(`/inbox/auto-trash/settings${qs}`, {
+      apiBase: RAILWAY_API_BASE,
+    });
   },
   updateAutoTrashSettings: (
     data: { enabled: boolean },
@@ -3522,12 +3531,18 @@ export const client = {
     return request<AutoTrashSettings>(`/inbox/auto-trash/settings${qs}`, {
       method: "PUT",
       body: JSON.stringify(data),
+      apiBase: RAILWAY_API_BASE,
     });
   },
   getAutoTrashDailyLog: (days = 14) =>
-    request<AutoTrashDailyLogResponse>(`/inbox/auto-trash/daily-log?days=${days}`),
+    request<AutoTrashDailyLogResponse>(`/inbox/auto-trash/daily-log?days=${days}`, {
+      apiBase: RAILWAY_API_BASE,
+    }),
   runAutoTrashLearn: () =>
-    request<AutoTrashLearnResponse>("/inbox/auto-trash/learn", { method: "POST" }),
+    request<AutoTrashLearnResponse>("/inbox/auto-trash/learn", {
+      method: "POST",
+      apiBase: RAILWAY_API_BASE,
+    }),
   replyInboxMessage: (
     uid: string,
     payload: {
