@@ -865,6 +865,9 @@ def _hydrate_lead_table_rows(
                 "meeting_location": getattr(buyer, "meeting_location", None),
                 "meeting_notes": getattr(buyer, "meeting_notes", None),
                 "meeting_priority": getattr(buyer, "meeting_priority", None),
+                "ai_data_update_fields": list(getattr(buyer, "ai_data_update_fields", None) or [])
+                if isinstance(getattr(buyer, "ai_data_update_fields", None), list)
+                else [],
             }
         )
     return rows
@@ -2187,6 +2190,9 @@ def get_lead_table_row(db: Session, buyer_id: int) -> dict[str, object] | None:
         "meeting_location": buyer.meeting_location,
         "meeting_notes": buyer.meeting_notes,
         "meeting_priority": buyer.meeting_priority,
+        "ai_data_update_fields": list(getattr(buyer, "ai_data_update_fields", None) or [])
+        if isinstance(getattr(buyer, "ai_data_update_fields", None), list)
+        else [],
     }
 
 
@@ -2304,6 +2310,7 @@ def update_lead_table_row(
 
     data = dict(data or {})
     data.pop("fill_missing_only", None)
+    manual_edit = not fill_missing_only
 
     if "assigned_to_user_id" in data:
         previous_assignee_id = buyer.assigned_to_user_id
@@ -2413,6 +2420,31 @@ def update_lead_table_row(
         action="table_row_updated",
         details={k: data[k] for k in data if k != "assigned_to"},
     )
+    if manual_edit:
+        # Human edit of a cell removes that cell's AI Data Update yellow highlight.
+        edited_keys = [
+            k
+            for k in data.keys()
+            if k
+            in {
+                "company_name",
+                "country",
+                "industry",
+                "website_url",
+                "address",
+                "contact_name",
+                "contact_email",
+                "contact_phone",
+                "contact_designation",
+            }
+        ]
+        if edited_keys:
+            try:
+                from modules import ai_sales_data_update as du
+
+                du.clear_ai_data_update_fields(db, buyer_id, edited_keys)
+            except Exception:  # noqa: BLE001
+                pass
     return get_lead_table_row(db, buyer_id)
 
 

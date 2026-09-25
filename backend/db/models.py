@@ -142,6 +142,9 @@ class Buyer(Base):
     address: Mapped[Optional[str]] = mapped_column(Text)
     remarks: Mapped[Optional[str]] = mapped_column(Text)
     remarks_history: Mapped[Optional[list]] = mapped_column(JSONB)
+    # Field keys filled by AI Sales Agent Data Update (Sara/Rayan) — yellow-highlight in lists.
+    # Cleared for a key when a human manually edits that cell.
+    ai_data_update_fields: Mapped[Optional[list]] = mapped_column(JSONB)
     assigned_to: Mapped[str] = mapped_column(String(50), nullable=False, server_default="unassigned")
     assigned_to_user_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("app_users.id", ondelete="SET NULL"),

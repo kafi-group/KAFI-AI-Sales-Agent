@@ -490,6 +490,105 @@ def complete_run(persona: str) -> dict[str, Any]:
     return data
 
 
+def mark_ai_data_update_fields(db: Any, buyer_id: int, fields: list[str]) -> None:
+    """Merge CRM field keys filled by Data Update onto the buyer (for list yellow highlights)."""
+    if not buyer_id or not fields:
+        return
+    from db.models import Buyer
+
+    allowed = set(PRIORITY_FIELDS) | {"industry", "address"}
+    clean = [f for f in fields if f in allowed]
+    if not clean:
+        return
+    buyer = db.get(Buyer, int(buyer_id))
+    if not buyer:
+        return
+    prev = getattr(buyer, "ai_data_update_fields", None) or []
+    if not isinstance(prev, list):
+        prev = []
+    merged = sorted(set([*prev, *clean]))
+    buyer.ai_data_update_fields = merged
+    try:
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+
+
+def clear_ai_data_update_fields(db: Any, buyer_id: int, fields: list[str]) -> None:
+    """Drop highlight flags when a human manually edits those cells."""
+    if not buyer_id or not fields:
+        return
+    from db.models import Buyer
+
+    buyer = db.get(Buyer, int(buyer_id))
+    if not buyer:
+        return
+    prev = getattr(buyer, "ai_data_update_fields", None) or []
+    if not isinstance(prev, list) or not prev:
+        return
+    drop = set(fields)
+    next_fields = [f for f in prev if f not in drop]
+    if next_fields == prev:
+        return
+    buyer.ai_data_update_fields = next_fields or None
+    try:
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+
+
+def sync_highlights_from_run_logs(db: Any) -> int:
+    """Backfill buyer.ai_data_update_fields from Data Update activity logs (no process change)."""
+    data = _load()
+    stamped = 0
+    for persona in ("female", "male"):
+        st = data.get("run_state", {}).get(persona) or {}
+        entries: list[dict[str, Any]] = []
+        for item in st.get("log") or []:
+            if isinstance(item, dict):
+                entries.append(item)
+        for hist in st.get("run_history") or []:
+            if not isinstance(hist, dict):
+                continue
+            for item in hist.get("log") or []:
+                if isinstance(item, dict):
+                    entries.append(item)
+        last = st.get("last_report")
+        if isinstance(last, dict):
+            for item in last.get("log") or []:
+                if isinstance(item, dict):
+                    entries.append(item)
+        seen: set[int] = set()
+        for entry in entries:
+            if entry.get("skipped") or not entry.get("ok"):
+                continue
+            bid = entry.get("buyer_id")
+            filled = entry.get("filled") or []
+            if not bid or not filled:
+                continue
+            bid_i = int(bid)
+            mark_ai_data_update_fields(db, bid_i, list(filled))
+            if bid_i not in seen:
+                seen.add(bid_i)
+                stamped += 1
+    return stamped
+
+
+def maybe_sync_highlights_once(db: Any) -> None:
+    """Backfill highlights from logs at most once (flag stored in schedule JSON)."""
+    data = _load()
+    if data.get("highlights_synced_v1"):
+        return
+    try:
+        sync_highlights_from_run_logs(db)
+        data = _load()
+        data["highlights_synced_v1"] = True
+        _save(data)
+    except Exception:  # noqa: BLE001
+        # Retry on a later poll (e.g. column not created yet).
+        pass
+
+
 def research_and_update_buyer(db: Any, buyer_id: int) -> dict[str, Any]:
     """Autopilot: research missing fields via chatbot (+ enrich fallback), save empties only."""
     from modules import leads as leads_module
@@ -622,6 +721,12 @@ def research_and_update_buyer(db: Any, buyer_id: int) -> dict[str, Any]:
                         "after": str(after.get(key) or "").strip(),
                     }
                 )
+
+    if filled:
+        try:
+            mark_ai_data_update_fields(db, buyer_id, filled)
+        except Exception:  # noqa: BLE001
+            pass
 
     return {
         "ok": True,

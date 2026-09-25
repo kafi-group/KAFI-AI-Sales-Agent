@@ -227,6 +227,11 @@ export function TargetedPoolLeadsTable({
           return (
             <tr
               key={row.id}
+              data-ai-hl={
+                ((row.ai_data_update_fields as string[] | null | undefined) ?? [])
+                  .filter(Boolean)
+                  .join(" ") || undefined
+              }
               onClick={() => {
                 if (!editMode) onSelectLead(row.id);
               }}

@@ -584,6 +584,8 @@ class LeadTableRowRead(BaseModel):
     meeting_location: Optional[str] = None
     meeting_notes: Optional[str] = None
     meeting_priority: Optional[int] = None
+    # CRM keys filled by AI Sales Agent Data Update — yellow highlight in lists.
+    ai_data_update_fields: Optional[list[str]] = None
 
 
 class LeadTableRowUpdate(BaseModel):

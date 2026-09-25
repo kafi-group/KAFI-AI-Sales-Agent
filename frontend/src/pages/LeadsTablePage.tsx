@@ -4597,8 +4597,12 @@ export function LeadsTablePage({
                 {displayedRows.map((row) => {
                   const draft = drafts[row.id] ?? row;
                   const dirty = editMode && isRowDirty(row.id);
-                  const aiHlFields =
-                    aiResearchHighlights[String(row.id)]?.fields?.join(" ") ?? "";
+                  const aiHlFields = [
+                    ...(aiResearchHighlights[String(row.id)]?.fields ?? []),
+                    ...((row.ai_data_update_fields as string[] | null | undefined) ?? []),
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
                   const cell = (
                     field: keyof LeadTableRow,
                     display: string,
@@ -5166,8 +5170,12 @@ export function LeadsTablePage({
               {displayedRows.map((row) => {
                 const draft = drafts[row.id] ?? row;
                 const dirty = editMode && isRowDirty(row.id);
-                const aiHlFields =
-                  aiResearchHighlights[String(row.id)]?.fields?.join(" ") ?? "";
+                const aiHlFields = [
+                  ...(aiResearchHighlights[String(row.id)]?.fields ?? []),
+                  ...((row.ai_data_update_fields as string[] | null | undefined) ?? []),
+                ]
+                  .filter(Boolean)
+                  .join(" ");
 
                 return (
                   <tr

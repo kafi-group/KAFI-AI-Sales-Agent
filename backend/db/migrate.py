@@ -428,6 +428,24 @@ def _ensure_target_workspace_tables() -> None:
         db.close()
 
 
+def _ensure_buyer_ai_data_update_fields_column() -> None:
+    """Idempotent: JSONB list of CRM keys filled by AI Sales Agent Data Update."""
+    inspector = inspect(engine)
+    if "buyers" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("buyers")}
+    if "ai_data_update_fields" in existing:
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE buyers ADD COLUMN IF NOT EXISTS "
+                "ai_data_update_fields JSONB"
+            )
+        )
+    print("Applied buyers.ai_data_update_fields column.", flush=True)
+
+
 def run_migrations() -> None:
     alembic_cfg = _alembic_config()
     script = ScriptDirectory.from_config(alembic_cfg)
@@ -453,6 +471,7 @@ def run_migrations() -> None:
         _ensure_lead_import_batches_table()
         _ensure_ai_sales_agent_run_log_table()
         _ensure_auto_trash_tables()
+        _ensure_buyer_ai_data_update_fields_column()
     except Exception as exc:
         print(f"WARNING: post-migrate schema ensure failed (continuing): {exc}", flush=True)
 

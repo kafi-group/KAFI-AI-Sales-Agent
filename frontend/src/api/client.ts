@@ -1772,6 +1772,8 @@ export interface LeadTableRow {
   meeting_location?: string | null;
   meeting_notes?: string | null;
   meeting_priority?: number | null;
+  /** CRM keys filled by AI Sales Agent Data Update — yellow highlight in lists. */
+  ai_data_update_fields?: string[] | null;
 }
 
 export interface LeadTableRowUpdate {

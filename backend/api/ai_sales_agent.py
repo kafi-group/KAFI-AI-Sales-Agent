@@ -1928,9 +1928,19 @@ def list_ai_sales_agent_logs(
 
 
 @router.get("/data-update")
-def get_data_update_status(user: AppUser = Depends(get_current_user)) -> dict[str, Any]:
+def get_data_update_status(
+    user: AppUser = Depends(get_current_user),
+    db=Depends(get_db),
+) -> dict[str, Any]:
     _ = user
     from modules import ai_sales_data_update as du
+
+    # One-time backfill of yellow highlights from existing Data Update logs.
+    # Does not touch schedules, queues, or the running tick.
+    try:
+        du.maybe_sync_highlights_once(db)
+    except Exception:  # noqa: BLE001
+        pass
 
     status = du.get_status()
     queues: dict[str, dict[str, list[dict[str, Any]]]] = {
