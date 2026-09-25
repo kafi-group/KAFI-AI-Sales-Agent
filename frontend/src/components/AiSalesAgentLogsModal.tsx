@@ -7,7 +7,8 @@ import {
 
 interface AiSalesAgentLogsModalProps {
   onClose: () => void;
-  onError: (message: string) => void;
+  /** Optional — prefer local inline errors so the sticky header is not polluted. */
+  onError?: (message: string) => void;
 }
 
 function formatWhen(iso: string | null | undefined): string {
@@ -56,22 +57,34 @@ function laneChip(lane: string | null, label: string | null) {
   );
 }
 
-export function AiSalesAgentLogsModal({ onClose, onError }: AiSalesAgentLogsModalProps) {
+export function AiSalesAgentLogsModal({ onClose }: AiSalesAgentLogsModalProps) {
   const [data, setData] = useState<AiSalesAgentLogsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [openRunId, setOpenRunId] = useState<number | null>(null);
   const [view, setView] = useState<"runs" | "summary">("runs");
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setLoadError(null);
     client
       .listAiSalesAgentLogs({ limit: 200 })
       .then((res) => {
-        if (!cancelled) setData(res);
+        if (!cancelled) {
+          setData(res);
+          setLoadError(null);
+        }
       })
       .catch((e) => {
-        if (!cancelled) onError(e instanceof Error ? e.message : "Failed to load AI Sales Agent logs");
+        if (cancelled) return;
+        const raw = e instanceof Error ? e.message : "Failed to load AI Sales Agent logs";
+        // Keep sticky header clean — show inside the modal only.
+        const friendly = /not found|404/i.test(raw)
+          ? "Logs API is not available on this server yet (redeploy may still be finishing). Try again in a minute."
+          : raw;
+        setLoadError(friendly);
+        setData(null);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -79,7 +92,7 @@ export function AiSalesAgentLogsModal({ onClose, onError }: AiSalesAgentLogsModa
     return () => {
       cancelled = true;
     };
-  }, [onError]);
+  }, []);
 
   const summary = data?.summary;
   const runs = data?.runs ?? [];
@@ -219,6 +232,10 @@ export function AiSalesAgentLogsModal({ onClose, onError }: AiSalesAgentLogsModa
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2">
           {loading ? (
             <p className="text-sm text-slate-500">Loading…</p>
+          ) : loadError ? (
+            <p className="text-sm text-amber-200/90 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+              {loadError}
+            </p>
           ) : view === "runs" ? (
             runs.length === 0 ? (
               <p className="text-sm text-slate-500">

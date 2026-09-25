@@ -632,7 +632,10 @@ function DashboardApp() {
     ) : tab === "ai-sales-agent" ? (
       <button
         type="button"
-        onClick={() => setShowAiSalesAgentLog(true)}
+        onClick={() => {
+          setError(null);
+          setShowAiSalesAgentLog(true);
+        }}
         className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-amber-500/50 bg-amber-500/15 px-2.5 py-1 text-[11px] sm:text-xs font-semibold text-amber-100 hover:bg-amber-500/25"
         title="AI Sales Agent assign vs process-start log"
       >
@@ -1045,6 +1048,7 @@ function DashboardApp() {
       }
     }
     setTab(nextTab);
+    setError(null);
     if (nextTab !== "leads" && nextTab !== "table" && nextTab !== "calls") {
       setSelectedLeadId(null);
     }
@@ -1786,9 +1790,14 @@ function DashboardApp() {
                 className="flex-1 min-w-0 flex items-center gap-3 overflow-hidden"
               />
             ) : error ? (
-              <p className="flex-1 min-w-0 text-xs sm:text-sm text-red-200 truncate px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/30">
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                className="flex-1 min-w-0 text-left text-xs sm:text-sm text-red-200 truncate px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/30 hover:bg-red-500/20"
+                title="Click to dismiss"
+              >
                 {error}
-              </p>
+              </button>
             ) : (
               <div className="flex-1" />
             )}
@@ -2096,8 +2105,10 @@ function DashboardApp() {
       ) : null}
       {showAiSalesAgentLog ? (
         <AiSalesAgentLogsModal
-          onClose={() => setShowAiSalesAgentLog(false)}
-          onError={setError}
+          onClose={() => {
+            setShowAiSalesAgentLog(false);
+            setError(null);
+          }}
         />
       ) : null}
       <ManageModulesModal
