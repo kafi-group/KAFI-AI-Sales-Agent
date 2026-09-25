@@ -9,7 +9,7 @@ const DATA_URI_RE =
   /\bsrc\s*=\s*(['"])(data:image\/([a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+))\1/gi;
 
 const RAILWAY_API =
-  "https://kafi-sales-agent.up.railway.app/api";
+  "https://kafi-sales-agent-production.up.railway.app/api";
 
 export function htmlHasDataUriImages(html: string): boolean {
   return /data:image\//i.test(html || "");

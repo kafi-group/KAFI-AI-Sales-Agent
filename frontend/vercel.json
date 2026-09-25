@@ -6,7 +6,7 @@
     },
     {
       "source": "/api/:path*",
-      "destination": "https://kafi-sales-agent.up.railway.app/api/:path*"
+      "destination": "https://kafi-sales-agent-production.up.railway.app/api/:path*"
     },
     {
       "source": "/((?!api/).*)",
