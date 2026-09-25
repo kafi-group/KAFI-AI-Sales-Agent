@@ -4706,6 +4706,16 @@ export const client = {
       `/ai-sales-agent/data-update/run-now?persona=${encodeURIComponent(persona)}`,
       { method: "POST", headers: aiSalesAgentHeaders() },
     ),
+  listAiSalesAgentLogs: (params: { limit?: number; event_kind?: "assign" | "run_start" } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.event_kind) qs.set("event_kind", params.event_kind);
+    const q = qs.toString();
+    return request<AiSalesAgentLogsResponse>(
+      `/ai-sales-agent/logs${q ? `?${q}` : ""}`,
+      { headers: aiSalesAgentHeaders() },
+    );
+  },
 
   // ── Catalogues ─────────────────────────────────────────────────────────────
   listCatalogues: () => request<CatalogueItem[]>("/catalogues"),
@@ -5396,6 +5406,54 @@ export interface AiSalesDataUpdateStatus {
       data_update: AiSalesAgentTask[];
       auto_mode: AiSalesAgentTask[];
     };
+  };
+}
+
+export interface AiSalesAgentLogContact {
+  task_id?: number | null;
+  buyer_id?: number | null;
+  company_name?: string;
+  contact_name?: string;
+  contact_phone?: string;
+  contact_email?: string;
+}
+
+export interface AiSalesAgentLogEvent {
+  id: number;
+  user_id: number | null;
+  user_label: string;
+  event_kind: "assign" | "run_start" | string;
+  persona: string;
+  persona_label: string;
+  queue_lane: string | null;
+  lane_label: string | null;
+  contact_count: number;
+  contacts: AiSalesAgentLogContact[];
+  note: string | null;
+  created_at: string | null;
+}
+
+export interface AiSalesAgentLogSummaryBucket {
+  key: string;
+  assigned: number;
+  used: number;
+  difference: number;
+  by_persona: Record<string, number>;
+  by_lane: Record<string, number>;
+  used_by_persona_lane: Record<string, number>;
+  runs: number;
+}
+
+export interface AiSalesAgentLogsResponse {
+  events: AiSalesAgentLogEvent[];
+  runs: AiSalesAgentLogEvent[];
+  summary: {
+    total_assigned: number;
+    total_used: number;
+    total_difference: number;
+    total_runs: number;
+    by_user: AiSalesAgentLogSummaryBucket[];
+    by_date: AiSalesAgentLogSummaryBucket[];
   };
 }
 

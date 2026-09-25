@@ -918,13 +918,23 @@ def _persona_label(persona: str) -> str:
     return p or "unknown"
 
 
+def _lane_label(lane: str) -> str:
+    l = (lane or "").strip().lower()
+    if l == "outreach":
+        return "Outreach"
+    if l == "data_update":
+        return "Data Update"
+    if l == "auto_mode":
+        return "AI Auto Mode"
+    return l or "—"
+
+
 @router.post("/tasks/assign")
 def assign_tasks(
     payload: AssignTaskRequest,
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    _ = user
     target = str(payload.persona or "").strip().lower()
     if target not in _ASSIGNABLE_PERSONAS:
         raise HTTPException(
@@ -1082,6 +1092,21 @@ def assign_tasks(
             f"{len(skipped)} contact(s) were not added to {self_label}: "
             f"{names}{extra}."
         )
+    if created:
+        try:
+            from modules import ai_sales_agent_log as asal
+
+            lane = "outreach" if target in _AGENT_PERSONAS else None
+            asal.record_assign(
+                db,
+                user=user,
+                persona=target,
+                tasks=created,
+                queue_lane=lane,
+                note=f"Assigned {len(created)} to {self_label}",
+            )
+        except Exception as log_exc:  # noqa: BLE001
+            print(f"AI Sales Agent assign log failed: {log_exc}", flush=True)
     return {"tasks": created, "skipped": skipped, "notice": notice}
 
 
@@ -1093,16 +1118,17 @@ class SetTaskPersonaRequest(BaseModel):
 @router.post("/tasks/set-persona")
 def set_task_persona(
     payload: SetTaskPersonaRequest,
+    db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Move staging (pipeline) contacts onto Sara or Rayan."""
-    _ = user
     target = str(payload.persona or "").strip().lower()
     if target not in _AGENT_PERSONAS:
         raise HTTPException(400, "persona must be female (Sara) or male (Rayan)")
     id_set = {int(x) for x in (payload.task_ids or []) if int(x) > 0}
     updated = 0
     skipped = 0
+    moved: list[dict[str, Any]] = []
     for t in _TASKS:
         if t.get("id") not in id_set:
             continue
@@ -1121,8 +1147,23 @@ def set_task_persona(
             t["queue_lane"] = "outreach"
         t["remarks"] = f"Assigned to {_persona_label(target)}."
         updated += 1
+        moved.append(t)
     _refresh_runner_counts()
     _persist_queue()
+    if moved:
+        try:
+            from modules import ai_sales_agent_log as asal
+
+            asal.record_assign(
+                db,
+                user=user,
+                persona=target,
+                tasks=moved,
+                queue_lane="outreach",
+                note=f"Moved {len(moved)} to {_persona_label(target)}",
+            )
+        except Exception as log_exc:  # noqa: BLE001
+            print(f"AI Sales Agent set-persona log failed: {log_exc}", flush=True)
     return {
         "updated": updated,
         "skipped": skipped,
@@ -1392,6 +1433,19 @@ def _bulk_email_queued(
             f"No contacts on {agent_name}'s AI Auto Mode list to email. "
             "Assign contacts to the agent, move them into AI Auto Mode, then Start again.",
         )
+    try:
+        from modules import ai_sales_agent_log as asal
+
+        asal.record_run_start(
+            db,
+            user=user,
+            persona=persona,
+            queue_lane="auto_mode",
+            tasks=queued,
+            note=f"{agent_name} AI Auto Mode bulk email started ({len(queued)} contacts)",
+        )
+    except Exception as log_exc:  # noqa: BLE001
+        print(f"AI Sales Agent auto-mode log failed: {log_exc}", flush=True)
     sent = 0
     failed = 0
     delay = float(getattr(app_settings, "bulk_email_message_delay_seconds", 0) or 0)
@@ -1580,6 +1634,36 @@ def start_runner(
             )
 
     runner["operator_user_id"] = user.id
+    # Log the contacts this Start will process (sequence = whole lane queue).
+    try:
+        from modules import ai_sales_agent_log as asal
+
+        if payload.task_id is None and bool(payload.sequence):
+            to_log = [
+                t
+                for t in _TASKS
+                if t.get("persona") == payload.persona
+                and _task_lane(t) == dial_lane
+                and t.get("status") == "queued"
+            ]
+            if not to_log and nxt:
+                to_log = [nxt]
+        else:
+            to_log = [nxt] if nxt else []
+        if to_log:
+            asal.record_run_start(
+                db,
+                user=user,
+                persona=payload.persona,
+                queue_lane=dial_lane,
+                tasks=to_log,
+                note=(
+                    f"{_persona_label(payload.persona)} {_lane_label(dial_lane)} started "
+                    f"({len(to_log)} contact{'s' if len(to_log) != 1 else ''})"
+                ),
+            )
+    except Exception as log_exc:  # noqa: BLE001
+        print(f"AI Sales Agent outreach log failed: {log_exc}", flush=True)
     _dial_task(db, task=nxt, user=user)
     _refresh_runner_counts()
     return runner
@@ -1762,15 +1846,16 @@ class SetTaskLaneRequest(BaseModel):
 @router.post("/tasks/set-lane")
 def set_task_lane(
     payload: SetTaskLaneRequest,
+    db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Move tasks between Outreach, Data Update, and AI Auto Mode (mutually exclusive)."""
-    _ = user
     lane = str(payload.queue_lane or "").strip().lower()
     if lane not in _VALID_QUEUE_LANES:
         raise HTTPException(400, "queue_lane must be outreach, data_update, or auto_mode")
     updated = 0
     id_set = set(int(x) for x in (payload.task_ids or []) if int(x) > 0)
+    moved_by_persona: dict[str, list[dict[str, Any]]] = {}
     for t in _TASKS:
         if t.get("id") in id_set:
             t["queue_lane"] = lane
@@ -1778,8 +1863,25 @@ def set_task_lane(
             if lane in ("outreach", "auto_mode") and t.get("status") not in ("in_progress",):
                 t["status"] = "queued"
             updated += 1
+            p = str(t.get("persona") or "").strip().lower() or "pipeline"
+            moved_by_persona.setdefault(p, []).append(t)
     _refresh_runner_counts()
     _persist_queue()
+    if moved_by_persona:
+        try:
+            from modules import ai_sales_agent_log as asal
+
+            for p, tasks in moved_by_persona.items():
+                asal.record_assign(
+                    db,
+                    user=user,
+                    persona=p,
+                    tasks=tasks,
+                    queue_lane=lane,
+                    note=f"Moved {len(tasks)} into {_lane_label(lane)}",
+                )
+        except Exception as log_exc:  # noqa: BLE001
+            print(f"AI Sales Agent set-lane log failed: {log_exc}", flush=True)
     return {"updated": updated, "queue_lane": lane}
 
 
@@ -1809,6 +1911,33 @@ def bulk_delete_tasks(
     _refresh_runner_counts()
     _persist_queue()
     return {"ok": True, "removed": before - len(_TASKS)}
+
+
+@router.get("/logs")
+def list_ai_sales_agent_logs(
+    limit: int = Query(200, ge=1, le=500),
+    event_kind: str | None = Query(None),
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Assign + process-start activity for AI Sales Agent (admin sees all users)."""
+    from modules import ai_sales_agent_log as asal
+
+    kind = (event_kind or "").strip().lower() or None
+    if kind and kind not in (asal.EVENT_ASSIGN, asal.EVENT_RUN_START):
+        raise HTTPException(400, "event_kind must be assign or run_start")
+    # Non-admins only see their own rows.
+    role = user.role.value if hasattr(user.role, "value") else str(user.role)
+    filter_user_id = None if role == "admin" else user.id
+    events = asal.list_events(
+        db, limit=limit, event_kind=kind, user_id=filter_user_id
+    )
+    runs = [e for e in events if e.get("event_kind") == asal.EVENT_RUN_START]
+    return {
+        "events": events,
+        "runs": runs,
+        "summary": asal.build_summary(events),
+    }
 
 
 @router.get("/data-update")
@@ -1850,9 +1979,9 @@ def put_data_update_schedule(
 @router.post("/data-update/run-now")
 def run_data_update_now(
     persona: str = Query(...),
+    db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    _ = user
     from modules import ai_sales_data_update as du
 
     p = str(persona or "").strip().lower()
@@ -1872,6 +2001,22 @@ def run_data_update_now(
         t.pop("data_update_run_id", None)
         t["status"] = "queued"
     _persist_queue()
+    try:
+        from modules import ai_sales_agent_log as asal
+
+        asal.record_run_start(
+            db,
+            user=user,
+            persona=p,
+            queue_lane="data_update",
+            tasks=pending,
+            note=(
+                f"{_persona_label(p)} Data Update started "
+                f"({len(pending)} contact{'s' if len(pending) != 1 else ''})"
+            ),
+        )
+    except Exception as log_exc:  # noqa: BLE001
+        print(f"AI Sales Agent data-update log failed: {log_exc}", flush=True)
     return {"ok": True, "run_id": run_id, "total": len(pending), "status": run_data}
 
 

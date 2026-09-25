@@ -35,6 +35,7 @@ import {
   type AiResearchLogEntry,
 } from "./utils/aiResearchLog";
 import { AiResearchLogModal } from "./components/AiResearchLogModal";
+import { AiSalesAgentLogsModal } from "./components/AiSalesAgentLogsModal";
 import { stashPendingAiResearchFind } from "./utils/aiResearchPendingFind";
 import { InboxAlertToasts } from "./components/InboxAlertToasts";
 import { UrgentEmailAlertModal, isGenuineNewInquiry } from "./components/UrgentEmailAlertModal";
@@ -182,6 +183,7 @@ function DashboardApp() {
   const [aiResearchRestoreSearch, setAiResearchRestoreSearch] = useState<string | null>(null);
   const [showAiResearchLog, setShowAiResearchLog] = useState(false);
   const [aiResearchLogEntries, setAiResearchLogEntries] = useState<AiResearchLogEntry[]>([]);
+  const [showAiSalesAgentLog, setShowAiSalesAgentLog] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpenPreference);
   const [mailDraftCount, setMailDraftCount] = useState(0);
@@ -624,6 +626,15 @@ function DashboardApp() {
         }}
         className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-amber-500/50 bg-amber-500/15 px-2.5 py-1 text-[11px] sm:text-xs font-semibold text-amber-100 hover:bg-amber-500/25"
         title="AI Research activity log"
+      >
+        Logs
+      </button>
+    ) : tab === "ai-sales-agent" ? (
+      <button
+        type="button"
+        onClick={() => setShowAiSalesAgentLog(true)}
+        className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-amber-500/50 bg-amber-500/15 px-2.5 py-1 text-[11px] sm:text-xs font-semibold text-amber-100 hover:bg-amber-500/25"
+        title="AI Sales Agent assign vs process-start log"
       >
         Logs
       </button>
@@ -2080,6 +2091,13 @@ function DashboardApp() {
           onOpenContacts={(leadIds, section, searchHint) =>
             returnToTableWithSelection(leadIds, section, searchHint)
           }
+          onError={setError}
+        />
+      ) : null}
+      {showAiSalesAgentLog ? (
+        <AiSalesAgentLogsModal
+          onClose={() => setShowAiSalesAgentLog(false)}
+          onError={setError}
         />
       ) : null}
       <ManageModulesModal

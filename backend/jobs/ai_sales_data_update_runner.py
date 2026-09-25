@@ -26,6 +26,28 @@ def run_data_update_tick() -> dict[str, Any]:
             for t in pending:
                 t.pop("data_update_run_id", None)
             asa._persist_queue()  # noqa: SLF001
+            if pending:
+                try:
+                    from modules import ai_sales_agent_log as asal
+
+                    db_log = SessionLocal()
+                    try:
+                        asal.record_run_start(
+                            db_log,
+                            user=None,
+                            persona=persona,
+                            queue_lane="data_update",
+                            tasks=pending,
+                            user_label="Scheduler",
+                            note=(
+                                f"{'Sara' if persona == 'female' else 'Rayan'} "
+                                f"Data Update scheduled start ({len(pending)} contacts)"
+                            ),
+                        )
+                    finally:
+                        db_log.close()
+                except Exception as log_exc:  # noqa: BLE001
+                    print(f"AI Sales Agent scheduled data-update log failed: {log_exc}", flush=True)
             results.append({"persona": persona, "action": "started", "total": len(pending)})
         except Exception as exc:  # noqa: BLE001
             results.append({"persona": persona, "action": "start_failed", "error": str(exc)[:200]})

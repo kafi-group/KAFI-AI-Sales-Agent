@@ -1238,4 +1238,29 @@ class AutoTrashLog(Base):
     )
 
 
+class AiSalesAgentRunLog(Base):
+    """Assign vs process-start activity for AI Sales Agent (Sara / Rayan / pipeline).
+
+    event_kind=assign  — contacts placed on pipeline / agent / lane (not yet used)
+    event_kind=run_start — Outreach / Data Update / AI Auto Mode process actually started
+    """
+
+    __tablename__ = "ai_sales_agent_run_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    user_label: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    event_kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    persona: Mapped[str] = mapped_column(String(32), nullable=False, default="", index=True)
+    queue_lane: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    contact_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    contacts: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    note: Mapped[Optional[str]] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 
