@@ -5,11 +5,22 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from config import settings
 
+
+def _engine_url(url: str) -> str:
+    """Force psycopg2 so a accidental SQLAlchemy 2.1 bump cannot require psycopg v3."""
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg2://" + url[len("postgresql://") :]
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg2://" + url[len("postgres://") :]
+    return url
+
+
 # Keep pools modest per worker. Oversized pools exhaust Supabase limits and
 # hang the app → Railway 502. Tune via DB_POOL_SIZE / DB_MAX_OVERFLOW.
 # LIFO reuses hot connections under bursty CRM polling.
+_db_url = _engine_url(settings.database_url)
 connect_args: dict = {}
-if not settings.database_url.startswith("sqlite"):
+if not _db_url.startswith("sqlite"):
     connect_args = {
         "keepalives": 1,
         "keepalives_idle": 20,
@@ -18,7 +29,7 @@ if not settings.database_url.startswith("sqlite"):
     }
 
 engine = create_engine(
-    settings.database_url,
+    _db_url,
     pool_pre_ping=True,
     pool_size=settings.db_pool_size,
     max_overflow=settings.db_max_overflow,

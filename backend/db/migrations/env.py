@@ -5,10 +5,11 @@ from sqlalchemy import engine_from_config, pool
 
 from config import settings
 from db.models import Base
+from db.session import _engine_url
 
 config = context.config
 # ConfigParser treats % as interpolation; escape URL-encoded chars in passwords (e.g. %2F).
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+config.set_main_option("sqlalchemy.url", _engine_url(settings.database_url).replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
