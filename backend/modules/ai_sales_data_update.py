@@ -237,8 +237,8 @@ def update_schedule(persona: str, patch: dict[str, Any]) -> dict[str, Any]:
     if "weekdays" in patch and isinstance(patch["weekdays"], list):
         cleaned = [str(d).strip().lower()[:3] for d in patch["weekdays"] if str(d).strip()]
         cleaned = [d for d in cleaned if d in WEEKDAY_NAMES]
-        if cleaned:
-            sch["weekdays"] = cleaned
+        # Allow empty (disarm days) or any subset — previously empty was ignored.
+        sch["weekdays"] = cleaned if cleaned else list(WEEKDAY_NAMES)
     if "cooldown_sec" in patch:
         try:
             sch["cooldown_sec"] = max(15, min(600, int(patch["cooldown_sec"])))

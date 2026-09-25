@@ -1846,16 +1846,15 @@ class SetTaskLaneRequest(BaseModel):
 @router.post("/tasks/set-lane")
 def set_task_lane(
     payload: SetTaskLaneRequest,
-    db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Move tasks between Outreach, Data Update, and AI Auto Mode (mutually exclusive)."""
+    _ = user
     lane = str(payload.queue_lane or "").strip().lower()
     if lane not in _VALID_QUEUE_LANES:
         raise HTTPException(400, "queue_lane must be outreach, data_update, or auto_mode")
     updated = 0
     id_set = set(int(x) for x in (payload.task_ids or []) if int(x) > 0)
-    moved_by_persona: dict[str, list[dict[str, Any]]] = {}
     for t in _TASKS:
         if t.get("id") in id_set:
             t["queue_lane"] = lane
@@ -1863,25 +1862,9 @@ def set_task_lane(
             if lane in ("outreach", "auto_mode") and t.get("status") not in ("in_progress",):
                 t["status"] = "queued"
             updated += 1
-            p = str(t.get("persona") or "").strip().lower() or "pipeline"
-            moved_by_persona.setdefault(p, []).append(t)
     _refresh_runner_counts()
     _persist_queue()
-    if moved_by_persona:
-        try:
-            from modules import ai_sales_agent_log as asal
-
-            for p, tasks in moved_by_persona.items():
-                asal.record_assign(
-                    db,
-                    user=user,
-                    persona=p,
-                    tasks=tasks,
-                    queue_lane=lane,
-                    note=f"Moved {len(tasks)} into {_lane_label(lane)}",
-                )
-        except Exception as log_exc:  # noqa: BLE001
-            print(f"AI Sales Agent set-lane log failed: {log_exc}", flush=True)
+    # Lane moves stay snappy — no DB assign-log write on every drag between lists.
     return {"updated": updated, "queue_lane": lane}
 
 

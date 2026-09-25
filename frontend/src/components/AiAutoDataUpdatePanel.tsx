@@ -387,18 +387,28 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
   const [open, setOpen] = useState(true);
   const [status, setStatus] = useState<AiSalesDataUpdateStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingPersona, setSavingPersona] = useState<"female" | "male" | null>(null);
   const [runningPersona, setRunningPersona] = useState<"female" | "male" | null>(null);
   const [moving, setMoving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [cooldownDraft, setCooldownDraft] = useState<Record<"female" | "male", string>>({
+    female: "45",
+    male: "45",
+  });
   const [selectedByPersona, setSelectedByPersona] = useState<
     Record<"female" | "male", Set<number>>
   >({ female: new Set(), male: new Set() });
+  const savingLockRef = useRef(0);
+  const movingLockRef = useRef(0);
 
   const load = useCallback(async () => {
     try {
       const data = await client.getAiSalesDataUpdate();
       setStatus(data);
+      setCooldownDraft({
+        female: String(data.schedules?.female?.cooldown_sec ?? 45),
+        male: String(data.schedules?.male?.cooldown_sec ?? 45),
+      });
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to load Data Update schedule");
     } finally {
@@ -408,7 +418,11 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
 
   useEffect(() => {
     void load();
-    const t = window.setInterval(() => void load(), 12000);
+    const t = window.setInterval(() => {
+      // Don't clobber in-flight edits with a poll refresh.
+      if (savingLockRef.current || movingLockRef.current) return;
+      void load();
+    }, 12000);
     return () => window.clearInterval(t);
   }, [load]);
 
@@ -425,6 +439,54 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
     return out;
   }, [tasks]);
 
+  function patchLocalSchedule(
+    persona: "female" | "male",
+    patch: {
+      enabled?: boolean;
+      time?: string;
+      end_time?: string;
+      stop_mode?: "until_done" | "until_end_time";
+      weekdays?: string[];
+      cooldown_sec?: number;
+    },
+  ) {
+    setStatus((prev) => {
+      const blankSchedule = {
+        enabled: false,
+        time: "10:00",
+        end_time: "",
+        stop_mode: "until_done" as const,
+        weekdays: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+        cooldown_sec: 45,
+      };
+      const blankRun = {
+        status: "idle",
+        progress: {
+          done: 0,
+          total: 0,
+          succeeded: 0,
+          failed: 0,
+          skipped: 0,
+          filled_total: 0,
+        },
+      };
+      const base: AiSalesDataUpdateStatus = prev ?? {
+        schedules: { female: { ...blankSchedule }, male: { ...blankSchedule } },
+        run_state: { female: { ...blankRun }, male: { ...blankRun } },
+      };
+      return {
+        ...base,
+        schedules: {
+          ...base.schedules,
+          [persona]: {
+            ...(base.schedules?.[persona] ?? blankSchedule),
+            ...patch,
+          },
+        },
+      };
+    });
+  }
+
   async function saveSchedule(
     persona: "female" | "male",
     patch: {
@@ -436,16 +498,29 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
       cooldown_sec?: number;
     },
   ) {
-    setSaving(true);
+    // Optimistic UI — never freeze the form behind a global `saving` lock.
+    patchLocalSchedule(persona, patch);
+    setSavingPersona(persona);
+    savingLockRef.current += 1;
     setNotice(null);
+    const unlock = window.setTimeout(() => {
+      setSavingPersona((cur) => (cur === persona ? null : cur));
+    }, 12_000);
     try {
       const next = await client.updateAiSalesDataUpdateSchedule({ persona, ...patch });
       setStatus(next);
+      if (typeof patch.cooldown_sec === "number") {
+        setCooldownDraft((d) => ({ ...d, [persona]: String(next.schedules?.[persona]?.cooldown_sec ?? patch.cooldown_sec) }));
+      }
       setNotice(`Saved ${persona === "female" ? "Sara" : "Rayan"} Data Update schedule.`);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to save schedule");
+      // Re-sync from server so optimistic edit does not stick if save failed.
+      void load();
     } finally {
-      setSaving(false);
+      window.clearTimeout(unlock);
+      savingLockRef.current = Math.max(0, savingLockRef.current - 1);
+      setSavingPersona((cur) => (cur === persona ? null : cur));
     }
   }
 
@@ -497,11 +572,12 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
       return;
     }
     setMoving(true);
+    movingLockRef.current += 1;
+    const unlock = window.setTimeout(() => setMoving(false), 12_000);
     try {
       await client.setAiSalesTaskLane({ task_ids: ids, queue_lane: lane });
       setSelectedByPersona((prev) => ({ ...prev, [persona]: new Set() }));
       onTasksChanged();
-      await load();
       setNotice(
         `Moved ${ids.length} contact(s) to ${LANE_LABEL[lane]} — still on ${
           persona === "female" ? "Sara" : "Rayan"
@@ -510,19 +586,24 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to move contacts");
     } finally {
+      window.clearTimeout(unlock);
+      movingLockRef.current = Math.max(0, movingLockRef.current - 1);
       setMoving(false);
     }
   }
 
   async function setLane(taskId: number, lane: QueueLane) {
     setMoving(true);
+    movingLockRef.current += 1;
+    const unlock = window.setTimeout(() => setMoving(false), 12_000);
     try {
       await client.setAiSalesTaskLane({ task_ids: [taskId], queue_lane: lane });
       onTasksChanged();
-      await load();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to move contact");
     } finally {
+      window.clearTimeout(unlock);
+      movingLockRef.current = Math.max(0, movingLockRef.current - 1);
       setMoving(false);
     }
   }
@@ -556,6 +637,11 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
       {open ? (
         <div className="px-4 pb-4 space-y-4 border-t border-cyan-500/20 pt-3">
           {notice ? <p className="text-xs text-emerald-300">{notice}</p> : null}
+          {savingPersona ? (
+            <p className="text-[11px] text-slate-500">
+              Saving {savingPersona === "female" ? "Sara" : "Rayan"} schedule…
+            </p>
+          ) : null}
 
           <div className="grid gap-3 md:grid-cols-2">
             {PERSONAS.map((p) => {
@@ -583,7 +669,6 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
                     </div>
                     <button
                       type="button"
-                      disabled={saving}
                       onClick={() => void saveSchedule(p.id, { enabled: !sch?.enabled })}
                       title={
                         sch?.enabled
@@ -610,7 +695,6 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
                       <input
                         type="time"
                         value={sch?.time || "10:00"}
-                        disabled={saving}
                         onChange={(e) => void saveSchedule(p.id, { time: e.target.value })}
                         className="mt-1 block w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-100"
                       />
@@ -620,7 +704,7 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
                       <input
                         type="time"
                         value={sch?.end_time || ""}
-                        disabled={saving || stopMode === "until_done"}
+                        disabled={stopMode === "until_done"}
                         onChange={(e) => void saveSchedule(p.id, { end_time: e.target.value })}
                         className="mt-1 block w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-100 disabled:opacity-40"
                       />
@@ -634,7 +718,6 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
                         type="radio"
                         className="mt-0.5 accent-cyan-500"
                         checked={stopMode === "until_done"}
-                        disabled={saving}
                         onChange={() => void saveSchedule(p.id, { stop_mode: "until_done" })}
                       />
                       <span>Until this agent&apos;s Data Update queue is empty</span>
@@ -644,7 +727,6 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
                         type="radio"
                         className="mt-0.5 accent-cyan-500"
                         checked={stopMode === "until_end_time"}
-                        disabled={saving}
                         onChange={() => void saveSchedule(p.id, { stop_mode: "until_end_time" })}
                       />
                       <span>At end time (even if contacts remain)</span>
@@ -658,7 +740,6 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
                         <button
                           key={d.id}
                           type="button"
-                          disabled={saving}
                           onClick={() => {
                             const cur = new Set(sch?.weekdays || []);
                             if (on) cur.delete(d.id);
@@ -683,11 +764,18 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
                       type="number"
                       min={15}
                       max={600}
-                      value={sch?.cooldown_sec ?? 45}
-                      disabled={saving}
+                      value={cooldownDraft[p.id]}
                       onChange={(e) =>
-                        void saveSchedule(p.id, { cooldown_sec: Number(e.target.value) || 45 })
+                        setCooldownDraft((d) => ({ ...d, [p.id]: e.target.value }))
                       }
+                      onBlur={() => {
+                        const n = Number(cooldownDraft[p.id]);
+                        const sec = Number.isFinite(n) ? Math.max(15, Math.min(600, Math.round(n))) : 45;
+                        setCooldownDraft((d) => ({ ...d, [p.id]: String(sec) }));
+                        if (sec !== (sch?.cooldown_sec ?? 45)) {
+                          void saveSchedule(p.id, { cooldown_sec: sec });
+                        }
+                      }}
                       className="mt-1 block w-28 rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-100"
                     />
                   </label>
