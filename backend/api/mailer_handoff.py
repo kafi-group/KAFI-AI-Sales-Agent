@@ -623,6 +623,144 @@ def upload_mailer_inline_image(
     )
 
 
+class PictureGroupCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class PictureGroupRename(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+@router.get("/picture-library")
+def get_picture_library(
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Shared picture groups for all mailer users."""
+    _ = db, user
+    from modules import mailer_picture_library as lib
+
+    return lib.list_library()
+
+
+@router.post("/picture-library/groups")
+def create_picture_group(
+    payload: PictureGroupCreate,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    _ = db
+    from modules import mailer_picture_library as lib
+
+    try:
+        row = lib.create_group(name=payload.name, created_by=user.username or str(user.id))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "group": row}
+
+
+@router.post("/picture-library/groups/{group_id}/rename")
+def rename_picture_group(
+    group_id: str,
+    payload: PictureGroupRename,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    _ = db, user
+    from modules import mailer_picture_library as lib
+
+    try:
+        row = lib.rename_group(group_id, payload.name)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "group": row}
+
+
+@router.post("/picture-library/groups/{group_id}/delete")
+def delete_picture_group(
+    group_id: str,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    _ = db, user
+    from modules import mailer_picture_library as lib
+
+    try:
+        lib.delete_group(group_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True}
+
+
+@router.post("/picture-library/groups/{group_id}/images")
+async def upload_picture_to_group(
+    group_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Upload an image into a shared library group (hosted like inline-media)."""
+    from modules import email_tracking
+    from modules import mailer_picture_library as lib
+    from modules.email_attachments import register_attachment_from_bytes
+
+    _ = db
+    base = email_tracking.public_api_base()
+    if not base:
+        raise HTTPException(
+            status_code=503,
+            detail="PUBLIC_API_BASE_URL is not configured — cannot host library images.",
+        )
+
+    filename = (file.filename or "picture.png").strip() or "picture.png"
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty image")
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image exceeds 8 MB")
+
+    ctype = (file.content_type or "image/png").split(";")[0].strip().lower()
+    if not ctype.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed in the library")
+    subtype = ctype.split("/", 1)[-1] or "png"
+    if subtype == "jpg":
+        subtype = "jpeg"
+        ctype = "image/jpeg"
+
+    meta = register_attachment_from_bytes(data, filename=filename, content_type=ctype)
+    url = f"{base}/api/mailer/inline-media/{meta['id']}"
+    try:
+        row = lib.add_image(
+            group_id,
+            media_id=str(meta["id"]),
+            url=url,
+            filename=str(meta["filename"]),
+            content_type=ctype,
+            size=int(meta["size"]),
+            uploaded_by=user.username or str(user.id),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "image": row, "group_id": group_id}
+
+
+@router.post("/picture-library/groups/{group_id}/images/{media_id}/delete")
+def delete_picture_from_group(
+    group_id: str,
+    media_id: str,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    _ = db, user
+    from modules import mailer_picture_library as lib
+
+    try:
+        lib.delete_image(group_id, media_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True}
+
+
 @router.post("/attachment-upload", response_model=MailerAttachmentUploadResponse)
 async def upload_mailer_file_attachment(
     file: UploadFile = File(...),

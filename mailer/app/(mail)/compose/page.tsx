@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch, getStoredToken } from "@/lib/api";
 import { useAuth } from "@/components/AuthProvider";
@@ -14,7 +14,9 @@ import {
   emailBodyHasContent,
   htmlToPlainText,
   plainTextToEditorHtml,
+  type EmailBodyEditorHandle,
 } from "@/components/EmailBodyEditor";
+import { PictureLibraryPanel } from "@/components/PictureLibraryPanel";
 import { ensureDearSalutation } from "@/lib/personalizeEmail";
 import { normalizeEditorTextColor } from "@/lib/emailTextColor";
 import {
@@ -73,6 +75,7 @@ function ComposeInner() {
   const [uploadLabel, setUploadLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const bodyEditorRef = useRef<EmailBodyEditorHandle>(null);
   const draftId = params.get("draft_id");
   const buyerIdParam = params.get("buyer_id");
   const buyerId =
@@ -231,7 +234,8 @@ function ComposeInner() {
   }
 
   return (
-    <div className="pad compose-page">
+    <div className="compose-with-library">
+      <div className="compose-with-library-main compose-page">
       <h2 className="folder-title">Compose</h2>
       <p className="muted small">
         From: {user?.mailbox_email || user?.username} · Sends via Vercel SMTP (not Railway)
@@ -392,7 +396,10 @@ function ComposeInner() {
         </>
       )}
       <label>Body</label>
-      <EmailBodyEditor value={body} onChange={setBody} rows={14} showPictureBox />
+      <p className="muted small" style={{ marginTop: 0 }}>
+        Click a picture in the library on the right to insert it at the cursor.
+      </p>
+      <EmailBodyEditor ref={bodyEditorRef} value={body} onChange={setBody} rows={14} />
       <div className="detail-actions">
         <button
           type="button"
@@ -424,6 +431,11 @@ function ComposeInner() {
             : "Add signature"}
         </button>
       </div>
+      </div>
+      <PictureLibraryPanel
+        disabled={sending}
+        onInsert={(url, filename) => bodyEditorRef.current?.insertPicture(url, filename)}
+      />
     </div>
   );
 }

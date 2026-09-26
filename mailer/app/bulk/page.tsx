@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, Suspense } from "react";
+import { useEffect, useMemo, useRef, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { loginFromHandoff, clearSession, getStoredToken } from "@/lib/api";
@@ -15,7 +15,9 @@ import {
   emailBodyHasContent,
   htmlToPlainText,
   plainTextToEditorHtml,
+  type EmailBodyEditorHandle,
 } from "@/components/EmailBodyEditor";
+import { PictureLibraryPanel } from "@/components/PictureLibraryPanel";
 import { ensureDearSalutation, personalizeEmailText } from "@/lib/personalizeEmail";
 import { normalizeEditorTextColor } from "@/lib/emailTextColor";
 import {
@@ -113,6 +115,7 @@ function BulkInner() {
   const [scheduledAt, setScheduledAt] = useState("");
   const [recipientsOpen, setRecipientsOpen] = useState(true);
   const [activeLeads, setActiveLeads] = useState<Lead[]>([]);
+  const bodyEditorRef = useRef<EmailBodyEditorHandle>(null);
 
   const handoffLeads: Lead[] = (preview?.leads || []).filter((l) =>
     (l.contact_email || "").includes("@"),
@@ -406,6 +409,8 @@ function BulkInner() {
   }
 
   return (
+    <div className="bulk-with-library">
+      <div className="bulk-with-library-main">
     <div className="wrap">
       <div className="card">
         <div className="folder-list-head">
@@ -541,7 +546,10 @@ function BulkInner() {
         <input value={subject} onChange={(e) => setSubject(e.target.value)} />
 
         <label>Body</label>
-        <EmailBodyEditor value={body} onChange={setBody} rows={12} showPictureBox />
+        <p className="muted small" style={{ marginTop: 0 }}>
+          Click a picture in the library on the right to insert it at the cursor.
+        </p>
+        <EmailBodyEditor ref={bodyEditorRef} value={body} onChange={setBody} rows={12} />
 
         <div className="row">
           <div>
@@ -715,6 +723,12 @@ function BulkInner() {
           </div>
         )}
       </div>
+    </div>
+      </div>
+      <PictureLibraryPanel
+        disabled={running || scheduling}
+        onInsert={(url, filename) => bodyEditorRef.current?.insertPicture(url, filename)}
+      />
     </div>
   );
 }

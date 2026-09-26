@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import {
   EmailBodyEditor,
   emailBodyHasContent,
+  type EmailBodyEditorHandle,
 } from "@/components/EmailBodyEditor";
+import { PictureLibraryPanel } from "@/components/PictureLibraryPanel";
 
 type Template = {
   id: number;
@@ -21,6 +23,7 @@ export default function TemplatesPage() {
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const bodyEditorRef = useRef<EmailBodyEditorHandle>(null);
 
   const load = useCallback(async () => {
     try {
@@ -57,40 +60,48 @@ export default function TemplatesPage() {
   }
 
   return (
-    <div className="pad">
-      <h2 className="folder-title">Email templates</h2>
-      {error && <p className="bad">{error}</p>}
-      {notice && <p className="ok">{notice}</p>}
-      <div className="card" style={{ marginBottom: "1.25rem" }}>
-        <label>Name</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} />
-        <label>Subject</label>
-        <input value={subject} onChange={(e) => setSubject(e.target.value)} />
-        <label>Body</label>
-        <EmailBodyEditor value={body} onChange={setBody} rows={6} showPictureBox />
-        <button
-          type="button"
-          className="btn"
-          disabled={!name.trim() || !subject.trim() || !emailBodyHasContent(body)}
-          onClick={() => void create()}
-        >
-          Save template
-        </button>
+    <div className="compose-with-library">
+      <div className="compose-with-library-main">
+        <h2 className="folder-title">Email templates</h2>
+        {error && <p className="bad">{error}</p>}
+        {notice && <p className="ok">{notice}</p>}
+        <div className="card" style={{ marginBottom: "1.25rem" }}>
+          <label>Name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} />
+          <label>Subject</label>
+          <input value={subject} onChange={(e) => setSubject(e.target.value)} />
+          <label>Body</label>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            Click a picture in the library on the right to insert it at the cursor.
+          </p>
+          <EmailBodyEditor ref={bodyEditorRef} value={body} onChange={setBody} rows={6} />
+          <button
+            type="button"
+            className="btn"
+            disabled={!name.trim() || !subject.trim() || !emailBodyHasContent(body)}
+            onClick={() => void create()}
+          >
+            Save template
+          </button>
+        </div>
+        <ul className="simple-list">
+          {rows.map((t) => (
+            <li key={t.id} className="card-row">
+              <div>
+                <p className="msg-subject">{t.name}</p>
+                <p className="muted small">{t.subject}</p>
+              </div>
+              <button type="button" className="btn ghost" onClick={() => void remove(t.id)}>
+                Delete
+              </button>
+            </li>
+          ))}
+          {rows.length === 0 && <li className="muted">No templates</li>}
+        </ul>
       </div>
-      <ul className="simple-list">
-        {rows.map((t) => (
-          <li key={t.id} className="card-row">
-            <div>
-              <p className="msg-subject">{t.name}</p>
-              <p className="muted small">{t.subject}</p>
-            </div>
-            <button type="button" className="btn ghost" onClick={() => void remove(t.id)}>
-              Delete
-            </button>
-          </li>
-        ))}
-        {rows.length === 0 && <li className="muted">No templates</li>}
-      </ul>
+      <PictureLibraryPanel
+        onInsert={(url, filename) => bodyEditorRef.current?.insertPicture(url, filename)}
+      />
     </div>
   );
 }
