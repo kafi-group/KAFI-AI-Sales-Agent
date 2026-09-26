@@ -432,7 +432,15 @@ async def require_api_auth(request, call_next):
             return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
         request.state.user_id = user.id
         request.state.user_role = user.role.value if hasattr(user.role, "value") else str(user.role)
-    except (SATimeoutError, OperationalError, DBAPIError):
+    except (SATimeoutError, OperationalError, DBAPIError) as first_exc:
+        # Overnight Supabase SSL drops poison the pool; dispose so the next
+        # request (and this retry) get fresh connections instead of 503 forever.
+        try:
+            from db.session import engine as _db_engine
+
+            _db_engine.dispose()
+        except Exception:
+            pass
         try:
             db.close()
             db = SessionLocal()
@@ -446,6 +454,11 @@ async def require_api_auth(request, call_next):
                 status_code=503,
                 content={"detail": "Database busy — retry shortly"},
                 headers={"Retry-After": "2"},
+            )
+        else:
+            print(
+                f"Auth middleware recovered after DB error ({type(first_exc).__name__}); pool disposed.",
+                flush=True,
             )
     finally:
         db.close()
