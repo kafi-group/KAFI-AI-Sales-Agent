@@ -49,6 +49,8 @@ def _default_store() -> dict[str, Any]:
         "master_lists": deepcopy(_DEFAULT_MASTER_LISTS),
         # user_id (str) -> list of master list keys; missing user = all enabled lists
         "user_master_access": {},
+        # agent_id -> list of master list keys; missing agent = none assigned
+        "agent_master_access": {},
         "ai_sales_agents": deepcopy(_DEFAULT_AGENTS),
     }
 
@@ -105,6 +107,13 @@ def _load() -> dict[str, Any]:
             if isinstance(keys, list):
                 out_access[str(uid)] = [str(k) for k in keys if str(k).strip()]
         base["user_master_access"] = out_access
+    agent_access = raw.get("agent_master_access")
+    if isinstance(agent_access, dict):
+        out_agents: dict[str, list[str]] = {}
+        for aid, keys in agent_access.items():
+            if isinstance(keys, list):
+                out_agents[str(aid)] = [str(k) for k in keys if str(k).strip()]
+        base["agent_master_access"] = out_agents
     agents = raw.get("ai_sales_agents")
     if isinstance(agents, list) and agents:
         cleaned_a: list[dict[str, Any]] = []
@@ -231,6 +240,10 @@ def delete_master_list(key: str) -> None:
         for uid, keys in list(access.items()):
             access[uid] = [x for x in keys if x != k]
         data["user_master_access"] = access
+        a_access = data.get("agent_master_access") or {}
+        for aid, keys in list(a_access.items()):
+            a_access[aid] = [x for x in keys if x != k]
+        data["agent_master_access"] = a_access
         _save(data)
 
 
@@ -244,6 +257,37 @@ def set_user_master_access(user_id: int, keys: list[str]) -> list[str]:
         data["user_master_access"] = access
         _save(data)
     return cleaned
+
+
+def get_agent_master_access() -> dict[str, list[str]]:
+    return dict(_load().get("agent_master_access") or {})
+
+
+def set_agent_master_access(agent_id: str, keys: list[str]) -> list[str]:
+    aid = str(agent_id or "").strip()
+    if not aid:
+        raise ValueError("Agent id required")
+    if not get_ai_agent(aid):
+        raise ValueError("Agent not found")
+    valid = {str(r["key"]) for r in get_master_lists(include_disabled=True)}
+    cleaned = [k for k in keys if k in valid]
+    with _LOCK:
+        data = _load()
+        access = dict(data.get("agent_master_access") or {})
+        access[aid] = cleaned
+        data["agent_master_access"] = access
+        _save(data)
+    return cleaned
+
+
+def master_keys_for_agent(agent_id: str) -> list[str]:
+    """Master list keys assigned to an AI Sales Agent (empty if unset)."""
+    enabled_keys = [str(r["key"]) for r in get_master_lists(include_disabled=False)]
+    access = get_agent_master_access().get(str(agent_id or "").strip())
+    if access is None:
+        return []
+    allowed = {str(k) for k in access}
+    return [k for k in enabled_keys if k in allowed]
 
 
 def list_ai_sales_agents(*, active_only: bool = False) -> list[dict[str, Any]]:
@@ -333,13 +377,16 @@ def delete_ai_sales_agent(agent_id: str) -> None:
     with _LOCK:
         data = _load()
         data["ai_sales_agents"] = [r for r in (data.get("ai_sales_agents") or []) if r.get("id") != aid]
+        access = dict(data.get("agent_master_access") or {})
+        access.pop(aid, None)
+        data["agent_master_access"] = access
         _save(data)
 
 
 def admin_snapshot() -> dict[str, Any]:
-    data = _load()
     return {
         "master_lists": get_master_lists(include_disabled=True),
         "user_master_access": get_user_master_access(),
+        "agent_master_access": get_agent_master_access(),
         "ai_sales_agents": list_ai_sales_agents(active_only=False),
     }

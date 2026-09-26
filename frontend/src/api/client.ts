@@ -190,6 +190,7 @@ export interface OrgAdminAiSalesAgent {
 export interface OrgAdminSnapshot {
   master_lists: OrgAdminMasterList[];
   user_master_access: Record<string, string[]>;
+  agent_master_access?: Record<string, string[]>;
   ai_sales_agents: OrgAdminAiSalesAgent[];
 }
 
@@ -4159,6 +4160,7 @@ export const client = {
     request<{
       master_lists: OrgAdminMasterList[];
       user_master_access: Record<string, string[]>;
+      agent_master_access?: Record<string, string[]>;
       users: OrgAdminUserRow[];
     }>(`/org-admin/master-lists/admin?pin=${encodeURIComponent(pin)}`),
   upsertOrgMasterList: (data: {
@@ -4183,6 +4185,14 @@ export const client = {
       {
         method: "POST",
         body: JSON.stringify({ pin, user_id: userId, master_list_keys: masterListKeys }),
+      },
+    ),
+  setOrgAgentMasterAccess: (pin: string, agentId: string, masterListKeys: string[]) =>
+    request<{ ok: boolean; agent_id: string; master_list_keys: string[] }>(
+      "/org-admin/master-lists/agent-access",
+      {
+        method: "POST",
+        body: JSON.stringify({ pin, agent_id: agentId, master_list_keys: masterListKeys }),
       },
     ),
   listOrgAiSalesAgents: (activeOnly = false) =>

@@ -14,6 +14,7 @@ import {
   orgAdminPinValid,
   ORG_ADMIN_PIN,
   saveOrgAdminLocal,
+  setLocalAgentAccess,
   setLocalUserAccess,
   upsertLocalAgent,
   upsertLocalMasterList,
@@ -27,11 +28,13 @@ interface OrgAdminSettingsPanelProps {
 function fromLocal(store: LocalOrgAdminStore): {
   masterLists: OrgAdminMasterList[];
   userAccess: Record<string, string[]>;
+  agentAccess: Record<string, string[]>;
   agents: OrgAdminAiSalesAgent[];
 } {
   return {
     masterLists: store.master_lists,
     userAccess: store.user_master_access,
+    agentAccess: store.agent_master_access || {},
     agents: store.ai_sales_agents,
   };
 }
@@ -48,6 +51,7 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
   const [masterLists, setMasterLists] = useState<OrgAdminMasterList[]>([]);
   const [users, setUsers] = useState<OrgAdminUserRow[]>([]);
   const [userAccess, setUserAccess] = useState<Record<string, string[]>>({});
+  const [agentAccess, setAgentAccess] = useState<Record<string, string[]>>({});
   const [agents, setAgents] = useState<OrgAdminAiSalesAgent[]>([]);
 
   const [newListLabel, setNewListLabel] = useState("");
@@ -65,6 +69,7 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
     const mapped = fromLocal(store);
     setMasterLists(mapped.masterLists);
     setUserAccess(mapped.userAccess);
+    setAgentAccess(mapped.agentAccess);
     setAgents(mapped.agents);
     setUsingLocal(true);
   }, []);
@@ -77,6 +82,7 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
         setMasterLists(data.master_lists || []);
         setUsers(data.users || []);
         setUserAccess(data.user_master_access || {});
+        setAgentAccess(data.agent_master_access || {});
         const ag = await client.listOrgAiSalesAgents(false);
         setAgents(ag.agents || []);
         setUsingLocal(false);
@@ -84,6 +90,7 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
         saveOrgAdminLocal({
           master_lists: data.master_lists || loadOrgAdminLocal().master_lists,
           user_master_access: data.user_master_access || {},
+          agent_master_access: data.agent_master_access || {},
           ai_sales_agents: ag.agents || loadOrgAdminLocal().ai_sales_agents,
         });
         return;
@@ -226,6 +233,35 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
       applyLocal(setLocalUserAccess(localStore, userId, nextKeys));
     } catch (err) {
       onError(err instanceof Error ? err.message : "Could not update user access");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleAgentAccess(agentId: string, listKey: string, checked: boolean) {
+    if (!pin) return;
+    const aid = String(agentId);
+    // Agents start with no lists until ticked (unlike users who default to all).
+    const current = agentAccess[aid] ?? [];
+    const nextKeys = checked
+      ? Array.from(new Set([...current, listKey]))
+      : current.filter((k) => k !== listKey);
+    setBusy(true);
+    try {
+      if (!usingLocal) {
+        try {
+          await client.setOrgAgentMasterAccess(pin, aid, nextKeys);
+          setAgentAccess((prev) => ({ ...prev, [aid]: nextKeys }));
+          const mirrored = setLocalAgentAccess(loadOrgAdminLocal(), aid, nextKeys);
+          setLocalStore(mirrored);
+          return;
+        } catch {
+          /* local */
+        }
+      }
+      applyLocal(setLocalAgentAccess(localStore, aid, nextKeys));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Could not update agent access");
     } finally {
       setBusy(false);
     }
@@ -457,61 +493,99 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
 
       <div className="space-y-3">
         <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-          User access to master lists
+          Access to master lists
         </h4>
         <p className="text-xs text-slate-500">
-          Unticked lists are hidden from that user&apos;s sidebar. Admins always see all enabled lists.
+          Tick which people and AI Sales Agents may use each master list. Example: Sesame Seeds →
+          Admin + Usman (AI) + Asim; Meat → Admin + Mitch (AI) + Asim. Admins always see all enabled
+          lists. Unticked lists are hidden from that user&apos;s sidebar.
         </p>
-        {users.length === 0 ? (
-          <p className="text-xs text-amber-200/80">
-            User list unavailable right now — master lists and AI agents still save on this browser.
-          </p>
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-slate-800">
-            <table className="min-w-full text-xs">
-              <thead className="bg-slate-950/80 text-slate-400">
-                <tr>
-                  <th className="text-left px-3 py-2 font-medium">User</th>
-                  {masterLists.map((m) => (
-                    <th key={m.key} className="text-left px-2 py-2 font-medium whitespace-nowrap">
-                      {m.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => {
-                  const uid = String(u.id);
-                  const assigned = userAccess[uid];
-                  const effective = assigned ?? enabledKeys;
-                  const isAdminUser = u.role === "admin";
-                  return (
-                    <tr key={u.id} className="border-t border-slate-800/80">
-                      <td className="px-3 py-2 text-slate-200">
-                        {u.display_name || u.username}
-                        {isAdminUser && (
-                          <span className="ml-1 text-[10px] text-slate-500">(admin)</span>
-                        )}
+        <div className="overflow-x-auto rounded-lg border border-slate-800">
+          <table className="min-w-full text-xs">
+            <thead className="bg-slate-950/80 text-slate-400">
+              <tr>
+                <th className="text-left px-3 py-2 font-medium">Person / AI Agent</th>
+                {masterLists.map((m) => (
+                  <th key={m.key} className="text-left px-2 py-2 font-medium whitespace-nowrap">
+                    {m.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => {
+                const uid = String(u.id);
+                const assigned = userAccess[uid];
+                const effective = assigned ?? enabledKeys;
+                const isAdminUser = u.role === "admin";
+                return (
+                  <tr key={`user-${u.id}`} className="border-t border-slate-800/80">
+                    <td className="px-3 py-2 text-slate-200">
+                      {u.display_name || u.username}
+                      {isAdminUser ? (
+                        <span className="ml-1 text-[10px] text-slate-500">(admin)</span>
+                      ) : (
+                        <span className="ml-1 text-[10px] text-slate-500">(user)</span>
+                      )}
+                    </td>
+                    {masterLists.map((m) => (
+                      <td key={m.key} className="px-2 py-2">
+                        <input
+                          type="checkbox"
+                          disabled={busy || isAdminUser || !m.enabled}
+                          checked={isAdminUser || effective.includes(m.key)}
+                          onChange={(e) =>
+                            void toggleUserAccess(u.id, m.key, e.target.checked)
+                          }
+                        />
                       </td>
-                      {masterLists.map((m) => (
-                        <td key={m.key} className="px-2 py-2">
-                          <input
-                            type="checkbox"
-                            disabled={busy || isAdminUser || !m.enabled}
-                            checked={isAdminUser || effective.includes(m.key)}
-                            onChange={(e) =>
-                              void toggleUserAccess(u.id, m.key, e.target.checked)
-                            }
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                    ))}
+                  </tr>
+                );
+              })}
+              {agents.map((ag) => {
+                const assigned = agentAccess[ag.id] ?? [];
+                return (
+                  <tr
+                    key={`agent-${ag.id}`}
+                    className={`border-t border-slate-800/80 ${ag.active ? "" : "opacity-50"}`}
+                  >
+                    <td className="px-3 py-2 text-slate-200">
+                      {ag.name}
+                      <span className="ml-1 text-[10px] text-emerald-400/90">(AI Sales Agent)</span>
+                      {!ag.active && (
+                        <span className="ml-1 text-[10px] text-slate-500">inactive</span>
+                      )}
+                    </td>
+                    {masterLists.map((m) => (
+                      <td key={m.key} className="px-2 py-2">
+                        <input
+                          type="checkbox"
+                          disabled={busy || !m.enabled || !ag.active}
+                          checked={assigned.includes(m.key)}
+                          onChange={(e) =>
+                            void toggleAgentAccess(ag.id, m.key, e.target.checked)
+                          }
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+              {users.length === 0 && agents.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={Math.max(1, masterLists.length + 1)}
+                    className="px-3 py-3 text-amber-200/80"
+                  >
+                    No users or AI agents loaded yet — add an AI Sales Agent below, then assign lists
+                    here.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="space-y-3">

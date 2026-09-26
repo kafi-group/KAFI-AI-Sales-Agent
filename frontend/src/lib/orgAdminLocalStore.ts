@@ -22,6 +22,8 @@ export interface LocalAiAgent {
 export interface LocalOrgAdminStore {
   master_lists: LocalMasterList[];
   user_master_access: Record<string, string[]>;
+  /** AI Sales Agent id → master list keys they are assigned. */
+  agent_master_access: Record<string, string[]>;
   ai_sales_agents: LocalAiAgent[];
 }
 
@@ -73,6 +75,7 @@ function defaultStore(): LocalOrgAdminStore {
   return {
     master_lists: DEFAULT_LISTS.map((r) => ({ ...r })),
     user_master_access: {},
+    agent_master_access: {},
     ai_sales_agents: DEFAULT_AGENTS.map((r) => ({ ...r })),
   };
 }
@@ -93,6 +96,9 @@ export function loadOrgAdminLocal(): LocalOrgAdminStore {
     }
     if (parsed.user_master_access && typeof parsed.user_master_access === "object") {
       base.user_master_access = parsed.user_master_access as Record<string, string[]>;
+    }
+    if (parsed.agent_master_access && typeof parsed.agent_master_access === "object") {
+      base.agent_master_access = parsed.agent_master_access as Record<string, string[]>;
     }
     if (Array.isArray(parsed.ai_sales_agents) && parsed.ai_sales_agents.length) {
       const seen = new Set<string>();
@@ -165,6 +171,12 @@ export function deleteLocalMasterList(data: LocalOrgAdminStore, key: string): Lo
         keys.filter((x) => x !== k),
       ]),
     ),
+    agent_master_access: Object.fromEntries(
+      Object.entries(data.agent_master_access || {}).map(([aid, keys]) => [
+        aid,
+        keys.filter((x) => x !== k),
+      ]),
+    ),
   };
   saveOrgAdminLocal(next);
   return next;
@@ -181,6 +193,25 @@ export function setLocalUserAccess(
     user_master_access: {
       ...data.user_master_access,
       [String(userId)]: keys.filter((k) => valid.has(k)),
+    },
+  };
+  saveOrgAdminLocal(next);
+  return next;
+}
+
+export function setLocalAgentAccess(
+  data: LocalOrgAdminStore,
+  agentId: string,
+  keys: string[],
+): LocalOrgAdminStore {
+  const aid = String(agentId || "").trim();
+  if (!aid) throw new Error("Agent id required");
+  const valid = new Set(data.master_lists.map((m) => m.key));
+  const next: LocalOrgAdminStore = {
+    ...data,
+    agent_master_access: {
+      ...(data.agent_master_access || {}),
+      [aid]: keys.filter((k) => valid.has(k)),
     },
   };
   saveOrgAdminLocal(next);
@@ -244,6 +275,9 @@ export function deleteLocalAgent(data: LocalOrgAdminStore, agentId: string): Loc
   const next = {
     ...data,
     ai_sales_agents: data.ai_sales_agents.filter((a) => a.id !== aid),
+    agent_master_access: Object.fromEntries(
+      Object.entries(data.agent_master_access || {}).filter(([id]) => id !== aid),
+    ),
   };
   saveOrgAdminLocal(next);
   return next;

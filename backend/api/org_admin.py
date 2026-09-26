@@ -44,6 +44,12 @@ class UserAccessUpdate(BaseModel):
     master_list_keys: list[str] = Field(default_factory=list)
 
 
+class AgentAccessUpdate(BaseModel):
+    pin: str
+    agent_id: str
+    master_list_keys: list[str] = Field(default_factory=list)
+
+
 class AiAgentUpsert(BaseModel):
     pin: str
     id: str | None = None
@@ -100,6 +106,7 @@ def list_master_lists_admin(
     return {
         "master_lists": org.get_master_lists(include_disabled=True),
         "user_master_access": org.get_user_master_access(),
+        "agent_master_access": org.get_agent_master_access(),
         "users": users,
     }
 
@@ -146,6 +153,20 @@ def set_user_master_access(
     _require_pin(payload.pin)
     keys = org.set_user_master_access(payload.user_id, payload.master_list_keys)
     return {"ok": True, "user_id": payload.user_id, "master_list_keys": keys}
+
+
+@router.post("/master-lists/agent-access")
+def set_agent_master_access(
+    payload: AgentAccessUpdate,
+    user: AppUser = Depends(require_admin),
+) -> dict[str, Any]:
+    _ = user
+    _require_pin(payload.pin)
+    try:
+        keys = org.set_agent_master_access(payload.agent_id, payload.master_list_keys)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "agent_id": payload.agent_id, "master_list_keys": keys}
 
 
 @router.get("/ai-sales-agents")
