@@ -120,7 +120,7 @@ function LogEntriesList({
               <span className="text-slate-500 tabular-nums shrink-0">
                 {formatLogTime(entry.at)}
               </span>
-              <span className="font-medium text-slate-100 truncate min-w-0 flex-1">
+              <span className="font-medium text-slate-100 break-words min-w-0 flex-1">
                 {entry.label || `Lead #${entry.buyer_id ?? "?"}`}
               </span>
               <span className={`font-semibold ${result.cls}`}>{result.text}</span>
@@ -658,7 +658,7 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
               return (
                 <div
                   key={p.id}
-                  className="rounded-lg border border-slate-700 bg-slate-950/50 p-3 space-y-3"
+                  className="min-w-0 overflow-hidden rounded-lg border border-slate-700 bg-slate-950/50 p-3 space-y-3"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div>
@@ -799,7 +799,7 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
                   </div>
 
                   {run?.current_label ? (
-                    <p className="text-[11px] text-cyan-200/90">Now: {run.current_label}</p>
+                    <p className="text-[11px] text-cyan-200/90 break-words">Now: {run.current_label}</p>
                   ) : null}
 
                   <DataUpdateActivityLog
@@ -925,8 +925,8 @@ function QueueLaneBlock({
       ? "border-violet-500/40 bg-violet-500/10 text-violet-100 hover:bg-violet-500/20"
       : "border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20";
   return (
-    <div className={`rounded-md border p-2 ${borderClass}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className={`min-w-0 overflow-hidden rounded-md border p-2 ${borderClass}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2 min-w-0">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -974,25 +974,25 @@ function QueueLaneBlock({
       </div>
       {open ? (
         <>
-          <ul className="space-y-1 max-h-48 overflow-y-auto text-xs mt-1">
+          <ul className="space-y-1 max-h-48 overflow-y-auto overflow-x-hidden text-xs mt-1 min-w-0">
             {tasks.length === 0 ? (
               <li className="text-slate-600 px-1 py-1">Empty</li>
             ) : (
               tasks.map((t) => (
                 <li
                   key={t.id}
-                  className="flex items-center gap-2 rounded border border-slate-800/80 px-2 py-1.5"
+                  className="flex items-start gap-2 rounded border border-slate-800/80 px-2 py-1.5 min-w-0"
                 >
                   <input
                     type="checkbox"
-                    className="accent-cyan-500 shrink-0"
+                    className="accent-cyan-500 shrink-0 mt-0.5"
                     checked={selected.has(t.id)}
                     onChange={() => onToggle(t.id)}
                   />
-                  <span className="text-slate-200 truncate flex-1 min-w-0">
+                  <span className="text-slate-200 break-words whitespace-normal flex-1 min-w-0">
                     {t.company_name || t.contact_name || `#${t.buyer_id}`}
                   </span>
-                  <span className="flex shrink-0 flex-wrap gap-1 justify-end">
+                  <span className="flex shrink-0 flex-wrap gap-1 justify-end max-w-[46%]">
                     {moveTargets.map((mt) => (
                       <button
                         key={mt.lane}
