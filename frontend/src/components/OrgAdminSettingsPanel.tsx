@@ -485,6 +485,17 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
         <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
           Active Master List
         </h4>
+        <p className="text-xs text-slate-500">
+          Lists must be saved on the server to appear in Incognito or on other PCs. Unlock Settings
+          (PIN) while online to sync this browser&apos;s lists up — they now persist on Railway disk
+          across redeploys.
+        </p>
+        {usingLocal ? (
+          <p className="text-xs text-amber-300/90 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5">
+            Showing browser-local lists (not fully on the server yet). Unlock again or click Add list
+            while the API is up so Incognito / other machines see Meat, Seeds, Salt, Rice, etc.
+          </p>
+        ) : null}
         <ul className="space-y-2">
           {masterLists.map((row) => (
             <li

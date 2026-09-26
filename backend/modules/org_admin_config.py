@@ -1,19 +1,43 @@
 """Org admin config: Active Master Lists + AI Sales Agents registry.
 
-Stored as JSON under backend/data/ — does not alter queues, Twilio, WhatsApp, or mail.
+Persisted on Railway volume (/data) when available so lists survive redeploys.
+Local/dev falls back to backend/data/. Does not alter queues, Twilio, WhatsApp, or mail.
 Sara (female) and Rayan (male) are seeded and protected (rename/active only; no delete).
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-_DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "org_admin_config.json"
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+_REPO_DATA_PATH = _BACKEND_DIR / "data" / "org_admin_config.json"
+
+
+def _resolve_data_path() -> Path:
+    """Prefer persistent Railway volume so master lists survive deploys."""
+    override = (os.environ.get("ORG_ADMIN_CONFIG_PATH") or "").strip()
+    if override:
+        return Path(override)
+    for candidate in (
+        Path("/data/org_admin_config.json"),
+        Path("/data/storage/org_admin_config.json"),
+    ):
+        parent = candidate.parent
+        try:
+            if parent.is_dir() and os.access(parent, os.W_OK):
+                return candidate
+        except OSError:
+            continue
+    return _REPO_DATA_PATH
+
+
+_DATA_PATH = _resolve_data_path()
 _LOCK = threading.Lock()
 
 _DEFAULT_MASTER_LISTS: list[dict[str, Any]] = [
@@ -58,10 +82,26 @@ def _default_store() -> dict[str, Any]:
 _MEMORY: dict[str, Any] | None = None
 
 
+def _migrate_repo_copy_if_needed() -> None:
+    """If volume path is empty but repo/ephemeral file has data, copy once."""
+    if _DATA_PATH == _REPO_DATA_PATH:
+        return
+    if _DATA_PATH.exists():
+        return
+    if not _REPO_DATA_PATH.exists():
+        return
+    try:
+        _DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _DATA_PATH.write_text(_REPO_DATA_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def _ensure_file() -> None:
     global _MEMORY
     try:
         _DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _migrate_repo_copy_if_needed()
         if not _DATA_PATH.exists():
             _DATA_PATH.write_text(json.dumps(_default_store(), indent=2), encoding="utf-8")
     except OSError:
