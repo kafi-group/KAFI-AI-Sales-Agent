@@ -4,12 +4,16 @@ import {
   type AiSalesAgentTask,
   type AiSalesDataUpdateStatus,
 } from "../api/client";
-import { loadOrgAdminLocal } from "../lib/orgAdminLocalStore";
+import { loadOrgAdminLocal, localAgentsForMasterList } from "../lib/orgAdminLocalStore";
 
 interface Props {
   onError: (message: string) => void;
   tasks: AiSalesAgentTask[];
   onTasksChanged: () => void;
+  /** Active Master List — only agents ticked for this list get schedule cards. */
+  masterType?: string;
+  /** When set, use this agent list instead of loading all active agents. */
+  allowedAgents?: Array<{ id: string; label: string }>;
 }
 
 const WEEKDAYS = [
@@ -21,11 +25,6 @@ const WEEKDAYS = [
   { id: "sat", label: "Sat" },
   { id: "sun", label: "Sun" },
 ] as const;
-
-const DEFAULT_PERSONAS = [
-  { id: "female", label: "Sara" },
-  { id: "male", label: "Rayan" },
-];
 
 type QueueLane = "outreach" | "data_update" | "auto_mode";
 
@@ -384,11 +383,17 @@ function DataUpdateActivityLog({
   );
 }
 
-export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props) {
+export function AiAutoDataUpdatePanel({
+  onError,
+  tasks,
+  onTasksChanged,
+  masterType = "fmcg",
+  allowedAgents,
+}: Props) {
   const [open, setOpen] = useState(true);
   const [status, setStatus] = useState<AiSalesDataUpdateStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [personas, setPersonas] = useState(DEFAULT_PERSONAS);
+  const [personas, setPersonas] = useState<Array<{ id: string; label: string }>>([]);
   const [savingPersona, setSavingPersona] = useState<string | null>(null);
   const [runningPersona, setRunningPersona] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
@@ -405,28 +410,33 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
   const movingLockRef = useRef(0);
 
   useEffect(() => {
+    if (allowedAgents) {
+      setPersonas(allowedAgents.length ? allowedAgents : []);
+      return;
+    }
     let cancelled = false;
     void client
-      .listOrgAiSalesAgents(true)
+      .listOrgAiSalesAgents(true, masterType)
       .then((res) => {
         if (cancelled) return;
         const rows = (res.agents || []).map((a) => ({
           id: a.id,
           label: a.name || a.id,
         }));
-        if (rows.length) setPersonas(rows);
+        setPersonas(rows);
       })
       .catch(() => {
         if (cancelled) return;
-        const rows = loadOrgAdminLocal()
-          .ai_sales_agents.filter((a) => a.active)
-          .map((a) => ({ id: a.id, label: a.name || a.id }));
-        if (rows.length) setPersonas(rows);
+        const rows = localAgentsForMasterList(loadOrgAdminLocal(), masterType, true).map((a) => ({
+          id: a.id,
+          label: a.name || a.id,
+        }));
+        setPersonas(rows);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [masterType, allowedAgents]);
 
   const load = useCallback(async () => {
     try {
@@ -676,6 +686,17 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
           ) : null}
 
           <div className="grid gap-3 md:grid-cols-2">
+            {personas.length === 0 ? (
+              <div className="md:col-span-2 rounded-lg border border-dashed border-slate-600 bg-slate-950/40 px-4 py-6 text-center space-y-2">
+                <p className="text-sm text-slate-200">
+                  No AI Sales Agents assigned to this master list.
+                </p>
+                <p className="text-xs text-slate-500">
+                  In Settings → Access to master lists, tick the agents that should work this list
+                  (product-specialized agents). Until then, Sara / Rayan / others stay hidden here.
+                </p>
+              </div>
+            ) : null}
             {personas.map((p) => {
               const sch = status?.schedules?.[p.id];
               const run = status?.run_state?.[p.id];

@@ -172,10 +172,16 @@ def set_agent_master_access(
 @router.get("/ai-sales-agents")
 def list_ai_agents(
     active_only: bool = False,
+    master_type: str | None = None,
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
+    """List AI Sales Agents. Optional master_type → only agents ticked for that Active Master List."""
     _ = user
-    return {"agents": org.list_ai_sales_agents(active_only=active_only)}
+    rows = org.list_ai_sales_agents(active_only=active_only)
+    mt = (master_type or "").strip()
+    if mt:
+        rows = [r for r in rows if mt in org.master_keys_for_agent(str(r.get("id") or ""))]
+    return {"agents": rows, "master_type": mt or None}
 
 
 @router.post("/ai-sales-agents")

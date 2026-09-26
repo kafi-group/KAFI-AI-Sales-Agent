@@ -4195,10 +4195,14 @@ export const client = {
         body: JSON.stringify({ pin, agent_id: agentId, master_list_keys: masterListKeys }),
       },
     ),
-  listOrgAiSalesAgents: (activeOnly = false) =>
-    request<{ agents: OrgAdminAiSalesAgent[] }>(
-      `/org-admin/ai-sales-agents?active_only=${activeOnly ? "true" : "false"}`,
-    ),
+  listOrgAiSalesAgents: (activeOnly = false, masterType?: string | null) => {
+    const params = new URLSearchParams();
+    params.set("active_only", activeOnly ? "true" : "false");
+    if (masterType) params.set("master_type", masterType);
+    return request<{ agents: OrgAdminAiSalesAgent[]; master_type?: string | null }>(
+      `/org-admin/ai-sales-agents?${params.toString()}`,
+    );
+  },
   upsertOrgAiSalesAgent: (data: {
     pin: string;
     id?: string | null;

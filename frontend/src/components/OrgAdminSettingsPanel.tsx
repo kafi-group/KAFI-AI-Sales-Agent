@@ -681,9 +681,9 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
           AI Sales Agents
         </h4>
         <p className="text-xs text-slate-500">
-          Product focus comes from the Master Table <strong>Product</strong> column (Rice, Salt,
-          …). Pick one or more so the agent is labeled for that specialty when you assign queues.
-          Inactive agents stay in the registry but are not dialable.
+          Registry of all agents (active / inactive). Assign which master lists each agent may use
+          in Access to master lists above — the AI Sales Agent page only shows agents ticked for the
+          Active Master List (e.g. Rice agents when Rice is selected).
         </p>
         <ul className="space-y-2">
           {agents.map((ag) => (

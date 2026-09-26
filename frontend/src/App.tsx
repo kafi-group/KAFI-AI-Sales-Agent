@@ -2060,7 +2060,7 @@ function DashboardApp() {
               />
             )}
             {tab === "ai-sales-agent" && (
-              <AiSalesAgentPage onError={setError} />
+              <AiSalesAgentPage onError={setError} masterType={masterType} />
             )}
             {tab === "ai-train" && <AiTrainPage onError={setError} />}
             {tab === "kpi" && <KpiPage onError={setError} />}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   client,
   setAiSalesAgentAccessCode,
@@ -24,10 +24,12 @@ import { ComposeMailModal } from "../components/ComposeMailModal";
 import { AiAutoModePanel } from "../components/AiAutoModePanel";
 import { AiAutoDataUpdatePanel } from "../components/AiAutoDataUpdatePanel";
 import { AiSalesProcessesPanel } from "../components/AiSalesProcessesPanel";
-import { loadOrgAdminLocal } from "../lib/orgAdminLocalStore";
+import { loadOrgAdminLocal, localAgentsForMasterList } from "../lib/orgAdminLocalStore";
 
 interface AiSalesAgentPageProps {
   onError: (message: string) => void;
+  /** Active Master List — only agents ticked for this list are shown. */
+  masterType?: string;
 }
 
 const PERSONA_LABELS: Record<string, string> = {
@@ -36,7 +38,7 @@ const PERSONA_LABELS: Record<string, string> = {
   pipeline: "AI Sales Agent list",
 };
 
-export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
+export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentPageProps) {
   const { isAdmin, user } = useAuth();
   const [unlocked, setUnlocked] = useState(false);
   const [codeInput, setCodeInput] = useState("");
@@ -76,32 +78,47 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   useEffect(() => {
     let cancelled = false;
     void client
-      .listOrgAiSalesAgents(true)
+      .listOrgAiSalesAgents(true, masterType)
       .then((res) => {
         if (!cancelled) setRegistryAgents(res.agents || []);
       })
       .catch(() => {
         if (cancelled) return;
-        const local = loadOrgAdminLocal().ai_sales_agents.filter((a) => a.active);
-        setRegistryAgents(local);
+        setRegistryAgents(localAgentsForMasterList(loadOrgAdminLocal(), masterType, true));
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [masterType]);
 
-  const agentOptions = (
-    registryAgents.length
-      ? registryAgents
-      : [
-          { id: "female", name: "Sara", product_focus: "" },
-          { id: "male", name: "Rayan", product_focus: "" },
-        ]
-  ).map((a) => ({
-    id: a.id,
-    name: a.name,
-    product_focus: a.product_focus || "",
-  }));
+  const agentOptions = useMemo(
+    () =>
+      registryAgents.map((a) => ({
+        id: a.id,
+        name: a.name,
+        product_focus: a.product_focus || "",
+      })),
+    [registryAgents],
+  );
+
+  const masterListLabel = useMemo(() => {
+    const fromLocal = loadOrgAdminLocal().master_lists.find((m) => m.key === masterType)?.label;
+    return fromLocal || masterType;
+  }, [masterType]);
+
+  useEffect(() => {
+    if (agentOptions.length === 0) return;
+    const ids = new Set(agentOptions.map((a) => a.id));
+    if (assignPersona !== "pipeline" && !ids.has(assignPersona)) {
+      setAssignPersona("pipeline");
+    }
+    if (!ids.has(selfTestPersona)) {
+      setSelfTestPersona(agentOptions[0].id);
+    }
+    if (filterPersona && !ids.has(filterPersona)) {
+      setFilterPersona("");
+    }
+  }, [agentOptions, assignPersona, selfTestPersona, filterPersona]);
 
   function personaName(persona: string): string {
     if (persona === "pipeline") return "AI Sales Agent list";
@@ -590,28 +607,45 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       <div>
         <h2 className="text-lg font-medium text-slate-100">AI Sales Agent</h2>
         <p className="text-sm text-slate-400 mt-1">
-          Rayan and Sara dial leads from the <strong className="text-slate-300">Master Table</strong>.
-          Filter by country, grade, and designation, tick contacts into the queue, then call one
-          number or the full sequence. Use <strong className="text-slate-300">AI Auto Mode</strong>{" "}
-          below to choose call / email / WhatsApp behaviour. Training is under{" "}
+          Agents dial leads for the Active Master List{" "}
+          <strong className="text-slate-200">{masterListLabel}</strong>. Only agents ticked for
+          this list in Settings appear below — product-specialized agents stay scoped to their
+          lists. Use <strong className="text-slate-300">AI Auto Mode</strong> for call / email /
+          WhatsApp behaviour. Training is under{" "}
           <strong className="text-slate-300">Call Center → AI Train</strong>.
         </p>
       </div>
 
+      {agentOptions.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-violet-500/40 bg-violet-950/20 px-4 py-8 text-center space-y-2">
+          <p className="text-sm text-slate-100">
+            No AI Sales Agents for <strong>{masterListLabel}</strong>
+          </p>
+          <p className="text-xs text-slate-400 max-w-lg mx-auto">
+            In Settings → Access to master lists, tick which agents may work{" "}
+            <strong>{masterListLabel}</strong>. Product-specialized agents only appear when that
+            list is selected and they are assigned.
+          </p>
+        </div>
+      ) : null}
+
+      <AiAutoDataUpdatePanel
+        onError={onError}
+        tasks={tasks}
+        onTasksChanged={() => void load()}
+        masterType={masterType}
+        allowedAgents={agentOptions.map((a) => ({ id: a.id, label: a.name }))}
+      />
+
+      {agentOptions.length > 0 ? (
+        <>
       <AiAutoModePanel
         onError={onError}
         onStartAgent={(persona) => void handleAutoModeStart(persona)}
         startingPersona={startingAutoPersona}
       />
 
-      <AiAutoDataUpdatePanel
-        onError={onError}
-        tasks={tasks}
-        onTasksChanged={() => void load()}
-      />
-
       <AiSalesProcessesPanel onError={onError} />
-
       {queueNotice ? (
         <p className="text-sm text-emerald-300 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2">
           {queueNotice}
@@ -619,7 +653,9 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
-        {runners.map((runner) => (
+        {runners
+          .filter((runner) => agentOptions.some((a) => a.id === runner.persona))
+          .map((runner) => (
           <div
             key={runner.persona}
             className="rounded-xl border border-slate-700/80 bg-slate-900/40 p-4 space-y-3"
@@ -1238,6 +1274,8 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
           }}
         />
       )}
+        </>
+      ) : null}
     </section>
   );
 }

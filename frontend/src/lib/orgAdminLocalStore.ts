@@ -338,3 +338,17 @@ export function localMasterListsForUser(
   const allowed = new Set(raw);
   return enabled.filter((m) => allowed.has(m.key));
 }
+
+/** Active AI Sales Agents ticked for this Active Master List (empty if none assigned). */
+export function localAgentsForMasterList(
+  data: LocalOrgAdminStore,
+  masterType: string | null | undefined,
+  activeOnly = true,
+): LocalAiAgent[] {
+  let rows = data.ai_sales_agents || [];
+  if (activeOnly) rows = rows.filter((a) => a.active);
+  const mt = (masterType || "").trim();
+  if (!mt) return rows;
+  const access = data.agent_master_access || {};
+  return rows.filter((a) => (access[a.id] || []).includes(mt));
+}
