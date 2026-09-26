@@ -10,6 +10,8 @@ import {
 import { mailLabelIdFromNavId } from "../lib/mailLabelRules";
 import { AppBrand } from "./AppBrand";
 import { client, type OrgAdminMasterList } from "../api/client";
+import { loadOrgAdminLocal, localMasterListsForUser } from "../lib/orgAdminLocalStore";
+import { useAuth } from "../auth/AuthContext";
 
 export type Tab =
   | "indexes"
@@ -214,6 +216,7 @@ export function AppSidebar({
   masterType = "fmcg",
   onMasterTypeChange,
 }: AppSidebarProps) {
+  const { user, isAdmin } = useAuth();
   const [masterLists, setMasterLists] = useState<OrgAdminMasterList[]>([
     { key: "fmcg", label: "Master FMCG", enabled: true, sort_order: 0 },
     { key: "minerals_ores", label: "Minerals & Ores", enabled: true, sort_order: 1 },
@@ -267,12 +270,18 @@ export function AppSidebar({
         if (rows.length) setMasterLists(rows);
       })
       .catch(() => {
-        /* keep built-in fallback */
+        if (cancelled) return;
+        const local = localMasterListsForUser(
+          loadOrgAdminLocal(),
+          user?.id ?? null,
+          Boolean(isAdmin),
+        );
+        if (local.length) setMasterLists(local);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user?.id, isAdmin]);
 
   useEffect(() => {
     if (activeTab === "table") {

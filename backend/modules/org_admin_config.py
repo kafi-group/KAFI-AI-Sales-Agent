@@ -53,18 +53,29 @@ def _default_store() -> dict[str, Any]:
     }
 
 
+_MEMORY: dict[str, Any] | None = None
+
+
 def _ensure_file() -> None:
-    _DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if not _DATA_PATH.exists():
-        _DATA_PATH.write_text(json.dumps(_default_store(), indent=2), encoding="utf-8")
+    global _MEMORY
+    try:
+        _DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if not _DATA_PATH.exists():
+            _DATA_PATH.write_text(json.dumps(_default_store(), indent=2), encoding="utf-8")
+    except OSError:
+        if _MEMORY is None:
+            _MEMORY = _default_store()
 
 
 def _load() -> dict[str, Any]:
+    global _MEMORY
     _ensure_file()
+    if _MEMORY is not None and not _DATA_PATH.exists():
+        return deepcopy(_MEMORY)
     try:
         raw = json.loads(_DATA_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return _default_store()
+        return deepcopy(_MEMORY) if _MEMORY is not None else _default_store()
     if not isinstance(raw, dict):
         return _default_store()
     base = _default_store()
@@ -122,12 +133,19 @@ def _load() -> dict[str, Any]:
                 cleaned_a.insert(0 if seed["id"] == "female" else 1, deepcopy(seed))
         if cleaned_a:
             base["ai_sales_agents"] = cleaned_a
+    _MEMORY = deepcopy(base)
     return base
 
 
 def _save(data: dict[str, Any]) -> None:
-    _ensure_file()
-    _DATA_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    global _MEMORY
+    _MEMORY = deepcopy(data)
+    try:
+        _ensure_file()
+        _DATA_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except OSError:
+        # Ephemeral / read-only disk — keep in-memory so Settings still works.
+        pass
 
 
 def _slug_key(raw: str) -> str:

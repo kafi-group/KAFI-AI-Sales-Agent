@@ -7,12 +7,34 @@ import {
 } from "../api/client";
 import { ActionButton } from "./ui/ActionButton";
 import { IconList, IconPlus, IconRobot } from "./icons/AppIcons";
+import {
+  deleteLocalAgent,
+  deleteLocalMasterList,
+  loadOrgAdminLocal,
+  orgAdminPinValid,
+  ORG_ADMIN_PIN,
+  saveOrgAdminLocal,
+  setLocalUserAccess,
+  upsertLocalAgent,
+  upsertLocalMasterList,
+  type LocalOrgAdminStore,
+} from "../lib/orgAdminLocalStore";
 
 interface OrgAdminSettingsPanelProps {
   onError: (message: string) => void;
 }
 
-const ORG_PIN_HINT = "07860";
+function fromLocal(store: LocalOrgAdminStore): {
+  masterLists: OrgAdminMasterList[];
+  userAccess: Record<string, string[]>;
+  agents: OrgAdminAiSalesAgent[];
+} {
+  return {
+    masterLists: store.master_lists,
+    userAccess: store.user_master_access,
+    agents: store.ai_sales_agents,
+  };
+}
 
 export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
   const [pin, setPin] = useState("");
@@ -20,6 +42,8 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
   const [unlocking, setUnlocking] = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [usingLocal, setUsingLocal] = useState(true);
+  const [localStore, setLocalStore] = useState<LocalOrgAdminStore>(() => loadOrgAdminLocal());
 
   const [masterLists, setMasterLists] = useState<OrgAdminMasterList[]>([]);
   const [users, setUsers] = useState<OrgAdminUserRow[]>([]);
@@ -36,16 +60,52 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
   const [editAgentName, setEditAgentName] = useState("");
   const [editAgentFocus, setEditAgentFocus] = useState("");
 
+  const applyLocal = useCallback((store: LocalOrgAdminStore) => {
+    setLocalStore(store);
+    const mapped = fromLocal(store);
+    setMasterLists(mapped.masterLists);
+    setUserAccess(mapped.userAccess);
+    setAgents(mapped.agents);
+    setUsingLocal(true);
+  }, []);
+
   const loadAdmin = useCallback(
     async (accessPin: string) => {
-      const data = await client.getOrgAdminMasterListsAdmin(accessPin);
-      setMasterLists(data.master_lists || []);
-      setUsers(data.users || []);
-      setUserAccess(data.user_master_access || {});
-      const ag = await client.listOrgAiSalesAgents(false);
-      setAgents(ag.agents || []);
+      // Prefer API when live; never block Settings unlock if API is down.
+      try {
+        const data = await client.getOrgAdminMasterListsAdmin(accessPin);
+        setMasterLists(data.master_lists || []);
+        setUsers(data.users || []);
+        setUserAccess(data.user_master_access || {});
+        const ag = await client.listOrgAiSalesAgents(false);
+        setAgents(ag.agents || []);
+        setUsingLocal(false);
+        // Mirror into local so sidebar still works if API later flakes.
+        saveOrgAdminLocal({
+          master_lists: data.master_lists || loadOrgAdminLocal().master_lists,
+          user_master_access: data.user_master_access || {},
+          ai_sales_agents: ag.agents || loadOrgAdminLocal().ai_sales_agents,
+        });
+        return;
+      } catch {
+        /* fall through to local */
+      }
+      try {
+        const usersRes = await client.listUsers();
+        setUsers(
+          (usersRes || []).map((u) => ({
+            id: u.id,
+            username: u.username,
+            display_name: u.full_name || u.username,
+            role: u.role,
+          })),
+        );
+      } catch {
+        setUsers([]);
+      }
+      applyLocal(loadOrgAdminLocal());
     },
-    [],
+    [applyLocal],
   );
 
   useEffect(() => {
@@ -64,9 +124,15 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
     setPinError(null);
     setUnlocking(true);
     try {
-      await client.unlockOrgAdmin(pin.trim());
+      const code = pin.trim();
+      if (!orgAdminPinValid(code)) {
+        setPinError(`Invalid access code. Please use access code: ${ORG_ADMIN_PIN}`);
+        setUnlocked(false);
+        return;
+      }
+      // Unlock locally first so Settings always works without Railway.
       setUnlocked(true);
-      await loadAdmin(pin.trim());
+      await loadAdmin(code);
     } catch (err) {
       setPinError(err instanceof Error ? err.message : "Invalid access code");
       setUnlocked(false);
@@ -83,13 +149,25 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
     if (!pin) return;
     setBusy(true);
     try {
-      await client.upsertOrgMasterList({
-        pin,
-        key: opts.key ?? null,
-        label: opts.label,
-        enabled: opts.enabled ?? true,
-      });
-      await loadAdmin(pin);
+      if (!usingLocal) {
+        try {
+          await client.upsertOrgMasterList({
+            pin,
+            key: opts.key ?? null,
+            label: opts.label,
+            enabled: opts.enabled ?? true,
+          });
+          await loadAdmin(pin);
+          setNewListLabel("");
+          setEditListKey(null);
+          setEditListLabel("");
+          return;
+        } catch {
+          /* fall back to local */
+        }
+      }
+      const next = upsertLocalMasterList(localStore, opts);
+      applyLocal(next);
       setNewListLabel("");
       setEditListKey(null);
       setEditListLabel("");
@@ -105,8 +183,16 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
     if (!window.confirm(`Remove master list “${key}”? Built-in lists cannot be deleted.`)) return;
     setBusy(true);
     try {
-      await client.deleteOrgMasterList(pin, key);
-      await loadAdmin(pin);
+      if (!usingLocal) {
+        try {
+          await client.deleteOrgMasterList(pin, key);
+          await loadAdmin(pin);
+          return;
+        } catch {
+          /* local */
+        }
+      }
+      applyLocal(deleteLocalMasterList(localStore, key));
     } catch (err) {
       onError(err instanceof Error ? err.message : "Could not delete master list");
     } finally {
@@ -122,15 +208,22 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
     if (!pin) return;
     const uid = String(userId);
     const current =
-      userAccess[uid] ??
-      masterLists.filter((m) => m.enabled).map((m) => m.key);
-    const next = checked
+      userAccess[uid] ?? masterLists.filter((m) => m.enabled).map((m) => m.key);
+    const nextKeys = checked
       ? Array.from(new Set([...current, listKey]))
       : current.filter((k) => k !== listKey);
     setBusy(true);
     try {
-      await client.setOrgUserMasterAccess(pin, userId, next);
-      setUserAccess((prev) => ({ ...prev, [uid]: next }));
+      if (!usingLocal) {
+        try {
+          await client.setOrgUserMasterAccess(pin, userId, nextKeys);
+          setUserAccess((prev) => ({ ...prev, [uid]: nextKeys }));
+          return;
+        } catch {
+          /* local */
+        }
+      }
+      applyLocal(setLocalUserAccess(localStore, userId, nextKeys));
     } catch (err) {
       onError(err instanceof Error ? err.message : "Could not update user access");
     } finally {
@@ -147,14 +240,27 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
     if (!pin) return;
     setBusy(true);
     try {
-      await client.upsertOrgAiSalesAgent({
-        pin,
-        id: opts.id ?? null,
-        name: opts.name,
-        active: opts.active ?? true,
-        product_focus: opts.product_focus ?? "",
-      });
-      await loadAdmin(pin);
+      if (!usingLocal) {
+        try {
+          await client.upsertOrgAiSalesAgent({
+            pin,
+            id: opts.id ?? null,
+            name: opts.name,
+            active: opts.active ?? true,
+            product_focus: opts.product_focus ?? "",
+          });
+          await loadAdmin(pin);
+          setNewAgentName("");
+          setNewAgentFocus("");
+          setEditAgentId(null);
+          setEditAgentName("");
+          setEditAgentFocus("");
+          return;
+        } catch {
+          /* local */
+        }
+      }
+      applyLocal(upsertLocalAgent(localStore, opts));
       setNewAgentName("");
       setNewAgentFocus("");
       setEditAgentId(null);
@@ -172,8 +278,16 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
     if (!window.confirm("Remove this AI Sales Agent? Sara and Rayan cannot be deleted.")) return;
     setBusy(true);
     try {
-      await client.deleteOrgAiSalesAgent(pin, id);
-      await loadAdmin(pin);
+      if (!usingLocal) {
+        try {
+          await client.deleteOrgAiSalesAgent(pin, id);
+          await loadAdmin(pin);
+          return;
+        } catch {
+          /* local */
+        }
+      }
+      applyLocal(deleteLocalAgent(localStore, id));
     } catch (err) {
       onError(err instanceof Error ? err.message : "Could not remove agent");
     } finally {
@@ -190,7 +304,7 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
           </h3>
           <p className="mt-1 text-xs text-slate-400 leading-relaxed">
             Add or edit sidebar master lists, choose which users can open each list, and manage AI
-            Sales Agents (Sara, Rayan, and product specialists). Unlock with access code {ORG_PIN_HINT}.
+            Sales Agents (Sara, Rayan, and product specialists). Unlock with access code {ORG_ADMIN_PIN}.
           </p>
         </div>
         <form onSubmit={(e) => void handleUnlock(e)} className="flex flex-wrap items-end gap-2">
@@ -227,8 +341,11 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
             Active Master Lists &amp; AI Sales Agents
           </h3>
           <p className="mt-1 text-xs text-slate-400">
-            Unlocked for this session. Changes apply immediately — queues, WhatsApp, email, and Twilio
-            are untouched.
+            Unlocked for this session.
+            {usingLocal
+              ? " Saved in this browser (API sync unavailable)."
+              : " Synced with server."}{" "}
+            Queues, WhatsApp, email, and Twilio are untouched.
           </p>
         </div>
         <button
@@ -243,7 +360,6 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
         </button>
       </div>
 
-      {/* Master lists */}
       <div className="space-y-3">
         <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
           Active Master List
@@ -339,62 +455,65 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
         </div>
       </div>
 
-      {/* User access */}
       <div className="space-y-3">
         <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
           User access to master lists
         </h4>
         <p className="text-xs text-slate-500">
           Unticked lists are hidden from that user&apos;s sidebar. Admins always see all enabled lists.
-          Leave a user unset (all checked by default) to grant every enabled list.
         </p>
-        <div className="overflow-x-auto rounded-lg border border-slate-800">
-          <table className="min-w-full text-xs">
-            <thead className="bg-slate-950/80 text-slate-400">
-              <tr>
-                <th className="text-left px-3 py-2 font-medium">User</th>
-                {masterLists.map((m) => (
-                  <th key={m.key} className="text-left px-2 py-2 font-medium whitespace-nowrap">
-                    {m.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => {
-                const uid = String(u.id);
-                const assigned = userAccess[uid];
-                const effective = assigned ?? enabledKeys;
-                const isAdminUser = u.role === "admin";
-                return (
-                  <tr key={u.id} className="border-t border-slate-800/80">
-                    <td className="px-3 py-2 text-slate-200">
-                      {u.display_name || u.username}
-                      {isAdminUser && (
-                        <span className="ml-1 text-[10px] text-slate-500">(admin)</span>
-                      )}
-                    </td>
-                    {masterLists.map((m) => (
-                      <td key={m.key} className="px-2 py-2">
-                        <input
-                          type="checkbox"
-                          disabled={busy || isAdminUser || !m.enabled}
-                          checked={isAdminUser || effective.includes(m.key)}
-                          onChange={(e) =>
-                            void toggleUserAccess(u.id, m.key, e.target.checked)
-                          }
-                        />
+        {users.length === 0 ? (
+          <p className="text-xs text-amber-200/80">
+            User list unavailable right now — master lists and AI agents still save on this browser.
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-slate-800">
+            <table className="min-w-full text-xs">
+              <thead className="bg-slate-950/80 text-slate-400">
+                <tr>
+                  <th className="text-left px-3 py-2 font-medium">User</th>
+                  {masterLists.map((m) => (
+                    <th key={m.key} className="text-left px-2 py-2 font-medium whitespace-nowrap">
+                      {m.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => {
+                  const uid = String(u.id);
+                  const assigned = userAccess[uid];
+                  const effective = assigned ?? enabledKeys;
+                  const isAdminUser = u.role === "admin";
+                  return (
+                    <tr key={u.id} className="border-t border-slate-800/80">
+                      <td className="px-3 py-2 text-slate-200">
+                        {u.display_name || u.username}
+                        {isAdminUser && (
+                          <span className="ml-1 text-[10px] text-slate-500">(admin)</span>
+                        )}
                       </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      {masterLists.map((m) => (
+                        <td key={m.key} className="px-2 py-2">
+                          <input
+                            type="checkbox"
+                            disabled={busy || isAdminUser || !m.enabled}
+                            checked={isAdminUser || effective.includes(m.key)}
+                            onChange={(e) =>
+                              void toggleUserAccess(u.id, m.key, e.target.checked)
+                            }
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {/* AI Sales Agents */}
       <div className="space-y-3">
         <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
           AI Sales Agents

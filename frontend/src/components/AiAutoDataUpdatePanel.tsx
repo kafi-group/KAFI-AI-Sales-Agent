@@ -4,6 +4,7 @@ import {
   type AiSalesAgentTask,
   type AiSalesDataUpdateStatus,
 } from "../api/client";
+import { loadOrgAdminLocal } from "../lib/orgAdminLocalStore";
 
 interface Props {
   onError: (message: string) => void;
@@ -416,7 +417,11 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
         if (rows.length) setPersonas(rows);
       })
       .catch(() => {
-        /* keep Sara/Rayan */
+        if (cancelled) return;
+        const rows = loadOrgAdminLocal()
+          .ai_sales_agents.filter((a) => a.active)
+          .map((a) => ({ id: a.id, label: a.name || a.id }));
+        if (rows.length) setPersonas(rows);
       });
     return () => {
       cancelled = true;

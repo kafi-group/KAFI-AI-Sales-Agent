@@ -24,6 +24,7 @@ import { ComposeMailModal } from "../components/ComposeMailModal";
 import { AiAutoModePanel } from "../components/AiAutoModePanel";
 import { AiAutoDataUpdatePanel } from "../components/AiAutoDataUpdatePanel";
 import { AiSalesProcessesPanel } from "../components/AiSalesProcessesPanel";
+import { loadOrgAdminLocal } from "../lib/orgAdminLocalStore";
 
 interface AiSalesAgentPageProps {
   onError: (message: string) => void;
@@ -80,7 +81,9 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         if (!cancelled) setRegistryAgents(res.agents || []);
       })
       .catch(() => {
-        /* keep defaults */
+        if (cancelled) return;
+        const local = loadOrgAdminLocal().ai_sales_agents.filter((a) => a.active);
+        setRegistryAgents(local);
       });
     return () => {
       cancelled = true;
