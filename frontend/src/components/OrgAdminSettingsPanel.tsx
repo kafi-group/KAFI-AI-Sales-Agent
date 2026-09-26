@@ -116,19 +116,26 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
         }
 
         const data = await client.getOrgAdminMasterListsAdmin(accessPin);
-        setMasterLists(data.master_lists || []);
+        const localStill = loadOrgAdminLocal();
+        const apiLists = data.master_lists || [];
+        const apiKeys = new Set(apiLists.map((m) => m.key));
+        // Never wipe browser-only lists (Rice, Meat, …) if server sync failed mid-502.
+        const localOnly = (localStill.master_lists || []).filter((m) => !apiKeys.has(m.key));
+        const mergedLists = [...apiLists, ...localOnly].sort(
+          (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.label.localeCompare(b.label),
+        );
+        setMasterLists(mergedLists);
         setUsers(data.users || []);
         setUserAccess(data.user_master_access || {});
         setAgentAccess(data.agent_master_access || {});
         const ag = await client.listOrgAiSalesAgents(false);
         setAgents(ag.agents || []);
-        setUsingLocal(false);
-        // Mirror into local so sidebar still works if API later flakes.
+        setUsingLocal(localOnly.length > 0);
         saveOrgAdminLocal({
-          master_lists: data.master_lists || loadOrgAdminLocal().master_lists,
-          user_master_access: data.user_master_access || {},
-          agent_master_access: data.agent_master_access || {},
-          ai_sales_agents: ag.agents || loadOrgAdminLocal().ai_sales_agents,
+          master_lists: mergedLists,
+          user_master_access: data.user_master_access || localStill.user_master_access || {},
+          agent_master_access: data.agent_master_access || localStill.agent_master_access || {},
+          ai_sales_agents: ag.agents || localStill.ai_sales_agents,
         });
         return;
       } catch {

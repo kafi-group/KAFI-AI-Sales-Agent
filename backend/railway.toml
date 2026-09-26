@@ -1,7 +1,8 @@
 [build]
 builder = "nixpacks"
-# Full repo is cloned; service root is backend/ so ../frontend is available at build time.
-watchPatterns = ["backend/**", "frontend/**"]
+# Only rebuild when backend code changes. Frontend-only Vercel pushes must NOT
+# restart this service (that caused emails/contacts 502s during UI deploys).
+watchPatterns = ["backend/**"]
 
 [deploy]
 # Use start.sh: migrate with 45s cap, then always boot uvicorn (avoids Railway 502).
