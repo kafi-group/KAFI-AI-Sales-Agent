@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   client,
   type OrgAdminAiSalesAgent,
@@ -7,6 +7,7 @@ import {
 } from "../api/client";
 import { ActionButton } from "./ui/ActionButton";
 import { IconList, IconPlus, IconRobot } from "./icons/AppIcons";
+import { SearchableSelect, stringOptions } from "./SearchableSelect";
 import {
   deleteLocalAgent,
   deleteLocalMasterList,
@@ -63,6 +64,8 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
   const [editAgentId, setEditAgentId] = useState<string | null>(null);
   const [editAgentName, setEditAgentName] = useState("");
   const [editAgentFocus, setEditAgentFocus] = useState("");
+  const [productFocusOptions, setProductFocusOptions] = useState<string[]>([]);
+  const [productFocusLoading, setProductFocusLoading] = useState(false);
 
   const applyLocal = useCallback((store: LocalOrgAdminStore) => {
     setLocalStore(store);
@@ -125,6 +128,46 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
       cancelled = true;
     };
   }, [unlocked, pin, loadAdmin, onError]);
+
+  useEffect(() => {
+    if (!unlocked) return;
+    let cancelled = false;
+    setProductFocusLoading(true);
+    void client
+      .getLeadTableColumnValues("product", {})
+      .then((res) => {
+        if (cancelled) return;
+        const values = (res.unique_values || [])
+          .map((row) => String(row.value || "").trim())
+          .filter(Boolean);
+        setProductFocusOptions(values);
+      })
+      .catch(() => {
+        if (!cancelled) setProductFocusOptions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setProductFocusLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [unlocked]);
+
+  const productFocusSelectOptions = useMemo(() => {
+    const base = stringOptions(productFocusOptions);
+    // Keep any custom/saved focus that isn't in the current Product column yet.
+    const extras = [newAgentFocus, editAgentFocus, ...agents.map((a) => a.product_focus || "")]
+      .flatMap((raw) => raw.split(",").map((s) => s.trim()).filter(Boolean))
+      .filter((v) => !productFocusOptions.some((p) => p.toLowerCase() === v.toLowerCase()));
+    const seen = new Set(base.map((o) => o.value.toLowerCase()));
+    for (const v of extras) {
+      const key = v.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      base.push({ value: v, label: v });
+    }
+    return base;
+  }, [productFocusOptions, newAgentFocus, editAgentFocus, agents]);
 
   async function handleUnlock(e: FormEvent) {
     e.preventDefault();
@@ -593,8 +636,9 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
           AI Sales Agents
         </h4>
         <p className="text-xs text-slate-500">
-          Assign product focus (e.g. rice → Rayan, Himalayan salt → a new agent). Inactive agents stay
-          in the registry but are not dialable.
+          Product focus comes from the Master Table <strong>Product</strong> column (Rice, Salt,
+          …). Pick one or more so the agent is labeled for that specialty when you assign queues.
+          Inactive agents stay in the registry but are not dialable.
         </p>
         <ul className="space-y-2">
           {agents.map((ag) => (
@@ -610,12 +654,20 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
                     className="min-w-[8rem] flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
                     placeholder="Name"
                   />
-                  <input
-                    value={editAgentFocus}
-                    onChange={(e) => setEditAgentFocus(e.target.value)}
-                    className="min-w-[8rem] flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
-                    placeholder="Product focus"
-                  />
+                  <div className="min-w-[12rem] flex-[1.2]">
+                    <SearchableSelect
+                      value={editAgentFocus}
+                      onChange={setEditAgentFocus}
+                      options={productFocusSelectOptions}
+                      allowEmpty
+                      emptyLabel="No product focus"
+                      placeholder={
+                        productFocusLoading ? "Loading products…" : "Search Product…"
+                      }
+                      disabled={busy || productFocusLoading}
+                      multiSelect
+                    />
+                  </div>
                   <button
                     type="button"
                     disabled={busy || !editAgentName.trim()}
@@ -684,19 +736,25 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
             </li>
           ))}
         </ul>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 items-end">
           <input
             value={newAgentName}
             onChange={(e) => setNewAgentName(e.target.value)}
-            placeholder="Agent name (e.g. Ayesha)"
+            placeholder="Agent name (e.g. Mitch)"
             className="min-w-[10rem] flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs"
           />
-          <input
-            value={newAgentFocus}
-            onChange={(e) => setNewAgentFocus(e.target.value)}
-            placeholder="Product focus (e.g. Himalayan salt)"
-            className="min-w-[10rem] flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs"
-          />
+          <div className="min-w-[14rem] flex-[1.4]">
+            <SearchableSelect
+              value={newAgentFocus}
+              onChange={setNewAgentFocus}
+              options={productFocusSelectOptions}
+              allowEmpty
+              emptyLabel="No product focus"
+              placeholder={productFocusLoading ? "Loading products…" : "Search Product…"}
+              disabled={busy || productFocusLoading}
+              multiSelect
+            />
+          </div>
           <ActionButton
             type="button"
             icon={IconRobot}
