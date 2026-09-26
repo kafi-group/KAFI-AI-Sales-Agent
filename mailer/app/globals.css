@@ -578,6 +578,32 @@ select.template-select {
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.01em;
+  white-space: nowrap;
+  padding: 0 0.15rem;
+}
+
+.rte-picture-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, #0f766e 18%, var(--panel));
+}
+
+.rte-picture-box-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.rte-picture-box-copy strong {
+  font-size: 0.85rem;
 }
 
 .recipients-panel {

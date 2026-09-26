@@ -392,7 +392,7 @@ function ComposeInner() {
         </>
       )}
       <label>Body</label>
-      <EmailBodyEditor value={body} onChange={setBody} rows={14} />
+      <EmailBodyEditor value={body} onChange={setBody} rows={14} showPictureBox />
       <div className="detail-actions">
         <button
           type="button"

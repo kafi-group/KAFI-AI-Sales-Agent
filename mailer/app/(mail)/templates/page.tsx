@@ -67,7 +67,7 @@ export default function TemplatesPage() {
         <label>Subject</label>
         <input value={subject} onChange={(e) => setSubject(e.target.value)} />
         <label>Body</label>
-        <EmailBodyEditor value={body} onChange={setBody} rows={6} />
+        <EmailBodyEditor value={body} onChange={setBody} rows={6} showPictureBox />
         <button
           type="button"
           className="btn"

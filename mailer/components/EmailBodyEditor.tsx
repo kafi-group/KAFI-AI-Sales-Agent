@@ -23,6 +23,8 @@ export type EmailBodyEditorProps = {
   rows?: number;
   disabled?: boolean;
   className?: string;
+  /** Show a larger Insert picture control under the toolbar (bulk/compose). */
+  showPictureBox?: boolean;
 };
 
 const FONT_SIZES = [
@@ -115,6 +117,7 @@ export function EmailBodyEditor({
   rows = 10,
   disabled = false,
   className = "",
+  showPictureBox = false,
 }: EmailBodyEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const lastHtml = useRef<string>("");
@@ -361,12 +364,12 @@ export function EmailBodyEditor({
             imageInputRef.current?.click();
           }}
         >
-          <span className="rte-tool-label">Picture</span>
+          <span className="rte-tool-label">Insert picture</span>
         </ToolbarButton>
         <input
           ref={imageInputRef}
           type="file"
-          accept="image/*"
+          accept="image/png,image/jpeg,image/jpg,image/gif,image/webp"
           multiple
           hidden
           onChange={(e) => {
@@ -375,6 +378,25 @@ export function EmailBodyEditor({
           }}
         />
       </div>
+
+      {showPictureBox ? (
+        <div className="rte-picture-box">
+          <div className="rte-picture-box-copy">
+            <strong>Pictures in email</strong>
+            <span className="muted small">
+              Insert images into the message body (not as file attachments). Paste also works.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn small"
+            disabled={disabled}
+            onClick={() => imageInputRef.current?.click()}
+          >
+            Insert picture
+          </button>
+        </div>
+      ) : null}
 
       {pasteStatus ? <p className="muted small" style={{ margin: "6px 0 0" }}>{pasteStatus}</p> : null}
 

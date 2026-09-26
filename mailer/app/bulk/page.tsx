@@ -541,7 +541,7 @@ function BulkInner() {
         <input value={subject} onChange={(e) => setSubject(e.target.value)} />
 
         <label>Body</label>
-        <EmailBodyEditor value={body} onChange={setBody} rows={12} />
+        <EmailBodyEditor value={body} onChange={setBody} rows={12} showPictureBox />
 
         <div className="row">
           <div>
