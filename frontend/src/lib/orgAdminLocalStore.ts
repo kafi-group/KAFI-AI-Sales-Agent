@@ -339,7 +339,9 @@ export function localMasterListsForUser(
   return enabled.filter((m) => allowed.has(m.key));
 }
 
-/** Active AI Sales Agents ticked for this Active Master List (empty if none assigned). */
+/** Active AI Sales Agents for this Active Master List.
+ * Unset access → all lists (default). Explicit [] → none.
+ */
 export function localAgentsForMasterList(
   data: LocalOrgAdminStore,
   masterType: string | null | undefined,
@@ -350,5 +352,8 @@ export function localAgentsForMasterList(
   const mt = (masterType || "").trim();
   if (!mt) return rows;
   const access = data.agent_master_access || {};
-  return rows.filter((a) => (access[a.id] || []).includes(mt));
+  return rows.filter((a) => {
+    if (!(a.id in access)) return true;
+    return (access[a.id] || []).includes(mt);
+  });
 }

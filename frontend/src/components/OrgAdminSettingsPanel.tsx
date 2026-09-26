@@ -326,8 +326,9 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
   async function toggleAgentAccess(agentId: string, listKey: string, checked: boolean) {
     if (!pin) return;
     const aid = String(agentId);
-    // Agents start with no lists until ticked (unlike users who default to all).
-    const current = agentAccess[aid] ?? [];
+    // Unset = all enabled lists (same default as people). First edit materializes the list.
+    const current =
+      agentAccess[aid] ?? masterLists.filter((m) => m.enabled).map((m) => m.key);
     const nextKeys = checked
       ? Array.from(new Set([...current, listKey]))
       : current.filter((k) => k !== listKey);
@@ -602,9 +603,9 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
           Access to master lists
         </h4>
         <p className="text-xs text-slate-500">
-          Tick which people and AI Sales Agents may use each master list. Example: Sesame Seeds →
-          Admin + Usman (AI) + Asim; Meat → Admin + Mitch (AI) + Asim. Admins always see all enabled
-          lists. Unticked lists are hidden from that user&apos;s sidebar.
+          Tick which people and AI Sales Agents may use each master list. Agents default to{" "}
+          <strong>all</strong> lists until you change them — untick a list (e.g. Rice) to hide
+          Sara/Rayan there. Admins always see every enabled list in the sidebar.
         </p>
         <div className="overflow-x-auto rounded-lg border border-slate-800">
           <table className="min-w-full text-xs">
@@ -650,7 +651,8 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
                 );
               })}
               {agents.map((ag) => {
-                const assigned = agentAccess[ag.id] ?? [];
+                const assigned = agentAccess[ag.id];
+                const effective = assigned ?? enabledKeys;
                 return (
                   <tr
                     key={`agent-${ag.id}`}
@@ -668,7 +670,7 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
                         <input
                           type="checkbox"
                           disabled={busy || !m.enabled || !ag.active}
-                          checked={assigned.includes(m.key)}
+                          checked={effective.includes(m.key)}
                           onChange={(e) =>
                             void toggleAgentAccess(ag.id, m.key, e.target.checked)
                           }

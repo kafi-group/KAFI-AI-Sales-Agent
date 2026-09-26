@@ -321,12 +321,17 @@ def set_agent_master_access(agent_id: str, keys: list[str]) -> list[str]:
 
 
 def master_keys_for_agent(agent_id: str) -> list[str]:
-    """Master list keys assigned to an AI Sales Agent (empty if unset)."""
+    """Master list keys for an AI Sales Agent.
+
+    Unset (never configured) → all enabled lists (Sara/Rayan stay visible by default).
+    Explicit empty list → none (e.g. Rice with no agents ticked).
+    """
     enabled_keys = [str(r["key"]) for r in get_master_lists(include_disabled=False)]
-    access = get_agent_master_access().get(str(agent_id or "").strip())
-    if access is None:
-        return []
-    allowed = {str(k) for k in access}
+    access_map = get_agent_master_access()
+    aid = str(agent_id or "").strip()
+    if aid not in access_map:
+        return enabled_keys
+    allowed = {str(k) for k in (access_map.get(aid) or [])}
     return [k for k in enabled_keys if k in allowed]
 
 
