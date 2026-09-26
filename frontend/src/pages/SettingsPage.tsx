@@ -27,6 +27,7 @@ import {
   lockAiTools,
   unlockAiTools,
 } from "../lib/aiToolsGate";
+import { OrgAdminSettingsPanel } from "../components/OrgAdminSettingsPanel";
 
 interface SettingsPageProps {
   onError: (message: string) => void;
@@ -382,6 +383,8 @@ export function SettingsPage({ onError, onOpenRestrictedAi }: SettingsPageProps)
           {refreshing ? "Refreshing…" : "Refresh"}
         </ActionButton>
       </div>
+
+      <OrgAdminSettingsPanel onError={onError} />
 
       <section className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-5 space-y-4">
         <div>

@@ -27,6 +27,7 @@ from api import (
     leads,
     mail_extras,
     mailer_handoff,
+    org_admin,
     personalized_followups,
     sales_assistant,
     scheduler,
@@ -479,6 +480,7 @@ app.include_router(agent_bridge.router, prefix="/api")
 app.include_router(agent_bridge.webhook_router, prefix="/api")
 app.include_router(agent_bridge.user_router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+app.include_router(org_admin.router, prefix="/api")
 app.include_router(custom_modules.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
 app.include_router(data_synthesis.router, prefix="/api")

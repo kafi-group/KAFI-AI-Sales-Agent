@@ -12,18 +12,30 @@ function contactKey(item: DialableContactSuggestion): string {
 }
 
 interface AiSalesAgentQueuePickerProps {
-  persona: "male" | "female" | "pipeline";
-  onPersonaChange: (persona: "male" | "female" | "pipeline") => void;
+  persona: string;
+  onPersonaChange: (persona: string) => void;
   assigning: boolean;
   onAssign: (contacts: DialableContactSuggestion[]) => void;
+  /** Active agents from org registry (Sara/Rayan + custom). */
+  agentOptions?: Array<{ id: string; name: string; product_focus?: string }>;
 }
+
+const DEFAULT_AGENTS = [
+  { id: "female", name: "Sara" },
+  { id: "male", name: "Rayan" },
+];
 
 export function AiSalesAgentQueuePicker({
   persona,
   onPersonaChange,
   assigning,
   onAssign,
+  agentOptions,
 }: AiSalesAgentQueuePickerProps) {
+  const agents = agentOptions?.length ? agentOptions : DEFAULT_AGENTS;
+  const agentLabel = (id: string) =>
+    agents.find((a) => a.id === id)?.name ||
+    (id === "female" ? "Sara" : id === "male" ? "Rayan" : id);
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<DialableContactSuggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -159,20 +171,22 @@ export function AiSalesAgentQueuePicker({
           Add to
           <select
             value={persona}
-            onChange={(e) =>
-              onPersonaChange(e.target.value as "male" | "female" | "pipeline")
-            }
+            onChange={(e) => onPersonaChange(e.target.value)}
             className="mt-1 block w-full min-w-[180px] rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100"
           >
             <option value="pipeline">AI Sales Agent list</option>
-            <option value="female">Sara (female)</option>
-            <option value="male">Rayan (male)</option>
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+                {a.product_focus ? ` — ${a.product_focus}` : ""}
+              </option>
+            ))}
           </select>
         </label>
         <p className="text-xs text-slate-500 flex-1 min-w-[220px] pb-1">
           {persona === "pipeline"
-            ? "Add to the shared list first — then assign Sara or Rayan and pick Outreach / Data Update / AI Auto Mode."
-            : `Add directly to ${persona === "female" ? "Sara" : "Rayan"}'s queue (default Outreach).`}
+            ? "Add to the shared list first — then assign an AI Sales Agent and pick Outreach / Data Update / AI Auto Mode."
+            : `Add directly to ${agentLabel(persona)}'s queue (default Outreach).`}
         </p>
       </div>
 
@@ -387,11 +401,7 @@ export function AiSalesAgentQueuePicker({
           {assigning
             ? "Adding…"
             : `Add ${selected.length || ""} ticked contact${selected.length === 1 ? "" : "s"} to ${
-                persona === "pipeline"
-                  ? "AI Sales Agent list"
-                  : persona === "female"
-                    ? "Sara"
-                    : "Rayan"
+                persona === "pipeline" ? "AI Sales Agent list" : agentLabel(persona)
               }`}
         </button>
       </div>

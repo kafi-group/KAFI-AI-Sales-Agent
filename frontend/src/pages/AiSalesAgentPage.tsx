@@ -8,6 +8,7 @@ import {
   type AiSalesAgentRunner,
   type AiSalesAgentTask,
   type DialableContactSuggestion,
+  type OrgAdminAiSalesAgent,
 } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { AiSalesAgentQueuePicker } from "../components/AiSalesAgentQueuePicker";
@@ -29,8 +30,8 @@ interface AiSalesAgentPageProps {
 }
 
 const PERSONA_LABELS: Record<string, string> = {
-  male: "Rayan (male)",
-  female: "Sara (female)",
+  male: "Rayan",
+  female: "Sara",
   pipeline: "AI Sales Agent list",
 };
 
@@ -43,20 +44,19 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   const [runners, setRunners] = useState<AiSalesAgentRunner[]>([]);
   const [tasks, setTasks] = useState<AiSalesAgentTask[]>([]);
   const [loading, setLoading] = useState(true);
-  const [assignPersona, setAssignPersona] = useState<"male" | "female" | "pipeline">(
-    "pipeline",
-  );
+  const [registryAgents, setRegistryAgents] = useState<OrgAdminAiSalesAgent[]>([]);
+  const [assignPersona, setAssignPersona] = useState<string>("pipeline");
   const [buyerIdsRaw, setBuyerIdsRaw] = useState("");
   const [assigning, setAssigning] = useState(false);
   const [filterPersona, setFilterPersona] = useState<string>("");
   const [selfTestPhone, setSelfTestPhone] = useState("");
   const [selfTestName, setSelfTestName] = useState("");
-  const [selfTestPersona, setSelfTestPersona] = useState<"male" | "female">("female");
+  const [selfTestPersona, setSelfTestPersona] = useState<string>("female");
   const [selfTestLanguage, setSelfTestLanguage] = useState<string>("en");
   const [selfTesting, setSelfTesting] = useState(false);
   const [endingCall, setEndingCall] = useState(false);
   const [callingTaskId, setCallingTaskId] = useState<number | null>(null);
-  const [startingAutoPersona, setStartingAutoPersona] = useState<"female" | "male" | null>(null);
+  const [startingAutoPersona, setStartingAutoPersona] = useState<string | null>(null);
   const [whatsAppModalTarget, setWhatsAppModalTarget] = useState<WhatsAppComposeTarget | null>(null);
   const [telegramModalTarget, setTelegramModalTarget] = useState<TelegramComposeTarget | null>(null);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
@@ -71,6 +71,41 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
   useEffect(() => {
     setUnlocked(Boolean(getAiSalesAgentAccessCode()));
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void client
+      .listOrgAiSalesAgents(true)
+      .then((res) => {
+        if (!cancelled) setRegistryAgents(res.agents || []);
+      })
+      .catch(() => {
+        /* keep defaults */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const agentOptions = (
+    registryAgents.length
+      ? registryAgents
+      : [
+          { id: "female", name: "Sara", product_focus: "" },
+          { id: "male", name: "Rayan", product_focus: "" },
+        ]
+  ).map((a) => ({
+    id: a.id,
+    name: a.name,
+    product_focus: a.product_focus || "",
+  }));
+
+  function personaName(persona: string): string {
+    if (persona === "pipeline") return "AI Sales Agent list";
+    const fromReg = agentOptions.find((a) => a.id === persona);
+    if (fromReg) return fromReg.name;
+    return PERSONA_LABELS[persona] ?? persona;
+  }
 
   useEffect(() => {
     if (user?.full_name && !selfTestName) {
@@ -174,7 +209,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       });
       setFilterPersona(selfTestPersona);
       setQueueNotice(
-        `Queued test call to ${phone} as ${selfTestPersona === "female" ? "Sara" : "Rayan"}. ` +
+        `Queued test call to ${phone} as ${personaName(selfTestPersona)}. ` +
           "Use Call this number in the queue, or Start calling (all in sequence).",
       );
       setTimeout(() => setQueueNotice(null), 10000);
@@ -204,7 +239,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         language: selfTestLanguage,
         dial_now: true,
       });
-      const agentName = selfTestPersona === "female" ? "Sara" : "Rayan";
+      const agentName = personaName(selfTestPersona);
       setQueueNotice(
         `📞 ${agentName} is calling ${phone} now. When the call ends, WhatsApp and email are sent automatically — including a missed-call email if no one picks up.`,
       );
@@ -260,15 +295,10 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         contact_ids: contacts.map((row) => row.contact_id),
       });
       setFilterPersona(assignPersona);
-      const dest =
-        assignPersona === "pipeline"
-          ? "AI Sales Agent list"
-          : assignPersona === "female"
-            ? "Sara"
-            : "Rayan";
+      const dest = personaName(assignPersona);
       const base =
         assignPersona === "pipeline"
-          ? `Added ${result.tasks.length} contact(s) to AI Sales Agent list. Assign them to Sara or Rayan below, then split Outreach / Data Update / AI Auto Mode.`
+          ? `Added ${result.tasks.length} contact(s) to AI Sales Agent list. Assign them to an AI Sales Agent below, then split Outreach / Data Update / AI Auto Mode.`
           : `Added ${result.tasks.length} Master Table contact(s) to ${dest}'s queue. Use Start calling or set lanes under Data Update / Auto Mode.`;
       setQueueNotice(result.notice ? `${base} ${result.notice}` : base);
       setTimeout(() => setQueueNotice(null), result.notice ? 16000 : 8000);
@@ -280,14 +310,14 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     }
   }
 
-  async function handleAutoModeStart(persona: "female" | "male") {
+  async function handleAutoModeStart(persona: string) {
     setStartingAutoPersona(persona);
     try {
       await client.startAiSalesAgentRunner(persona, {
         sequence: true,
         queue_lane: "auto_mode",
       });
-      const name = persona === "female" ? "Sara" : "Rayan";
+      const name = personaName(persona);
       setQueueNotice(
         `${name} started AI Auto Mode on the AI Auto Mode list only. Outreach and Data Update lists are untouched.`,
       );
@@ -302,7 +332,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
 
   async function handleCallOne(task: AiSalesAgentTask) {
     if (task.persona === "pipeline") {
-      onError("Assign this contact to Sara or Rayan first.");
+      onError("Assign this contact to an AI Sales Agent first.");
       return;
     }
     setCallingTaskId(task.id);
@@ -311,7 +341,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
         task_id: task.id,
         sequence: false,
       });
-      const agentName = task.persona === "female" ? "Sara" : "Rayan";
+      const agentName = personaName(task.persona);
       setQueueNotice(
         `${agentName} is calling ${task.contact_name || task.company_name || "this number"} now. Follow-up WhatsApp and email send automatically when the call ends.`,
       );
@@ -331,7 +361,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     try {
       if (action === "start") {
         await client.startAiSalesAgentRunner(persona, { sequence: true });
-        const agentName = persona === "female" ? "Sara" : "Rayan";
+        const agentName = personaName(persona);
         setQueueNotice(
           `${agentName} is calling the queue in sequence. After each call, WhatsApp and email are sent automatically (missed-call email if no pickup), then the next number is dialed.`,
         );
@@ -437,7 +467,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
     }
   }
 
-  async function handleAssignToAgent(persona: "female" | "male", taskIds?: number[]) {
+  async function handleAssignToAgent(persona: string, taskIds?: number[]) {
     const ids =
       taskIds ??
       [...selectedTaskIds].filter((id) =>
@@ -447,7 +477,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
       onError("Select contacts from the AI Sales Agent list first.");
       return;
     }
-    const name = persona === "female" ? "Sara" : "Rayan";
+    const name = personaName(persona);
     setAssigning(true);
     try {
       const res = await client.setAiSalesTaskPersona({ task_ids: ids, persona });
@@ -674,13 +704,14 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
               Agent
               <select
                 value={selfTestPersona}
-                onChange={(e) =>
-                  setSelfTestPersona(e.target.value as "male" | "female")
-                }
+                onChange={(e) => setSelfTestPersona(e.target.value)}
                 className="mt-1 block w-full min-w-[140px] rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100"
               >
-                <option value="female">Sara (female)</option>
-                <option value="male">Rayan (male)</option>
+                {agentOptions.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="text-sm text-slate-400">
@@ -764,6 +795,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
             onPersonaChange={setAssignPersona}
             assigning={assigning}
             onAssign={(contacts) => void handleAssignContacts(contacts)}
+            agentOptions={agentOptions}
           />
           <details className="text-xs text-slate-500">
             <summary className="cursor-pointer text-slate-400 hover:text-slate-200">
@@ -841,8 +873,11 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
           >
             <option value="">All</option>
             <option value="pipeline">AI Sales Agent list</option>
-            <option value="female">Sara</option>
-            <option value="male">Rayan</option>
+            {agentOptions.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
           </select>
           <button
             type="button"
@@ -865,22 +900,17 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                 />
                 Select all
               </label>
-              <button
-                type="button"
-                disabled={assigning || selectedPipelineIds.length === 0}
-                onClick={() => void handleAssignToAgent("female")}
-                className="px-3 py-1 text-xs font-semibold rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
-              >
-                → Sara ({selectedPipelineIds.length})
-              </button>
-              <button
-                type="button"
-                disabled={assigning || selectedPipelineIds.length === 0}
-                onClick={() => void handleAssignToAgent("male")}
-                className="px-3 py-1 text-xs font-semibold rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 disabled:opacity-40"
-              >
-                → Rayan ({selectedPipelineIds.length})
-              </button>
+              {agentOptions.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  disabled={assigning || selectedPipelineIds.length === 0}
+                  onClick={() => void handleAssignToAgent(a.id)}
+                  className="px-3 py-1 text-xs font-semibold rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
+                >
+                  → {a.name} ({selectedPipelineIds.length})
+                </button>
+              ))}
               <button
                 type="button"
                 disabled={bulkRemoving || selectedTaskIds.size === 0}
@@ -957,7 +987,7 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                           />
                         </td>
                         <td className="px-3 py-2.5">
-                          {PERSONA_LABELS[task.persona] ?? task.persona}
+                          {PERSONA_LABELS[task.persona] ?? personaName(task.persona)}
                         </td>
                         <td className="px-3 py-2.5 break-words">
                           {task.company_name ?? `#${task.buyer_id}`}
@@ -1086,22 +1116,17 @@ export function AiSalesAgentPage({ onError }: AiSalesAgentPageProps) {
                         )}
                         {isAdmin && task.persona === "pipeline" && task.status === "queued" ? (
                           <>
-                            <button
-                              type="button"
-                              disabled={assigning}
-                              onClick={() => void handleAssignToAgent("female", [task.id])}
-                              className="px-2 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-200 border border-emerald-500/30 text-xs font-semibold disabled:opacity-40"
-                            >
-                              → Sara
-                            </button>
-                            <button
-                              type="button"
-                              disabled={assigning}
-                              onClick={() => void handleAssignToAgent("male", [task.id])}
-                              className="px-2 py-1 rounded bg-sky-600/20 hover:bg-sky-600/30 text-sky-200 border border-sky-500/30 text-xs font-semibold disabled:opacity-40"
-                            >
-                              → Rayan
-                            </button>
+                            {agentOptions.map((a) => (
+                              <button
+                                key={a.id}
+                                type="button"
+                                disabled={assigning}
+                                onClick={() => void handleAssignToAgent(a.id, [task.id])}
+                                className="px-2 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-200 border border-emerald-500/30 text-xs font-semibold disabled:opacity-40"
+                              >
+                                → {a.name}
+                              </button>
+                            ))}
                           </>
                         ) : null}
                         {isAdmin &&

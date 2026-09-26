@@ -9,6 +9,7 @@ import {
 } from "./icons/AppIcons";
 import { mailLabelIdFromNavId } from "../lib/mailLabelRules";
 import { AppBrand } from "./AppBrand";
+import { client, type OrgAdminMasterList } from "../api/client";
 
 export type Tab =
   | "indexes"
@@ -213,6 +214,11 @@ export function AppSidebar({
   masterType = "fmcg",
   onMasterTypeChange,
 }: AppSidebarProps) {
+  const [masterLists, setMasterLists] = useState<OrgAdminMasterList[]>([
+    { key: "fmcg", label: "Master FMCG", enabled: true, sort_order: 0 },
+    { key: "minerals_ores", label: "Minerals & Ores", enabled: true, sort_order: 1 },
+    { key: "other_items", label: "Other Items", enabled: true, sort_order: 2 },
+  ]);
   const [leadsMenuOpen, setLeadsMenuOpen] = useState(activeTab === "table");
   const [mailMenuOpen, setMailMenuOpen] = useState(
     activeTab === "inbox" ||
@@ -250,6 +256,23 @@ export function AppSidebar({
   );
   const [horekaMenuOpen, setHorekaMenuOpen] = useState(activeTab === "horeka");
   const [catalogueMenuOpen, setCatalogueMenuOpen] = useState(activeTab === "catalogue");
+
+  useEffect(() => {
+    let cancelled = false;
+    void client
+      .getMyMasterLists()
+      .then((res) => {
+        if (cancelled) return;
+        const rows = (res.master_lists || []).filter((r) => r.enabled);
+        if (rows.length) setMasterLists(rows);
+      })
+      .catch(() => {
+        /* keep built-in fallback */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (activeTab === "table") {
@@ -403,13 +426,19 @@ export function AppSidebar({
                 Active Master List
               </label>
               <select
-                value={masterType}
+                value={
+                  masterLists.some((m) => m.key === masterType)
+                    ? masterType
+                    : masterLists[0]?.key || masterType
+                }
                 onChange={(e) => onMasterTypeChange?.(e.target.value)}
                 className="w-full bg-slate-900 text-slate-100 text-xs rounded-md border border-slate-700 px-2 py-1.5 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 cursor-pointer font-medium"
               >
-                <option value="fmcg">Master FMCG</option>
-                <option value="minerals_ores">Minerals & Ores</option>
-                <option value="other_items">Other Items</option>
+                {masterLists.map((m) => (
+                  <option key={m.key} value={m.key}>
+                    {m.label}
+                  </option>
+                ))}
               </select>
             </div>
             {navItems.map((item) => {

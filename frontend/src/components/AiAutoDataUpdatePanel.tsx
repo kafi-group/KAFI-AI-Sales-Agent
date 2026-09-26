@@ -21,9 +21,9 @@ const WEEKDAYS = [
   { id: "sun", label: "Sun" },
 ] as const;
 
-const PERSONAS = [
-  { id: "female" as const, label: "Sara" },
-  { id: "male" as const, label: "Rayan" },
+const DEFAULT_PERSONAS = [
+  { id: "female", label: "Sara" },
+  { id: "male", label: "Rayan" },
 ];
 
 type QueueLane = "outreach" | "data_update" | "auto_mode";
@@ -387,27 +387,52 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
   const [open, setOpen] = useState(true);
   const [status, setStatus] = useState<AiSalesDataUpdateStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [savingPersona, setSavingPersona] = useState<"female" | "male" | null>(null);
-  const [runningPersona, setRunningPersona] = useState<"female" | "male" | null>(null);
+  const [personas, setPersonas] = useState(DEFAULT_PERSONAS);
+  const [savingPersona, setSavingPersona] = useState<string | null>(null);
+  const [runningPersona, setRunningPersona] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [cooldownDraft, setCooldownDraft] = useState<Record<"female" | "male", string>>({
+  const [cooldownDraft, setCooldownDraft] = useState<Record<string, string>>({
     female: "45",
     male: "45",
   });
-  const [selectedByPersona, setSelectedByPersona] = useState<
-    Record<"female" | "male", Set<number>>
-  >({ female: new Set(), male: new Set() });
+  const [selectedByPersona, setSelectedByPersona] = useState<Record<string, Set<number>>>({
+    female: new Set(),
+    male: new Set(),
+  });
   const savingLockRef = useRef(0);
   const movingLockRef = useRef(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    void client
+      .listOrgAiSalesAgents(true)
+      .then((res) => {
+        if (cancelled) return;
+        const rows = (res.agents || []).map((a) => ({
+          id: a.id,
+          label: a.name || a.id,
+        }));
+        if (rows.length) setPersonas(rows);
+      })
+      .catch(() => {
+        /* keep Sara/Rayan */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const load = useCallback(async () => {
     try {
       const data = await client.getAiSalesDataUpdate();
       setStatus(data);
-      setCooldownDraft({
-        female: String(data.schedules?.female?.cooldown_sec ?? 45),
-        male: String(data.schedules?.male?.cooldown_sec ?? 45),
+      setCooldownDraft((prev) => {
+        const next = { ...prev };
+        for (const key of Object.keys(data.schedules || {})) {
+          next[key] = String(data.schedules?.[key]?.cooldown_sec ?? 45);
+        }
+        return next;
       });
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to load Data Update schedule");
@@ -427,20 +452,24 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
   }, [load]);
 
   const queues = useMemo(() => {
-    const out: Record<"female" | "male", Record<QueueLane, AiSalesAgentTask[]>> = {
-      female: { outreach: [], data_update: [], auto_mode: [] },
-      male: { outreach: [], data_update: [], auto_mode: [] },
-    };
+    const out: Record<string, Record<QueueLane, AiSalesAgentTask[]>> = {};
+    for (const p of personas) {
+      out[p.id] = { outreach: [], data_update: [], auto_mode: [] };
+    }
+    const known = new Set(personas.map((p) => p.id));
     for (const t of tasks) {
-      if (t.persona !== "male" && t.persona !== "female") continue;
-      const persona = t.persona === "male" ? "male" : "female";
-      out[persona][normalizeLane(t.queue_lane)].push(t);
+      if (!known.has(t.persona)) continue;
+      out[t.persona][normalizeLane(t.queue_lane)].push(t);
     }
     return out;
-  }, [tasks]);
+  }, [tasks, personas]);
+
+  function personaLabel(id: string): string {
+    return personas.find((p) => p.id === id)?.label || id;
+  }
 
   function patchLocalSchedule(
-    persona: "female" | "male",
+    persona: string,
     patch: {
       enabled?: boolean;
       time?: string;
@@ -488,7 +517,7 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
   }
 
   async function saveSchedule(
-    persona: "female" | "male",
+    persona: string,
     patch: {
       enabled?: boolean;
       time?: string;
@@ -512,7 +541,7 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
       if (typeof patch.cooldown_sec === "number") {
         setCooldownDraft((d) => ({ ...d, [persona]: String(next.schedules?.[persona]?.cooldown_sec ?? patch.cooldown_sec) }));
       }
-      setNotice(`Saved ${persona === "female" ? "Sara" : "Rayan"} Data Update schedule.`);
+      setNotice(`Saved ${personaLabel(persona)} Data Update schedule.`);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to save schedule");
       // Re-sync from server so optimistic edit does not stick if save failed.
@@ -524,14 +553,14 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
     }
   }
 
-  async function runNow(persona: "female" | "male") {
+  async function runNow(persona: string) {
     setRunningPersona(persona);
     setNotice(null);
     try {
       const res = await client.runAiSalesDataUpdateNow(persona);
       setStatus(res.status as AiSalesDataUpdateStatus);
       setNotice(
-        `Started Data Update for ${persona === "female" ? "Sara" : "Rayan"} — ${res.total} contact(s). Autopilot runs 1-at-a-time with cooldown.`,
+        `Started Data Update for ${personaLabel(persona)} — ${res.total} contact(s). Autopilot runs 1-at-a-time with cooldown.`,
       );
       onTasksChanged();
     } catch (e) {
@@ -541,19 +570,19 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
     }
   }
 
-  function toggleSelect(persona: "female" | "male", taskId: number) {
+  function toggleSelect(persona: string, taskId: number) {
     setSelectedByPersona((prev) => {
-      const next = new Set(prev[persona]);
+      const next = new Set(prev[persona] || []);
       if (next.has(taskId)) next.delete(taskId);
       else next.add(taskId);
       return { ...prev, [persona]: next };
     });
   }
 
-  function selectAllInLane(persona: "female" | "male", lane: QueueLane, on: boolean) {
-    const ids = queues[persona][lane].map((t) => t.id);
+  function selectAllInLane(persona: string, lane: QueueLane, on: boolean) {
+    const ids = (queues[persona]?.[lane] || []).map((t) => t.id);
     setSelectedByPersona((prev) => {
-      const next = new Set(prev[persona]);
+      const next = new Set(prev[persona] || []);
       for (const id of ids) {
         if (on) next.add(id);
         else next.delete(id);
@@ -562,11 +591,11 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
     });
   }
 
-  async function moveSelected(persona: "female" | "male", lane: QueueLane) {
+  async function moveSelected(persona: string, lane: QueueLane) {
     const allIds = (
       ["outreach", "data_update", "auto_mode"] as QueueLane[]
-    ).flatMap((l) => queues[persona][l].map((t) => t.id));
-    const ids = [...selectedByPersona[persona]].filter((id) => allIds.includes(id));
+    ).flatMap((l) => (queues[persona]?.[l] || []).map((t) => t.id));
+    const ids = [...(selectedByPersona[persona] || [])].filter((id) => allIds.includes(id));
     if (!ids.length) {
       onError("Select one or more contacts first.");
       return;
@@ -579,9 +608,7 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
       setSelectedByPersona((prev) => ({ ...prev, [persona]: new Set() }));
       onTasksChanged();
       setNotice(
-        `Moved ${ids.length} contact(s) to ${LANE_LABEL[lane]} — still on ${
-          persona === "female" ? "Sara" : "Rayan"
-        }.`,
+        `Moved ${ids.length} contact(s) to ${LANE_LABEL[lane]} — still on ${personaLabel(persona)}.`,
       );
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to move contacts");
@@ -626,7 +653,7 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
         <div>
           <h3 className="text-base font-semibold text-slate-100">AI Auto Data Update Schedule</h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Sara and Rayan each keep their own contacts. Split each agent&apos;s list into Outreach
+            Each AI Sales Agent keeps their own contacts. Split each agent&apos;s list into Outreach
             (calls), Data Update (research), or AI Auto Mode (emails / Auto Mode actions) — one
             contact, one lane.
           </p>
@@ -639,19 +666,19 @@ export function AiAutoDataUpdatePanel({ onError, tasks, onTasksChanged }: Props)
           {notice ? <p className="text-xs text-emerald-300">{notice}</p> : null}
           {savingPersona ? (
             <p className="text-[11px] text-slate-500">
-              Saving {savingPersona === "female" ? "Sara" : "Rayan"} schedule…
+              Saving {personaLabel(savingPersona || "")} schedule…
             </p>
           ) : null}
 
           <div className="grid gap-3 md:grid-cols-2">
-            {PERSONAS.map((p) => {
+            {personas.map((p) => {
               const sch = status?.schedules?.[p.id];
               const run = status?.run_state?.[p.id];
               const prog = run?.progress;
-              const outreach = queues[p.id].outreach;
-              const dataUpdate = queues[p.id].data_update;
-              const autoMode = queues[p.id].auto_mode;
-              const selected = selectedByPersona[p.id];
+              const outreach = queues[p.id]?.outreach || [];
+              const dataUpdate = queues[p.id]?.data_update || [];
+              const autoMode = queues[p.id]?.auto_mode || [];
+              const selected = selectedByPersona[p.id] || new Set<number>();
               const stopMode = (sch?.stop_mode || "until_done") as "until_done" | "until_end_time";
               const otherLanes = (from: QueueLane): QueueLane[] =>
                 (["outreach", "data_update", "auto_mode"] as QueueLane[]).filter((l) => l !== from);

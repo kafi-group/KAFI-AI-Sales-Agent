@@ -69,42 +69,93 @@ class RunnerControlRequest(BaseModel):
 
 
 _VALID_QUEUE_LANES = frozenset({"outreach", "data_update", "auto_mode"})
-_AGENT_PERSONAS = frozenset({"male", "female"})
 _PIPELINE_PERSONA = "pipeline"
+
+
+def _agent_personas() -> frozenset[str]:
+    try:
+        from modules import org_admin_config as org
+
+        ids = org.active_agent_ids()
+        if ids:
+            return frozenset(ids)
+    except Exception:  # noqa: BLE001
+        pass
+    return frozenset({"male", "female"})
+
+
+def _assignable_personas() -> frozenset[str]:
+    return _agent_personas() | {_PIPELINE_PERSONA}
+
+
+# Back-compat aliases used by existing checks
+_AGENT_PERSONAS = frozenset({"male", "female"})
 _ASSIGNABLE_PERSONAS = frozenset({"male", "female", "pipeline"})
+
+
+def _default_runner(persona: str, *, name: str, voice: str, gender_label: str) -> dict[str, Any]:
+    return {
+        "persona": persona,
+        "display_name": name,
+        "gender_label": gender_label,
+        "app_username": persona,
+        "voice": voice,
+        "status": "idle",
+        "current_task_id": None,
+        "current_task": None,
+        "pending_count": 0,
+        "twilio_ready": True,
+        "sequence_mode": False,
+        "operator_user_id": None,
+    }
 
 
 # Global mock/live runner state
 _RUNNERS = [
-    {
-        "persona": "male",
-        "display_name": "Rayan",
-        "gender_label": "male",
-        "app_username": "rayan",
-        "voice": "en-US-Neural2-D",
-        "status": "idle",
-        "current_task_id": None,
-        "current_task": None,
-        "pending_count": 0,
-        "twilio_ready": True,
-        "sequence_mode": False,
-        "operator_user_id": None,
-    },
-    {
-        "persona": "female",
-        "display_name": "Sara",
-        "gender_label": "female",
-        "app_username": "sara",
-        "voice": "en-US-Neural2-F",
-        "status": "idle",
-        "current_task_id": None,
-        "current_task": None,
-        "pending_count": 0,
-        "twilio_ready": True,
-        "sequence_mode": False,
-        "operator_user_id": None,
-    },
+    _default_runner("male", name="Rayan", voice="en-US-Neural2-D", gender_label="male"),
+    _default_runner("female", name="Sara", voice="en-US-Neural2-F", gender_label="female"),
 ]
+
+
+def sync_runners_from_registry() -> None:
+    """Add/update runners from org admin registry without clearing the task queue."""
+    global _RUNNERS, _AGENT_PERSONAS, _ASSIGNABLE_PERSONAS
+    try:
+        from modules import org_admin_config as org
+
+        agents = org.list_ai_sales_agents(active_only=False)
+    except Exception:  # noqa: BLE001
+        return
+    by_persona = {str(r.get("persona")): r for r in _RUNNERS if r.get("persona")}
+    next_runners: list[dict[str, Any]] = []
+    for ag in agents:
+        aid = str(ag.get("id") or "").strip()
+        if not aid:
+            continue
+        existing = by_persona.get(aid)
+        if existing:
+            existing["display_name"] = str(ag.get("name") or existing.get("display_name") or aid)
+            existing["voice"] = str(ag.get("voice") or existing.get("voice") or "en-US-Neural2-D")
+            existing["gender_label"] = str(ag.get("gender_label") or aid)
+            # Inactive agents stay in registry but are not dialable runners
+            if ag.get("active"):
+                next_runners.append(existing)
+        elif ag.get("active"):
+            next_runners.append(
+                _default_runner(
+                    aid,
+                    name=str(ag.get("name") or aid),
+                    voice=str(ag.get("voice") or "en-US-Neural2-D"),
+                    gender_label=str(ag.get("gender_label") or aid),
+                )
+            )
+    if next_runners:
+        _RUNNERS = next_runners
+    active_ids = [str(a["id"]) for a in agents if a.get("active")]
+    if active_ids:
+        _AGENT_PERSONAS = frozenset(active_ids)
+        _ASSIGNABLE_PERSONAS = frozenset(active_ids) | {_PIPELINE_PERSONA}
+
 
 _TASKS: list[dict[str, Any]] = []
 
@@ -163,7 +214,13 @@ def _next_task_id() -> int:
 
 
 def _agent_name(persona: str) -> str:
-    return "Sara" if persona == "female" else "Rayan"
+    try:
+        from modules import org_admin_config as org
+
+        return org.agent_display_name(persona)
+    except Exception:  # noqa: BLE001
+        pass
+    return "Sara" if persona == "female" else "Rayan" if persona == "male" else (persona or "Agent")
 
 
 def _get_runner(persona: str) -> dict[str, Any] | None:
@@ -879,6 +936,10 @@ def list_runners(
 ) -> dict[str, Any]:
     _ = user
     try:
+        sync_runners_from_registry()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
         _reconcile_live_calls(db)
     except Exception:
         pass
@@ -908,13 +969,18 @@ def list_tasks(
 
 
 def _persona_label(persona: str) -> str:
-    p = (persona or "").strip().lower()
-    if p == "female":
-        return "Sara"
-    if p == "male":
-        return "Rayan"
+    p = (persona or "").strip()
     if p == _PIPELINE_PERSONA:
         return "AI Sales Agent list"
+    try:
+        return _agent_name(p)
+    except Exception:  # noqa: BLE001
+        pass
+    pl = p.lower()
+    if pl == "female":
+        return "Sara"
+    if pl == "male":
+        return "Rayan"
     return p or "unknown"
 
 
@@ -935,11 +1001,15 @@ def assign_tasks(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
+    try:
+        sync_runners_from_registry()
+    except Exception:  # noqa: BLE001
+        pass
     target = str(payload.persona or "").strip().lower()
     if target not in _ASSIGNABLE_PERSONAS:
         raise HTTPException(
             400,
-            "Persona must be pipeline (AI Sales Agent list), female (Sara), or male (Rayan).",
+            "Persona must be pipeline (AI Sales Agent list) or an active AI Sales Agent.",
         )
     created = []
     skipped: list[dict[str, Any]] = []
@@ -1121,10 +1191,14 @@ def set_task_persona(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Move staging (pipeline) contacts onto Sara or Rayan."""
+    """Move staging (pipeline) contacts onto an AI Sales Agent."""
+    try:
+        sync_runners_from_registry()
+    except Exception:  # noqa: BLE001
+        pass
     target = str(payload.persona or "").strip().lower()
     if target not in _AGENT_PERSONAS:
-        raise HTTPException(400, "persona must be female (Sara) or male (Rayan)")
+        raise HTTPException(400, "persona must be an active AI Sales Agent")
     id_set = {int(x) for x in (payload.task_ids or []) if int(x) > 0}
     updated = 0
     skipped = 0
@@ -1564,6 +1638,10 @@ def start_runner(
 ) -> dict[str, Any]:
     from modules.ai_sales_auto_mode import get_auto_mode_settings
 
+    try:
+        sync_runners_from_registry()
+    except Exception:  # noqa: BLE001
+        pass
     runner = _get_runner(payload.persona)
     if not runner:
         raise HTTPException(404, "Runner persona not found")
@@ -1802,8 +1880,12 @@ def post_auto_mode_schedule_start(
     from modules.ai_sales_auto_mode import get_auto_mode_settings, schedule_start
 
     persona = str(payload.persona or "").strip().lower()
-    if persona not in ("female", "male"):
-        raise HTTPException(400, "persona must be female (Sara) or male (Rayan)")
+    try:
+        sync_runners_from_registry()
+    except Exception:  # noqa: BLE001
+        pass
+    if persona not in _AGENT_PERSONAS:
+        raise HTTPException(400, "persona must be an active AI Sales Agent")
     settings = get_auto_mode_settings()
     if not settings.get("enabled"):
         raise HTTPException(400, "Turn AI Auto Mode ON before scheduling a start")
@@ -1815,7 +1897,7 @@ def post_auto_mode_schedule_start(
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    name = "Sara" if persona == "female" else "Rayan"
+    name = _agent_name(persona)
     return {
         "ok": True,
         "schedule": entry,
@@ -1944,9 +2026,13 @@ def get_data_update_status(
 
     status = du.get_status()
     queues: dict[str, dict[str, list[dict[str, Any]]]] = {
-        "female": {"outreach": [], "data_update": [], "auto_mode": []},
-        "male": {"outreach": [], "data_update": [], "auto_mode": []},
+        pid: {"outreach": [], "data_update": [], "auto_mode": []}
+        for pid in list(status.get("schedules") or {"female": None, "male": None})
     }
+    if "female" not in queues:
+        queues["female"] = {"outreach": [], "data_update": [], "auto_mode": []}
+    if "male" not in queues:
+        queues["male"] = {"outreach": [], "data_update": [], "auto_mode": []}
     for t in _TASKS:
         persona = t.get("persona")
         if persona not in queues:
@@ -1968,8 +2054,15 @@ def put_data_update_schedule(
     from modules import ai_sales_data_update as du
 
     persona = str(payload.persona or "").strip().lower()
-    if persona not in ("male", "female"):
-        raise HTTPException(400, "persona must be male or female")
+    known = set(du.persona_ids())
+    if persona not in known:
+        try:
+            du.ensure_persona_slots([persona])
+            known = set(du.persona_ids())
+        except Exception:  # noqa: BLE001
+            pass
+    if persona not in known:
+        raise HTTPException(400, "Unknown AI Sales Agent persona")
     return du.update_schedule(persona, payload.model_dump(exclude_none=True))
 
 
@@ -1982,8 +2075,15 @@ def run_data_update_now(
     from modules import ai_sales_data_update as du
 
     p = str(persona or "").strip().lower()
-    if p not in ("male", "female"):
-        raise HTTPException(400, "persona must be male or female")
+    known = set(du.persona_ids())
+    if p not in known:
+        try:
+            du.ensure_persona_slots([p])
+            known = set(du.persona_ids())
+        except Exception:  # noqa: BLE001
+            pass
+    if p not in known:
+        raise HTTPException(400, "Unknown AI Sales Agent persona")
     pending = [
         t
         for t in _TASKS
@@ -2086,12 +2186,16 @@ def execute_recurring_process(
     """Assign process contacts to Sara/Rayan queue and run ticked actions."""
     personas: list[str] = []
     persona = str(process.get("persona") or "female")
+    try:
+        sync_runners_from_registry()
+    except Exception:  # noqa: BLE001
+        pass
     if persona == "both":
-        personas = ["female", "male"]
-    elif persona in ("male", "female"):
+        personas = [p for p in ("female", "male") if p in _AGENT_PERSONAS] or ["female", "male"]
+    elif persona in _AGENT_PERSONAS:
         personas = [persona]
     else:
-        personas = ["female"]
+        personas = ["female"] if "female" in _AGENT_PERSONAS else list(_AGENT_PERSONAS)[:1] or ["female"]
 
     actions = process.get("actions") or {}
     buyer_ids = [int(b) for b in (process.get("buyer_ids") or []) if int(b) > 0]
@@ -2393,6 +2497,10 @@ async def vapi_ai_agent_status(request: Request) -> dict[str, Any]:
 
 # Restore queue after all helpers exist (survives Railway redeploys).
 _load_persisted_queue()
+try:
+    sync_runners_from_registry()
+except Exception:
+    pass
 try:
     _refresh_runner_counts()
 except Exception:

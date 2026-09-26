@@ -102,6 +102,47 @@ def _default_store() -> dict[str, Any]:
     }
 
 
+def _merge_schedule(sch: dict[str, Any]) -> dict[str, Any]:
+    merged = _default_persona_schedule()
+    merged["enabled"] = bool(sch.get("enabled", False))
+    merged["time"] = str(sch.get("time") or "10:00").strip() or "10:00"
+    end_t = str(sch.get("end_time") or "").strip()
+    merged["end_time"] = end_t
+    stop_mode = str(sch.get("stop_mode") or "until_done").strip().lower()
+    merged["stop_mode"] = (
+        stop_mode if stop_mode in ("until_done", "until_end_time") else "until_done"
+    )
+    wds = sch.get("weekdays")
+    if isinstance(wds, list) and wds:
+        cleaned = [str(d).strip().lower()[:3] for d in wds if str(d).strip()]
+        cleaned = [d for d in cleaned if d in WEEKDAY_NAMES]
+        if cleaned:
+            merged["weekdays"] = cleaned
+    try:
+        merged["cooldown_sec"] = max(15, min(600, int(sch.get("cooldown_sec") or DEFAULT_COOLDOWN_SEC)))
+    except (TypeError, ValueError):
+        merged["cooldown_sec"] = DEFAULT_COOLDOWN_SEC
+    merged["last_run_key"] = sch.get("last_run_key")
+    merged["last_started_at"] = sch.get("last_started_at")
+    return merged
+
+
+def _merge_run_state(st: dict[str, Any]) -> dict[str, Any]:
+    merged_st = _default_run_state()
+    merged_st.update({k: st.get(k, merged_st.get(k)) for k in merged_st})
+    if isinstance(st.get("progress"), dict):
+        merged_st["progress"] = {**merged_st["progress"], **st["progress"]}
+    if isinstance(st.get("log"), list):
+        merged_st["log"] = st["log"][-MAX_LOG_LINES:]
+    if isinstance(st.get("run_history"), list):
+        merged_st["run_history"] = [
+            h for h in st["run_history"] if isinstance(h, dict)
+        ][:MAX_RUN_HISTORY]
+    if not merged_st["run_history"] and isinstance(merged_st.get("last_report"), dict):
+        merged_st["run_history"] = [merged_st["last_report"]]
+    return merged_st
+
+
 def _ensure_file() -> None:
     _DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not _DATA_PATH.exists():
@@ -117,48 +158,67 @@ def _load() -> dict[str, Any]:
     if not isinstance(raw, dict):
         return _default_store()
     base = _default_store()
-    for persona in ("female", "male"):
-        sch = raw.get("schedules", {}).get(persona) if isinstance(raw.get("schedules"), dict) else None
+    raw_sch = raw.get("schedules") if isinstance(raw.get("schedules"), dict) else {}
+    raw_st = raw.get("run_state") if isinstance(raw.get("run_state"), dict) else {}
+    persona_ids = set(base["schedules"].keys()) | set(raw_sch.keys()) | set(raw_st.keys())
+    for persona in persona_ids:
+        sch = raw_sch.get(persona)
         if isinstance(sch, dict):
-            merged = _default_persona_schedule()
-            merged["enabled"] = bool(sch.get("enabled", False))
-            merged["time"] = str(sch.get("time") or "10:00").strip() or "10:00"
-            end_t = str(sch.get("end_time") or "").strip()
-            merged["end_time"] = end_t
-            stop_mode = str(sch.get("stop_mode") or "until_done").strip().lower()
-            merged["stop_mode"] = (
-                stop_mode if stop_mode in ("until_done", "until_end_time") else "until_done"
-            )
-            wds = sch.get("weekdays")
-            if isinstance(wds, list) and wds:
-                cleaned = [str(d).strip().lower()[:3] for d in wds if str(d).strip()]
-                cleaned = [d for d in cleaned if d in WEEKDAY_NAMES]
-                if cleaned:
-                    merged["weekdays"] = cleaned
-            try:
-                merged["cooldown_sec"] = max(15, min(600, int(sch.get("cooldown_sec") or DEFAULT_COOLDOWN_SEC)))
-            except (TypeError, ValueError):
-                merged["cooldown_sec"] = DEFAULT_COOLDOWN_SEC
-            merged["last_run_key"] = sch.get("last_run_key")
-            merged["last_started_at"] = sch.get("last_started_at")
-            base["schedules"][persona] = merged
-        st = raw.get("run_state", {}).get(persona) if isinstance(raw.get("run_state"), dict) else None
+            base["schedules"][persona] = _merge_schedule(sch)
+        elif persona not in base["schedules"]:
+            base["schedules"][persona] = _default_persona_schedule()
+        st = raw_st.get(persona)
         if isinstance(st, dict):
-            merged_st = _default_run_state()
-            merged_st.update({k: st.get(k, merged_st.get(k)) for k in merged_st})
-            if isinstance(st.get("progress"), dict):
-                merged_st["progress"] = {**merged_st["progress"], **st["progress"]}
-            if isinstance(st.get("log"), list):
-                merged_st["log"] = st["log"][-MAX_LOG_LINES:]
-            if isinstance(st.get("run_history"), list):
-                merged_st["run_history"] = [
-                    h for h in st["run_history"] if isinstance(h, dict)
-                ][:MAX_RUN_HISTORY]
-            # Older installs only had last_report — seed history so it stays reviewable.
-            if not merged_st["run_history"] and isinstance(merged_st.get("last_report"), dict):
-                merged_st["run_history"] = [merged_st["last_report"]]
-            base["run_state"][persona] = merged_st
+            base["run_state"][persona] = _merge_run_state(st)
+        elif persona not in base["run_state"]:
+            base["run_state"][persona] = _default_run_state()
+    if raw.get("highlights_synced_v1"):
+        base["highlights_synced_v1"] = True
     return base
+
+
+def persona_ids() -> list[str]:
+    data = _load()
+    ids = list(data.get("schedules") or {})
+    # Prefer Sara/Rayan first for stable UI order
+    preferred = [p for p in ("female", "male") if p in ids]
+    rest = sorted(p for p in ids if p not in preferred)
+    return preferred + rest
+
+
+def ensure_persona_slots(ids: list[str] | None = None) -> list[str]:
+    """Add schedule/run_state slots for new AI agents without touching existing queues."""
+    wanted = [str(x).strip() for x in (ids or []) if str(x).strip()]
+    if not wanted:
+        try:
+            from modules import org_admin_config as org
+
+            wanted = org.active_agent_ids()
+        except Exception:  # noqa: BLE001
+            wanted = ["female", "male"]
+    data = _load()
+    dirty = False
+    for pid in wanted:
+        if pid not in data["schedules"]:
+            data["schedules"][pid] = _default_persona_schedule()
+            dirty = True
+        if pid not in data["run_state"]:
+            data["run_state"][pid] = _default_run_state()
+            dirty = True
+    if dirty:
+        _save(data)
+    return persona_ids()
+
+
+def _normalize_persona(persona: str, data: dict[str, Any] | None = None) -> str:
+    p = str(persona or "").strip()
+    store = data or _load()
+    known = set(store.get("schedules") or {}) | set(store.get("run_state") or {})
+    if p in known:
+        return p
+    if p in ("male", "female"):
+        return p
+    return "female"
 
 
 def _report_dedupe_key(report: dict[str, Any]) -> str:
@@ -201,10 +261,14 @@ def _save(data: dict[str, Any]) -> None:
 
 
 def get_status() -> dict[str, Any]:
+    try:
+        ensure_persona_slots()
+    except Exception:  # noqa: BLE001
+        pass
     data = _load()
     # Persist one-time seed of last_report → run_history for older installs.
     dirty = False
-    for persona in ("female", "male"):
+    for persona in list(data.get("run_state") or {}):
         st = data["run_state"][persona]
         if not st.get("run_history") and isinstance(st.get("last_report"), dict):
             st["run_history"] = [st["last_report"]]
@@ -215,8 +279,11 @@ def get_status() -> dict[str, Any]:
 
 
 def update_schedule(persona: str, patch: dict[str, Any]) -> dict[str, Any]:
-    persona = "female" if persona not in ("male", "female") else persona
     data = _load()
+    persona = _normalize_persona(persona, data)
+    if persona not in data["schedules"]:
+        data["schedules"][persona] = _default_persona_schedule()
+        data["run_state"][persona] = _default_run_state()
     sch = data["schedules"][persona]
     if "enabled" in patch:
         sch["enabled"] = bool(patch["enabled"])
@@ -271,8 +338,9 @@ def past_end_time(sch: dict[str, Any]) -> bool:
 
 def should_stop_running(persona: str) -> bool:
     data = _load()
-    persona = "female" if persona not in ("male", "female") else persona
-    return past_end_time(data["schedules"][persona])
+    persona = _normalize_persona(persona, data)
+    sch = data["schedules"].get(persona) or _default_persona_schedule()
+    return past_end_time(sch)
 
 
 def _is_blank(value: Any) -> bool:
@@ -426,7 +494,7 @@ def _schedule_due(sch: dict[str, Any]) -> bool:
 
 
 def start_run(persona: str, *, total: int, force: bool = False) -> dict[str, Any]:
-    persona = "female" if persona not in ("male", "female") else persona
+    persona = _normalize_persona(persona)
     data = _load()
     prev = data["run_state"][persona]
     if prev.get("status") == "running" and not force:
@@ -475,7 +543,7 @@ def _append_log(st: dict[str, Any], entry: dict[str, Any]) -> None:
 
 
 def complete_run(persona: str) -> dict[str, Any]:
-    persona = "female" if persona not in ("male", "female") else persona
+    persona = _normalize_persona(persona)
     data = _load()
     st = data["run_state"][persona]
     report = _snapshot_report_from_state(st, partial=False)
@@ -541,7 +609,7 @@ def sync_highlights_from_run_logs(db: Any) -> int:
     """Backfill buyer.ai_data_update_fields from Data Update activity logs (no process change)."""
     data = _load()
     stamped = 0
-    for persona in ("female", "male"):
+    for persona in list(data.get("run_state") or {}):
         st = data.get("run_state", {}).get(persona) or {}
         entries: list[dict[str, Any]] = []
         for item in st.get("log") or []:
@@ -747,7 +815,7 @@ def record_contact_result(
     result: dict[str, Any],
     cooldown_sec: int,
 ) -> dict[str, Any]:
-    persona = "female" if persona not in ("male", "female") else persona
+    persona = _normalize_persona(persona)
     data = _load()
     st = data["run_state"][persona]
     prog = dict(st.get("progress") or {})
@@ -815,15 +883,20 @@ def mark_current(persona: str, buyer_id: int, label: str) -> None:
 def personas_needing_start() -> list[str]:
     data = _load()
     out: list[str] = []
-    for persona in ("female", "male"):
-        st = data["run_state"][persona]
+    for persona in list(data.get("schedules") or {}):
+        st = (data.get("run_state") or {}).get(persona) or {}
         if st.get("status") == "running":
             continue
-        if _schedule_due(data["schedules"][persona]):
+        sch = data["schedules"].get(persona) or {}
+        if _schedule_due(sch):
             out.append(persona)
     return out
 
 
 def running_personas() -> list[str]:
     data = _load()
-    return [p for p in ("female", "male") if data["run_state"][p].get("status") == "running"]
+    return [
+        p
+        for p in list(data.get("run_state") or {})
+        if (data["run_state"][p] or {}).get("status") == "running"
+    ]

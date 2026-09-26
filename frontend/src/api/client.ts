@@ -163,6 +163,36 @@ export interface VoiceEngineSettings {
   has_elevenlabs_key: boolean;
 }
 
+export interface OrgAdminMasterList {
+  key: string;
+  label: string;
+  enabled: boolean;
+  sort_order: number;
+}
+
+export interface OrgAdminUserRow {
+  id: number;
+  username: string;
+  display_name: string | null;
+  role: string;
+}
+
+export interface OrgAdminAiSalesAgent {
+  id: string;
+  name: string;
+  active: boolean;
+  product_focus: string;
+  voice: string;
+  gender_label: string;
+  protected: boolean;
+}
+
+export interface OrgAdminSnapshot {
+  master_lists: OrgAdminMasterList[];
+  user_master_access: Record<string, string[]>;
+  ai_sales_agents: OrgAdminAiSalesAgent[];
+}
+
 export interface AiTrainingData {
   last_trained_at: string | null;
   total_calls_analyzed: number;
@@ -4118,6 +4148,64 @@ export const client = {
       method: "POST",
       body: JSON.stringify({ pin }),
     }),
+  unlockOrgAdmin: (pin: string) =>
+    request<{ ok: boolean } & OrgAdminSnapshot>("/org-admin/unlock", {
+      method: "POST",
+      body: JSON.stringify({ pin }),
+    }),
+  getMyMasterLists: () =>
+    request<{ master_lists: OrgAdminMasterList[] }>("/org-admin/master-lists"),
+  getOrgAdminMasterListsAdmin: (pin: string) =>
+    request<{
+      master_lists: OrgAdminMasterList[];
+      user_master_access: Record<string, string[]>;
+      users: OrgAdminUserRow[];
+    }>(`/org-admin/master-lists/admin?pin=${encodeURIComponent(pin)}`),
+  upsertOrgMasterList: (data: {
+    pin: string;
+    key?: string | null;
+    label: string;
+    enabled?: boolean;
+    sort_order?: number | null;
+  }) =>
+    request<{ ok: boolean; master_list: OrgAdminMasterList }>("/org-admin/master-lists", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  deleteOrgMasterList: (pin: string, key: string) =>
+    request<{ ok: boolean }>("/org-admin/master-lists/delete", {
+      method: "POST",
+      body: JSON.stringify({ pin, key }),
+    }),
+  setOrgUserMasterAccess: (pin: string, userId: number, masterListKeys: string[]) =>
+    request<{ ok: boolean; user_id: number; master_list_keys: string[] }>(
+      "/org-admin/master-lists/user-access",
+      {
+        method: "POST",
+        body: JSON.stringify({ pin, user_id: userId, master_list_keys: masterListKeys }),
+      },
+    ),
+  listOrgAiSalesAgents: (activeOnly = false) =>
+    request<{ agents: OrgAdminAiSalesAgent[] }>(
+      `/org-admin/ai-sales-agents?active_only=${activeOnly ? "true" : "false"}`,
+    ),
+  upsertOrgAiSalesAgent: (data: {
+    pin: string;
+    id?: string | null;
+    name: string;
+    active?: boolean;
+    product_focus?: string;
+    voice?: string | null;
+  }) =>
+    request<{ ok: boolean; agent: OrgAdminAiSalesAgent }>("/org-admin/ai-sales-agents", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  deleteOrgAiSalesAgent: (pin: string, id: string) =>
+    request<{ ok: boolean }>("/org-admin/ai-sales-agents/delete", {
+      method: "POST",
+      body: JSON.stringify({ pin, id }),
+    }),
   toggleVapiEngine: (pin: string, enabled: boolean) =>
     request<{ ok: boolean; vapi_enabled: boolean; message: string }>("/calls/toggle-vapi-engine", {
       method: "POST",
@@ -4705,7 +4793,7 @@ export const client = {
       headers: aiSalesAgentHeaders(),
     }),
   updateAiSalesDataUpdateSchedule: (data: {
-    persona: "female" | "male";
+    persona: string;
     enabled?: boolean;
     time?: string;
     end_time?: string;
@@ -4718,7 +4806,7 @@ export const client = {
       headers: aiSalesAgentHeaders(),
       body: JSON.stringify(data),
     }),
-  runAiSalesDataUpdateNow: (persona: "female" | "male") =>
+  runAiSalesDataUpdateNow: (persona: string) =>
     request<{ ok: boolean; run_id: string; total: number; status: AiSalesDataUpdateStatus }>(
       `/ai-sales-agent/data-update/run-now?persona=${encodeURIComponent(persona)}`,
       { method: "POST", headers: aiSalesAgentHeaders() },
@@ -5424,26 +5512,16 @@ export interface AiSalesDataUpdateRunState {
 }
 
 export interface AiSalesDataUpdateStatus {
-  schedules: {
-    female: AiSalesDataUpdateSchedule;
-    male: AiSalesDataUpdateSchedule;
-  };
-  run_state: {
-    female: AiSalesDataUpdateRunState;
-    male: AiSalesDataUpdateRunState;
-  };
-  queues?: {
-    female: {
+  schedules: Record<string, AiSalesDataUpdateSchedule>;
+  run_state: Record<string, AiSalesDataUpdateRunState>;
+  queues?: Record<
+    string,
+    {
       outreach: AiSalesAgentTask[];
       data_update: AiSalesAgentTask[];
       auto_mode: AiSalesAgentTask[];
-    };
-    male: {
-      outreach: AiSalesAgentTask[];
-      data_update: AiSalesAgentTask[];
-      auto_mode: AiSalesAgentTask[];
-    };
-  };
+    }
+  >;
 }
 
 export interface AiSalesAgentLogContact {
