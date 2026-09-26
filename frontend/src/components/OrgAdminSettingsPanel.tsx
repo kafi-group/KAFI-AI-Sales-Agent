@@ -12,6 +12,7 @@ import {
   deleteLocalAgent,
   deleteLocalMasterList,
   loadOrgAdminLocal,
+  notifyOrgAdminChanged,
   orgAdminPinValid,
   ORG_ADMIN_PIN,
   saveOrgAdminLocal,
@@ -81,6 +82,39 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
     async (accessPin: string) => {
       // Prefer API when live; never block Settings unlock if API is down.
       try {
+        // Push any browser-local lists (Meat, Rice, …) up to Railway before reload,
+        // so the sidebar Active Master List matches Settings.
+        const local = loadOrgAdminLocal();
+        try {
+          const existing = await client.getOrgAdminMasterListsAdmin(accessPin);
+          const apiByKey = new Map(
+            (existing.master_lists || []).map((m) => [m.key, m] as const),
+          );
+          for (const m of local.master_lists || []) {
+            const apiRow = apiByKey.get(m.key);
+            if (!apiRow) {
+              await client.upsertOrgMasterList({
+                pin: accessPin,
+                key: m.key,
+                label: m.label,
+                enabled: m.enabled,
+              });
+            } else if (
+              apiRow.label !== m.label ||
+              Boolean(apiRow.enabled) !== Boolean(m.enabled)
+            ) {
+              await client.upsertOrgMasterList({
+                pin: accessPin,
+                key: m.key,
+                label: m.label,
+                enabled: m.enabled,
+              });
+            }
+          }
+        } catch {
+          /* sync best-effort */
+        }
+
         const data = await client.getOrgAdminMasterListsAdmin(accessPin);
         setMasterLists(data.master_lists || []);
         setUsers(data.users || []);
@@ -208,6 +242,7 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
             enabled: opts.enabled ?? true,
           });
           await loadAdmin(pin);
+          notifyOrgAdminChanged();
           setNewListLabel("");
           setEditListKey(null);
           setEditListLabel("");
@@ -516,7 +551,14 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
             </li>
           ))}
         </ul>
-        <div className="flex flex-wrap gap-2">
+        <form
+          className="flex flex-wrap gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (busy || !newListLabel.trim()) return;
+            void saveMasterList({ label: newListLabel.trim(), enabled: true });
+          }}
+        >
           <input
             value={newListLabel}
             onChange={(e) => setNewListLabel(e.target.value)}
@@ -524,14 +566,17 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
             className="flex-1 min-w-[12rem] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100"
           />
           <ActionButton
-            type="button"
+            type="submit"
             icon={IconPlus}
             disabled={busy || !newListLabel.trim()}
-            onClick={() => void saveMasterList({ label: newListLabel.trim(), enabled: true })}
           >
             Add list
           </ActionButton>
-        </div>
+        </form>
+        <p className="text-[11px] text-slate-500">
+          Press Enter or click Add list. Changes sync to the sidebar automatically; unlock Settings
+          while the API is up so lists stay on the server for everyone.
+        </p>
       </div>
 
       <div className="space-y-3">

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   IconBell,
   IconChevronDown,
@@ -10,7 +10,13 @@ import {
 import { mailLabelIdFromNavId } from "../lib/mailLabelRules";
 import { AppBrand } from "./AppBrand";
 import { client, type OrgAdminMasterList } from "../api/client";
-import { loadOrgAdminLocal, localMasterListsForUser } from "../lib/orgAdminLocalStore";
+import {
+  loadOrgAdminLocal,
+  localMasterListsForUser,
+  mergeMasterListsForSidebar,
+  ORG_ADMIN_CHANGED_EVENT,
+} from "../lib/orgAdminLocalStore";
+import { SearchableSelect } from "./SearchableSelect";
 import { useAuth } from "../auth/AuthContext";
 
 export type Tab =
@@ -262,26 +268,50 @@ export function AppSidebar({
 
   useEffect(() => {
     let cancelled = false;
-    void client
-      .getMyMasterLists()
-      .then((res) => {
-        if (cancelled) return;
-        const rows = (res.master_lists || []).filter((r) => r.enabled);
-        if (rows.length) setMasterLists(rows);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        const local = localMasterListsForUser(
-          loadOrgAdminLocal(),
-          user?.id ?? null,
-          Boolean(isAdmin),
-        );
-        if (local.length) setMasterLists(local);
-      });
+
+    function applyMerged(apiRows: OrgAdminMasterList[]) {
+      const local = localMasterListsForUser(
+        loadOrgAdminLocal(),
+        user?.id ?? null,
+        Boolean(isAdmin),
+      );
+      const merged = mergeMasterListsForSidebar(apiRows, local);
+      if (!cancelled && merged.length) setMasterLists(merged);
+    }
+
+    function refresh() {
+      void client
+        .getMyMasterLists()
+        .then((res) => {
+          if (cancelled) return;
+          applyMerged(res.master_lists || []);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          const local = localMasterListsForUser(
+            loadOrgAdminLocal(),
+            user?.id ?? null,
+            Boolean(isAdmin),
+          );
+          if (local.length) setMasterLists(local);
+        });
+    }
+
+    refresh();
+    const onChanged = () => refresh();
+    window.addEventListener(ORG_ADMIN_CHANGED_EVENT, onChanged);
+    window.addEventListener("storage", onChanged);
     return () => {
       cancelled = true;
+      window.removeEventListener(ORG_ADMIN_CHANGED_EVENT, onChanged);
+      window.removeEventListener("storage", onChanged);
     };
   }, [user?.id, isAdmin]);
+
+  const masterListOptions = useMemo(
+    () => masterLists.map((m) => ({ value: m.key, label: m.label })),
+    [masterLists],
+  );
 
   useEffect(() => {
     if (activeTab === "table") {
@@ -434,21 +464,18 @@ export function AppSidebar({
               <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-1">
                 Active Master List
               </label>
-              <select
+              <SearchableSelect
                 value={
                   masterLists.some((m) => m.key === masterType)
                     ? masterType
                     : masterLists[0]?.key || masterType
                 }
-                onChange={(e) => onMasterTypeChange?.(e.target.value)}
-                className="w-full bg-slate-900 text-slate-100 text-xs rounded-md border border-slate-700 px-2 py-1.5 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 cursor-pointer font-medium"
-              >
-                {masterLists.map((m) => (
-                  <option key={m.key} value={m.key}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
+                onChange={(next) => onMasterTypeChange?.(next)}
+                options={masterListOptions}
+                multiSelect={false}
+                allowEmpty={false}
+                placeholder="Search master lists…"
+              />
             </div>
             {navItems.map((item) => {
               if ("openMailer" in item && item.openMailer) {

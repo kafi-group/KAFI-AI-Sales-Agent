@@ -29,6 +29,14 @@ export interface LocalOrgAdminStore {
 
 const STORAGE_KEY = "kafi.org_admin_v1";
 
+/** Fired (and mirrored on `storage`) whenever local org-admin master lists change. */
+export const ORG_ADMIN_CHANGED_EVENT = "kafi-org-admin-changed";
+
+export function notifyOrgAdminChanged(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(ORG_ADMIN_CHANGED_EVENT));
+}
+
 const DEFAULT_LISTS: LocalMasterList[] = [
   { key: "fmcg", label: "Master FMCG", enabled: true, sort_order: 0 },
   { key: "minerals_ores", label: "Minerals & Ores", enabled: true, sort_order: 1 },
@@ -130,6 +138,39 @@ export function loadOrgAdminLocal(): LocalOrgAdminStore {
 
 export function saveOrgAdminLocal(data: LocalOrgAdminStore): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  notifyOrgAdminChanged();
+}
+
+/** Merge API + local enabled lists so sidebar matches Settings even if one side lagged. */
+export function mergeMasterListsForSidebar(
+  apiRows: Array<{ key: string; label: string; enabled: boolean; sort_order: number }>,
+  localRows: LocalMasterList[],
+): LocalMasterList[] {
+  const byKey = new Map<string, LocalMasterList>();
+  for (const r of apiRows) {
+    if (!r?.key || r.enabled === false) continue;
+    byKey.set(r.key, {
+      key: r.key,
+      label: r.label || r.key,
+      enabled: true,
+      sort_order: typeof r.sort_order === "number" ? r.sort_order : byKey.size,
+    });
+  }
+  for (const r of localRows) {
+    if (!r?.key || !r.enabled) continue;
+    const existing = byKey.get(r.key);
+    if (!existing) {
+      byKey.set(r.key, { ...r, enabled: true });
+      continue;
+    }
+    // Prefer Settings/local label when renamed (e.g. Other Items → Other Commodities).
+    if (r.label && r.label !== existing.label) {
+      byKey.set(r.key, { ...existing, label: r.label });
+    }
+  }
+  return Array.from(byKey.values()).sort(
+    (a, b) => a.sort_order - b.sort_order || a.label.localeCompare(b.label),
+  );
 }
 
 export function upsertLocalMasterList(
