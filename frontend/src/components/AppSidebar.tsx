@@ -476,6 +476,9 @@ export function AppSidebar({
                 allowEmpty={false}
                 placeholder="Search master lists…"
               />
+              <p className="mt-1 text-[9px] text-slate-600 font-mono truncate" title="Deploy build id — Chrome and Edge should match">
+                build {typeof __KAFI_BUILD_ID__ !== "undefined" ? __KAFI_BUILD_ID__ : "dev"}
+              </p>
             </div>
             {navItems.map((item) => {
               if ("openMailer" in item && item.openMailer) {

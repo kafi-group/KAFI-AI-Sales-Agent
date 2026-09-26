@@ -14,33 +14,39 @@ function currentBundleName(): string | null {
   return null;
 }
 
-async function latestBundleName(): Promise<string | null> {
-  const res = await fetch(`/?_deploy_check=${Date.now()}`, {
-    cache: "no-store",
-    headers: { Pragma: "no-cache", "Cache-Control": "no-cache" },
-  });
-  if (!res.ok) return null;
-  const html = await res.text();
-  const m = html.match(/\/assets\/(index-[A-Za-z0-9_-]+\.js)/);
-  return m ? m[1] : null;
-}
-
 export function watchForNewDeploy(): void {
   if (typeof window === "undefined") return;
-  // Vite dev always serves /src/main.tsx — skip.
   if (import.meta.env.DEV) return;
 
   const mine = currentBundleName();
-  if (!mine) return;
+  const metaEl = document.querySelector('meta[name="kafi-build"]');
+  const myBuild = metaEl?.getAttribute("content") || null;
+  if (!mine && !myBuild) return;
 
   let checking = false;
   const check = async () => {
     if (checking) return;
     checking = true;
     try {
-      const latest = await latestBundleName();
-      if (latest && latest !== mine) {
-        // One hard reload to pick up the new index → new assets.
+      const res = await fetch(`/?_deploy_check=${Date.now()}`, {
+        cache: "no-store",
+        headers: { Pragma: "no-cache", "Cache-Control": "no-cache" },
+      });
+      if (!res.ok) return;
+      const html = await res.text();
+      const latestBundle = html.match(/\/assets\/(index-[A-Za-z0-9_-]+\.js)/)?.[1] || null;
+      const latestBuild = html.match(/name="kafi-build"\s+content="([^"]+)"/)?.[1] || null;
+      const bundleChanged = Boolean(mine && latestBundle && latestBundle !== mine);
+      const buildChanged = Boolean(myBuild && latestBuild && latestBuild !== myBuild);
+      if (bundleChanged || buildChanged) {
+        try {
+          if ("caches" in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((k) => caches.delete(k)));
+          }
+        } catch {
+          /* ignore */
+        }
         window.location.reload();
       }
     } catch {
@@ -54,7 +60,6 @@ export function watchForNewDeploy(): void {
     if (document.visibilityState === "visible") void check();
   });
   window.addEventListener("focus", () => void check());
-  // First check shortly after load (covers long-lived Edge tabs).
-  window.setTimeout(() => void check(), 2500);
-  window.setInterval(() => void check(), 3 * 60 * 1000);
+  window.setTimeout(() => void check(), 1500);
+  window.setInterval(() => void check(), 2 * 60 * 1000);
 }
