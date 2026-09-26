@@ -111,10 +111,30 @@ function BulkInner() {
   const [tplNotice, setTplNotice] = useState<string | null>(null);
   const [scheduling, setScheduling] = useState(false);
   const [scheduledAt, setScheduledAt] = useState("");
+  const [recipientsOpen, setRecipientsOpen] = useState(true);
+  const [activeLeads, setActiveLeads] = useState<Lead[]>([]);
 
-  const leads: Lead[] = (preview?.leads || []).filter((l) =>
+  const handoffLeads: Lead[] = (preview?.leads || []).filter((l) =>
     (l.contact_email || "").includes("@"),
   );
+
+  useEffect(() => {
+    setActiveLeads(handoffLeads);
+    // Reset when a new handoff opens (token / lead set from Sales Agent).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handoffLeads is derived from preview
+  }, [token, preview?.mailbox_email, preview?.buyer_ids?.length, handoffLeads.length]);
+
+  const leads = activeLeads;
+
+  function removeRecipient(buyerId: number, email: string) {
+    setActiveLeads((prev) =>
+      prev.filter((l) => !(l.buyer_id === buyerId && l.contact_email === email)),
+    );
+  }
+
+  function restoreAllRecipients() {
+    setActiveLeads(handoffLeads);
+  }
 
   function pushLog(line: string) {
     setLog((prev) => [...prev, line]);
@@ -410,7 +430,74 @@ function BulkInner() {
         <div className="chips">
           <span className="chip">From: {preview?.mailbox_email || "—"}</span>
           <span className="chip">User: {preview?.username || "—"}</span>
-          <span className="chip">Recipients: {leads.length}</span>
+          <button
+            type="button"
+            className="chip"
+            style={{ cursor: "pointer" }}
+            onClick={() => setRecipientsOpen((o) => !o)}
+            title="Show or hide the recipients list"
+          >
+            Recipients: {leads.length}
+            {handoffLeads.length !== leads.length
+              ? ` of ${handoffLeads.length}`
+              : ""}
+          </button>
+        </div>
+
+        <div className="recipients-panel">
+          <div className="recipients-panel-head">
+            <h3>Recipients</h3>
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              {handoffLeads.length !== leads.length ? (
+                <button
+                  type="button"
+                  className="btn ghost small"
+                  onClick={restoreAllRecipients}
+                >
+                  Restore all ({handoffLeads.length})
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn ghost small"
+                onClick={() => setRecipientsOpen((o) => !o)}
+              >
+                {recipientsOpen ? "Hide list" : "Show list"}
+              </button>
+            </div>
+          </div>
+          {recipientsOpen ? (
+            leads.length === 0 ? (
+              <p className="recipients-empty muted">
+                No recipients left. Restore all, or open Send emails again from Sales Agent.
+              </p>
+            ) : (
+              <ul className="recipients-list">
+                {leads.map((lead) => (
+                  <li key={`${lead.buyer_id}-${lead.contact_email}`}>
+                    <div className="recipients-meta">
+                      <strong>{lead.company_name || "—"}</strong>
+                      <span>
+                        {lead.contact_name || "No contact name"} · {lead.contact_email}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="linkish"
+                      onClick={() => removeRecipient(lead.buyer_id, lead.contact_email)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )
+          ) : (
+            <p className="recipients-empty muted">
+              {leads.length} recipient{leads.length === 1 ? "" : "s"} ready — click Show list to
+              review or remove before send.
+            </p>
+          )}
         </div>
 
         {tplNotice && <p className="ok small">{tplNotice}</p>}

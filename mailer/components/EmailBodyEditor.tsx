@@ -122,6 +122,7 @@ export function EmailBodyEditor({
   const [pasteStatus, setPasteStatus] = useState<string | null>(null);
   const [uiTheme, setUiTheme] = useState<"dark" | "light">("dark");
   const [activeColor, setActiveColor] = useState("#ffffff");
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const theme = getMailerUiTheme();
@@ -209,6 +210,28 @@ export function EmailBodyEditor({
       } catch (err) {
         setPasteStatus(err instanceof Error ? err.message : "Image paste failed");
       }
+    }
+  }
+
+  async function insertImageFiles(files: FileList | null) {
+    if (disabled || !files?.length) return;
+    setPasteStatus("Uploading image…");
+    try {
+      for (const file of Array.from(files)) {
+        if (!file.type.startsWith("image/")) continue;
+        const url = await uploadPastedImageFile(file);
+        if (!url) {
+          setPasteStatus("Could not upload image — stay signed in and try again.");
+          return;
+        }
+        const safeName = (file.name || "image").replace(/"/g, "");
+        insertHtmlAtCursor(
+          `<p><img src="${url}" alt="${safeName}" style="max-width:100%;height:auto;border-radius:6px;margin:8px 0;display:block;" /></p>`,
+        );
+      }
+      setPasteStatus(null);
+    } catch (err) {
+      setPasteStatus(err instanceof Error ? err.message : "Image upload failed");
     }
   }
 
@@ -327,6 +350,30 @@ export function EmailBodyEditor({
         >
           •
         </ToolbarButton>
+
+        <Divider />
+
+        <ToolbarButton
+          title="Insert picture into email body"
+          disabled={disabled}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            imageInputRef.current?.click();
+          }}
+        >
+          <span className="rte-tool-label">Picture</span>
+        </ToolbarButton>
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            void insertImageFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
       </div>
 
       {pasteStatus ? <p className="muted small" style={{ margin: "6px 0 0" }}>{pasteStatus}</p> : null}
