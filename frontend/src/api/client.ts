@@ -309,6 +309,8 @@ const RETRY_BACKOFF_MS = [600, 1_800, 3_500] as const;
 export type ApiRequestOptions = RequestInit & {
   /** Override the path-based client abort timeout. */
   timeoutMs?: number;
+  /** Skip GET retries (use for session bootstrap so splash cannot hang). */
+  noRetry?: boolean;
   /**
    * Absolute API root (e.g. Railway production). Used when the Vercel /api
    * rewrite still points at a stale host missing newer routes like Auto Trash.
@@ -380,7 +382,12 @@ function networkErrorMessage(isTimeout: boolean): string {
 }
 
 async function request<T>(path: string, options?: ApiRequestOptions): Promise<T> {
-  const { timeoutMs: timeoutOverride, apiBase: apiBaseOverride, ...fetchOptions } = options ?? {};
+  const {
+    timeoutMs: timeoutOverride,
+    apiBase: apiBaseOverride,
+    noRetry = false,
+    ...fetchOptions
+  } = options ?? {};
   const headers = new Headers(authHeaders({ "Content-Type": "application/json" }));
   if (fetchOptions.headers) {
     const extra = new Headers(fetchOptions.headers);
@@ -388,7 +395,7 @@ async function request<T>(path: string, options?: ApiRequestOptions): Promise<T>
   }
 
   const method = (fetchOptions.method || "GET").toUpperCase();
-  const canRetry = method === "GET" || method === "HEAD";
+  const canRetry = !noRetry && (method === "GET" || method === "HEAD");
   const timeoutMs = timeoutOverride ?? timeoutForPath(path);
   const maxAttempts = canRetry ? RETRY_BACKOFF_MS.length + 1 : 1;
   const base = (apiBaseOverride || API_BASE).replace(/\/+$/, "");
@@ -2121,10 +2128,10 @@ export const client = {
     return data as { ok: true; message: string; action?: string };
   },
 
-  /** Fire-and-forget wake for Railway cold starts before session bootstrap. */
+  /** Single short wake — never block session bootstrap on health retries. */
   wakeBackend: async (): Promise<boolean> => {
     try {
-      await request<{ status: string }>("/health");
+      await request<{ status: string }>("/health", { timeoutMs: 6_000, noRetry: true });
       return true;
     } catch {
       return false;
@@ -2141,7 +2148,11 @@ export const client = {
       method: "POST",
     }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
-  getMe: () => request<AppUser>("/auth/me"),
+  getMe: (opts?: { timeoutMs?: number }) =>
+    request<AppUser>("/auth/me", {
+      timeoutMs: opts?.timeoutMs,
+      noRetry: opts?.timeoutMs != null,
+    }),
   listUsers: () => request<AppUser[]>("/auth/users"),
   listAssignees: () => request<AppUser[]>("/auth/assignees"),
   createUser: (data: {

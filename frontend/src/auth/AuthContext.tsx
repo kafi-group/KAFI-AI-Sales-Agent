@@ -39,8 +39,8 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-/** If /auth/me hangs (Railway cold start), stop blocking the UI. */
-const AUTH_SAFETY_MS = 18_000;
+/** If /auth/me hangs (Railway cold start / 502 retries), stop blocking the UI. */
+const AUTH_SAFETY_MS = 10_000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const cached = getStoredUser();
@@ -80,10 +80,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Short wake — don't let health retries dominate bootstrap.
         await Promise.race([
           client.wakeBackend(),
-          new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), 8_000)),
+          new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), 5_000)),
         ]);
         if (authEpochRef.current !== epoch) return;
-        const me = await client.getMe();
+        // One short me() — no multi-retry hang during "Checking session…".
+        const me = await client.getMe({ timeoutMs: 8_000 });
         if (authEpochRef.current !== epoch) return;
         const next: AuthUser = {
           id: me.id,
@@ -105,9 +106,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } finally {
         if (safetyTimer !== null) clearTimeout(safetyTimer);
-        if (authEpochRef.current === epoch) {
-          setLoading(false);
-        }
+        // Always leave the splash — even if a 401 bumped the auth epoch.
+        setLoading(false);
       }
     };
 
