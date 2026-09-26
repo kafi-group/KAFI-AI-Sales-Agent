@@ -12,6 +12,7 @@ import {
   deleteLocalAgent,
   deleteLocalMasterList,
   loadOrgAdminLocal,
+  mergeAgentMasterAccess,
   notifyOrgAdminChanged,
   orgAdminPinValid,
   ORG_ADMIN_PIN,
@@ -127,15 +128,35 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
         setMasterLists(mergedLists);
         setUsers(data.users || []);
         setUserAccess(data.user_master_access || {});
-        setAgentAccess(data.agent_master_access || {});
+        // Empty API `{}` must not wipe Sara/Rayan FMCG ticks saved in the browser.
+        const mergedAgentAccess = mergeAgentMasterAccess(
+          data.agent_master_access,
+          localStill.agent_master_access,
+        );
+        // Push browser ticks to Railway when server is missing that agent’s lists.
+        const apiAccess = data.agent_master_access || {};
+        for (const [aid, keys] of Object.entries(mergedAgentAccess)) {
+          const serverKeys = apiAccess[aid];
+          if (serverKeys == null || (serverKeys.length === 0 && keys.length > 0)) {
+            try {
+              await client.setOrgAgentMasterAccess(accessPin, aid, keys);
+            } catch {
+              /* best-effort */
+            }
+          }
+        }
+        setAgentAccess(mergedAgentAccess);
         const ag = await client.listOrgAiSalesAgents(false);
-        setAgents(ag.agents || []);
+        const apiAgents = ag.agents || [];
+        const mergedAgents =
+          apiAgents.length > 0 ? apiAgents : localStill.ai_sales_agents || [];
+        setAgents(mergedAgents);
         setUsingLocal(localOnly.length > 0);
         saveOrgAdminLocal({
           master_lists: mergedLists,
           user_master_access: data.user_master_access || localStill.user_master_access || {},
-          agent_master_access: data.agent_master_access || localStill.agent_master_access || {},
-          ai_sales_agents: ag.agents || localStill.ai_sales_agents,
+          agent_master_access: mergedAgentAccess,
+          ai_sales_agents: mergedAgents.length ? mergedAgents : localStill.ai_sales_agents,
         });
         return;
       } catch {

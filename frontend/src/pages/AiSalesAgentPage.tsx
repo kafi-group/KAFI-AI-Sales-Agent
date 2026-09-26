@@ -24,7 +24,7 @@ import { ComposeMailModal } from "../components/ComposeMailModal";
 import { AiAutoModePanel } from "../components/AiAutoModePanel";
 import { AiAutoDataUpdatePanel } from "../components/AiAutoDataUpdatePanel";
 import { AiSalesProcessesPanel } from "../components/AiSalesProcessesPanel";
-import { loadOrgAdminLocal, localAgentsForMasterList } from "../lib/orgAdminLocalStore";
+import { loadOrgAdminLocal, resolveAgentsForMasterList } from "../lib/orgAdminLocalStore";
 
 interface AiSalesAgentPageProps {
   onError: (message: string) => void;
@@ -80,11 +80,17 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
     void client
       .listOrgAiSalesAgents(true, masterType)
       .then((res) => {
-        if (!cancelled) setRegistryAgents(res.agents || []);
+        if (cancelled) return;
+        // Settings ticks (local) must still show when API filter is empty/out of sync.
+        setRegistryAgents(
+          resolveAgentsForMasterList(res.agents || [], masterType, true) as OrgAdminAiSalesAgent[],
+        );
       })
       .catch(() => {
         if (cancelled) return;
-        setRegistryAgents(localAgentsForMasterList(loadOrgAdminLocal(), masterType, true));
+        setRegistryAgents(
+          resolveAgentsForMasterList([], masterType, true) as OrgAdminAiSalesAgent[],
+        );
       });
     return () => {
       cancelled = true;

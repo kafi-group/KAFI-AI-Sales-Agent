@@ -4,7 +4,7 @@ import {
   type AiSalesAgentTask,
   type AiSalesDataUpdateStatus,
 } from "../api/client";
-import { loadOrgAdminLocal, localAgentsForMasterList } from "../lib/orgAdminLocalStore";
+import { resolveAgentsForMasterList } from "../lib/orgAdminLocalStore";
 
 interface Props {
   onError: (message: string) => void;
@@ -419,17 +419,17 @@ export function AiAutoDataUpdatePanel({
       .listOrgAiSalesAgents(true, masterType)
       .then((res) => {
         if (cancelled) return;
-        const rows = (res.agents || []).map((a) => ({
+        const rows = resolveAgentsForMasterList(res.agents || [], masterType, true).map((a) => ({
           id: a.id,
-          label: a.name || a.id,
+          label: ("name" in a && a.name ? String(a.name) : a.id) || a.id,
         }));
         setPersonas(rows);
       })
       .catch(() => {
         if (cancelled) return;
-        const rows = localAgentsForMasterList(loadOrgAdminLocal(), masterType, true).map((a) => ({
+        const rows = resolveAgentsForMasterList([], masterType, true).map((a) => ({
           id: a.id,
-          label: a.name || a.id,
+          label: ("name" in a && a.name ? String(a.name) : a.id) || a.id,
         }));
         setPersonas(rows);
       });

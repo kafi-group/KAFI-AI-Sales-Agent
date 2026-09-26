@@ -73,7 +73,7 @@ def _default_store() -> dict[str, Any]:
         "master_lists": deepcopy(_DEFAULT_MASTER_LISTS),
         # user_id (str) -> list of master list keys; missing user = all enabled lists
         "user_master_access": {},
-        # agent_id -> list of master list keys; missing agent = none assigned
+        # agent_id -> list of master list keys; missing agent = all enabled lists
         "agent_master_access": {},
         "ai_sales_agents": deepcopy(_DEFAULT_AGENTS),
     }

@@ -357,3 +357,44 @@ export function localAgentsForMasterList(
     return (access[a.id] || []).includes(mt);
   });
 }
+
+/** Merge API agent list with Settings (local) assignments for the Active Master List.
+ * Settings ticks must win when the API filter returns empty or is out of sync.
+ */
+export function resolveAgentsForMasterList<T extends { id: string }>(
+  apiAgents: T[] | null | undefined,
+  masterType: string | null | undefined,
+  activeOnly = true,
+): Array<T | LocalAiAgent> {
+  const local = localAgentsForMasterList(loadOrgAdminLocal(), masterType, activeOnly);
+  const api = apiAgents || [];
+  if (!api.length) return local;
+  if (!local.length) return api;
+  const byId = new Map<string, T | LocalAiAgent>();
+  for (const a of api) byId.set(a.id, a);
+  for (const a of local) {
+    if (!byId.has(a.id)) byId.set(a.id, a);
+  }
+  // Prefer intersection when both sides have people: keep anyone allowed by either source.
+  return Array.from(byId.values());
+}
+
+/** Merge agent→list access maps. Non-empty local ticks are never wiped by empty API `{}`. */
+export function mergeAgentMasterAccess(
+  api: Record<string, string[]> | null | undefined,
+  local: Record<string, string[]> | null | undefined,
+): Record<string, string[]> {
+  const a = api && typeof api === "object" ? api : {};
+  const b = local && typeof local === "object" ? local : {};
+  if (!Object.keys(a).length) return { ...b };
+  if (!Object.keys(b).length) return { ...a };
+  const out: Record<string, string[]> = { ...a };
+  for (const [aid, keys] of Object.entries(b)) {
+    if (!(aid in out) || !(out[aid] || []).length) {
+      out[aid] = [...(keys || [])];
+    } else {
+      out[aid] = Array.from(new Set([...(out[aid] || []), ...(keys || [])]));
+    }
+  }
+  return out;
+}
