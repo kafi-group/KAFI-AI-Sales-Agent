@@ -4,6 +4,9 @@ import './index.css'
 import App from './App.tsx'
 import { AuthProvider } from './auth/AuthContext'
 import { ThemeProvider } from './theme/ThemeContext'
+import { watchForNewDeploy } from './lib/deployRefresh'
+
+watchForNewDeploy()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
