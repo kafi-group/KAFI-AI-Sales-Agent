@@ -20,7 +20,7 @@ interface AiSalesAgentQueuePickerProps {
   agentOptions?: Array<{ id: string; name: string; product_focus?: string }>;
 }
 
-const DEFAULT_AGENTS = [
+const DEFAULT_AGENTS: Array<{ id: string; name: string; product_focus?: string }> = [
   { id: "female", name: "Sara" },
   { id: "male", name: "Rayan" },
 ];

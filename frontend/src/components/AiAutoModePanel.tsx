@@ -17,8 +17,8 @@ interface AiAutoModePanelProps {
   onError: (message: string) => void;
   /** When true, show compact panel suitable under unlock / above runners. */
   compact?: boolean;
-  onStartAgent?: (persona: "female" | "male") => void;
-  startingPersona?: "female" | "male" | null;
+  onStartAgent?: (persona: string) => void;
+  startingPersona?: string | null;
 }
 
 const EMPTY_BULK: AiSalesBulkEmailPersonaSettings = {

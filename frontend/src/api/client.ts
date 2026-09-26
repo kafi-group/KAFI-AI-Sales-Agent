@@ -4772,7 +4772,7 @@ export const client = {
     }),
   setAiSalesTaskPersona: (data: {
     task_ids: number[];
-    persona: "female" | "male";
+    persona: string;
   }) =>
     request<{ updated: number; skipped: number; persona: string; label: string }>(
       "/ai-sales-agent/tasks/set-persona",

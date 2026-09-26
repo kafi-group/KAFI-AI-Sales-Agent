@@ -6,6 +6,7 @@ import {
   type OrgAdminUserRow,
 } from "../api/client";
 import { ActionButton } from "./ui/ActionButton";
+import { IconList, IconPlus, IconRobot } from "./icons/AppIcons";
 
 interface OrgAdminSettingsPanelProps {
   onError: (message: string) => void;
@@ -203,7 +204,7 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
               className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 font-mono tracking-widest focus:border-emerald-500 focus:outline-none"
             />
           </div>
-          <ActionButton type="submit" disabled={unlocking || !pin.trim()}>
+          <ActionButton type="submit" icon={IconList} disabled={unlocking || !pin.trim()}>
             {unlocking ? "Unlocking…" : "Unlock"}
           </ActionButton>
         </form>
@@ -329,6 +330,7 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
           />
           <ActionButton
             type="button"
+            icon={IconPlus}
             disabled={busy || !newListLabel.trim()}
             onClick={() => void saveMasterList({ label: newListLabel.trim(), enabled: true })}
           >
@@ -504,6 +506,7 @@ export function OrgAdminSettingsPanel({ onError }: OrgAdminSettingsPanelProps) {
           />
           <ActionButton
             type="button"
+            icon={IconRobot}
             disabled={busy || !newAgentName.trim()}
             onClick={() =>
               void saveAgent({
