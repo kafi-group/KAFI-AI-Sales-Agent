@@ -97,6 +97,87 @@ def public_call_media(media: dict[str, Any] | None, *, interaction_id: int) -> d
     }
 
 
+def download_public_recording(recording_url: str, recording_sid: str) -> tuple[Path, str]:
+    """Download a publicly reachable recording URL (Vapi/S3) without Twilio auth."""
+    _ensure_storage()
+    url = (recording_url or "").strip()
+    if not url:
+        raise ValueError("Empty recording URL")
+    with httpx.Client(timeout=120.0, follow_redirects=True) as client:
+        response = client.get(url)
+        response.raise_for_status()
+        data = response.content
+        content_type = (response.headers.get("content-type") or "audio/mpeg").split(";")[0].strip()
+    ext = "mp3"
+    if "wav" in content_type or url.lower().endswith(".wav"):
+        ext = "wav"
+    elif "ogg" in content_type or url.lower().endswith(".ogg"):
+        ext = "ogg"
+    elif url.lower().endswith(".mp3"):
+        ext = "mp3"
+    safe_sid = "".join(ch for ch in (recording_sid or "vapi") if ch.isalnum() or ch in "-_")[:64] or "vapi"
+    path = STORAGE_DIR / f"{safe_sid}.{ext}"
+    path.write_bytes(data)
+    return path, content_type or f"audio/{ext}"
+
+
+def save_ai_call_media(
+    db: Session,
+    *,
+    interaction_id: int,
+    recording_url: str | None = None,
+    recording_sid: str | None = None,
+    duration_seconds: int | float | None = None,
+    transcript: str | None = None,
+) -> dict[str, Any] | None:
+    """Attach Vapi (or other AI) recording + closed captions onto a phone Interaction."""
+    interaction = db.get(Interaction, interaction_id)
+    if not interaction or interaction.channel != Channel.phone:
+        return None
+
+    media = get_call_media(interaction) or {"type": CALL_RECORDING_TYPE}
+    media["type"] = CALL_RECORDING_TYPE
+    sid = (recording_sid or media.get("recording_sid") or f"ai-{interaction_id}").strip()
+    media["recording_sid"] = sid
+    if duration_seconds is not None:
+        try:
+            media["duration_seconds"] = int(float(duration_seconds))
+        except (TypeError, ValueError):
+            pass
+
+    url = (recording_url or "").strip() or None
+    if url:
+        media["recording_url"] = url
+        media["recording_status"] = "completed"
+        try:
+            # Twilio media URLs need auth; Vapi/S3 usually do not.
+            if "api.twilio.com" in url.lower():
+                path, content_type = download_twilio_recording(url, sid)
+            else:
+                path, content_type = download_public_recording(url, sid)
+            media["local_path"] = f"call_recordings/{path.name}"
+            media["content_type"] = content_type
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to download AI call recording for %s", interaction_id)
+            media["transcript_error"] = f"Recording download failed: {exc}"
+
+    text = (transcript or "").strip()
+    if text:
+        media["transcript"] = text[:20000]
+        media["transcript_status"] = "ready"
+        media["transcript_error"] = None
+    elif media.get("local_path") and (media.get("transcript_status") or "") != "ready":
+        media["transcript_status"] = media.get("transcript_status") or "pending"
+
+    if not media.get("local_path") and not media.get("recording_url") and not media.get("transcript"):
+        return None
+
+    _set_call_media(interaction, media)
+    db.commit()
+    db.refresh(interaction)
+    return media
+
+
 def download_twilio_recording(recording_url: str, recording_sid: str) -> tuple[Path, str]:
     """Download a Twilio recording as MP3. Returns (local_path, content_type)."""
     if not settings.twilio_account_sid or not settings.twilio_auth_token:

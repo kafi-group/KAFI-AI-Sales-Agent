@@ -600,6 +600,7 @@ def _dial_task(
     allowed_languages: list[str] | None = None,
 ) -> dict[str, Any]:
     from integrations.voice_client import voice_client
+    from db.models import Channel, Direction, HandledBy, Interaction, InteractionStatus
 
     phone = task.get("contact_phone")
     if not phone:
@@ -613,11 +614,41 @@ def _dial_task(
     voice_gender = str(task.get("voice_gender") or "").strip() or None
     lang = (language or task.get("language") or "en").strip().lower() or "en"
     allowed = allowed_languages if allowed_languages is not None else task.get("allowed_languages")
+    agent_name = _agent_name(persona)
+    contact_name = task.get("contact_name") or "Purchasing Manager"
+
+    # Create call log BEFORE dial so recording/captions can attach when the call ends.
+    interaction_id = task.get("interaction_id")
+    if not interaction_id:
+        try:
+            interaction = Interaction(
+                contact_id=task.get("contact_id"),
+                channel=Channel.phone,
+                direction=Direction.outbound,
+                subject=f"AI Voice Call ({agent_name}) to {contact_name}",
+                content=(
+                    f"Interactive AI voice call to {phone}. "
+                    f"Company: {task.get('company_name') or 'n/a'}. "
+                    f"Contact: {contact_name}."
+                ),
+                handled_by=HandledBy.agent,
+                status=InteractionStatus.sent,
+                approved_by="dashboard",
+                attachments=[],
+            )
+            db.add(interaction)
+            db.commit()
+            db.refresh(interaction)
+            interaction_id = interaction.id
+            task["interaction_id"] = interaction_id
+        except Exception as exc:  # noqa: BLE001
+            print(f"Could not create AI call interaction: {exc}", flush=True)
+            interaction_id = None
 
     call_result = voice_client.place_outbound_ai_call(
         phone,
         persona=persona,
-        contact_name=task.get("contact_name") or "Purchasing Manager",
+        contact_name=contact_name,
         language=lang,
         task_id=task.get("id"),
         company_name=task.get("company_name"),
@@ -625,6 +656,7 @@ def _dial_task(
         ring_attempt=1,
         voice_gender=voice_gender,
         allowed_languages=allowed if isinstance(allowed, list) else None,
+        interaction_id=int(interaction_id) if interaction_id else None,
     )
     if not call_result.get("ok"):
         task["status"] = "failed"
@@ -643,6 +675,18 @@ def _dial_task(
     task["outcome"] = "Calling"
     task["remarks"] = f"Calling {phone} live (SID: {call_result.get('call_sid')})..."
     task["followup_sent"] = False
+
+    if interaction_id:
+        try:
+            row = db.get(Interaction, int(interaction_id))
+            if row:
+                row.content = (
+                    f"Interactive AI voice call to {phone}. "
+                    f"SID: {call_result.get('call_sid')}. Engine: {call_result.get('engine')}."
+                )
+                db.commit()
+        except Exception:
+            pass
 
     runner = _get_runner(str(task.get("persona")))
     if runner:
@@ -815,6 +859,8 @@ def handle_ai_call_status(
     call_summary: str | None = None,
     call_transcript: str | None = None,
     ring_attempt: int | None = None,
+    recording_url: str | None = None,
+    interaction_id: int | None = None,
 ) -> dict[str, Any]:
     """Twilio / Vapi terminal status — send follow-up and dial the next queued lead."""
     from integrations.voice_client import voice_client
@@ -849,6 +895,10 @@ def handle_ai_call_status(
         task["call_summary"] = call_summary
     if call_transcript:
         task["call_transcript"] = call_transcript
+    if recording_url:
+        task["recording_url"] = recording_url
+    if interaction_id and not task.get("interaction_id"):
+        task["interaction_id"] = interaction_id
 
     # Always prefer the live task counter (webhook metadata can lag / be stale).
     attempt = int(task.get("ring_attempt") or ring_attempt or 1)
@@ -881,6 +931,11 @@ def handle_ai_call_status(
                     if isinstance(task.get("allowed_languages"), list)
                     else None
                 ),
+                interaction_id=(
+                    int(task["interaction_id"])
+                    if task.get("interaction_id") is not None
+                    else None
+                ),
             )
             if redial.get("ok"):
                 task["call_sid"] = redial.get("call_sid")
@@ -895,6 +950,23 @@ def handle_ai_call_status(
 
     db = SessionLocal()
     try:
+        # Persist recording + closed captions onto the Call history Interaction.
+        try:
+            from modules.call_media import save_ai_call_media
+
+            iid = task.get("interaction_id") or interaction_id
+            if iid and (recording_url or call_transcript or task.get("recording_url") or task.get("call_transcript")):
+                save_ai_call_media(
+                    db,
+                    interaction_id=int(iid),
+                    recording_url=recording_url or task.get("recording_url"),
+                    recording_sid=str(call_sid or f"ai-{iid}"),
+                    duration_seconds=duration,
+                    transcript=call_transcript or task.get("call_transcript"),
+                )
+        except Exception as media_exc:  # noqa: BLE001
+            print(f"AI call media save failed: {media_exc}", flush=True)
+
         _finish_task(
             db,
             task,
@@ -1393,24 +1465,30 @@ def queue_self_test(
         )
     _refresh_runner_counts()
 
-    try:
-        from db.models import Channel, Direction, HandledBy, Interaction, InteractionStatus
+    # Interaction is created inside _dial_task (so recording/captions can attach).
+    # If dial_now was false, create a queued log row without media yet.
+    if not payload.dial_now:
+        try:
+            from db.models import Channel, Direction, HandledBy, Interaction, InteractionStatus
 
-        interaction = Interaction(
-            contact_id=contact_id,
-            channel=Channel.phone,
-            direction=Direction.outbound,
-            subject=f"AI Voice Call ({agent_name}) to {contact_name}",
-            content=f"Interactive AI voice call to {payload.phone}. Twilio SID: {call_result.get('call_sid')}",
-            handled_by=HandledBy.agent,
-            status=InteractionStatus.sent,
-            approved_by="dashboard",
-        )
-        db.add(interaction)
-        db.commit()
-        db.refresh(interaction)
-    except Exception as exc:
-        print(f"Could not log AI interaction to DB: {exc}", flush=True)
+            interaction = Interaction(
+                contact_id=contact_id,
+                channel=Channel.phone,
+                direction=Direction.outbound,
+                subject=f"AI Voice Call ({agent_name}) to {contact_name}",
+                content=f"Queued AI voice call to {payload.phone}.",
+                handled_by=HandledBy.agent,
+                status=InteractionStatus.sent,
+                approved_by="dashboard",
+                attachments=[],
+            )
+            db.add(interaction)
+            db.commit()
+            db.refresh(interaction)
+            task["interaction_id"] = interaction.id
+            _persist_queue()
+        except Exception as exc:
+            print(f"Could not log AI interaction to DB: {exc}", flush=True)
 
     return {"task": task, "call_result": call_result}
 
@@ -2567,9 +2645,10 @@ async def vapi_ai_agent_status(request: Request) -> dict[str, Any]:
         or (call.get("duration") if isinstance(call, dict) else None)
     )
 
-    # Pull summary / transcript for Target & Workspace autopilot classification.
+    # Pull summary / transcript / recording for Call history + Train Sara & Rayan.
     call_summary = None
     call_transcript = None
+    recording_url = None
     analysis = message.get("analysis") if isinstance(message.get("analysis"), dict) else {}
     artifact = message.get("artifact") if isinstance(message.get("artifact"), dict) else {}
     for candidate in (
@@ -2604,6 +2683,60 @@ async def vapi_ai_agent_status(request: Request) -> dict[str, Any]:
                 call_transcript = "\n".join(parts)[:8000]
                 break
 
+    for candidate in (
+        message.get("recordingUrl"),
+        message.get("stereoRecordingUrl"),
+        artifact.get("recordingUrl") if isinstance(artifact, dict) else None,
+        artifact.get("stereoRecordingUrl") if isinstance(artifact, dict) else None,
+        artifact.get("recording") if isinstance(artifact, dict) else None,
+        call.get("recordingUrl") if isinstance(call, dict) else None,
+        call.get("stereoRecordingUrl") if isinstance(call, dict) else None,
+    ):
+        if isinstance(candidate, str) and candidate.strip().startswith("http"):
+            recording_url = candidate.strip()
+            break
+        if isinstance(candidate, dict):
+            for key in ("url", "recordingUrl", "stereoRecordingUrl"):
+                val = candidate.get(key)
+                if isinstance(val, str) and val.strip().startswith("http"):
+                    recording_url = val.strip()
+                    break
+            if recording_url:
+                break
+
+    # Fallback: fetch call from Vapi if webhook omitted the recording URL.
+    if not recording_url and call_sid and not str(call_sid).startswith("CA"):
+        try:
+            import json as _json
+            import urllib.request
+
+            from config import settings as app_settings
+
+            vkey = getattr(app_settings, "vapi_api_key", None)
+            if vkey:
+                req = urllib.request.Request(
+                    f"https://api.vapi.ai/call/{call_sid}",
+                    headers={"Authorization": f"Bearer {vkey}"},
+                )
+                with urllib.request.urlopen(req, timeout=12) as res:
+                    call_data = _json.loads(res.read().decode("utf-8"))
+                art = call_data.get("artifact") if isinstance(call_data, dict) else None
+                for candidate in (
+                    (call_data or {}).get("recordingUrl"),
+                    (call_data or {}).get("stereoRecordingUrl"),
+                    (art or {}).get("recordingUrl") if isinstance(art, dict) else None,
+                    (art or {}).get("stereoRecordingUrl") if isinstance(art, dict) else None,
+                ):
+                    if isinstance(candidate, str) and candidate.strip().startswith("http"):
+                        recording_url = candidate.strip()
+                        break
+                if not call_transcript and isinstance(art, dict):
+                    t = art.get("transcript")
+                    if isinstance(t, str) and t.strip():
+                        call_transcript = t.strip()[:8000]
+        except Exception as fetch_exc:  # noqa: BLE001
+            print(f"Vapi call fetch for recording skipped: {fetch_exc}", flush=True)
+
     if msg_type == "status-update" and str(status or "").lower() not in {
         "ended",
         "completed",
@@ -2616,6 +2749,12 @@ async def vapi_ai_agent_status(request: Request) -> dict[str, Any]:
             ring_attempt = int(metadata.get("ring_attempt"))
         except (TypeError, ValueError):
             ring_attempt = None
+    interaction_id = None
+    if isinstance(metadata, dict) and metadata.get("interaction_id") is not None:
+        try:
+            interaction_id = int(metadata.get("interaction_id"))
+        except (TypeError, ValueError):
+            interaction_id = None
     return handle_ai_call_status(
         task_id=task_id_int,
         call_sid=str(call_sid) if call_sid else None,
@@ -2625,6 +2764,8 @@ async def vapi_ai_agent_status(request: Request) -> dict[str, Any]:
         call_summary=call_summary,
         call_transcript=call_transcript,
         ring_attempt=ring_attempt,
+        recording_url=recording_url,
+        interaction_id=interaction_id,
     )
 
 

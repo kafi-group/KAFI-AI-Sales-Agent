@@ -181,12 +181,14 @@ export function CallRecordingPanel({
     }
   }
 
-  if (!call.recording_available) {
-    if (compact) return null;
+  const hasTranscript = Boolean((call.transcript || "").trim());
+
+  if (!call.recording_available && !hasTranscript) {
     return (
       <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
         <p className="text-xs text-slate-500">
-          Recording will appear here after the call ends (Twilio saves it automatically).
+          Recording &amp; closed captions appear here after the call ends (AI Sales Agent and
+          manual calls).
         </p>
       </div>
     );
@@ -194,34 +196,63 @@ export function CallRecordingPanel({
 
   return (
     <div className={`space-y-3 ${compact ? "" : "pt-1"}`}>
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <label className="text-xs text-slate-500">Call recording</label>
-          {call.recording_duration_seconds ? (
-            <span className="text-xs text-slate-500">
-              {Math.floor(call.recording_duration_seconds / 60)}m{" "}
-              {call.recording_duration_seconds % 60}s
-            </span>
-          ) : null}
+      {call.recording_available ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-xs text-slate-500">Call recording</label>
+            {call.recording_duration_seconds ? (
+              <span className="text-xs text-slate-500">
+                {Math.floor(call.recording_duration_seconds / 60)}m{" "}
+                {call.recording_duration_seconds % 60}s
+              </span>
+            ) : null}
+          </div>
+          {audioLoading && !audioSrc ? (
+            <p className="text-xs text-slate-500">Loading recording…</p>
+          ) : audioSrc ? (
+            <audio controls preload="metadata" className="w-full h-10" src={audioSrc}>
+              Your browser does not support audio playback.
+            </audio>
+          ) : (
+            <p className="text-xs text-slate-500">Recording unavailable right now.</p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void downloadRecording()}
+              disabled={downloading}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-200 disabled:opacity-50"
+            >
+              {downloading ? "Downloading…" : "Download recording"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCaptions((open) => !open)}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-200"
+            >
+              {showCaptions ? "Hide closed captions" : "Show closed captions (CC)"}
+            </button>
+            <button
+              type="button"
+              disabled={transcribing || polling}
+              onClick={() => void generateCaptions()}
+              className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 border border-emerald-600/50 text-xs text-white disabled:opacity-50"
+            >
+              {transcribing || polling
+                ? "Generating CC…"
+                : call.transcript
+                  ? "Regenerate CC"
+                  : "Generate CC"}
+            </button>
+          </div>
+          <p className="text-xs text-slate-500">
+            {transcriptStatusLabel(call.transcript_status)}
+            {polling ? " · Checking every few seconds…" : ""}
+            {call.transcript_error ? ` — ${call.transcript_error}` : ""}
+          </p>
         </div>
-        {audioLoading && !audioSrc ? (
-          <p className="text-xs text-slate-500">Loading recording…</p>
-        ) : audioSrc ? (
-          <audio controls preload="metadata" className="w-full h-10" src={audioSrc}>
-            Your browser does not support audio playback.
-          </audio>
-        ) : (
-          <p className="text-xs text-slate-500">Recording unavailable right now.</p>
-        )}
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void downloadRecording()}
-            disabled={downloading}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-200 disabled:opacity-50"
-          >
-            {downloading ? "Downloading…" : "Download recording"}
-          </button>
+      ) : (
+        <div className="flex flex-wrap gap-2 items-center">
           <button
             type="button"
             onClick={() => setShowCaptions((open) => !open)}
@@ -229,27 +260,13 @@ export function CallRecordingPanel({
           >
             {showCaptions ? "Hide closed captions" : "Show closed captions (CC)"}
           </button>
-          <button
-            type="button"
-            disabled={transcribing || polling}
-            onClick={() => void generateCaptions()}
-            className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 border border-emerald-600/50 text-xs text-white disabled:opacity-50"
-          >
-            {transcribing || polling
-              ? "Generating CC…"
-              : call.transcript
-                ? "Regenerate CC"
-                : "Generate CC"}
-          </button>
+          <span className="text-xs text-slate-500">
+            {transcriptStatusLabel(call.transcript_status)}
+          </span>
         </div>
-        <p className="text-xs text-slate-500">
-          {transcriptStatusLabel(call.transcript_status)}
-          {polling ? " · Checking every few seconds…" : ""}
-          {call.transcript_error ? ` — ${call.transcript_error}` : ""}
-        </p>
-      </div>
+      )}
 
-      {showCaptions && (
+      {(showCaptions || (hasTranscript && !call.recording_available)) && (
         <div className="rounded-lg border border-slate-700 bg-slate-950 p-3 space-y-2">
           <div className="flex items-center justify-between gap-2">
             <h4 className="text-xs font-medium uppercase tracking-wide text-slate-400">

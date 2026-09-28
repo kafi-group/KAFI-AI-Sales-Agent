@@ -719,6 +719,7 @@ class VoiceClient:
         ring_attempt: int = 1,
         voice_gender: str | None = None,
         allowed_languages: list[str] | None = None,
+        interaction_id: int | None = None,
     ) -> dict[str, Any]:
         """Initiate an outbound PSTN call via Vapi AI Voice Engine (or Twilio fallback).
 
@@ -865,6 +866,8 @@ class VoiceClient:
 
                 payload = {
                     "customer": {"number": normalized, "name": c_name},
+                    # Enable call recording + artifact transcript for Call history / Train Sara & Rayan.
+                    "recordingEnabled": True,
                     "assistant": {
                         "name": agent_name,
                         "firstMessage": first_msg,
@@ -884,20 +887,27 @@ class VoiceClient:
                             "model": "nova-3",
                             "language": transcriber_lang,
                         },
+                        "artifactPlan": {
+                            "recordingEnabled": True,
+                            "transcriptPlan": {"enabled": True},
+                        },
                     },
                 }
 
                 if vapi_phone_id:
                     payload["phoneNumberId"] = vapi_phone_id
+                meta: dict[str, Any] = {
+                    "persona": persona,
+                    "voice_gender": gender,
+                    "ring_attempt": safe_attempt,
+                    "language": lang_code,
+                    "allowed_languages": allowed_langs,
+                }
                 if task_id is not None:
-                    payload["metadata"] = {
-                        "task_id": task_id,
-                        "persona": persona,
-                        "voice_gender": gender,
-                        "ring_attempt": safe_attempt,
-                        "language": lang_code,
-                        "allowed_languages": allowed_langs,
-                    }
+                    meta["task_id"] = task_id
+                if interaction_id is not None:
+                    meta["interaction_id"] = int(interaction_id)
+                payload["metadata"] = meta
                 if settings.twilio_webhook_base_url:
                     try:
                         payload["assistant"]["serverUrl"] = self.webhook_url(
