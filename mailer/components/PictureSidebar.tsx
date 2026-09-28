@@ -222,58 +222,31 @@ export function PictureSidebar({
         />
       </div>
 
-      {/* Group Pills */}
+      {/* Group Dropdown */}
       {groups.length > 0 && (
-        <div
-          style={{
-            padding: "0.3rem 1rem 0.6rem",
-            display: "flex",
-            gap: "0.35rem",
-            overflowX: "auto",
-            scrollbarWidth: "none",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setSelectedGroupId("all")}
+        <div style={{ padding: "0.3rem 1rem 0.6rem" }}>
+          <select
+            value={selectedGroupId}
+            onChange={(e) => setSelectedGroupId(e.target.value)}
             style={{
-              fontSize: "0.72rem",
-              padding: "0.2rem 0.55rem",
-              borderRadius: "999px",
+              width: "100%",
+              padding: "0.4rem 0.75rem",
+              fontSize: "0.82rem",
+              borderRadius: "7px",
               border: "1px solid var(--border, #334155)",
-              background: selectedGroupId === "all" ? "#0284c7" : "#0f172a",
-              color: selectedGroupId === "all" ? "#fff" : "var(--muted, #94a3b8)",
+              background: "#080e1a",
+              color: "var(--text, #f8fafc)",
+              outline: "none",
               cursor: "pointer",
-              whiteSpace: "nowrap",
-              fontWeight: 500,
             }}
           >
-            All ({totalImageCount})
-          </button>
-          {groups.map((g) => {
-            const isSelected = selectedGroupId === g.id;
-            const count = g.images?.length || 0;
-            return (
-              <button
-                key={g.id}
-                type="button"
-                onClick={() => setSelectedGroupId(g.id)}
-                style={{
-                  fontSize: "0.72rem",
-                  padding: "0.2rem 0.55rem",
-                  borderRadius: "999px",
-                  border: "1px solid var(--border, #334155)",
-                  background: isSelected ? "#0284c7" : "#0f172a",
-                  color: isSelected ? "#fff" : "var(--muted, #94a3b8)",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                  fontWeight: 500,
-                }}
-              >
-                {g.name} ({count})
-              </button>
-            );
-          })}
+            <option value="all">All ({totalImageCount})</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name} ({g.images?.length || 0})
+              </option>
+            ))}
+          </select>
         </div>
       )}
 
