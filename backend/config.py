@@ -162,6 +162,8 @@ class Settings(BaseSettings):
     vapi_enabled: bool = True
     elevenlabs_enabled: bool = False
     elevenlabs_api_key: str | None = "sk_880257fad111679821f7d3bbbf1a562b4d2c2fbe22cd14af"
+    # Backup ElevenLabs key (second account) — switch to this when primary quota runs out.
+    elevenlabs_api_key_2: str | None = "sk_f22c68ea0d26139c1184f6c515735986fcdca941fee4ba8c"
 
     # Twilio Voice — browser calling from dashboard (integrations/voice_client.py)
     twilio_account_sid: str | None = None
