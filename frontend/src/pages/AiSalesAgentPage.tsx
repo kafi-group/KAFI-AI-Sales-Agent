@@ -103,9 +103,29 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
         id: a.id,
         name: a.name,
         product_focus: a.product_focus || "",
+        voice: a.voice || "",
+        gender_label: a.gender_label || "",
       })),
     [registryAgents],
   );
+
+  function voiceGenderForAgent(agentId: string): "female" | "male" {
+    const a = agentOptions.find((x) => x.id === agentId);
+    const id = (a?.id || agentId || "").toLowerCase();
+    const name = (a?.name || "").toLowerCase();
+    const gl = (a?.gender_label || "").toLowerCase();
+    const voice = a?.voice || "";
+    if (
+      id === "female" ||
+      gl === "female" ||
+      name === "sara" ||
+      name.includes("sara") ||
+      /Neural2-F|Jenny|Joanna|Female/i.test(voice)
+    ) {
+      return "female";
+    }
+    return "male";
+  }
 
   const masterListLabel = useMemo(() => {
     const fromLocal = loadOrgAdminLocal().master_lists.find((m) => m.key === masterType)?.label;
@@ -232,6 +252,7 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
         contact_name: selfTestName.trim() || undefined,
         language: selfTestLanguage,
         dial_now: false,
+        voice_gender: voiceGenderForAgent(selfTestPersona),
       });
       setFilterPersona(selfTestPersona);
       setQueueNotice(
@@ -264,6 +285,7 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
         contact_name: selfTestName.trim() || undefined,
         language: selfTestLanguage,
         dial_now: true,
+        voice_gender: voiceGenderForAgent(selfTestPersona),
       });
       const agentName = personaName(selfTestPersona);
       setQueueNotice(

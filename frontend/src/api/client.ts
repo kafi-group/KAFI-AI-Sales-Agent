@@ -4652,6 +4652,7 @@ export const client = {
     contact_name?: string;
     language?: string;
     dial_now?: boolean;
+    voice_gender?: "female" | "male";
   }) =>
     request<{ task: AiSalesAgentTask; followup?: AiSalesAgentFollowup }>(
       "/ai-sales-agent/tasks/self-test",

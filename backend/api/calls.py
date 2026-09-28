@@ -974,10 +974,20 @@ async def twilio_ai_agent_status(request: Request):
 @webhooks_router.post("/ai-agent/intro")
 async def twilio_ai_agent_intro(request: Request):
     """Initial spoken greeting when AI agent calls buyer, prompting for speech response."""
+    from integrations.voice_client import resolve_call_gender
+
     persona = request.query_params.get("persona", "female")
+    voice_gender = request.query_params.get("voice_gender")
     name = request.query_params.get("name", "there")
-    agent_name = "Sara" if persona == "female" else "Rayan"
-    voice = "Polly.Joanna-Neural" if persona == "female" else "Polly.Matthew-Neural"
+    gender = resolve_call_gender(persona, voice_gender=voice_gender)
+    is_female = gender == "female"
+    try:
+        from api import ai_sales_agent as asa
+
+        agent_name = asa._agent_name(str(persona or ("female" if is_female else "male")))
+    except Exception:
+        agent_name = "Sara" if is_female else "Rayan"
+    voice = "Polly.Joanna-Neural" if is_female else "Polly.Matthew-Neural"
 
     greeting = f"Hello {name}, this is {agent_name} calling from Kafi Commodities. How are you doing today?"
     
@@ -985,9 +995,12 @@ async def twilio_ai_agent_intro(request: Request):
     if settings.twilio_webhook_base_url:
         import urllib.parse
         q_persona = urllib.parse.quote(persona)
-        respond_url = voice_client.webhook_url(f"/api/webhooks/twilio/ai-agent/respond?persona={q_persona}")
+        q_gender = urllib.parse.quote(gender)
+        respond_url = voice_client.webhook_url(
+            f"/api/webhooks/twilio/ai-agent/respond?persona={q_persona}&voice_gender={q_gender}"
+        )
     else:
-        respond_url = f"/api/webhooks/twilio/ai-agent/respond?persona={persona}"
+        respond_url = f"/api/webhooks/twilio/ai-agent/respond?persona={persona}&voice_gender={gender}"
 
     xml = voice_client.ai_gather_twiml(greeting, respond_url, voice=voice)
     return _twiml_response(xml)
@@ -996,9 +1009,19 @@ async def twilio_ai_agent_intro(request: Request):
 @webhooks_router.post("/ai-agent/respond")
 async def twilio_ai_agent_respond(request: Request):
     """Processes buyer's spoken input via Gemini AI and responds interactively."""
+    from integrations.voice_client import resolve_call_gender
+
     persona = request.query_params.get("persona", "female")
-    agent_name = "Sara" if persona == "female" else "Rayan"
-    voice = "Polly.Joanna-Neural" if persona == "female" else "Polly.Matthew-Neural"
+    voice_gender = request.query_params.get("voice_gender")
+    gender = resolve_call_gender(persona, voice_gender=voice_gender)
+    is_female = gender == "female"
+    try:
+        from api import ai_sales_agent as asa
+
+        agent_name = asa._agent_name(str(persona or ("female" if is_female else "male")))
+    except Exception:
+        agent_name = "Sara" if is_female else "Rayan"
+    voice = "Polly.Joanna-Neural" if is_female else "Polly.Matthew-Neural"
 
     params = await request.form()
     speech_result = (params.get("SpeechResult") or "").strip()

@@ -58,6 +58,8 @@ class SelfTestRequest(BaseModel):
     contact_name: str | None = None
     language: str | None = "en"
     dial_now: bool = True
+    # Force female/male TTS when set (Sara → female, Rayan → male).
+    voice_gender: str | None = None
 
 
 class RunnerControlRequest(BaseModel):
@@ -562,15 +564,29 @@ def _dial_task(
         task["remarks"] = "No phone on this contact."
         raise HTTPException(400, "This queue item has no phone number.")
 
+    persona = str(task.get("persona") or "female")
+    voice_gender = str(task.get("voice_gender") or "").strip() or None
+    if not voice_gender:
+        runner_ foresight = _get_runner(persona)
+        if runner_foresight:
+            from integrations.voice_client import resolve_call_gender
+
+            voice_gender = resolve_call_gender(
+                persona,
+                voice_gender=str(runner_foresight.get("gender_label") or "") or None,
+            )
+            task["voice_gender"] = voice_gender
+
     call_result = voice_client.place_outbound_ai_call(
         phone,
-        persona=str(task.get("persona") or "female"),
+        persona=persona,
         contact_name=task.get("contact_name") or "Purchasing Manager",
         language=language,
         task_id=task.get("id"),
         company_name=task.get("company_name"),
         designation=task.get("designation"),
         ring_attempt=1,
+        voice_gender=voice_gender,
     )
     if not call_result.get("ok"):
         task["status"] = "failed"
@@ -814,6 +830,7 @@ def handle_ai_call_status(
                 company_name=task.get("company_name"),
                 designation=task.get("designation"),
                 ring_attempt=next_attempt,
+                voice_gender=str(task.get("voice_gender") or "") or None,
             )
             if redial.get("ok"):
                 task["call_sid"] = redial.get("call_sid")
@@ -1288,6 +1305,7 @@ def queue_self_test(
     task = {
         "id": _next_task_id(),
         "persona": payload.persona,
+        "voice_gender": (payload.voice_gender or "").strip().lower() or None,
         "buyer_id": 0,
         "contact_id": contact_id,
         "company_name": "Direct AI Call",

@@ -4,10 +4,57 @@ from __future__ import annotations
 
 import re
 import threading
-from typing import Any
+from typing import Any, Literal
+
+
+def resolve_call_gender(
+    persona: str | None,
+    *,
+    voice_gender: str | None = None,
+) -> Literal["female", "male"]:
+    """Map agent persona → TTS gender. Sara / Neural2-F → female; Rayan / Neural2-D → male."""
+    forced = (voice_gender or "").strip().lower()
+    if forced in {"female", "f", "woman"}:
+        return "female"
+    if forced in {"male", "m", "man"}:
+        return "male"
+
+    p = (persona or "").strip().lower()
+    if p in {"female", "sara", "sarah", "f", "woman"} or "sara" in p:
+        return "female"
+    if p in {"male", "rayan", "ryan", "m", "man"} or "rayan" in p:
+        return "male"
+
+    try:
+        from api import ai_sales_agent as asa
+
+        runner = asa._get_runner(str(persona or ""))
+    except Exception:
+        runner = None
+    if isinstance(runner, dict):
+        gl = str(runner.get("gender_label") or "").strip().lower()
+        if gl in {"female", "f", "woman", "sara", "sarah"} or "female" in gl or "sara" in gl:
+            return "female"
+        if gl in {"male", "m", "man", "rayan", "ryan"} or "male" in gl or "rayan" in gl:
+            return "male"
+        voice = str(runner.get("voice") or "")
+        if re.search(r"Neural2-F|Jenny|Female|-F\b|Joanna|Salli", voice, re.I):
+            return "female"
+        if re.search(r"Neural2-D|Neural2-A|Guy|Male|Matthew|Joey", voice, re.I):
+            return "male"
+        name = str(runner.get("display_name") or "").strip().lower()
+        if "sara" in name or "sarah" in name:
+            return "female"
+        if "rayan" in name or "ryan" in name:
+            return "male"
+
+    # Unknown custom agents: do not default to male when the id looks feminine.
+    if any(tok in p for tok in ("fem", "girl", "woman", "lady")):
+        return "female"
+    return "male"
+
 
 from config import settings
-
 _FOURTH_RING_SECONDS = 16  # ~4s per ring × 4 rings per dial attempt
 _DEFAULT_MAX_RING_ATTEMPTS = 10  # 16s → hangup → 16s again … until answer or this cap
 _HARD_MAX_RING_ATTEMPTS = 20
@@ -595,6 +642,7 @@ class VoiceClient:
         company_name: str | None = None,
         designation: str | None = None,
         ring_attempt: int = 1,
+        voice_gender: str | None = None,
     ) -> dict[str, Any]:
         """Initiate an outbound PSTN call via Vapi AI Voice Engine (or Twilio fallback).
 
@@ -605,6 +653,8 @@ class VoiceClient:
             return {"ok": False, "error": f"Invalid destination phone number: '{to_phone}'. Must be in E.164 format (e.g. +923142867152)."}
 
         safe_attempt = max(1, int(ring_attempt or 1))
+        gender = resolve_call_gender(persona, voice_gender=voice_gender)
+        is_female = gender == "female"
 
         def _arm_ring_limit(call_id: str | None) -> None:
             # After ~16s still ringing → hang up. For AI queue tasks, redial attempt 2
@@ -647,7 +697,13 @@ class VoiceClient:
             try:
                 import json
                 import urllib.request
-                agent_name = "Sara" if persona == "female" else "Rayan"
+                agent_name = "Sara" if is_female else "Rayan"
+                try:
+                    from api import ai_sales_agent as asa
+
+                    agent_name = asa._agent_name(str(persona or ("female" if is_female else "male")))
+                except Exception:
+                    pass
                 c_name = contact_name or "there"
                 first_msg = text_message or lang_cfg["greeting"].format(c_name=c_name)
 
@@ -655,18 +711,24 @@ class VoiceClient:
                 eleven_on = getattr(settings, "elevenlabs_enabled", False)
                 if eleven_on and eleven_key and eleven_key.strip():
                     # Multilingual TTS so mid-call French/Arabic/Urdu/etc. sound natural.
+                    # Rachel (female) / Antoni (male) — never swap these.
                     voice_config = {
                         "provider": "11labs",
-                        "voiceId": "21m00Tcm4TlvDq8ikWAM" if persona == "female" else "ErXwobaYiN019PkySvjV",
+                        "voiceId": "21m00Tcm4TlvDq8ikWAM" if is_female else "ErXwobaYiN019PkySvjV",
                         "model": "eleven_multilingual_v2",
                     }
                 else:
                     # Vapi Voices v2 auto language — mid-call switch across supported languages.
                     voice_config = {
                         "provider": "vapi",
-                        "voiceId": "Savannah" if persona == "female" else "Elliot",
+                        "voiceId": "Savannah" if is_female else "Elliot",
                         "language": "auto",
                     }
+                print(
+                    f"AI call voice gender={gender} persona={persona!r} "
+                    f"engine_voice={voice_config.get('voiceId')}",
+                    flush=True,
+                )
 
                 try:
                     from modules.ai_agent_training import get_training_knowledge
@@ -763,6 +825,7 @@ class VoiceClient:
                     payload["metadata"] = {
                         "task_id": task_id,
                         "persona": persona,
+                        "voice_gender": gender,
                         "ring_attempt": safe_attempt,
                     }
                 if settings.twilio_webhook_base_url:
@@ -814,11 +877,13 @@ class VoiceClient:
             )
 
             q_persona = urllib.parse.quote(persona or "female")
+            q_gender = urllib.parse.quote(gender)
             q_name = urllib.parse.quote(contact_name or "there")
 
             if settings.twilio_webhook_base_url:
                 webhook_url = self.webhook_url(
-                    f"/api/webhooks/twilio/ai-agent/intro?persona={q_persona}&name={q_name}"
+                    f"/api/webhooks/twilio/ai-agent/intro?persona={q_persona}"
+                    f"&voice_gender={q_gender}&name={q_name}"
                 )
                 create_kwargs: dict[str, Any] = {
                     "to": normalized,
