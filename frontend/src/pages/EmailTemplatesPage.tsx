@@ -197,38 +197,43 @@ export function EmailTemplatesPage({ onError, onCountChange }: EmailTemplatesPag
       <div className="flex items-start justify-between gap-4 flex-wrap pb-4 border-b border-slate-800/80">
         <div>
           <div className="flex items-center gap-3 flex-wrap">
-            <h2 className="text-lg font-medium text-slate-100">
+            <h2 className="text-xl font-bold tracking-tight text-white">
               {mode === "templates" ? "Email templates" : "Picture library"}
             </h2>
 
-            {/* Switchable Mode Buttons */}
-            <div className="flex items-center rounded-lg bg-slate-950 p-1 border border-slate-800">
+            {/* Switchable Mode Toggle */}
+            <div className="inline-flex items-center rounded-xl bg-slate-900/90 p-1 border border-slate-700/80 shadow-inner backdrop-blur-sm">
               <button
                 type="button"
                 onClick={() => setMode("templates")}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${
                   mode === "templates"
-                    ? "bg-slate-800 text-white shadow-sm"
-                    : "text-slate-400 hover:text-slate-200"
+                    ? "bg-emerald-600 text-white shadow-md shadow-emerald-950/40"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
                 }`}
               >
                 <span>✉️ Email templates</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-900 border border-slate-700 text-slate-400 font-mono">
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                  mode === "templates" ? "bg-emerald-700/80 text-emerald-100" : "bg-slate-800 text-slate-400"
+                }`}>
                   {templates.length}
                 </span>
               </button>
+
               <button
                 type="button"
                 onClick={() => setMode("pictures")}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${
                   mode === "pictures"
-                    ? "bg-slate-800 text-white shadow-sm"
-                    : "text-slate-400 hover:text-slate-200"
+                    ? "bg-sky-600 text-white shadow-md shadow-sky-950/40"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
                 }`}
               >
                 <span>🖼️ Picture library</span>
                 {pictureCount > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-900 border border-slate-700 text-slate-400 font-mono">
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                    mode === "pictures" ? "bg-sky-700/80 text-sky-100" : "bg-slate-800 text-slate-400"
+                  }`}>
                     {pictureCount}
                   </span>
                 )}
