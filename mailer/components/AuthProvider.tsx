@@ -15,6 +15,7 @@ import {
   getStoredToken,
   getStoredUser,
   login as apiLogin,
+  storeSession,
   type MailerUser,
 } from "@/lib/api";
 
@@ -23,6 +24,8 @@ type AuthState = {
   token: string | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
+  /** Apply a session from handoff-login without requiring /auth/me. */
+  adoptSession: (token: string, user: MailerUser) => void;
   logout: () => void;
   refresh: () => Promise<void>;
 };
@@ -33,6 +36,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<MailerUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const adoptSession = useCallback((nextToken: string, nextUser: MailerUser) => {
+    storeSession(nextToken, nextUser);
+    setToken(nextToken);
+    setUser(nextUser);
+    setLoading(false);
+  }, []);
 
   const refresh = useCallback(async () => {
     const stored = getStoredToken();
@@ -47,9 +57,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(me);
       setToken(stored);
     } catch {
-      clearSession();
-      setUser(null);
-      setToken(null);
+      // Keep handoff/local session — /auth/me can fail while /mailer/* still works.
+      const cachedUser = getStoredUser();
+      setToken(stored);
+      setUser(cachedUser);
     } finally {
       setLoading(false);
     }
@@ -74,8 +85,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, token, loading, login, logout, refresh }),
-    [user, token, loading, login, logout, refresh],
+    () => ({ user, token, loading, login, adoptSession, logout, refresh }),
+    [user, token, loading, login, adoptSession, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -59,7 +59,7 @@ function BulkInner() {
   const params = useSearchParams();
   const token = params.get("token") || "";
   const scheduleMode = params.get("schedule") === "1";
-  const { refresh, user } = useAuth();
+  const { refresh, user, adoptSession } = useAuth();
 
   const preview = useMemo(() => {
     try {
@@ -83,8 +83,10 @@ function BulkInner() {
     let cancelled = false;
     void (async () => {
       try {
-        await loginFromHandoff(token);
-        if (!cancelled) await refresh();
+        const result = await loginFromHandoff(token);
+        if (cancelled) return;
+        adoptSession(result.token, result.user);
+        await refresh();
       } catch {
         /* preview still shows; send will prompt login */
       }
@@ -92,7 +94,7 @@ function BulkInner() {
     return () => {
       cancelled = true;
     };
-  }, [token, refresh]);
+  }, [token, refresh, adoptSession]);
 
   const [subject, setSubject] = useState(
     "Introduction — Kafi Commodities ({{company_name}})",

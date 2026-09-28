@@ -98,13 +98,12 @@ export function PictureLibraryPanel({
       }
     } catch (e) {
       const status = e instanceof ApiError ? e.status : 0;
-      // Hand-off login may still be finishing — don't flash "Not authenticated".
-      if (status === 401) {
-        applyGroups([], setGroups, setActiveGroupId);
-        setError(null);
-      } else if (local.groups.length) {
+      // Never wipe a local draft on 401 — handoff may still be finishing.
+      if (local.groups.length) {
         applyGroups(local.groups, setGroups, setActiveGroupId);
         setDirty(true);
+        setError(null);
+      } else if (status === 401) {
         setError(null);
       } else {
         setError(e instanceof Error ? e.message : "Could not load picture library");
@@ -117,9 +116,14 @@ export function PictureLibraryPanel({
   useEffect(() => {
     if (authLoading) return;
     if (!token) {
+      // Keep any local draft visible; wait for handoff login before API calls.
+      const local = loadLocalPictureLibrary();
+      if (local.groups.length) {
+        applyGroups(local.groups, setGroups, setActiveGroupId);
+        setDirty(true);
+      }
       setLoading(false);
       setError(null);
-      applyGroups([], setGroups, setActiveGroupId);
       return;
     }
     void refresh();
@@ -149,6 +153,10 @@ export function PictureLibraryPanel({
   async function handleCreateGroup() {
     const name = newGroupName.trim();
     if (!name || busy) return;
+    if (!token) {
+      setError("Still signing in… wait a second, then click Add group again.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -160,7 +168,12 @@ export function PictureLibraryPanel({
       setSavedHint("Group created on shared library.");
       window.setTimeout(() => setSavedHint(null), 4000);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create group");
+      const msg = e instanceof Error ? e.message : "Could not create group";
+      setError(
+        /not authenticated/i.test(msg)
+          ? "Session not ready yet — wait 2 seconds and click Add group again."
+          : msg,
+      );
     } finally {
       setBusy(false);
     }
@@ -533,7 +546,7 @@ export function PictureLibraryPanel({
           <button
             type="button"
             className="btn small"
-            disabled={busy || !newGroupName.trim()}
+            disabled={busy || !newGroupName.trim() || !token}
             onClick={() => void handleCreateGroup()}
           >
             Add group

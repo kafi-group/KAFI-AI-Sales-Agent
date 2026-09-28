@@ -13,7 +13,7 @@ function safeMailerNext(raw: string | null): string {
 function CallbackInner() {
   const params = useSearchParams();
   const router = useRouter();
-  const { refresh } = useAuth();
+  const { refresh, adoptSession } = useAuth();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -38,6 +38,8 @@ function CallbackInner() {
             `Expected mailer login as ${expectedUser}, got ${result.user.username}`,
           );
         }
+        if (cancelled) return;
+        adoptSession(result.token, result.user);
         await refresh();
         if (!cancelled) router.replace(nextPath);
       } catch (e) {
@@ -49,7 +51,7 @@ function CallbackInner() {
     return () => {
       cancelled = true;
     };
-  }, [params, refresh, router]);
+  }, [params, refresh, adoptSession, router]);
 
   return (
     <div className="wrap">
