@@ -224,12 +224,10 @@ class Settings(BaseSettings):
     # Read-only dashboard bridge for bank-recon / PA (x-bridge-secret header).
     agent_bridge_secret: str | None = None
 
-    # DB connection pool — sized for concurrent CRM polls + one background job
-    # on a single Railway worker. Raise via DB_POOL_SIZE / DB_MAX_OVERFLOW only
-    # after confirming Supabase/session-pooler headroom.
-    db_pool_size: int = 8
-    db_max_overflow: int = 12
-    db_pool_timeout: int = 15
+    # DB connection pool — sized for concurrent CRM polls + background jobs
+    db_pool_size: int = 16
+    db_max_overflow: int = 24
+    db_pool_timeout: int = 25
 
     @field_validator("mailbox_imap_port", "mailbox_smtp_port", mode="before")
     @classmethod
