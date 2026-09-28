@@ -787,7 +787,44 @@ class VoiceClient:
                 first_msg = text_message or lang_cfg["greeting"].format(c_name=c_name)
 
                 eleven_key = getattr(settings, "elevenlabs_api_key", None)
+                eleven_key_2 = getattr(settings, "elevenlabs_api_key_2", None)
                 eleven_on = getattr(settings, "elevenlabs_enabled", False)
+
+                # Auto-fallback: if primary key has quota, use it; else switch to backup.
+                if eleven_on and eleven_key and eleven_key.strip():
+                    active_eleven_key = eleven_key.strip()
+                    try:
+                        import urllib.request as _ureq
+                        _req = _ureq.Request(
+                            "https://api.elevenlabs.io/v1/user/subscription",
+                            headers={"xi-api-key": active_eleven_key},
+                        )
+                        with _ureq.urlopen(_req, timeout=4) as _res:
+                            import json as _json
+                            _sub = _json.loads(_res.read())
+                            _remaining = int(_sub.get("character_limit", 10000)) - int(_sub.get("character_count", 0))
+                            if _remaining < 500 and eleven_key_2 and eleven_key_2.strip():
+                                print(f"ElevenLabs primary quota low ({_remaining} chars) — switching to backup key.", flush=True)
+                                active_eleven_key = eleven_key_2.strip()
+                                settings.elevenlabs_api_key = active_eleven_key
+                                # Sync backup key to Vapi credentials silently.
+                                try:
+                                    _sync_data = _json.dumps({"provider": "11labs", "apiKey": active_eleven_key}).encode()
+                                    _sync_req = _ureq.Request(
+                                        "https://api.vapi.ai/credential",
+                                        data=_sync_data,
+                                        headers={
+                                            "Authorization": f"Bearer {vapi_key}",
+                                            "Content-Type": "application/json",
+                                        },
+                                    )
+                                    with _ureq.urlopen(_sync_req, timeout=6) as _sr:
+                                        _sr.read()
+                                except Exception as _se:
+                                    print(f"Vapi credential sync for backup ElevenLabs key failed: {_se}", flush=True)
+                    except Exception:
+                        pass  # quota check failed — continue with current key
+
                 if eleven_on and eleven_key and eleven_key.strip():
                     # Multilingual TTS — do NOT set language:auto (causes random ZH/JA/AR hops).
                     voice_config = {
