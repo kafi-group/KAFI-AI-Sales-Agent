@@ -75,9 +75,16 @@ def get_current_user_released(
     Use on IMAP/SMTP/LLM routes so long I/O does not pin a QueuePool connection
     (that was exhausting the pool under CRM + inbox polling on Railway).
     """
+    # Fast-path: middleware already validated the session and the user is cached.
+    # This avoids opening a DB connection at all on the vast majority of requests.
+    user_id = getattr(request.state, "user_id", None)
+    if user_id is not None:
+        cached_user = auth_module.get_cached_user_by_id(int(user_id))
+        if cached_user and cached_user.is_active:
+            return cached_user
+
     db = SessionLocal()
     try:
-        user_id = getattr(request.state, "user_id", None)
         user: AppUser | None = None
         if user_id is not None:
             user = db.get(AppUser, int(user_id))
@@ -87,6 +94,7 @@ def get_current_user_released(
             user = auth_module.get_user_by_token(db, token)
         if not user:
             raise HTTPException(status_code=401, detail="Not authenticated")
+        auth_module.cache_user_object(user)
         # Touch column attrs so they remain available after expunge.
         _ = (
             user.id,
