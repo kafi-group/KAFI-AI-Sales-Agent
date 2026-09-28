@@ -17,6 +17,7 @@ import {
   type EmailBodyEditorHandle,
 } from "@/components/EmailBodyEditor";
 import { PictureDropdownPicker } from "@/components/PictureDropdownPicker";
+import { PictureSidebar } from "@/components/PictureSidebar";
 import { ensureDearSalutation } from "@/lib/personalizeEmail";
 import { normalizeEditorTextColor } from "@/lib/emailTextColor";
 import {
@@ -75,6 +76,7 @@ function ComposeInner() {
   const [uploadLabel, setUploadLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [showPictureSidebar, setShowPictureSidebar] = useState(false);
   const bodyEditorRef = useRef<EmailBodyEditorHandle>(null);
   const draftId = params.get("draft_id");
   const buyerIdParam = params.get("buyer_id");
@@ -234,13 +236,34 @@ function ComposeInner() {
   }
 
   return (
-    <div className="compose-page">
-      <h2 className="folder-title">Compose</h2>
-      <p className="muted small">
-        From: {user?.mailbox_email || user?.username} · Sends via Vercel SMTP (not Railway)
-      </p>
-      {error && <p className="bad">{error}</p>}
-      {notice && <p className="ok">{notice}</p>}
+    <div style={{ display: "flex", width: "100%", minHeight: "100dvh", alignItems: "stretch" }}>
+      <div className="compose-page" style={{ flex: 1, minWidth: 0, paddingRight: showPictureSidebar ? "1rem" : undefined }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
+          <div>
+            <h2 className="folder-title" style={{ margin: 0 }}>Compose</h2>
+            <p className="muted small" style={{ margin: "0.2rem 0 0" }}>
+              From: {user?.mailbox_email || user?.username} · Sends via Vercel SMTP (not Railway)
+            </p>
+          </div>
+          <button
+            type="button"
+            className={showPictureSidebar ? "btn small" : "btn ghost small"}
+            onClick={() => setShowPictureSidebar((prev) => !prev)}
+            title="Toggle right sidebar to browse and insert pictures"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.4rem",
+              fontWeight: 600,
+              background: showPictureSidebar ? "#0284c7" : undefined,
+              color: showPictureSidebar ? "#fff" : undefined,
+            }}
+          >
+            <span>🖼️ {showPictureSidebar ? "Close pictures" : "Browse pictures"}</span>
+          </button>
+        </div>
+        {error && <p className="bad">{error}</p>}
+        {notice && <p className="ok">{notice}</p>}
 
       <TemplatePicker
         value={templateId}
@@ -396,10 +419,28 @@ function ComposeInner() {
       )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "1rem", marginBottom: "0.4rem" }}>
         <label style={{ margin: 0 }}>Body</label>
-        <PictureDropdownPicker
-          disabled={sending}
-          onInsert={(url, filename) => bodyEditorRef.current?.insertPicture(url, filename)}
-        />
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <button
+            type="button"
+            className={showPictureSidebar ? "btn small" : "btn ghost small"}
+            disabled={sending}
+            onClick={() => setShowPictureSidebar((prev) => !prev)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.35rem",
+              fontWeight: 500,
+              fontSize: "0.8rem",
+            }}
+            title="Toggle right sidebar with all pictures"
+          >
+            <span>🖼️ {showPictureSidebar ? "Hide sidebar" : "Picture sidebar"}</span>
+          </button>
+          <PictureDropdownPicker
+            disabled={sending}
+            onInsert={(url, filename) => bodyEditorRef.current?.insertPicture(url, filename)}
+          />
+        </div>
       </div>
       <EmailBodyEditor ref={bodyEditorRef} value={body} onChange={setBody} rows={14} />
       <div className="detail-actions">
@@ -433,6 +474,16 @@ function ComposeInner() {
             : "Add signature"}
         </button>
       </div>
+      </div>
+
+      <PictureSidebar
+        isOpen={showPictureSidebar}
+        onClose={() => setShowPictureSidebar(false)}
+        onInsert={(url, filename) => {
+          bodyEditorRef.current?.insertPicture(url, filename);
+        }}
+        disabled={sending}
+      />
     </div>
   );
 }

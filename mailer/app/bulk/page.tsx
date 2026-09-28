@@ -18,6 +18,7 @@ import {
   type EmailBodyEditorHandle,
 } from "@/components/EmailBodyEditor";
 import { PictureDropdownPicker } from "@/components/PictureDropdownPicker";
+import { PictureSidebar } from "@/components/PictureSidebar";
 import { ensureDearSalutation, personalizeEmailText } from "@/lib/personalizeEmail";
 import { normalizeEditorTextColor } from "@/lib/emailTextColor";
 import {
@@ -122,6 +123,7 @@ function BulkInner() {
   const [scheduling, setScheduling] = useState(false);
   const [scheduledAt, setScheduledAt] = useState("");
   const [recipientsOpen, setRecipientsOpen] = useState(true);
+  const [showPictureSidebar, setShowPictureSidebar] = useState(false);
   const [activeLeads, setActiveLeads] = useState<Lead[]>([]);
   const bodyEditorRef = useRef<EmailBodyEditorHandle>(null);
 
@@ -417,8 +419,9 @@ function BulkInner() {
   }
 
   return (
-    <div className="wrap">
-      <div className="card">
+    <div style={{ display: "flex", width: "100%", minHeight: "100dvh", alignItems: "stretch" }}>
+      <div className="wrap" style={{ flex: 1, minWidth: 0, paddingRight: showPictureSidebar ? "0.5rem" : undefined }}>
+        <div className="card">
         <div className="folder-list-head">
           <h1>{scheduleMode ? "Schedule bulk send" : "Bulk send"}</h1>
           {scheduleMode ? (
@@ -427,11 +430,29 @@ function BulkInner() {
               <strong>Schedule N emails</strong>.
             </p>
           ) : null}
-          {user && (
-            <Link className="btn ghost small" href="/inbox">
-              Open inbox
-            </Link>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <button
+              type="button"
+              className={showPictureSidebar ? "btn small" : "btn ghost small"}
+              onClick={() => setShowPictureSidebar((prev) => !prev)}
+              title="Toggle right sidebar to browse and insert pictures"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.4rem",
+                fontWeight: 600,
+                background: showPictureSidebar ? "#0284c7" : undefined,
+                color: showPictureSidebar ? "#fff" : undefined,
+              }}
+            >
+              <span>🖼️ {showPictureSidebar ? "Close pictures" : "Browse pictures"}</span>
+            </button>
+            {user && (
+              <Link className="btn ghost small" href="/inbox">
+                Open inbox
+              </Link>
+            )}
+          </div>
         </div>
         <p className="muted">
           Sends via SMTP on Vercel. Each recipient gets their own company name — use{" "}
@@ -553,10 +574,28 @@ function BulkInner() {
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "1rem", marginBottom: "0.4rem" }}>
           <label style={{ margin: 0 }}>Body</label>
-          <PictureDropdownPicker
-            disabled={running || scheduling}
-            onInsert={(url, filename) => bodyEditorRef.current?.insertPicture(url, filename)}
-          />
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <button
+              type="button"
+              className={showPictureSidebar ? "btn small" : "btn ghost small"}
+              disabled={running || scheduling}
+              onClick={() => setShowPictureSidebar((prev) => !prev)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.35rem",
+                fontWeight: 500,
+                fontSize: "0.8rem",
+              }}
+              title="Toggle right sidebar with all pictures"
+            >
+              <span>🖼️ {showPictureSidebar ? "Hide sidebar" : "Picture sidebar"}</span>
+            </button>
+            <PictureDropdownPicker
+              disabled={running || scheduling}
+              onInsert={(url, filename) => bodyEditorRef.current?.insertPicture(url, filename)}
+            />
+          </div>
         </div>
         <EmailBodyEditor ref={bodyEditorRef} value={body} onChange={setBody} rows={12} />
 
@@ -731,7 +770,17 @@ function BulkInner() {
             ))}
           </div>
         )}
+        </div>
       </div>
+
+      <PictureSidebar
+        isOpen={showPictureSidebar}
+        onClose={() => setShowPictureSidebar(false)}
+        onInsert={(url, filename) => {
+          bodyEditorRef.current?.insertPicture(url, filename);
+        }}
+        disabled={running || scheduling}
+      />
     </div>
   );
 }
