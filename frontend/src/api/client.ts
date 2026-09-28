@@ -4651,6 +4651,7 @@ export const client = {
     phone: string;
     contact_name?: string;
     language?: string;
+    allowed_languages?: string[];
     dial_now?: boolean;
     voice_gender?: "female" | "male";
   }) =>

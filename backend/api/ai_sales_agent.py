@@ -57,6 +57,8 @@ class SelfTestRequest(BaseModel):
     phone: str
     contact_name: str | None = None
     language: str | None = "en"
+    # Tick which languages the agent may use (start language is always included).
+    allowed_languages: list[str] | None = None
     dial_now: bool = True
     # Force female/male TTS when set (Sara → female, Rayan → male).
     voice_gender: str | None = None
@@ -595,6 +597,7 @@ def _dial_task(
     task: dict[str, Any],
     user: AppUser,
     language: str = "en",
+    allowed_languages: list[str] | None = None,
 ) -> dict[str, Any]:
     from integrations.voice_client import voice_client
 
@@ -608,17 +611,20 @@ def _dial_task(
     persona = str(task.get("persona") or "female")
     _stamp_task_voice_gender(task)
     voice_gender = str(task.get("voice_gender") or "").strip() or None
+    lang = (language or task.get("language") or "en").strip().lower() or "en"
+    allowed = allowed_languages if allowed_languages is not None else task.get("allowed_languages")
 
     call_result = voice_client.place_outbound_ai_call(
         phone,
         persona=persona,
         contact_name=task.get("contact_name") or "Purchasing Manager",
-        language=language,
+        language=lang,
         task_id=task.get("id"),
         company_name=task.get("company_name"),
         designation=task.get("designation"),
         ring_attempt=1,
         voice_gender=voice_gender,
+        allowed_languages=allowed if isinstance(allowed, list) else None,
     )
     if not call_result.get("ok"):
         task["status"] = "failed"
@@ -626,6 +632,8 @@ def _dial_task(
         raise HTTPException(400, f"Twilio Voice Error: {call_result.get('error')}")
 
     task["status"] = "in_progress"
+    task["language"] = lang
+    task["allowed_languages"] = allowed if isinstance(allowed, list) else None
     task["call_sid"] = call_result.get("call_sid")
     task["call_engine"] = call_result.get("engine")
     task["ring_attempt"] = int(call_result.get("ring_attempt") or 1)
@@ -642,6 +650,7 @@ def _dial_task(
         runner["current_task_id"] = task["id"]
         runner["current_task"] = task
         runner["operator_user_id"] = user.id
+        runner["active_call_sid"] = call_result.get("call_sid")
     _persist_queue()
     return call_result
 
@@ -747,6 +756,10 @@ def _finish_task(
             voice_client.end_call(str(task["call_sid"]))
         except Exception:
             pass
+
+    runner = _get_runner(str(task.get("persona") or ""))
+    if runner and runner.get("current_task_id") == task.get("id"):
+        runner["active_call_sid"] = None
 
     no_answer = _is_no_answer(status, ended_reason, duration)
     outcome = "no_answer" if no_answer else "connected"
@@ -863,6 +876,11 @@ def handle_ai_call_status(
                 designation=task.get("designation"),
                 ring_attempt=next_attempt,
                 voice_gender=str(task.get("voice_gender") or "") or None,
+                allowed_languages=(
+                    task.get("allowed_languages")
+                    if isinstance(task.get("allowed_languages"), list)
+                    else None
+                ),
             )
             if redial.get("ok"):
                 task["call_sid"] = redial.get("call_sid")
@@ -1350,6 +1368,8 @@ def queue_self_test(
         "status": "queued",
         "ready": True,
         "is_test": True,
+        "language": (payload.language or "en").strip().lower() or "en",
+        "allowed_languages": payload.allowed_languages,
         "created_at": _now_iso(),
         "operator_user_id": user.id,
         "followup_sent": False,
@@ -1369,6 +1389,7 @@ def queue_self_test(
             task=task,
             user=user,
             language=payload.language or "en",
+            allowed_languages=payload.allowed_languages,
         )
     _refresh_runner_counts()
 
@@ -1406,7 +1427,13 @@ def end_ai_call(
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    ended_task = None
+    from integrations.voice_client import voice_client
+
+    sids: list[str] = []
+    if payload.call_sid and str(payload.call_sid).strip():
+        sids.append(str(payload.call_sid).strip())
+
+    candidates: list[dict[str, Any]] = []
     for t in _TASKS:
         matches = False
         if payload.task_id and t.get("id") == payload.task_id:
@@ -1414,37 +1441,89 @@ def end_ai_call(
         elif (
             payload.persona
             and t.get("persona") == payload.persona
-            and t.get("status") in ("in_progress", "running")
+            and t.get("status") in ("in_progress", "running", "calling")
         ):
             matches = True
         elif (
             not payload.task_id
             and not payload.persona
-            and t.get("status") in ("in_progress", "running")
+            and t.get("status") in ("in_progress", "running", "calling")
         ):
             matches = True
 
         if matches:
-            duration = None
-            if t.get("started_at"):
-                try:
-                    started_dt = datetime.fromisoformat(str(t["started_at"]).replace("Z", "+00:00"))
-                    duration = (datetime.now(timezone.utc) - started_dt).total_seconds()
-                except Exception:
-                    duration = None
-            _finish_task(
-                db,
-                t,
-                status="completed",
-                duration=duration,
-                outcome_label="Ended by user",
-                user=user,
-                hangup=True,
-            )
-            ended_task = t
-            break
+            candidates.append(t)
+            sid = t.get("call_sid")
+            if sid and str(sid) not in sids:
+                sids.append(str(sid))
 
-    return {"ok": True, "task": ended_task, "followup": (ended_task or {}).get("followup")}
+    # Runner may hold the live SID even if task status drifted.
+    if payload.persona:
+        runner = _get_runner(payload.persona)
+        if runner:
+            for key in ("active_call_sid",):
+                sid = runner.get(key)
+                if sid and str(sid) not in sids:
+                    sids.append(str(sid))
+            ct = runner.get("current_task")
+            if isinstance(ct, dict) and ct.get("call_sid"):
+                sid = str(ct["call_sid"])
+                if sid not in sids:
+                    sids.append(sid)
+                if ct not in candidates and ct.get("id"):
+                    # Prefer the live task object from _TASKS when present.
+                    live = next((x for x in _TASKS if x.get("id") == ct.get("id")), ct)
+                    if live not in candidates:
+                        candidates.append(live)
+
+    hangup_results: list[dict[str, Any]] = []
+    for sid in sids:
+        try:
+            hangup_results.append(voice_client.end_call(sid))
+        except Exception as exc:  # noqa: BLE001
+            hangup_results.append({"ok": False, "error": str(exc), "call_sid": sid})
+
+    ended_task = None
+    for t in candidates or []:
+        duration = None
+        if t.get("started_at"):
+            try:
+                started_dt = datetime.fromisoformat(str(t["started_at"]).replace("Z", "+00:00"))
+                duration = (datetime.now(timezone.utc) - started_dt).total_seconds()
+            except Exception:
+                duration = None
+        _finish_task(
+            db,
+            t,
+            status="completed",
+            duration=duration,
+            outcome_label="Ended by user",
+            user=user,
+            hangup=False,  # already hung up above
+        )
+        ended_task = t
+        break
+
+    # No matching task but we still tried SIDs — report hangup outcome.
+    if not ended_task and not sids:
+        raise HTTPException(
+            404,
+            "No in-progress call found to end. If the phone is still connected, hang up from the handset.",
+        )
+
+    ok_any = any(r.get("ok") for r in hangup_results) if hangup_results else bool(ended_task)
+    if hangup_results and not ok_any:
+        detail = "; ".join(
+            str(r.get("error") or "unknown") for r in hangup_results if not r.get("ok")
+        )
+        raise HTTPException(502, f"Could not hang up the live call: {detail}")
+
+    return {
+        "ok": ok_any or bool(ended_task),
+        "task": ended_task,
+        "followup": (ended_task or {}).get("followup"),
+        "hangup": hangup_results,
+    }
 
 
 @router.delete("/tasks/{task_id}")

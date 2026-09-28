@@ -27,6 +27,25 @@ import { AiSalesProcessesPanel } from "../components/AiSalesProcessesPanel";
 import { loadOrgAdminLocal, resolveAgentsForMasterList } from "../lib/orgAdminLocalStore";
 import { personaDisplayName, personaVoiceGender } from "../lib/aiAgentPersona";
 
+const SPEAKING_LANGUAGE_OPTIONS: { code: string; label: string; defaultOn: boolean }[] = [
+  { code: "en", label: "🇺🇸 English", defaultOn: true },
+  { code: "ur", label: "🇵🇰 Urdu (اردو)", defaultOn: true },
+  { code: "fr", label: "🇫🇷 French", defaultOn: true },
+  { code: "ar", label: "🇸🇦 Arabic", defaultOn: true },
+  { code: "de", label: "🇩🇪 German", defaultOn: true },
+  { code: "ru", label: "🇷🇺 Russian", defaultOn: true },
+  // Off by default — multi STT often mislabels Urdu as Chinese/Japanese.
+  { code: "zh", label: "🇨🇳 Chinese", defaultOn: false },
+  { code: "ja", label: "🇯🇵 Japanese", defaultOn: false },
+  { code: "fil", label: "🇵🇭 Filipino / Tagalog", defaultOn: true },
+];
+
+function ensureStartLanguageAllowed(start: string, allowed: string[]): string[] {
+  const next = [...allowed];
+  if (start && !next.includes(start)) next.unshift(start);
+  return next.length ? next : [start || "en"];
+}
+
 interface AiSalesAgentPageProps {
   onError: (message: string) => void;
   /** Active Master List — only agents ticked for this list are shown. */
@@ -57,6 +76,11 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
   const [selfTestName, setSelfTestName] = useState("");
   const [selfTestPersona, setSelfTestPersona] = useState<string>("female");
   const [selfTestLanguage, setSelfTestLanguage] = useState<string>("en");
+  const [allowedLanguages, setAllowedLanguages] = useState<string[]>(() =>
+    SPEAKING_LANGUAGE_OPTIONS.filter((o) => o.defaultOn).map((o) => o.code),
+  );
+  const [lastCallSid, setLastCallSid] = useState<string | null>(null);
+  const [lastCallTaskId, setLastCallTaskId] = useState<number | null>(null);
   const [selfTesting, setSelfTesting] = useState(false);
   const [endingCall, setEndingCall] = useState(false);
   const [callingTaskId, setCallingTaskId] = useState<number | null>(null);
@@ -237,6 +261,7 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
       onError("Enter your mobile number in international format, e.g. +923001234567");
       return;
     }
+    const allowed = ensureStartLanguageAllowed(selfTestLanguage, allowedLanguages);
     setSelfTesting(true);
     try {
       const result = await client.queueAiSalesAgentSelfTest({
@@ -244,6 +269,7 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
         phone,
         contact_name: selfTestName.trim() || undefined,
         language: selfTestLanguage,
+        allowed_languages: allowed,
         dial_now: false,
         voice_gender: voiceGenderForAgent(selfTestPersona),
       });
@@ -270,13 +296,15 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
       onError("Enter phone number in international format, e.g. +923001234567");
       return;
     }
+    const allowed = ensureStartLanguageAllowed(selfTestLanguage, allowedLanguages);
     setSelfTesting(true);
     try {
-      await client.queueAiSalesAgentSelfTest({
+      const result = await client.queueAiSalesAgentSelfTest({
         persona: selfTestPersona,
         phone,
         contact_name: selfTestName.trim() || undefined,
         language: selfTestLanguage,
+        allowed_languages: allowed,
         dial_now: true,
         voice_gender: voiceGenderForAgent(selfTestPersona),
       });
@@ -286,6 +314,12 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
       );
       setTimeout(() => setQueueNotice(null), 14000);
       await load();
+      if (result.task?.call_sid) {
+        setLastCallSid(result.task.call_sid);
+      }
+      if (result.task?.id) {
+        setLastCallTaskId(result.task.id);
+      }
     } catch (e) {
       onError(e instanceof Error ? e.message : "Direct call failed");
     } finally {
@@ -416,10 +450,33 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
     }
   }
 
-  async function handleEndCall(persona?: string) {
+  async function handleEndCall(opts?: {
+    persona?: string;
+    call_sid?: string | null;
+    task_id?: number | null;
+  }) {
     setEndingCall(true);
     try {
-      const res = await client.endAiSalesAgentCall({ persona });
+      const persona = opts?.persona || selfTestPersona;
+      const call_sid = opts?.call_sid || lastCallSid || undefined;
+      const task_id = opts?.task_id || lastCallTaskId || undefined;
+      // Prefer live in-progress task for this persona when SID not passed.
+      const live =
+        !call_sid && !task_id
+          ? tasks.find(
+              (t) =>
+                t.persona === persona &&
+                (t.status === "in_progress" || t.status === "running") &&
+                t.call_sid,
+            )
+          : null;
+      const res = await client.endAiSalesAgentCall({
+        persona,
+        call_sid: call_sid || live?.call_sid || undefined,
+        task_id: task_id || live?.id || undefined,
+      });
+      setLastCallSid(null);
+      setLastCallTaskId(null);
       setQueueNotice(followupNotice("Call ended.", res.followup || res.task?.followup));
       setTimeout(() => setQueueNotice(null), 12000);
       await load();
@@ -428,6 +485,23 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
     } finally {
       setEndingCall(false);
     }
+  }
+
+  function toggleAllowedLanguage(code: string) {
+    setAllowedLanguages((prev) => {
+      if (prev.includes(code)) {
+        // Keep at least the speaking language ticked.
+        if (code === selfTestLanguage) return prev;
+        const next = prev.filter((c) => c !== code);
+        return next.length ? next : [selfTestLanguage || "en"];
+      }
+      return [...prev, code];
+    });
+  }
+
+  function onSpeakingLanguageChange(code: string) {
+    setSelfTestLanguage(code);
+    setAllowedLanguages((prev) => ensureStartLanguageAllowed(code, prev));
   }
 
   function openWhatsAppForTask(task: AiSalesAgentTask) {
@@ -740,7 +814,13 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
                 <button
                   type="button"
                   disabled={endingCall || (runner.status !== "running" && !runner.current_task)}
-                  onClick={() => void handleEndCall(runner.persona)}
+                  onClick={() =>
+                    void handleEndCall({
+                      persona: runner.persona,
+                      call_sid: runner.current_task?.call_sid,
+                      task_id: runner.current_task?.id ?? runner.current_task_id,
+                    })
+                  }
                   className="px-3 py-1.5 text-sm rounded-lg bg-rose-600 hover:bg-rose-500 text-white disabled:opacity-40 font-medium flex items-center gap-1"
                   title="End current call immediately"
                 >
@@ -778,18 +858,15 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
               Speaking Language
               <select
                 value={selfTestLanguage}
-                onChange={(e) => setSelfTestLanguage(e.target.value)}
+                onChange={(e) => onSpeakingLanguageChange(e.target.value)}
                 className="mt-1 block w-full min-w-[160px] rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100 font-medium"
               >
-                <option value="en">🇺🇸 English (Default)</option>
-                <option value="ur">🇵🇰 Urdu (اردو)</option>
-                <option value="fr">🇫🇷 French (Français)</option>
-                <option value="ar">🇸🇦 Arabic (العربية)</option>
-                <option value="de">🇩🇪 German (Deutsch)</option>
-                <option value="ru">🇷🇺 Russian (Русский)</option>
-                <option value="zh">🇨🇳 Chinese (中文)</option>
-                <option value="ja">🇯🇵 Japanese (日本語)</option>
-                <option value="fil">🇵🇭 Filipino / Tagalog</option>
+                {SPEAKING_LANGUAGE_OPTIONS.map((opt) => (
+                  <option key={opt.code} value={opt.code}>
+                    {opt.label}
+                    {opt.code === "en" ? " (Default)" : ""}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="text-sm text-slate-400 flex-1 min-w-[160px]">
@@ -823,7 +900,13 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
               <button
                 type="button"
                 disabled={endingCall}
-                onClick={() => void handleEndCall(selfTestPersona)}
+                onClick={() =>
+                  void handleEndCall({
+                    persona: selfTestPersona,
+                    call_sid: lastCallSid,
+                    task_id: lastCallTaskId,
+                  })
+                }
                 className="px-3.5 py-2 text-sm rounded-lg bg-rose-600 hover:bg-rose-500 font-semibold text-white disabled:opacity-40 flex items-center gap-1.5"
                 title="End active call immediately"
               >
@@ -837,6 +920,41 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
               >
                 {selfTesting ? "Queueing…" : "Queue test call"}
               </button>
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-700/80 bg-slate-950/50 px-3 py-2.5">
+            <p className="text-xs font-medium text-slate-300 mb-1.5">
+              Allowed languages on this call
+            </p>
+            <p className="text-[11px] text-slate-500 mb-2">
+              Untick languages you do not want (Chinese/Japanese are off by default — they were
+              causing random switches when you spoke Urdu). Speaking language stays ticked.
+            </p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+              {SPEAKING_LANGUAGE_OPTIONS.map((opt) => {
+                const checked = allowedLanguages.includes(opt.code);
+                const locked = opt.code === selfTestLanguage;
+                return (
+                  <label
+                    key={opt.code}
+                    className={`inline-flex items-center gap-1.5 text-xs ${
+                      locked ? "text-emerald-300" : "text-slate-300"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={locked}
+                      onChange={() => toggleAllowedLanguage(opt.code)}
+                      className="rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500/40"
+                    />
+                    <span>
+                      {opt.label}
+                      {locked ? " (start)" : ""}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1157,7 +1275,13 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
                           <button
                             type="button"
                             disabled={endingCall}
-                            onClick={() => void handleEndCall(task.persona)}
+                            onClick={() =>
+                              void handleEndCall({
+                                persona: task.persona,
+                                call_sid: task.call_sid,
+                                task_id: task.id,
+                              })
+                            }
                             className="px-2 py-1 rounded bg-rose-600/20 hover:bg-rose-600/30 text-rose-200 border border-rose-500/30 text-xs font-semibold disabled:opacity-40"
                             title="Hang up / clear stuck in-progress call"
                           >

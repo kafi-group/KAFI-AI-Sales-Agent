@@ -155,8 +155,9 @@ LANGUAGE_CONFIGS: dict[str, dict[str, str]] = {
         "voice_male": "ur-PK-AsadNeural",
         "greeting": "سلام! کیا میری بات {c_name} سے ہو رہی ہے؟",
         "instruction": (
-            "Start the call in Urdu (اردو). If they reply in English, French, Arabic, or any other "
-            "language — or mix — match them immediately. Phone number country is irrelevant."
+            "Start the call in Urdu (اردو) and STAY in Urdu unless the customer clearly asks "
+            "to switch (e.g. 'speak English') or clearly speaks another ALLOWED language. "
+            "Never switch to Chinese, Japanese, or Arabic because of noisy transcription."
         ),
     },
     "fr": {
@@ -236,6 +237,75 @@ _SWITCHABLE_LANGUAGES = (
     "Russian (Русский), Mandarin Chinese (中文), Japanese (日本語), Filipino/Tagalog, "
     "and natural mixes (e.g. English+Urdu, English+French)"
 )
+
+# Deepgram / Vapi language codes for each UI language key.
+_TRANSCRIBER_CODES: dict[str, str] = {
+    "en": "en",
+    "ur": "ur",
+    "fr": "fr",
+    "ar": "ar",
+    "de": "de",
+    "ru": "ru",
+    "zh": "zh",
+    "ja": "ja",
+    "fil": "tl",
+}
+
+_ALL_LANGUAGE_KEYS = tuple(LANGUAGE_CONFIGS.keys())
+
+
+def normalize_allowed_languages(
+    start_language: str | None,
+    allowed: list[str] | None,
+) -> list[str]:
+    """Start language is always included; unknown codes dropped."""
+    start = (start_language or "en").strip().lower()
+    if start not in LANGUAGE_CONFIGS:
+        start = "en"
+    raw = allowed if isinstance(allowed, list) else list(_ALL_LANGUAGE_KEYS)
+    out: list[str] = []
+    for code in raw:
+        c = str(code or "").strip().lower()
+        if c in LANGUAGE_CONFIGS and c not in out:
+            out.append(c)
+    if start not in out:
+        out.insert(0, start)
+    return out or [start]
+
+
+def build_language_prompt_block(start_language: str, allowed: list[str]) -> str:
+    """Strict language rules — stop random Chinese/Japanese/Arabic drift."""
+    start = start_language if start_language in LANGUAGE_CONFIGS else "en"
+    allowed_clean = normalize_allowed_languages(start, allowed)
+    start_name = LANGUAGE_CONFIGS[start]["name"]
+    allowed_names = ", ".join(LANGUAGE_CONFIGS[c]["name"] for c in allowed_clean)
+    base = LANGUAGE_CONFIGS[start]["instruction"]
+    return (
+        f"STARTING LANGUAGE: {start_name} ({start}).\n"
+        f"{base}\n\n"
+        f"ALLOWED LANGUAGES FOR THIS CALL (only these): {allowed_names}.\n"
+        "CRITICAL LANGUAGE RULES:\n"
+        f"1. Open the call in {start_name} and KEEP speaking {start_name} by default.\n"
+        "2. Only switch if the customer clearly speaks another ALLOWED language above.\n"
+        "3. Never switch to Chinese, Japanese, Arabic, or any other language that is NOT in the allowed list — "
+        "even if speech recognition guesses wrong.\n"
+        f"4. If you are unsure what language they used, stay in {start_name}. Do not invent a new language.\n"
+        f"5. If they ask to speak English (or another allowed language), switch then and stay there until they change again.\n"
+    )
+
+
+def resolve_transcriber_language(start_language: str, allowed: list[str]) -> str:
+    """Pick Deepgram language. Lock high-confusion starts (Urdu/Arabic/CJK) to stop random hops."""
+    start = (start_language or "en").strip().lower()
+    if start not in LANGUAGE_CONFIGS:
+        start = "en"
+    allowed_clean = normalize_allowed_languages(start, allowed)
+    if len(allowed_clean) == 1:
+        return _TRANSCRIBER_CODES.get(allowed_clean[0], "en")
+    # multi STT often mislabels Urdu as Chinese/Japanese/Arabic — lock to start instead.
+    if start in {"ur", "ar", "zh", "ja", "ru"}:
+        return _TRANSCRIBER_CODES.get(start, "en")
+    return "multi"
 
 
 class VoiceClient:
@@ -648,6 +718,7 @@ class VoiceClient:
         designation: str | None = None,
         ring_attempt: int = 1,
         voice_gender: str | None = None,
+        allowed_languages: list[str] | None = None,
     ) -> dict[str, Any]:
         """Initiate an outbound PSTN call via Vapi AI Voice Engine (or Twilio fallback).
 
@@ -660,6 +731,13 @@ class VoiceClient:
         safe_attempt = max(1, int(ring_attempt or 1))
         gender = resolve_call_gender(persona, voice_gender=voice_gender)
         is_female = gender == "female"
+        lang_code = (language or "en").strip().lower()
+        if lang_code not in LANGUAGE_CONFIGS:
+            lang_code = "en"
+        allowed_langs = normalize_allowed_languages(lang_code, allowed_languages)
+        lang_block = build_language_prompt_block(lang_code, allowed_langs)
+        transcriber_lang = resolve_transcriber_language(lang_code, allowed_langs)
+        allowed_names = ", ".join(LANGUAGE_CONFIGS[c]["name"] for c in allowed_langs)
 
         def _arm_ring_limit(call_id: str | None) -> None:
             # After ~16s still ringing → hang up. For AI queue tasks, redial attempt 2
@@ -695,7 +773,6 @@ class VoiceClient:
         vapi_key = settings.vapi_api_key if getattr(settings, "vapi_enabled", True) else None
         vapi_phone_id = settings.vapi_phone_number_id
 
-        lang_code = (language or "en").strip().lower()
         lang_cfg = LANGUAGE_CONFIGS.get(lang_code, LANGUAGE_CONFIGS["en"])
 
         if vapi_key:
@@ -711,23 +788,23 @@ class VoiceClient:
                 eleven_key = getattr(settings, "elevenlabs_api_key", None)
                 eleven_on = getattr(settings, "elevenlabs_enabled", False)
                 if eleven_on and eleven_key and eleven_key.strip():
-                    # Multilingual TTS so mid-call French/Arabic/Urdu/etc. sound natural.
-                    # Rachel (female) / Antoni (male) — never swap these.
+                    # Multilingual TTS — do NOT set language:auto (causes random ZH/JA/AR hops).
                     voice_config = {
                         "provider": "11labs",
                         "voiceId": "21m00Tcm4TlvDq8ikWAM" if is_female else "ErXwobaYiN019PkySvjV",
                         "model": "eleven_multilingual_v2",
                     }
                 else:
-                    # Vapi Voices v2 auto language — mid-call switch across supported languages.
+                    # Stick TTS to the selected start language (no auto).
                     voice_config = {
                         "provider": "vapi",
                         "voiceId": "Savannah" if is_female else "Elliot",
-                        "language": "auto",
+                        "language": lang_code if lang_code != "fil" else "tl",
                     }
                 print(
                     f"AI call voice gender={gender} persona={persona!r} "
-                    f"engine_voice={voice_config.get('voiceId')}",
+                    f"engine_voice={voice_config.get('voiceId')} "
+                    f"lang={lang_code} stt={transcriber_lang} allowed={allowed_langs}",
                     flush=True,
                 )
 
@@ -771,24 +848,15 @@ class VoiceClient:
                 system_prompt = (
                     f"You are {agent_name}, a friendly, natural, and sharp B2B AI Sales Representative for Kafi Commodities. "
                     "Kafi Commodities is a leading global exporter of White Rice (Basmati 1121 & 5% Broken), Sesame Seeds (99% Purity), Yellow Corn, Spices, and Edible Oils.\n\n"
-                    f"LANGUAGE INSTRUCTION (starting language):\n{lang_cfg['instruction']}\n\n"
-                    f"You speak fluently: {_SWITCHABLE_LANGUAGES}.\n"
-                    "CRITICAL — MID-CALL LANGUAGE SWITCHING:\n"
-                    "- Never decide language from the phone number or country code. A +1 US number may speak French; "
-                    "a Gulf number may speak English; etc.\n"
-                    "- When the customer speaks or switches to ANY language you know (French, Arabic, Urdu, English, "
-                    "German, Russian, Chinese, Japanese, Filipino, Hindi, or a mix), YOU MUST reply in that language "
-                    "from the next sentence onward.\n"
-                    "- Do not ask permission to switch. Do not say you only speak one language. Do not force English "
-                    "if they are speaking French, Arabic, Urdu, or another language.\n"
-                    "- If they mix languages, you may mix naturally. Mirror their language every turn.\n\n"
+                    f"{lang_block}\n"
+                    f"Languages you may use on THIS call only: {allowed_names}.\n"
+                    "Do not invent or drift into unticked languages. Phone country code never chooses the language.\n\n"
                     "STRICT CONVERSATIONAL PROTOCOL & RULES:\n"
                     f"1. OPENING GREETING: You start the call by asking '{first_msg}'. Once the customer confirms, introduce {agent_name} from Kafi Commodities and offer our product catalogue and price list.\n"
                     "2. DO NOT REPEAT THE CUSTOMER'S NAME: You already asked for their name in the greeting. NEVER repeat their name in every sentence during the call.\n"
                     "3. DO NOT ASK FOR EMAIL OR PHONE NUMBER: We ALREADY have the customer's email and phone number in our system. NEVER ask the buyer to give you their email or phone number.\n"
-                    "4. CATALOGUE & PRICE LIST DELIVERY: Tell the buyer you will send the full product catalogue and CNF price list to WhatsApp and email — say this in whatever language the call is currently in.\n"
-                    "5. SHORT SPOKEN RESPONSES: Speak concisely in 1 to 2 spoken sentences so the conversation feels natural over the phone.\n"
-                    "6. LANGUAGE SWITCHING: Always mirror the customer's current language (French, Arabic, Urdu, English, etc.), not the dialed country.\n\n"
+                    "4. CATALOGUE & PRICE LIST DELIVERY: Tell the buyer you will send the full product catalogue and CNF price list to WhatsApp and email — say this in the current allowed language.\n"
+                    "5. SHORT SPOKEN RESPONSES: Speak concisely in 1 to 2 spoken sentences so the conversation feels natural over the phone.\n\n"
                     f"LEARNED SALES PLAYBOOK:\n{insights_txt}\n\n"
                     f"CUSTOM SALES RULES:\n{rules_txt}"
                     f"{contact_block}"
@@ -811,11 +879,10 @@ class VoiceClient:
                             ],
                         },
                         "voice": voice_config,
-                        # Auto-detect language changes mid-call (FR, AR, UR, EN, etc.).
                         "transcriber": {
                             "provider": "deepgram",
                             "model": "nova-3",
-                            "language": "multi",
+                            "language": transcriber_lang,
                         },
                     },
                 }
@@ -828,6 +895,8 @@ class VoiceClient:
                         "persona": persona,
                         "voice_gender": gender,
                         "ring_attempt": safe_attempt,
+                        "language": lang_code,
+                        "allowed_languages": allowed_langs,
                     }
                 if settings.twilio_webhook_base_url:
                     try:
@@ -926,46 +995,152 @@ class VoiceClient:
             return {"ok": False, "error": str(exc)}
 
     def end_call(self, call_sid: str) -> dict[str, Any]:
-        """Hang up a live call via Twilio or Vapi."""
+        """Hang up a live call via Twilio and/or Vapi (both legs when possible)."""
         if not call_sid:
             return {"ok": False, "error": "No call SID provided"}
 
-        # Twilio SIDs always start with CA — never send Vapi UUIDs to Twilio.
-        if call_sid.startswith("CA"):
-            if settings.twilio_account_sid and settings.twilio_auth_token:
-                try:
-                    from twilio.rest import Client
+        sid = str(call_sid).strip()
+        errors: list[str] = []
+        engines: list[str] = []
 
-                    c = Client(
-                        settings.twilio_account_sid.strip(),
-                        settings.twilio_auth_token.strip(),
-                    )
-                    c.calls(call_sid).update(status="completed")
-                    return {"ok": True, "engine": "twilio"}
-                except Exception as exc:
-                    print(f"Twilio hangup failed: {exc}", flush=True)
-                    return {"ok": False, "error": str(exc), "engine": "twilio"}
-            return {"ok": False, "error": "Twilio is not configured", "engine": "twilio"}
-
-        # Vapi call ids are UUIDs (not CA…).
-        vapi_key = getattr(settings, "vapi_api_key", None)
-        if vapi_key:
+        def _twilio_hangup(twilio_sid: str) -> bool:
+            if not (settings.twilio_account_sid and settings.twilio_auth_token):
+                errors.append("Twilio is not configured")
+                return False
+            if not twilio_sid.startswith("CA"):
+                return False
             try:
-                import urllib.request
+                from twilio.rest import Client
 
-                req = urllib.request.Request(
-                    f"https://api.vapi.ai/call/{call_sid}",
+                c = Client(
+                    settings.twilio_account_sid.strip(),
+                    settings.twilio_auth_token.strip(),
+                )
+                c.calls(twilio_sid).update(status="completed")
+                engines.append("twilio")
+                print(f"Twilio hangup ok sid={twilio_sid[-8:]}", flush=True)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"twilio: {exc}")
+                print(f"Twilio hangup failed: {exc}", flush=True)
+                return False
+
+        def _vapi_provider_sids(data: dict[str, Any]) -> list[str]:
+            found: list[str] = []
+            for key in (
+                "phoneCallProviderId",
+                "phoneCallProviderCallId",
+                "telephonyProviderId",
+                "providerCallId",
+            ):
+                val = data.get(key)
+                if isinstance(val, str) and val.startswith("CA"):
+                    found.append(val)
+            transport = data.get("transport") or data.get("phoneCallTransport") or {}
+            if isinstance(transport, dict):
+                for key in ("callId", "providerId", "callSid", "sid"):
+                    val = transport.get(key)
+                    if isinstance(val, str) and val.startswith("CA"):
+                        found.append(val)
+            # de-dupe
+            out: list[str] = []
+            for s in found:
+                if s not in out:
+                    out.append(s)
+            return out
+
+        def _vapi_hangup(vapi_id: str) -> bool:
+            vapi_key = getattr(settings, "vapi_api_key", None)
+            if not vapi_key:
+                errors.append("Vapi is not configured")
+                return False
+            import json
+            import urllib.error
+            import urllib.request
+
+            headers = {
+                "Authorization": f"Bearer {vapi_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0",
+            }
+            # Fetch call so we can also kill the Twilio PSTN leg.
+            try:
+                get_req = urllib.request.Request(
+                    f"https://api.vapi.ai/call/{vapi_id}",
+                    headers={"Authorization": f"Bearer {vapi_key}"},
+                )
+                with urllib.request.urlopen(get_req, timeout=10) as res:
+                    call_data = json.loads(res.read().decode("utf-8"))
+                for tw_sid in _vapi_provider_sids(call_data if isinstance(call_data, dict) else {}):
+                    _twilio_hangup(tw_sid)
+            except Exception as exc:  # noqa: BLE001
+                print(f"Vapi GET before hangup skipped: {exc}", flush=True)
+
+            ok = False
+            # Preferred: PATCH status ended (ends live PSTN).
+            try:
+                body = json.dumps({"status": "ended"}).encode("utf-8")
+                patch_req = urllib.request.Request(
+                    f"https://api.vapi.ai/call/{vapi_id}",
+                    data=body,
+                    headers=headers,
+                    method="PATCH",
+                )
+                with urllib.request.urlopen(patch_req, timeout=10) as res:
+                    _ = res.read()
+                ok = True
+                engines.append("vapi-patch")
+                print(f"Vapi PATCH ended ok id={vapi_id[-8:]}", flush=True)
+            except urllib.error.HTTPError as exc:
+                # 400/404 often mean already ended — treat as success for hangup UX.
+                if exc.code in (400, 404):
+                    ok = True
+                    engines.append("vapi-patch")
+                else:
+                    errors.append(f"vapi-patch: HTTP {exc.code}")
+                    print(f"Vapi PATCH hangup failed: {exc}", flush=True)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"vapi-patch: {exc}")
+                print(f"Vapi PATCH hangup failed: {exc}", flush=True)
+
+            # Fallback DELETE.
+            try:
+                del_req = urllib.request.Request(
+                    f"https://api.vapi.ai/call/{vapi_id}",
                     headers={"Authorization": f"Bearer {vapi_key}"},
                     method="DELETE",
                 )
-                with urllib.request.urlopen(req, timeout=10) as res:
-                    _ = res
-                    return {"ok": True, "engine": "vapi"}
-            except Exception as exc:
-                print(f"Vapi hangup failed: {exc}", flush=True)
-        return {"ok": False, "error": str(exc), "engine": "vapi"}
+                with urllib.request.urlopen(del_req, timeout=10) as res:
+                    _ = res.read()
+                ok = True
+                engines.append("vapi-delete")
+            except urllib.error.HTTPError as exc:
+                if exc.code in (200, 204, 400, 404):
+                    ok = True
+                    engines.append("vapi-delete")
+                else:
+                    errors.append(f"vapi-delete: HTTP {exc.code}")
+                    print(f"Vapi DELETE hangup failed: {exc}", flush=True)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"vapi-delete: {exc}")
+                print(f"Vapi DELETE hangup failed: {exc}", flush=True)
 
-        return {"ok": False, "error": "No hangup engine configured for this call id"}
+            return ok
+
+        if sid.startswith("CA"):
+            tw_ok = _twilio_hangup(sid)
+            return {
+                "ok": tw_ok,
+                "engine": ",".join(engines) or "twilio",
+                "error": None if tw_ok else ("; ".join(errors) or "Twilio hangup failed"),
+            }
+
+        v_ok = _vapi_hangup(sid)
+        return {
+            "ok": v_ok,
+            "engine": ",".join(engines) or "vapi",
+            "error": None if v_ok else ("; ".join(errors) or "Vapi hangup failed"),
+        }
 
     def fetch_outbound_status(self, call_sid: str | None) -> dict[str, Any]:
         """Best-effort live status for a Vapi or Twilio call (used to detect no-answer)."""
