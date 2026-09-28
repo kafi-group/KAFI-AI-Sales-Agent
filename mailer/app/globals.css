@@ -510,6 +510,15 @@ button.chip:hover {
   gap: 0.35rem;
 }
 
+.picture-library-save {
+  background: color-mix(in srgb, #16a34a 85%, black) !important;
+  border-color: #15803d !important;
+}
+
+.picture-library-save:disabled {
+  opacity: 0.55;
+}
+
 .picture-library-grid {
   display: flex;
   flex-direction: column;

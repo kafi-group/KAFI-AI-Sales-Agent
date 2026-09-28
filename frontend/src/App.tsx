@@ -1483,7 +1483,7 @@ function DashboardApp() {
         { id: "calls", label: "Manual Call Center", count: 0 },
       ],
     },
-    // #4 Emails (dropdown) with Bulk Email Sender inside
+    // #4 Emails (dropdown)
     {
       id: "inbox",
       label: "Emails",
@@ -1501,12 +1501,6 @@ function DashboardApp() {
               },
             ]
           : [{ id: "flagged", label: "Flagged", count: 0 }]),
-        {
-          id: "mail",
-          label: "Bulk Email Sender",
-          count: 0,
-          openMailer: true,
-        },
         { id: "sent", label: "Sent", count: mailCounts.sent },
         { id: "drafts", label: "Drafts", count: mailDraftCount },
         { id: "trash", label: "Trash", count: mailCounts.trash },
