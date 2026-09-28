@@ -17,6 +17,8 @@ import {
   clearLocalPictureLibrary,
   loadLocalPictureLibrary,
 } from "@/lib/pictureLibraryLocal";
+import { useAuth } from "@/components/AuthProvider";
+import { ApiError } from "@/lib/api";
 
 export type PictureLibraryPanelProps = {
   /** Insert a hosted image URL into the email body at the last cursor position. */
@@ -48,6 +50,7 @@ export function PictureLibraryPanel({
   disabled = false,
   className = "",
 }: PictureLibraryPanelProps) {
+  const { token, loading: authLoading } = useAuth();
   const [groups, setGroups] = useState<PictureLibraryGroup[]>([]);
   const [activeGroupId, setActiveGroupId] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -60,36 +63,49 @@ export function PictureLibraryPanel({
   const [searchOpen, setSearchOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const searchWrapRef = useRef<HTMLDivElement>(null);
+  const publishAttempted = useRef(false);
 
   const refresh = useCallback(async () => {
     setError(null);
+    setLoading(true);
     const local = loadLocalPictureLibrary();
     try {
       const remote = await fetchPictureLibrary();
       if ((remote.groups || []).length) {
-        // Server is source of truth — never resurrect deleted local leftovers.
         applyGroups(remote.groups, setGroups, setActiveGroupId);
         clearLocalPictureLibrary();
         setDirty(false);
       } else if (local.groups.length) {
-        // Migrate old browser-only libraries: show them and ask user to Save.
-        applyGroups(local.groups, setGroups, setActiveGroupId);
-        setDirty(true);
-        setSavedHint(
-          "Pictures were only on this browser before. Click Save library to share them with everyone (any PC / incognito).",
-        );
+        // Quietly publish old browser-only drafts to the shared server once.
+        if (!publishAttempted.current) {
+          publishAttempted.current = true;
+          try {
+            const library = await savePictureLibrary(local.groups);
+            applyGroups(library.groups || [], setGroups, setActiveGroupId);
+            clearLocalPictureLibrary();
+            setDirty(false);
+          } catch {
+            applyGroups(local.groups, setGroups, setActiveGroupId);
+            setDirty(true);
+          }
+        } else {
+          applyGroups(local.groups, setGroups, setActiveGroupId);
+          setDirty(true);
+        }
       } else {
         applyGroups([], setGroups, setActiveGroupId);
         setDirty(false);
       }
     } catch (e) {
-      if (local.groups.length) {
+      const status = e instanceof ApiError ? e.status : 0;
+      // Hand-off login may still be finishing — don't flash "Not authenticated".
+      if (status === 401) {
+        applyGroups([], setGroups, setActiveGroupId);
+        setError(null);
+      } else if (local.groups.length) {
         applyGroups(local.groups, setGroups, setActiveGroupId);
         setDirty(true);
-        setError(
-          (e instanceof Error ? e.message : "Could not reach shared library") +
-            " — showing this browser’s draft. Click Save library when the API is back.",
-        );
+        setError(null);
       } else {
         setError(e instanceof Error ? e.message : "Could not load picture library");
       }
@@ -99,8 +115,15 @@ export function PictureLibraryPanel({
   }, []);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!token) {
+      setLoading(false);
+      setError(null);
+      applyGroups([], setGroups, setActiveGroupId);
+      return;
+    }
     void refresh();
-  }, [refresh]);
+  }, [token, authLoading, refresh]);
 
   const activeGroup = groups.find((g) => g.id === activeGroupId) || null;
   const activeImages = activeGroup?.images || [];
@@ -265,6 +288,7 @@ export function PictureLibraryPanel({
       const library = await savePictureLibrary(groups);
       applyGroups(library.groups || [], setGroups, setActiveGroupId);
       clearLocalPictureLibrary();
+      setSavedHint(null);
       setDirty(false);
       setSavedHint(
         "Saved to shared library — available on any PC, browser, or incognito after login.",
