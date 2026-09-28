@@ -49,7 +49,10 @@ export function PictureLibraryPanel({
   const [savedHint, setSavedHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [newGroupName, setNewGroupName] = useState("");
+  const [pictureSearch, setPictureSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const searchWrapRef = useRef<HTMLDivElement>(null);
 
   const persistLocal = useCallback((nextGroups: PictureLibraryGroup[]) => {
     saveLocalPictureLibrary({ groups: nextGroups });
@@ -92,6 +95,25 @@ export function PictureLibraryPanel({
   }, [refresh]);
 
   const activeGroup = groups.find((g) => g.id === activeGroupId) || null;
+  const activeImages = activeGroup?.images || [];
+  const searchNeedle = pictureSearch.trim().toLowerCase();
+  const filteredImages = searchNeedle
+    ? activeImages.filter((img) => {
+        const caption = (img.caption || "").toLowerCase();
+        const filename = (img.filename || "").toLowerCase();
+        return caption.includes(searchNeedle) || filename.includes(searchNeedle);
+      })
+    : activeImages;
+
+  useEffect(() => {
+    function onDocMouseDown(e: MouseEvent) {
+      if (!searchWrapRef.current?.contains(e.target as Node)) {
+        setSearchOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, []);
 
   async function handleCreateGroup() {
     const name = newGroupName.trim();
@@ -292,31 +314,156 @@ export function PictureLibraryPanel({
     onInsert(img.url, img.filename || "image");
   }
 
+  function pickFromSearch(img: PictureLibraryImage) {
+    insertImage(img);
+    setPictureSearch((img.caption || "").trim());
+    setSearchOpen(false);
+  }
+
   return (
     <aside className={`picture-library ${className}`.trim()} aria-label="Picture library">
       <div className="picture-library-head">
         <h3>Picture library</h3>
         <p className="muted small">
-          Shared for all users. Click a picture to paste it where the cursor was in the email.
-          Add a short label above each picture. Press <strong>Save</strong> after uploading.
+          Shared for all users. Pick a group, search or click a picture to paste it where the
+          cursor was in the email.
         </p>
       </div>
 
-      <div className="picture-library-groups">
-        <label className="small muted">Groups</label>
+      <div className="picture-library-browse">
+        <label className="small muted" htmlFor="picture-library-group">
+          Groups
+        </label>
+        <select
+          id="picture-library-group"
+          value={activeGroupId}
+          disabled={loading || !groups.length}
+          onChange={(e) => {
+            setActiveGroupId(e.target.value);
+            setPictureSearch("");
+            setSearchOpen(false);
+          }}
+        >
+          {!groups.length ? <option value="">No groups yet</option> : null}
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name} ({g.images?.length || 0})
+            </option>
+          ))}
+        </select>
+
+        <label className="small muted" htmlFor="picture-library-search">
+          Search pictures
+        </label>
+        <div className="picture-library-search" ref={searchWrapRef}>
+          <input
+            id="picture-library-search"
+            type="search"
+            value={pictureSearch}
+            disabled={loading || !activeGroup || !activeImages.length}
+            placeholder="Type to find by label…"
+            autoComplete="off"
+            onChange={(e) => {
+              setPictureSearch(e.target.value);
+              setSearchOpen(true);
+            }}
+            onFocus={() => setSearchOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setSearchOpen(false);
+                return;
+              }
+              if (e.key === "Enter" && filteredImages[0]) {
+                e.preventDefault();
+                pickFromSearch(filteredImages[0]);
+              }
+            }}
+          />
+          {searchOpen && activeGroup && filteredImages.length ? (
+            <ul className="picture-library-search-list" role="listbox">
+              {filteredImages.slice(0, 40).map((img) => {
+                const label = (img.caption || "").trim() || "Untitled picture";
+                return (
+                  <li key={img.id}>
+                    <button
+                      type="button"
+                      role="option"
+                      disabled={disabled}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => pickFromSearch(img)}
+                      title="Insert this picture"
+                    >
+                      <span className="picture-library-search-preview" aria-hidden>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={img.url} alt="" />
+                      </span>
+                      <span className="picture-library-search-label">{label}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+          {searchOpen && activeGroup && searchNeedle && !filteredImages.length ? (
+            <p className="picture-library-search-empty muted small">No pictures match.</p>
+          ) : null}
+        </div>
+      </div>
+
+      {error ? <p className="bad small">{error}</p> : null}
+      {loading ? <p className="muted small">Loading library…</p> : null}
+      {savedHint ? <p className="ok small">{savedHint}</p> : null}
+
+      <div className="picture-library-grid">
+        {!loading && activeGroup && !activeImages.length ? (
+          <p className="muted small picture-library-empty">
+            No pictures in this group yet.
+          </p>
+        ) : null}
+        {!loading && activeGroup && activeImages.length && !filteredImages.length ? (
+          <p className="muted small picture-library-empty">No pictures match your search.</p>
+        ) : null}
+        {filteredImages.map((img) => (
+          <div key={img.id} className="picture-library-tile">
+            <label className="picture-library-caption-label small muted">Details</label>
+            <textarea
+              className="picture-library-caption"
+              rows={2}
+              value={img.caption || ""}
+              placeholder="Add details (edit or clear anytime)"
+              disabled={busy || disabled}
+              onChange={(e) => setCaptionLocal(img.id, e.target.value)}
+              onBlur={(e) => void commitCaption(img, e.target.value)}
+            />
+            <button
+              type="button"
+              className="picture-library-thumb"
+              disabled={disabled}
+              title={img.caption?.trim() || "Insert picture"}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => insertImage(img)}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={img.url} alt={img.caption || "Library picture"} loading="lazy" />
+            </button>
+            <div className="picture-library-tile-meta">
+              <span className="muted small">{formatSize(img.size)}</span>
+              <button
+                type="button"
+                className="linkish small"
+                disabled={busy}
+                onClick={() => void handleDeleteImage(img)}
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="picture-library-manage">
+        <p className="small muted picture-library-manage-title">Library admin</p>
         <div className="picture-library-group-row">
-          <select
-            value={activeGroupId}
-            disabled={loading || !groups.length}
-            onChange={(e) => setActiveGroupId(e.target.value)}
-          >
-            {!groups.length ? <option value="">No groups yet</option> : null}
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name} ({g.images?.length || 0})
-              </option>
-            ))}
-          </select>
           <button
             type="button"
             className="btn ghost small"
@@ -359,88 +506,41 @@ export function PictureLibraryPanel({
             Add group
           </button>
         </div>
-      </div>
 
-      <div className="picture-library-upload">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/jpg,image/gif,image/webp"
-          multiple
-          hidden
-          onChange={(e) => {
-            void handleUpload(e.target.files);
-            e.target.value = "";
-          }}
-        />
-        <button
-          type="button"
-          className="btn"
-          disabled={!activeGroup || busy || disabled}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          {busy ? "Working…" : "Upload to group"}
-        </button>
-        <button
-          type="button"
-          className="btn picture-library-save"
-          disabled={busy || (!dirty && !groups.length)}
-          onClick={handleSave}
-          title="Keep pictures in this browser until you delete them"
-        >
-          {dirty ? "Save library" : "Save"}
-        </button>
-        <p className="muted small">
-          Upload, label each picture, then Save. Labels and pictures stay until you remove them.
-        </p>
-        {savedHint ? <p className="ok small">{savedHint}</p> : null}
-      </div>
-
-      {error ? <p className="bad small">{error}</p> : null}
-      {loading ? <p className="muted small">Loading library…</p> : null}
-
-      <div className="picture-library-grid">
-        {!loading && activeGroup && !(activeGroup.images || []).length ? (
-          <p className="muted small picture-library-empty">
-            No pictures in this group yet. Upload above, then Save.
+        <div className="picture-library-upload">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/jpg,image/gif,image/webp"
+            multiple
+            hidden
+            onChange={(e) => {
+              void handleUpload(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            className="btn"
+            disabled={!activeGroup || busy || disabled}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {busy ? "Working…" : "Upload to group"}
+          </button>
+          <button
+            type="button"
+            className="btn picture-library-save"
+            disabled={busy || (!dirty && !groups.length)}
+            onClick={handleSave}
+            title="Keep pictures in this browser until you delete them"
+          >
+            {dirty ? "Save library" : "Save"}
+          </button>
+          <p className="muted small">
+            Upload, label each picture, then Save. Labels and pictures stay until you remove
+            them.
           </p>
-        ) : null}
-        {(activeGroup?.images || []).map((img) => (
-          <div key={img.id} className="picture-library-tile">
-            <label className="picture-library-caption-label small muted">Details</label>
-            <textarea
-              className="picture-library-caption"
-              rows={2}
-              value={img.caption || ""}
-              placeholder="Add details (edit or clear anytime)"
-              disabled={busy || disabled}
-              onChange={(e) => setCaptionLocal(img.id, e.target.value)}
-              onBlur={(e) => void commitCaption(img, e.target.value)}
-            />
-            <button
-              type="button"
-              className="picture-library-thumb"
-              disabled={disabled}
-              title={img.caption?.trim() || "Insert picture"}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => insertImage(img)}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={img.url} alt={img.caption || "Library picture"} loading="lazy" />
-            </button>
-            <div className="picture-library-tile-meta">
-              <span className="muted small">{formatSize(img.size)}</span>
-              <button
-                type="button"
-                className="linkish small"
-                disabled={busy}
-                onClick={() => void handleDeleteImage(img)}
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-        ))}
+        </div>
       </div>
     </aside>
   );

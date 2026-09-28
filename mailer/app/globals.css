@@ -481,6 +481,102 @@ button.chip:hover {
   margin: 0;
 }
 
+.picture-library-browse {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.picture-library-browse > select,
+.picture-library-search > input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.picture-library-search {
+  position: relative;
+}
+
+.picture-library-search-list {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0.25rem;
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  max-height: 14rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0b1220;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.picture-library-search-list button {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0.4rem 0.45rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.picture-library-search-list button:hover:not(:disabled) {
+  background: color-mix(in srgb, #38bdf8 16%, transparent);
+}
+
+.picture-library-search-preview {
+  flex: 0 0 2rem;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #111827;
+  border: 1px solid var(--border);
+}
+
+.picture-library-search-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.picture-library-search-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picture-library-search-empty {
+  margin: 0.35rem 0 0;
+}
+
+.picture-library-manage {
+  margin-top: auto;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.picture-library-manage-title {
+  margin: 0;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--muted, #94a3b8) 90%, white);
+}
+
 .picture-library-group-row {
   display: flex;
   flex-wrap: wrap;
@@ -496,7 +592,6 @@ button.chip:hover {
 .picture-library-new-group {
   display: flex;
   gap: 0.35rem;
-  margin-top: 0.45rem;
 }
 
 .picture-library-new-group input {
