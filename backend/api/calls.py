@@ -1059,7 +1059,7 @@ async def twilio_ai_agent_respond(request: Request):
             "Respond naturally in 1 to 2 clear, spoken sentences to answer their question, mention our commodities if relevant, and keep the conversation going smoothly. "
             "Do NOT use markdown, emojis, bullet points, or special characters."
         )
-        ai_reply = llm_client.generate_content(prompt)
+        ai_reply = llm_client.generate(prompt)
         ai_reply = (ai_reply or "").strip().replace("*", "").replace("#", "")
         if not ai_reply:
             ai_reply = "We offer premium quality white rice, sesame seeds, and agricultural commodities. Are you currently importing any of these items?"

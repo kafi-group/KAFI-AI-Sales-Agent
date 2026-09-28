@@ -866,8 +866,8 @@ class VoiceClient:
 
                 payload = {
                     "customer": {"number": normalized, "name": c_name},
-                    # Enable call recording + artifact transcript for Call history / Train Sara & Rayan.
-                    "recordingEnabled": True,
+                    # Disable call recording + artifact transcript.
+                    "recordingEnabled": False,
                     "assistant": {
                         "name": agent_name,
                         "firstMessage": first_msg,
@@ -886,10 +886,6 @@ class VoiceClient:
                             "provider": "deepgram",
                             "model": "nova-3",
                             "language": transcriber_lang,
-                        },
-                        "artifactPlan": {
-                            "recordingEnabled": True,
-                            "transcriptPlan": {"enabled": True},
                         },
                     },
                 }
