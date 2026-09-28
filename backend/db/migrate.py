@@ -446,6 +446,13 @@ def _ensure_buyer_ai_data_update_fields_column() -> None:
     print("Applied buyers.ai_data_update_fields column.", flush=True)
 
 
+def _ensure_mailer_picture_library_table() -> None:
+    """Idempotent: shared picture library metadata in Postgres."""
+    from modules import mailer_picture_library as lib
+
+    lib.ensure_state_table()
+
+
 def run_migrations() -> None:
     alembic_cfg = _alembic_config()
     script = ScriptDirectory.from_config(alembic_cfg)
@@ -472,6 +479,7 @@ def run_migrations() -> None:
         _ensure_ai_sales_agent_run_log_table()
         _ensure_auto_trash_tables()
         _ensure_buyer_ai_data_update_fields_column()
+        _ensure_mailer_picture_library_table()
     except Exception as exc:
         print(f"WARNING: post-migrate schema ensure failed (continuing): {exc}", flush=True)
 

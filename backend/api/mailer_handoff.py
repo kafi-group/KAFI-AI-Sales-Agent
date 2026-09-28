@@ -635,6 +635,12 @@ class PictureCaptionUpdate(BaseModel):
     caption: str = Field(default="", max_length=500)
 
 
+class PictureLibraryReplace(BaseModel):
+    """Full shared library snapshot (Save publishes this for every browser)."""
+
+    groups: list[dict[str, Any]] = Field(default_factory=list)
+
+
 @router.get("/picture-library")
 def get_picture_library(
     db: Session = Depends(get_db),
@@ -645,6 +651,28 @@ def get_picture_library(
     from modules import mailer_picture_library as lib
 
     return lib.list_library()
+
+
+@router.post("/picture-library/save")
+def save_picture_library(
+    payload: PictureLibraryReplace,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Publish the library to Postgres so every browser / incognito sees the same pictures."""
+    _ = db
+    from modules import mailer_picture_library as lib
+
+    try:
+        library = lib.replace_library(
+            payload.groups,
+            uploaded_by=user.username or str(user.id),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"Could not save shared picture library: {exc}") from exc
+    return {"ok": True, "library": library}
 
 
 @router.post("/picture-library/groups")

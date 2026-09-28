@@ -1191,6 +1191,21 @@ class AiSalesAgentState(Base):
     )
 
 
+class MailerPictureLibraryState(Base):
+    """Single-row shared mailer picture library (groups + image metadata). Survives redeploys."""
+
+    __tablename__ = "mailer_picture_library_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    groups: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class AutoTrashSettings(Base):
     """Per-mailbox-user Auto Trash toggle (only that user's inbox is scanned when ON)."""
 

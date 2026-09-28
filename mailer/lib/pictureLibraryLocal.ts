@@ -4,6 +4,16 @@ import type { PictureLibrary, PictureLibraryGroup } from "./pictureLibrary";
 
 const STORAGE_KEY = "kafi.mailer.picture_library.v1";
 
+/** Clear browser cache after a successful shared save (optional). */
+export function clearLocalPictureLibrary(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function loadLocalPictureLibrary(): PictureLibrary {
   if (typeof window === "undefined") return { groups: [] };
   try {

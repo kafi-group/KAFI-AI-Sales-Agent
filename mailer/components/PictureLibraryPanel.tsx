@@ -1,22 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   createPictureGroup,
   deletePictureFromGroup,
   deletePictureGroup,
   fetchPictureLibrary,
   renamePictureGroup,
+  savePictureLibrary,
   updatePictureCaption,
   uploadPictureToGroup,
   type PictureLibraryGroup,
   type PictureLibraryImage,
 } from "@/lib/pictureLibrary";
 import {
-  fileToDataUrl,
+  clearLocalPictureLibrary,
   loadLocalPictureLibrary,
-  mergePictureLibraries,
-  saveLocalPictureLibrary,
 } from "@/lib/pictureLibraryLocal";
 
 export type PictureLibraryPanelProps = {
@@ -32,8 +31,16 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function newLocalId(prefix: string): string {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+function applyGroups(
+  next: PictureLibraryGroup[],
+  setGroups: Dispatch<SetStateAction<PictureLibraryGroup[]>>,
+  setActiveGroupId: Dispatch<SetStateAction<string>>,
+) {
+  setGroups(next);
+  setActiveGroupId((prev) => {
+    if (prev && next.some((g) => g.id === prev)) return prev;
+    return next[0]?.id || "";
+  });
 }
 
 export function PictureLibraryPanel({
@@ -54,35 +61,36 @@ export function PictureLibraryPanel({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const searchWrapRef = useRef<HTMLDivElement>(null);
 
-  const persistLocal = useCallback((nextGroups: PictureLibraryGroup[]) => {
-    saveLocalPictureLibrary({ groups: nextGroups });
-    setDirty(false);
-    setSavedHint("Saved — pictures stay until you remove them.");
-    window.setTimeout(() => setSavedHint(null), 4000);
-  }, []);
-
   const refresh = useCallback(async () => {
     setError(null);
     const local = loadLocalPictureLibrary();
     try {
       const remote = await fetchPictureLibrary();
-      const merged = mergePictureLibraries(local, remote);
-      setGroups(merged.groups);
-      setActiveGroupId((prev) => {
-        if (prev && merged.groups.some((g) => g.id === prev)) return prev;
-        return merged.groups[0]?.id || "";
-      });
-      // Keep browser copy in sync so redeploys cannot wipe the library UI.
-      if (merged.groups.length) {
-        saveLocalPictureLibrary(merged);
+      if ((remote.groups || []).length) {
+        // Server is source of truth — never resurrect deleted local leftovers.
+        applyGroups(remote.groups, setGroups, setActiveGroupId);
+        clearLocalPictureLibrary();
+        setDirty(false);
+      } else if (local.groups.length) {
+        // Migrate old browser-only libraries: show them and ask user to Save.
+        applyGroups(local.groups, setGroups, setActiveGroupId);
+        setDirty(true);
+        setSavedHint(
+          "Pictures were only on this browser before. Click Save library to share them with everyone (any PC / incognito).",
+        );
+      } else {
+        applyGroups([], setGroups, setActiveGroupId);
+        setDirty(false);
       }
     } catch (e) {
-      setGroups(local.groups);
-      setActiveGroupId((prev) => {
-        if (prev && local.groups.some((g) => g.id === prev)) return prev;
-        return local.groups[0]?.id || "";
-      });
-      if (!local.groups.length) {
+      if (local.groups.length) {
+        applyGroups(local.groups, setGroups, setActiveGroupId);
+        setDirty(true);
+        setError(
+          (e instanceof Error ? e.message : "Could not reach shared library") +
+            " — showing this browser’s draft. Click Save library when the API is back.",
+        );
+      } else {
         setError(e instanceof Error ? e.message : "Could not load picture library");
       }
     } finally {
@@ -121,22 +129,13 @@ export function PictureLibraryPanel({
     setBusy(true);
     setError(null);
     try {
-      let row: PictureLibraryGroup;
-      try {
-        row = await createPictureGroup(name);
-      } catch {
-        row = {
-          id: newLocalId("group"),
-          name,
-          created_at: new Date().toISOString(),
-          images: [],
-        };
-      }
+      const row = await createPictureGroup(name);
       const next = [...groups.filter((g) => g.id !== row.id), row];
-      setGroups(next);
-      setActiveGroupId(row.id);
+      applyGroups(next, setGroups, setActiveGroupId);
       setNewGroupName("");
-      setDirty(true);
+      setDirty(false);
+      setSavedHint("Group created on shared library.");
+      window.setTimeout(() => setSavedHint(null), 4000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create group");
     } finally {
@@ -151,14 +150,11 @@ export function PictureLibraryPanel({
     setBusy(true);
     setError(null);
     try {
-      try {
-        await renamePictureGroup(activeGroup.id, name);
-      } catch {
-        /* local rename still applies */
-      }
-      const next = groups.map((g) => (g.id === activeGroup.id ? { ...g, name } : g));
-      setGroups(next);
-      setDirty(true);
+      await renamePictureGroup(activeGroup.id, name);
+      setGroups((prev) =>
+        prev.map((g) => (g.id === activeGroup.id ? { ...g, name } : g)),
+      );
+      setDirty(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not rename group");
     } finally {
@@ -178,15 +174,11 @@ export function PictureLibraryPanel({
     setBusy(true);
     setError(null);
     try {
-      try {
-        await deletePictureGroup(activeGroup.id);
-      } catch {
-        /* still remove locally */
-      }
+      await deletePictureGroup(activeGroup.id);
       const next = groups.filter((g) => g.id !== activeGroup.id);
-      setGroups(next);
-      setActiveGroupId(next[0]?.id || "");
-      persistLocal(next);
+      applyGroups(next, setGroups, setActiveGroupId);
+      clearLocalPictureLibrary();
+      setDirty(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not delete group");
     } finally {
@@ -200,36 +192,38 @@ export function PictureLibraryPanel({
     setError(null);
     try {
       const added: PictureLibraryImage[] = [];
+      const failures: string[] = [];
       for (const file of Array.from(files)) {
         if (!file.type.startsWith("image/")) continue;
         try {
           const img = await uploadPictureToGroup(activeGroup.id, file);
           added.push(img);
-        } catch {
-          // API/ephemeral disk failed — keep a durable data-URL copy in the browser.
-          const url = await fileToDataUrl(file);
-          added.push({
-            id: newLocalId("img"),
-            url,
-            filename: file.name || "image.png",
-            content_type: file.type || "image/png",
-            size: file.size,
-            created_at: new Date().toISOString(),
-          });
+        } catch (e) {
+          failures.push(
+            `${file.name}: ${e instanceof Error ? e.message : "upload failed"}`,
+          );
         }
       }
       if (!added.length) {
-        setError("No images uploaded");
+        setError(failures[0] || "No images uploaded to the shared library");
         return;
       }
-      const next = groups.map((g) => {
-        if (g.id !== activeGroup.id) return g;
-        const byId = new Map((g.images || []).map((i) => [i.id, i]));
-        for (const img of added) byId.set(img.id, img);
-        return { ...g, images: Array.from(byId.values()) };
-      });
-      setGroups(next);
-      setDirty(true);
+      setGroups((prev) =>
+        prev.map((g) => {
+          if (g.id !== activeGroup.id) return g;
+          const byId = new Map((g.images || []).map((i) => [i.id, i]));
+          for (const img of added) byId.set(img.id, img);
+          return { ...g, images: Array.from(byId.values()) };
+        }),
+      );
+      setDirty(false);
+      setSavedHint(
+        failures.length
+          ? `Uploaded ${added.length}; some failed (shared save skipped for those).`
+          : `Uploaded ${added.length} picture(s) to the shared library.`,
+      );
+      window.setTimeout(() => setSavedHint(null), 5000);
+      if (failures.length) setError(failures.join(" · "));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -239,22 +233,23 @@ export function PictureLibraryPanel({
 
   async function handleDeleteImage(img: PictureLibraryImage) {
     if (!activeGroup || busy) return;
-    if (!window.confirm(`Remove “${img.filename}” from this group?`)) return;
+    const label = (img.caption || "").trim() || img.filename || "this picture";
+    if (!window.confirm(`Remove “${label}” from the shared library?`)) return;
     setBusy(true);
     setError(null);
     try {
-      try {
-        await deletePictureFromGroup(activeGroup.id, img.id);
-      } catch {
-        /* local delete still applies */
-      }
-      const next = groups.map((g) =>
-        g.id === activeGroup.id
-          ? { ...g, images: (g.images || []).filter((i) => i.id !== img.id) }
-          : g,
+      await deletePictureFromGroup(activeGroup.id, img.id);
+      setGroups((prev) =>
+        prev.map((g) =>
+          g.id === activeGroup.id
+            ? { ...g, images: (g.images || []).filter((i) => i.id !== img.id) }
+            : g,
+        ),
       );
-      setGroups(next);
-      persistLocal(next);
+      clearLocalPictureLibrary();
+      setDirty(false);
+      setSavedHint("Removed from shared library — other browsers will see this after refresh.");
+      window.setTimeout(() => setSavedHint(null), 4000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not remove picture");
     } finally {
@@ -262,9 +257,24 @@ export function PictureLibraryPanel({
     }
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (busy) return;
-    persistLocal(groups);
+    setBusy(true);
+    setError(null);
+    try {
+      const library = await savePictureLibrary(groups);
+      applyGroups(library.groups || [], setGroups, setActiveGroupId);
+      clearLocalPictureLibrary();
+      setDirty(false);
+      setSavedHint(
+        "Saved to shared library — available on any PC, browser, or incognito after login.",
+      );
+      window.setTimeout(() => setSavedHint(null), 6000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save shared library");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function setCaptionLocal(imageId: string, caption: string) {
@@ -286,9 +296,8 @@ export function PictureLibraryPanel({
   async function commitCaption(img: PictureLibraryImage, caption: string) {
     if (!activeGroup) return;
     const cleaned = caption.trim();
-    let nextGroups: PictureLibraryGroup[] = [];
-    setGroups((prev) => {
-      nextGroups = prev.map((g) =>
+    setGroups((prev) =>
+      prev.map((g) =>
         g.id !== activeGroup.id
           ? g
           : {
@@ -297,16 +306,15 @@ export function PictureLibraryPanel({
                 i.id === img.id ? { ...i, caption: cleaned } : i,
               ),
             },
-      );
-      return nextGroups;
-    });
-    setDirty(true);
+      ),
+    );
     try {
       await updatePictureCaption(activeGroup.id, img.id, cleaned);
+      setDirty(false);
     } catch {
-      /* local save still holds the caption */
+      setDirty(true);
+      setError("Caption saved on this screen only — click Save library to share it.");
     }
-    saveLocalPictureLibrary({ groups: nextGroups.length ? nextGroups : groups });
   }
 
   function insertImage(img: PictureLibraryImage) {
@@ -325,8 +333,9 @@ export function PictureLibraryPanel({
       <div className="picture-library-head">
         <h3>Picture library</h3>
         <p className="muted small">
-          Shared for all users. Pick a group, search or click a picture to paste it where the
-          cursor was in the email.
+          Shared for all users on any PC or browser (including incognito). Pick a group, search
+          or click a picture to paste it into the email. Use Save library to publish changes for
+          everyone.
         </p>
       </div>
 
@@ -530,15 +539,15 @@ export function PictureLibraryPanel({
           <button
             type="button"
             className="btn picture-library-save"
-            disabled={busy || (!dirty && !groups.length)}
-            onClick={handleSave}
-            title="Keep pictures in this browser until you delete them"
+            disabled={busy || !groups.length}
+            onClick={() => void handleSave()}
+            title="Publish this library to the shared server for every user and browser"
           >
-            {dirty ? "Save library" : "Save"}
+            {busy ? "Saving…" : dirty ? "Save library *" : "Save library"}
           </button>
           <p className="muted small">
-            Upload, label each picture, then Save. Labels and pictures stay until you remove
-            them.
+            Save publishes to the shared server (not just this PC). After Save, any laptop or
+            incognito window will load the same pictures when logged in.
           </p>
         </div>
       </div>

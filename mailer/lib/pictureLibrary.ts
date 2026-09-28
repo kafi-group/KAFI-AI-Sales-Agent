@@ -132,3 +132,17 @@ export async function updatePictureCaption(
   );
   return data.image;
 }
+
+/** Publish full library to the shared server (works in any browser / incognito). */
+export async function savePictureLibrary(
+  groups: PictureLibraryGroup[],
+): Promise<PictureLibrary> {
+  const data = await authFetch<{ ok: boolean; library: PictureLibrary }>(
+    "/mailer/picture-library/save",
+    {
+      method: "POST",
+      body: JSON.stringify({ groups }),
+    },
+  );
+  return data.library;
+}
