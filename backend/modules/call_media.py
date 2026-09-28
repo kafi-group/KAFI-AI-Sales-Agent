@@ -156,24 +156,13 @@ def save_ai_call_media(
     if url:
         media["recording_url"] = url
         media["recording_status"] = "completed"
-        try:
-            # Twilio media URLs need auth; Vapi/S3 usually do not.
-            if "api.twilio.com" in url.lower():
-                path, content_type = download_twilio_recording(url, sid)
-            else:
-                path, content_type = download_public_recording(url, sid)
-            media["local_path"] = f"call_recordings/{path.name}"
-            media["content_type"] = content_type
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Local copy of AI call recording for %s skipped (%s) — streaming direct URL instead", interaction_id, exc)
-            # Retain recording_url so the user can still stream/listen directly from the presigned URL!
 
     text = (transcript or "").strip()
     if text:
         media["transcript"] = text[:20000]
         media["transcript_status"] = "ready"
         media["transcript_error"] = None
-    elif media.get("local_path") and (media.get("transcript_status") or "") != "ready":
+    elif media.get("recording_url") and (media.get("transcript_status") or "") != "ready":
         media["transcript_status"] = media.get("transcript_status") or "pending"
 
     if not media.get("local_path") and not media.get("recording_url") and not media.get("transcript"):
@@ -182,6 +171,35 @@ def save_ai_call_media(
     _set_call_media(interaction, media)
     db.commit()
     db.refresh(interaction)
+
+    # Download local copy asynchronously in background so DB connection is freed instantly!
+    if url and not media.get("local_path"):
+        import threading
+
+        def _bg_download(target_url: str, target_sid: str, target_iid: int):
+            try:
+                if "api.twilio.com" in target_url.lower():
+                    path, content_type = download_twilio_recording(target_url, target_sid)
+                else:
+                    path, content_type = download_public_recording(target_url, target_sid)
+                from db.session import SessionLocal
+
+                with SessionLocal() as bg_db:
+                    attach_local_recording(
+                        bg_db,
+                        interaction_id=target_iid,
+                        local_path=f"call_recordings/{path.name}",
+                        content_type=content_type,
+                    )
+            except Exception as exc:
+                logger.warning("Background local audio caching skipped for %s: %s", target_iid, exc)
+
+        threading.Thread(
+            target=_bg_download,
+            args=(url, sid, int(interaction_id)),
+            daemon=True,
+        ).start()
+
     return media
 
 

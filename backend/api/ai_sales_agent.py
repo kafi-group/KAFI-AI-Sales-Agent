@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import time
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -861,6 +862,7 @@ def handle_ai_call_status(
     ring_attempt: int | None = None,
     recording_url: str | None = None,
     interaction_id: int | None = None,
+    db: Session | None = None,
 ) -> dict[str, Any]:
     """Twilio / Vapi terminal status — send follow-up and dial the next queued lead."""
     from integrations.voice_client import voice_client
@@ -900,7 +902,7 @@ def handle_ai_call_status(
     # marked the task completed. Still attach recording + captions to Call history.
     if task is None or task.get("status") not in ("in_progress", "running"):
         if has_media and iid_for_late:
-            db = SessionLocal()
+            local_db = db if db is not None else SessionLocal()
             try:
                 from modules.call_media import save_ai_call_media
 
@@ -914,7 +916,7 @@ def handle_ai_call_status(
                     if interaction_id and not task.get("interaction_id"):
                         task["interaction_id"] = interaction_id
                 save_ai_call_media(
-                    db,
+                    local_db,
                     interaction_id=int(iid_for_late),
                     recording_url=recording_url
                     or (task.get("recording_url") if task else None),
@@ -928,7 +930,8 @@ def handle_ai_call_status(
                 print(f"AI call late media save failed: {media_exc}", flush=True)
                 return {"ok": False, "error": str(media_exc), "late_media": True}
             finally:
-                db.close()
+                if db is None:
+                    local_db.close()
         return {"ok": True, "ignored": True}
 
     # Ignore stale status from attempt 1 after we already moved to attempt 2.
@@ -992,7 +995,7 @@ def handle_ai_call_status(
                 f"Auto-redial failed after attempt {attempt}: {redial.get('error')}"
             )
 
-    db = SessionLocal()
+    local_db = db if db is not None else SessionLocal()
     try:
         # Persist recording + closed captions onto the Call history Interaction.
         try:
@@ -1001,7 +1004,7 @@ def handle_ai_call_status(
             iid = task.get("interaction_id") or interaction_id
             if iid and (recording_url or call_transcript or task.get("recording_url") or task.get("call_transcript")):
                 save_ai_call_media(
-                    db,
+                    local_db,
                     interaction_id=int(iid),
                     recording_url=recording_url or task.get("recording_url"),
                     recording_sid=str(call_sid or f"ai-{iid}"),
@@ -1012,7 +1015,7 @@ def handle_ai_call_status(
             print(f"AI call media save failed: {media_exc}", flush=True)
 
         _finish_task(
-            db,
+            local_db,
             task,
             status=status,
             ended_reason=ended_reason,
@@ -1022,11 +1025,21 @@ def handle_ai_call_status(
         )
         return {"ok": True, "task_id": task.get("id")}
     finally:
-        db.close()
+        if db is None:
+            local_db.close()
+
+
+_LAST_RECONCILE_TIME: float = 0.0
 
 
 def _reconcile_live_calls(db: Session) -> None:
     """If webhooks were missed, poll Vapi/Twilio for ended calls; clear stale dials."""
+    global _LAST_RECONCILE_TIME
+    now = time.monotonic()
+    if now - _LAST_RECONCILE_TIME < 6.0:
+        return
+    _LAST_RECONCILE_TIME = now
+
     from integrations.voice_client import voice_client
 
     live = [t for t in _TASKS if t.get("status") == "in_progress"]
@@ -1073,6 +1086,7 @@ def _reconcile_live_calls(db: Session) -> None:
                     if task.get("interaction_id") is not None
                     else None
                 ),
+                db=db,
             )
             continue
 
