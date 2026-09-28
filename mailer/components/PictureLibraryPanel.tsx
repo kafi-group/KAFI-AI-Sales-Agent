@@ -7,6 +7,7 @@ import {
   deletePictureGroup,
   fetchPictureLibrary,
   renamePictureGroup,
+  updatePictureCaption,
   uploadPictureToGroup,
   type PictureLibraryGroup,
   type PictureLibraryImage,
@@ -244,6 +245,48 @@ export function PictureLibraryPanel({
     persistLocal(groups);
   }
 
+  function setCaptionLocal(imageId: string, caption: string) {
+    setGroups((prev) =>
+      prev.map((g) =>
+        g.id !== activeGroupId
+          ? g
+          : {
+              ...g,
+              images: (g.images || []).map((i) =>
+                i.id === imageId ? { ...i, caption } : i,
+              ),
+            },
+      ),
+    );
+    setDirty(true);
+  }
+
+  async function commitCaption(img: PictureLibraryImage, caption: string) {
+    if (!activeGroup) return;
+    const cleaned = caption.trim();
+    let nextGroups: PictureLibraryGroup[] = [];
+    setGroups((prev) => {
+      nextGroups = prev.map((g) =>
+        g.id !== activeGroup.id
+          ? g
+          : {
+              ...g,
+              images: (g.images || []).map((i) =>
+                i.id === img.id ? { ...i, caption: cleaned } : i,
+              ),
+            },
+      );
+      return nextGroups;
+    });
+    setDirty(true);
+    try {
+      await updatePictureCaption(activeGroup.id, img.id, cleaned);
+    } catch {
+      /* local save still holds the caption */
+    }
+    saveLocalPictureLibrary({ groups: nextGroups.length ? nextGroups : groups });
+  }
+
   function insertImage(img: PictureLibraryImage) {
     if (disabled) return;
     onInsert(img.url, img.filename || "image");
@@ -255,7 +298,7 @@ export function PictureLibraryPanel({
         <h3>Picture library</h3>
         <p className="muted small">
           Shared for all users. Click a picture to paste it where the cursor was in the email.
-          Press <strong>Save</strong> after uploading so pictures stay until you delete them.
+          Add a short label above each picture. Press <strong>Save</strong> after uploading.
         </p>
       </div>
 
@@ -348,7 +391,7 @@ export function PictureLibraryPanel({
           {dirty ? "Save library" : "Save"}
         </button>
         <p className="muted small">
-          Upload, then click Save. Saved pictures remain here until you remove them.
+          Upload, label each picture, then Save. Labels and pictures stay until you remove them.
         </p>
         {savedHint ? <p className="ok small">{savedHint}</p> : null}
       </div>
@@ -364,21 +407,28 @@ export function PictureLibraryPanel({
         ) : null}
         {(activeGroup?.images || []).map((img) => (
           <div key={img.id} className="picture-library-tile">
+            <label className="picture-library-caption-label small muted">Details</label>
+            <textarea
+              className="picture-library-caption"
+              rows={2}
+              value={img.caption || ""}
+              placeholder="Add details (edit or clear anytime)"
+              disabled={busy || disabled}
+              onChange={(e) => setCaptionLocal(img.id, e.target.value)}
+              onBlur={(e) => void commitCaption(img, e.target.value)}
+            />
             <button
               type="button"
               className="picture-library-thumb"
               disabled={disabled}
-              title={`Insert ${img.filename}`}
+              title={img.caption?.trim() || "Insert picture"}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => insertImage(img)}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={img.url} alt={img.filename} loading="lazy" />
+              <img src={img.url} alt={img.caption || "Library picture"} loading="lazy" />
             </button>
             <div className="picture-library-tile-meta">
-              <span className="picture-library-name" title={img.filename}>
-                {img.filename}
-              </span>
               <span className="muted small">{formatSize(img.size)}</span>
               <button
                 type="button"

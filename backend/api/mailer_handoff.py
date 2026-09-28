@@ -631,6 +631,10 @@ class PictureGroupRename(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
 
+class PictureCaptionUpdate(BaseModel):
+    caption: str = Field(default="", max_length=500)
+
+
 @router.get("/picture-library")
 def get_picture_library(
     db: Session = Depends(get_db),
@@ -759,6 +763,25 @@ def delete_picture_from_group(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True}
+
+
+@router.post("/picture-library/groups/{group_id}/images/{media_id}/caption")
+def update_picture_caption(
+    group_id: str,
+    media_id: str,
+    payload: PictureCaptionUpdate,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Set free-text details above a library thumbnail (clear with empty string)."""
+    _ = db, user
+    from modules import mailer_picture_library as lib
+
+    try:
+        row = lib.set_image_caption(group_id, media_id, payload.caption)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "image": row}
 
 
 @router.post("/attachment-upload", response_model=MailerAttachmentUploadResponse)

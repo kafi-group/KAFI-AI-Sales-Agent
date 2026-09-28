@@ -78,6 +78,7 @@ def _load() -> dict[str, Any]:
                         "filename": str(img.get("filename") or f"{mid}.png"),
                         "content_type": str(img.get("content_type") or "image/png"),
                         "size": int(img.get("size") or 0),
+                        "caption": str(img.get("caption") or ""),
                         "uploaded_by": str(img.get("uploaded_by") or ""),
                         "created_at": str(img.get("created_at") or ""),
                     }
@@ -191,6 +192,7 @@ def add_image(
                 "filename": (filename or f"{mid}.png").strip(),
                 "content_type": content_type or "image/png",
                 "size": int(size or 0),
+                "caption": "",
                 "uploaded_by": (uploaded_by or "").strip(),
                 "created_at": _now(),
             }
@@ -199,6 +201,23 @@ def add_image(
             _save(data)
             return row
     raise ValueError("Group not found")
+
+
+def set_image_caption(group_id: str, media_id: str, caption: str) -> dict[str, Any]:
+    """Set or clear free-text caption shown above the thumbnail."""
+    text = (caption or "").strip()
+    with _LOCK:
+        data = _load()
+        for g in data.get("groups") or []:
+            if g.get("id") != group_id:
+                continue
+            for img in g.get("images") or []:
+                if img.get("id") != media_id:
+                    continue
+                img["caption"] = text
+                _save(data)
+                return img
+    raise ValueError("Image not found")
 
 
 def delete_image(group_id: str, media_id: str) -> None:

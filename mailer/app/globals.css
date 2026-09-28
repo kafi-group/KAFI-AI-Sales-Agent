@@ -535,6 +535,34 @@ button.chip:hover {
   border-radius: 8px;
   overflow: hidden;
   background: color-mix(in srgb, var(--panel) 80%, black);
+  display: flex;
+  flex-direction: column;
+}
+
+.picture-library-caption-label {
+  display: block;
+  padding: 0.4rem 0.55rem 0;
+}
+
+.picture-library-caption {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0.25rem 0.55rem 0.45rem;
+  width: calc(100% - 1.1rem);
+  resize: vertical;
+  min-height: 2.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #0b1220;
+  color: inherit;
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+}
+
+.picture-library-caption:focus {
+  outline: 1px solid color-mix(in srgb, #38bdf8 60%, transparent);
+  border-color: #38bdf8;
 }
 
 .picture-library-thumb {

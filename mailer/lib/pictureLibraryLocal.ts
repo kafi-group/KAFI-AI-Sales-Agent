@@ -43,6 +43,7 @@ export function saveLocalPictureLibrary(library: PictureLibrary): void {
         filename: img.filename,
         content_type: img.content_type,
         size: img.size,
+        caption: img.caption || "",
         uploaded_by: img.uploaded_by,
         created_at: img.created_at,
       })),
@@ -71,7 +72,17 @@ export function mergePictureLibraries(
     }
     const imgById = new Map(existing.images.map((i) => [i.id, i]));
     for (const img of g.images || []) {
-      if (!imgById.has(img.id)) imgById.set(img.id, img);
+      const prior = imgById.get(img.id);
+      if (!prior) {
+        imgById.set(img.id, img);
+      } else {
+        imgById.set(img.id, {
+          ...prior,
+          ...img,
+          // Prefer non-empty caption from either side.
+          caption: (img.caption || "").trim() || (prior.caption || "").trim() || "",
+        });
+      }
     }
     byId.set(g.id, {
       ...existing,

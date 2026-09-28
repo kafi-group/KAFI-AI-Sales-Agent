@@ -8,6 +8,8 @@ export type PictureLibraryImage = {
   filename: string;
   content_type: string;
   size: number;
+  /** Free-text label shown above the thumbnail (editable by any user). */
+  caption?: string;
   uploaded_by?: string;
   created_at?: string;
 };
@@ -117,4 +119,16 @@ export async function deletePictureFromGroup(
     `/mailer/picture-library/groups/${encodeURIComponent(groupId)}/images/${encodeURIComponent(mediaId)}/delete`,
     { method: "POST" },
   );
+}
+
+export async function updatePictureCaption(
+  groupId: string,
+  mediaId: string,
+  caption: string,
+): Promise<PictureLibraryImage> {
+  const data = await authFetch<{ image: PictureLibraryImage }>(
+    `/mailer/picture-library/groups/${encodeURIComponent(groupId)}/images/${encodeURIComponent(mediaId)}/caption`,
+    { method: "POST", body: JSON.stringify({ caption }) },
+  );
+  return data.image;
 }
