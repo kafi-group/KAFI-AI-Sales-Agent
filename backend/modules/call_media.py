@@ -60,6 +60,8 @@ def set_ai_training_selected_flag(interaction: Interaction, selected: bool) -> N
 
 
 def _set_call_media(interaction: Interaction, media: dict[str, Any]) -> None:
+    from sqlalchemy.orm.attributes import flag_modified
+
     attachments = list(interaction.attachments or [])
     if not isinstance(attachments, list):
         attachments = []
@@ -70,6 +72,7 @@ def _set_call_media(interaction: Interaction, media: dict[str, Any]) -> None:
     ]
     kept.append(media)
     interaction.attachments = kept
+    flag_modified(interaction, "attachments")
 
 
 def public_call_media(media: dict[str, Any] | None, *, interaction_id: int) -> dict[str, Any]:
@@ -176,6 +179,51 @@ def save_ai_call_media(
     db.commit()
     db.refresh(interaction)
     return media
+
+
+def maybe_backfill_ai_call_media(db: Session, interaction: Interaction) -> dict[str, Any] | None:
+    """If Call history has no recording yet, try once to pull it from Vapi by SID in content."""
+    import re
+
+    existing = get_call_media(interaction)
+    if existing and (
+        existing.get("local_path")
+        or existing.get("recording_url")
+        or (existing.get("transcript") or "").strip()
+    ):
+        return existing
+
+    content = interaction.content or ""
+    match = re.search(r"SID:\s*([A-Za-z0-9_-]+)", content)
+    if not match:
+        return existing
+    sid = match.group(1).strip()
+    if not sid or sid.startswith("CA"):
+        return existing
+
+    try:
+        from integrations.voice_client import voice_client
+
+        info = voice_client.fetch_outbound_status(sid)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Vapi media backfill status fetch failed for %s: %s", interaction.id, exc)
+        return existing
+
+    if not info.get("recording_url") and not info.get("call_transcript"):
+        return existing
+
+    try:
+        return save_ai_call_media(
+            db,
+            interaction_id=int(interaction.id),
+            recording_url=info.get("recording_url"),
+            recording_sid=sid,
+            duration_seconds=info.get("duration"),
+            transcript=info.get("call_transcript"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Vapi media backfill save failed for %s: %s", interaction.id, exc)
+        return existing
 
 
 def download_twilio_recording(recording_url: str, recording_sid: str) -> tuple[Path, str]:

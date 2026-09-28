@@ -884,7 +884,51 @@ def handle_ai_call_status(
     task = _find_task(task_id)
     if task is None and call_sid:
         task = next((t for t in _TASKS if t.get("call_sid") == call_sid), None)
+
+    has_media = bool(
+        (recording_url or "").strip()
+        or (call_transcript or "").strip()
+        or (task and ((task.get("recording_url") or "").strip() or (task.get("call_transcript") or "").strip()))
+    )
+    iid_for_late = None
+    if task is not None:
+        iid_for_late = task.get("interaction_id") or interaction_id
+    elif interaction_id:
+        iid_for_late = interaction_id
+
+    # Late end-of-call-report often arrives after status-update / End Call already
+    # marked the task completed. Still attach recording + captions to Call history.
     if task is None or task.get("status") not in ("in_progress", "running"):
+        if has_media and iid_for_late:
+            db = SessionLocal()
+            try:
+                from modules.call_media import save_ai_call_media
+
+                if task is not None:
+                    if call_summary:
+                        task["call_summary"] = call_summary
+                    if call_transcript:
+                        task["call_transcript"] = call_transcript
+                    if recording_url:
+                        task["recording_url"] = recording_url
+                    if interaction_id and not task.get("interaction_id"):
+                        task["interaction_id"] = interaction_id
+                save_ai_call_media(
+                    db,
+                    interaction_id=int(iid_for_late),
+                    recording_url=recording_url
+                    or (task.get("recording_url") if task else None),
+                    recording_sid=str(call_sid or f"ai-{iid_for_late}"),
+                    duration_seconds=duration,
+                    transcript=call_transcript
+                    or (task.get("call_transcript") if task else None),
+                )
+                return {"ok": True, "late_media": True, "interaction_id": int(iid_for_late)}
+            except Exception as media_exc:  # noqa: BLE001
+                print(f"AI call late media save failed: {media_exc}", flush=True)
+                return {"ok": False, "error": str(media_exc), "late_media": True}
+            finally:
+                db.close()
         return {"ok": True, "ignored": True}
 
     # Ignore stale status from attempt 1 after we already moved to attempt 2.
@@ -1022,6 +1066,13 @@ def _reconcile_live_calls(db: Session) -> None:
                 duration=info.get("duration"),
                 ended_reason=ended_reason,
                 ring_attempt=task.get("ring_attempt"),
+                recording_url=info.get("recording_url"),
+                call_transcript=info.get("call_transcript"),
+                interaction_id=(
+                    int(task["interaction_id"])
+                    if task.get("interaction_id") is not None
+                    else None
+                ),
             )
             continue
 
@@ -1580,6 +1631,30 @@ def end_ai_call(
             hangup=False,  # already hung up above
         )
         ended_task = t
+        # Pull recording/transcript from Vapi now — end-of-call-report may arrive later
+        # or never if webhooks were missed; Call history still needs the media.
+        try:
+            sid = t.get("call_sid")
+            iid = t.get("interaction_id")
+            if sid and iid:
+                info = voice_client.fetch_outbound_status(str(sid))
+                from modules.call_media import save_ai_call_media
+
+                if info.get("recording_url") or info.get("call_transcript"):
+                    save_ai_call_media(
+                        db,
+                        interaction_id=int(iid),
+                        recording_url=info.get("recording_url"),
+                        recording_sid=str(sid),
+                        duration_seconds=info.get("duration") or duration,
+                        transcript=info.get("call_transcript"),
+                    )
+                    if info.get("recording_url"):
+                        t["recording_url"] = info.get("recording_url")
+                    if info.get("call_transcript"):
+                        t["call_transcript"] = info.get("call_transcript")
+        except Exception as media_exc:  # noqa: BLE001
+            print(f"End-call media fetch failed: {media_exc}", flush=True)
         break
 
     # No matching task but we still tried SIDs — report hangup outcome.

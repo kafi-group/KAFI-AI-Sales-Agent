@@ -292,12 +292,15 @@ def call_interaction_to_dict(db: Session, interaction: Interaction) -> dict:
     from modules.call_media import (
         get_ai_training_selected,
         get_call_media,
+        maybe_backfill_ai_call_media,
         public_call_media,
     )
 
     contact = db.get(Contact, interaction.contact_id) if interaction.contact_id else None
     buyer = db.get(Buyer, contact.buyer_id) if contact else None
     parsed = parse_call_fields(interaction.content)
+    # Recover recording/CC for AI calls that finished before the late webhook arrived.
+    maybe_backfill_ai_call_media(db, interaction)
     media = public_call_media(get_call_media(interaction), interaction_id=interaction.id)
 
     company = (buyer.company_name if buyer else None) or parsed.get("company_name") or interaction.subject or "Direct AI Call"

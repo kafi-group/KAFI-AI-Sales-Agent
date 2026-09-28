@@ -187,7 +187,7 @@ export function CallRecordingPanel({
     return (
       <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
         <p className="text-xs text-slate-500">
-          Recording &amp; closed captions appear here after the call ends (AI Sales Agent and
+          Recording & closed captions appear here after the call ends (AI Sales Agent and
           manual calls).
         </p>
       </div>

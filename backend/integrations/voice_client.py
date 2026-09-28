@@ -1173,6 +1173,21 @@ class VoiceClient:
                 ended_reason = str(data.get("endedReason") or data.get("ended_reason") or "")
                 duration = data.get("durationSeconds") or data.get("duration")
                 ended = status in {"ended", "completed", "failed"} or bool(ended_reason)
+                art = data.get("artifact") if isinstance(data.get("artifact"), dict) else {}
+                recording_url = None
+                for candidate in (
+                    data.get("recordingUrl"),
+                    data.get("stereoRecordingUrl"),
+                    art.get("recordingUrl"),
+                    art.get("stereoRecordingUrl"),
+                ):
+                    if isinstance(candidate, str) and candidate.strip().startswith("http"):
+                        recording_url = candidate.strip()
+                        break
+                transcript = None
+                t = art.get("transcript")
+                if isinstance(t, str) and t.strip():
+                    transcript = t.strip()[:8000]
                 return {
                     "ok": True,
                     "ended": ended,
@@ -1180,6 +1195,8 @@ class VoiceClient:
                     "ended_reason": ended_reason,
                     "duration": duration,
                     "engine": "vapi",
+                    "recording_url": recording_url,
+                    "call_transcript": transcript,
                 }
             except Exception as exc:
                 print(f"Vapi status fetch failed: {exc}", flush=True)
