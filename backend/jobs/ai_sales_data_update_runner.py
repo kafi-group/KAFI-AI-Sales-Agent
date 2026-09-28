@@ -9,6 +9,7 @@ def run_data_update_tick() -> dict[str, Any]:
     """Start due schedules and process at most one contact per running persona (cooldown)."""
     from db.session import SessionLocal
     from modules import ai_sales_data_update as du
+    from modules.ai_agent_persona import persona_display_name
 
     results: list[dict[str, Any]] = []
 
@@ -40,7 +41,7 @@ def run_data_update_tick() -> dict[str, Any]:
                             tasks=pending,
                             user_label="Scheduler",
                             note=(
-                                f"{'Sara' if persona == 'female' else 'Rayan'} "
+                                f"{persona_display_name(persona)} "
                                 f"Data Update scheduled start ({len(pending)} contacts)"
                             ),
                         )

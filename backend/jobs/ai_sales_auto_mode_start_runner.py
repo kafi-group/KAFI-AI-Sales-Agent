@@ -58,7 +58,9 @@ def run_due_auto_mode_starts() -> dict[str, Any]:
                     db=db,
                     user=user,
                 )
-                name = "Sara" if persona == "female" else "Rayan"
+                from modules.ai_agent_persona import persona_display_name
+
+                name = persona_display_name(persona)
                 # Bulk email path returns summary dict; dial path returns runner.
                 msg = None
                 if isinstance(result, dict):

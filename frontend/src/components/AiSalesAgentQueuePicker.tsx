@@ -6,6 +6,7 @@ import {
 } from "../api/client";
 import { findCountry } from "../data/countries";
 import { SearchableSelect } from "./SearchableSelect";
+import { personaDisplayName } from "../lib/aiAgentPersona";
 
 function contactKey(item: DialableContactSuggestion): string {
   return `${item.buyer_id}:${item.contact_id ?? "x"}:${item.phone}`;
@@ -34,8 +35,10 @@ export function AiSalesAgentQueuePicker({
 }: AiSalesAgentQueuePickerProps) {
   const agents = agentOptions?.length ? agentOptions : DEFAULT_AGENTS;
   const agentLabel = (id: string) =>
-    agents.find((a) => a.id === id)?.name ||
-    (id === "female" ? "Sara" : id === "male" ? "Rayan" : id);
+    personaDisplayName({
+      id,
+      name: agents.find((a) => a.id === id)?.name,
+    });
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<DialableContactSuggestion[]>([]);
   const [open, setOpen] = useState(false);

@@ -25,6 +25,7 @@ import { AiAutoModePanel } from "../components/AiAutoModePanel";
 import { AiAutoDataUpdatePanel } from "../components/AiAutoDataUpdatePanel";
 import { AiSalesProcessesPanel } from "../components/AiSalesProcessesPanel";
 import { loadOrgAdminLocal, resolveAgentsForMasterList } from "../lib/orgAdminLocalStore";
+import { personaDisplayName, personaVoiceGender } from "../lib/aiAgentPersona";
 
 interface AiSalesAgentPageProps {
   onError: (message: string) => void;
@@ -111,20 +112,19 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
 
   function voiceGenderForAgent(agentId: string): "female" | "male" {
     const a = agentOptions.find((x) => x.id === agentId);
-    const id = (a?.id || agentId || "").toLowerCase();
-    const name = (a?.name || "").toLowerCase();
-    const gl = (a?.gender_label || "").toLowerCase();
-    const voice = a?.voice || "";
-    if (
-      id === "female" ||
-      gl === "female" ||
-      name === "sara" ||
-      name.includes("sara") ||
-      /Neural2-F|Jenny|Joanna|Female/i.test(voice)
-    ) {
-      return "female";
-    }
-    return "male";
+    return personaVoiceGender({
+      id: a?.id || agentId,
+      name: a?.name,
+      gender_label: a?.gender_label,
+      voice: a?.voice,
+    });
+  }
+
+  function personaName(persona: string): string {
+    if (persona === "pipeline") return "AI Sales Agent list";
+    const fromReg = agentOptions.find((a) => a.id === persona);
+    if (fromReg) return personaDisplayName({ id: fromReg.id, name: fromReg.name });
+    return personaDisplayName({ id: persona, name: PERSONA_LABELS[persona] ?? persona });
   }
 
   const masterListLabel = useMemo(() => {
@@ -145,13 +145,6 @@ export function AiSalesAgentPage({ onError, masterType = "fmcg" }: AiSalesAgentP
       setFilterPersona("");
     }
   }, [agentOptions, assignPersona, selfTestPersona, filterPersona]);
-
-  function personaName(persona: string): string {
-    if (persona === "pipeline") return "AI Sales Agent list";
-    const fromReg = agentOptions.find((a) => a.id === persona);
-    if (fromReg) return fromReg.name;
-    return PERSONA_LABELS[persona] ?? persona;
-  }
 
   useEffect(() => {
     if (user?.full_name && !selfTestName) {

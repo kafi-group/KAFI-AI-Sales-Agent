@@ -124,6 +124,12 @@ def sync_runners_from_registry() -> None:
     global _RUNNERS, _AGENT_PERSONAS, _ASSIGNABLE_PERSONAS
     try:
         from modules import org_admin_config as org
+        from modules.ai_agent_persona import (
+            FEMALE_VOICE,
+            MALE_VOICE,
+            enforce_sara_rayan_agent,
+            persona_gender,
+        )
 
         agents = org.list_ai_sales_agents(active_only=False)
     except Exception:  # noqa: BLE001
@@ -134,12 +140,26 @@ def sync_runners_from_registry() -> None:
         aid = str(ag.get("id") or "").strip()
         if not aid:
             continue
+        # Sara/Rayan always keep female/male voice + gender, even if registry drifted.
+        ag = enforce_sara_rayan_agent(dict(ag))
+        aid = str(ag.get("id") or aid).strip()
+        gender = persona_gender(
+            aid,
+            gender_label=str(ag.get("gender_label") or ""),
+            display_name=str(ag.get("name") or ""),
+            voice=str(ag.get("voice") or ""),
+        )
+        voice = FEMALE_VOICE if gender == "female" else MALE_VOICE
+        if aid in ("female", "male"):
+            # Core agents: lock voice + gender_label to the canonical mapping.
+            voice = FEMALE_VOICE if aid == "female" else MALE_VOICE
+            gender = "female" if aid == "female" else "male"
         existing = by_persona.get(aid)
         if existing:
             existing["display_name"] = str(ag.get("name") or existing.get("display_name") or aid)
-            existing["voice"] = str(ag.get("voice") or existing.get("voice") or "en-US-Neural2-D")
-            existing["gender_label"] = str(ag.get("gender_label") or aid)
-            # Inactive agents stay in registry but are not dialable runners
+            existing["voice"] = voice
+            existing["gender_label"] = gender
+            existing["persona"] = aid
             if ag.get("active"):
                 next_runners.append(existing)
         elif ag.get("active"):
@@ -147,8 +167,8 @@ def sync_runners_from_registry() -> None:
                 _default_runner(
                     aid,
                     name=str(ag.get("name") or aid),
-                    voice=str(ag.get("voice") or "en-US-Neural2-D"),
-                    gender_label=str(ag.get("gender_label") or aid),
+                    voice=voice,
+                    gender_label=gender,
                 )
             )
     if next_runners:
@@ -217,12 +237,33 @@ def _next_task_id() -> int:
 
 def _agent_name(persona: str) -> str:
     try:
+        from modules.ai_agent_persona import persona_display_name
         from modules import org_admin_config as org
 
-        return org.agent_display_name(persona)
+        return persona_display_name(
+            persona,
+            display_name=org.agent_display_name(persona),
+        )
     except Exception:  # noqa: BLE001
         pass
-    return "Sara" if persona == "female" else "Rayan" if persona == "male" else (persona or "Agent")
+    from modules.ai_agent_persona import persona_display_name
+
+    return persona_display_name(persona)
+
+
+def _stamp_task_voice_gender(task: dict[str, Any]) -> None:
+    """Every queued dial inherits Sara=female / Rayan=male (not only self-test)."""
+    from modules.ai_agent_persona import persona_gender
+
+    persona = str(task.get("persona") or "")
+    runner = _get_runner(persona) or {}
+    task["voice_gender"] = persona_gender(
+        persona,
+        voice_gender=str(task.get("voice_gender") or "") or None,
+        gender_label=str(runner.get("gender_label") or ""),
+        display_name=str(runner.get("display_name") or ""),
+        voice=str(runner.get("voice") or ""),
+    )
 
 
 def _get_runner(persona: str) -> dict[str, Any] | None:
@@ -565,17 +606,8 @@ def _dial_task(
         raise HTTPException(400, "This queue item has no phone number.")
 
     persona = str(task.get("persona") or "female")
+    _stamp_task_voice_gender(task)
     voice_gender = str(task.get("voice_gender") or "").strip() or None
-    if not voice_gender:
-        runner_ foresight = _get_runner(persona)
-        if runner_foresight:
-            from integrations.voice_client import resolve_call_gender
-
-            voice_gender = resolve_call_gender(
-                persona,
-                voice_gender=str(runner_foresight.get("gender_label") or "") or None,
-            )
-            task["voice_gender"] = voice_gender
 
     call_result = voice_client.place_outbound_ai_call(
         phone,
@@ -1101,6 +1133,7 @@ def assign_tasks(
             # Staging → Sara/Rayan: promote in place.
             if cur == _PIPELINE_PERSONA and target in _AGENT_PERSONAS:
                 existing["persona"] = target
+                _stamp_task_voice_gender(existing)
                 existing["status"] = "queued"
                 existing["ready"] = bool(
                     contact_phone
@@ -1121,6 +1154,7 @@ def assign_tasks(
                 continue
             # Already assigned historically — put back in queue; never drop.
             existing["persona"] = target
+            _stamp_task_voice_gender(existing)
             existing["status"] = "queued"
             existing["ready"] = bool(
                 contact_phone
@@ -1166,6 +1200,7 @@ def assign_tasks(
             "created_at": _now_iso(),
             "followup_sent": False,
         }
+        _stamp_task_voice_gender(task)
         _TASKS.append(task)
         created.append(task)
     _refresh_runner_counts()
@@ -1319,6 +1354,7 @@ def queue_self_test(
         "operator_user_id": user.id,
         "followup_sent": False,
     }
+    _stamp_task_voice_gender(task)
     _TASKS.insert(0, task)
 
     runner = _get_runner(payload.persona)
@@ -1454,7 +1490,7 @@ def _bulk_email_queued(
     from modules.ai_sales_auto_mode import get_bulk_email_config
     from modules.email_templates import get_template, render_template_text
 
-    agent_name = "Sara" if persona == "female" else "Rayan"
+    agent_name = _agent_name(persona)
     runner["queue_lane"] = "auto_mode"
     cfg = get_bulk_email_config(persona)
     subject_tpl = (cfg.get("subject") or "").strip()

@@ -26,8 +26,12 @@ _LANE_LABELS = {
 
 
 def persona_label(persona: str | None) -> str:
-    p = (persona or "").strip().lower()
-    return _PERSONA_LABELS.get(p, p or "—")
+    from modules.ai_agent_persona import persona_display_name
+
+    p = (persona or "").strip()
+    if p.lower() == "pipeline":
+        return "AI Sales Agent list"
+    return persona_display_name(p) if p else "—"
 
 
 def lane_label(lane: str | None) -> str:

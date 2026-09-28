@@ -12,6 +12,7 @@ import {
   htmlHasDataUriImages,
   inlineMediaPublicUrl,
 } from "../lib/hostInlineImages";
+import { personaDisplayName } from "../lib/aiAgentPersona";
 
 interface AiAutoModePanelProps {
   onError: (message: string) => void;
@@ -227,7 +228,7 @@ export function AiAutoModePanel({
       const cfg = settings.bulk_email_by_persona?.[schedulePersona];
       if (!cfg?.subject?.trim() || !cfg?.body?.trim()) {
         onError(
-          `Save bulk email setup for ${schedulePersona === "female" ? "Sara" : "Rayan"} first.`,
+          `Save bulk email setup for ${personaDisplayName({ id: schedulePersona })} first.`,
         );
         setBulkPersona(schedulePersona);
         setScheduleOpen(false);
@@ -327,12 +328,12 @@ export function AiAutoModePanel({
       const cfg = settings.bulk_email_by_persona?.[persona];
       if (!cfg?.subject?.trim() || !cfg?.body?.trim()) {
         onError(
-          `Save bulk email setup for ${persona === "female" ? "Sara" : "Rayan"} first (template, From, CC, signature).`,
+          `Save bulk email setup for ${personaDisplayName({ id: persona })} first (template, From, CC, signature).`,
         );
         setBulkPersona(persona);
         return;
       }
-      const agent = persona === "female" ? "Sara" : "Rayan";
+      const agent = personaDisplayName({ id: persona });
       const ok = window.confirm(
         `Send bulk emails as ${agent}?\n\n` +
           `From: ${cfg.from_mailbox_email || "(your mailbox)"}\n` +
@@ -497,7 +498,7 @@ export function AiAutoModePanel({
             return (
               <ul className="space-y-1.5 rounded-lg border border-violet-500/30 bg-violet-950/20 p-2">
                 {pending.map((s) => {
-                  const name = s.persona === "female" ? "Sara" : "Rayan";
+                  const name = personaDisplayName({ id: s.persona });
                   return (
                     <li
                       key={s.id}
@@ -757,7 +758,7 @@ export function AiAutoModePanel({
                   >
                     {saving
                       ? "Saving…"
-                      : `Save ${bulkPersona === "female" ? "Sara" : "Rayan"} bulk email setup`}
+                      : `Save ${personaDisplayName({ id: bulkPersona })} bulk email setup`}
                   </button>
                 </div>
               </div>

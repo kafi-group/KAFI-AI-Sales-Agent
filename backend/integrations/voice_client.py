@@ -6,55 +6,60 @@ import re
 import threading
 from typing import Any, Literal
 
+from config import settings
+from modules.ai_agent_persona import persona_display_name, persona_gender
+
 
 def resolve_call_gender(
     persona: str | None,
     *,
     voice_gender: str | None = None,
 ) -> Literal["female", "male"]:
-    """Map agent persona → TTS gender. Sara / Neural2-F → female; Rayan / Neural2-D → male."""
-    forced = (voice_gender or "").strip().lower()
-    if forced in {"female", "f", "woman"}:
-        return "female"
-    if forced in {"male", "m", "man"}:
-        return "male"
-
-    p = (persona or "").strip().lower()
-    if p in {"female", "sara", "sarah", "f", "woman"} or "sara" in p:
-        return "female"
-    if p in {"male", "rayan", "ryan", "m", "man"} or "rayan" in p:
-        return "male"
-
+    """Map agent persona → TTS gender. Sara → female; Rayan → male (everywhere)."""
+    gender_label = None
+    display_name = None
+    voice = None
     try:
         from api import ai_sales_agent as asa
 
         runner = asa._get_runner(str(persona or ""))
+        if isinstance(runner, dict):
+            gender_label = str(runner.get("gender_label") or "") or None
+            display_name = str(runner.get("display_name") or "") or None
+            voice = str(runner.get("voice") or "") or None
     except Exception:
-        runner = None
-    if isinstance(runner, dict):
-        gl = str(runner.get("gender_label") or "").strip().lower()
-        if gl in {"female", "f", "woman", "sara", "sarah"} or "female" in gl or "sara" in gl:
-            return "female"
-        if gl in {"male", "m", "man", "rayan", "ryan"} or "male" in gl or "rayan" in gl:
-            return "male"
-        voice = str(runner.get("voice") or "")
-        if re.search(r"Neural2-F|Jenny|Female|-F\b|Joanna|Salli", voice, re.I):
-            return "female"
-        if re.search(r"Neural2-D|Neural2-A|Guy|Male|Matthew|Joey", voice, re.I):
-            return "male"
-        name = str(runner.get("display_name") or "").strip().lower()
-        if "sara" in name or "sarah" in name:
-            return "female"
-        if "rayan" in name or "ryan" in name:
-            return "male"
-
-    # Unknown custom agents: do not default to male when the id looks feminine.
-    if any(tok in p for tok in ("fem", "girl", "woman", "lady")):
-        return "female"
-    return "male"
+        pass
+    return persona_gender(
+        persona,
+        voice_gender=voice_gender,
+        gender_label=gender_label,
+        display_name=display_name,
+        voice=voice,
+    )
 
 
-from config import settings
+def resolve_call_agent_name(persona: str | None, *, is_female: bool | None = None) -> str:
+    display_name = None
+    gender_label = None
+    voice = None
+    try:
+        from api import ai_sales_agent as asa
+
+        runner = asa._get_runner(str(persona or ""))
+        if isinstance(runner, dict):
+            display_name = str(runner.get("display_name") or "") or None
+            gender_label = str(runner.get("gender_label") or "") or None
+            voice = str(runner.get("voice") or "") or None
+    except Exception:
+        pass
+    name = persona_display_name(
+        persona, display_name=display_name, gender_label=gender_label, voice=voice
+    )
+    if name not in {"Sara", "Rayan"} and is_female is not None:
+        return "Sara" if is_female else "Rayan"
+    return name
+
+
 _FOURTH_RING_SECONDS = 16  # ~4s per ring × 4 rings per dial attempt
 _DEFAULT_MAX_RING_ATTEMPTS = 10  # 16s → hangup → 16s again … until answer or this cap
 _HARD_MAX_RING_ATTEMPTS = 20
@@ -697,13 +702,9 @@ class VoiceClient:
             try:
                 import json
                 import urllib.request
-                agent_name = "Sara" if is_female else "Rayan"
-                try:
-                    from api import ai_sales_agent as asa
-
-                    agent_name = asa._agent_name(str(persona or ("female" if is_female else "male")))
-                except Exception:
-                    pass
+                gender = resolve_call_gender(persona, voice_gender=voice_gender)
+                is_female = gender == "female"
+                agent_name = resolve_call_agent_name(persona, is_female=is_female)
                 c_name = contact_name or "there"
                 first_msg = text_message or lang_cfg["greeting"].format(c_name=c_name)
 

@@ -176,6 +176,19 @@ def _load() -> dict[str, Any]:
                     "protected": bool(row.get("protected", aid in ("female", "male"))),
                 }
             )
+        # Sara = female + Neural2-F; Rayan = male + Neural2-D — always on load.
+        from modules.ai_agent_persona import FEMALE_VOICE, MALE_VOICE, enforce_sara_rayan_agent
+
+        cleaned_a = [enforce_sara_rayan_agent(r) for r in cleaned_a]
+        for r in cleaned_a:
+            if r.get("id") == "female":
+                r["gender_label"] = "female"
+                r["voice"] = FEMALE_VOICE
+                r["protected"] = True
+            elif r.get("id") == "male":
+                r["gender_label"] = "male"
+                r["voice"] = MALE_VOICE
+                r["protected"] = True
         # Always keep Sara/Rayan present
         for seed in _DEFAULT_AGENTS:
             if seed["id"] not in seen:
@@ -348,14 +361,17 @@ def get_ai_agent(agent_id: str) -> dict[str, Any] | None:
 
 
 def agent_display_name(agent_id: str) -> str:
+    from modules.ai_agent_persona import persona_display_name
+
     row = get_ai_agent(agent_id)
     if row:
-        return str(row.get("name") or agent_id)
-    if agent_id == "female":
-        return "Sara"
-    if agent_id == "male":
-        return "Rayan"
-    return agent_id or "Agent"
+        return persona_display_name(
+            agent_id,
+            display_name=str(row.get("name") or ""),
+            gender_label=str(row.get("gender_label") or ""),
+            voice=str(row.get("voice") or ""),
+        )
+    return persona_display_name(agent_id)
 
 
 def active_agent_ids() -> list[str]:
@@ -407,6 +423,22 @@ def upsert_ai_sales_agent(
                 "protected": aid in ("female", "male"),
             }
             rows.append(row)
+        from modules.ai_agent_persona import (
+            FEMALE_VOICE,
+            MALE_VOICE,
+            enforce_sara_rayan_agent,
+        )
+
+        # Sara = female + Neural2-F; Rayan = male + Neural2-D — always.
+        row = enforce_sara_rayan_agent(row)
+        if aid == "female":
+            row["gender_label"] = "female"
+            row["voice"] = FEMALE_VOICE
+            row["protected"] = True
+        elif aid == "male":
+            row["gender_label"] = "male"
+            row["voice"] = MALE_VOICE
+            row["protected"] = True
         data["ai_sales_agents"] = rows
         _save(data)
         return row
