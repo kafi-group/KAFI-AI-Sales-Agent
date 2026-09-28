@@ -59,11 +59,17 @@ export function getStoredUser(): MailerUser | null {
 export function storeSession(token: string, user: MailerUser) {
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("kafi-mailer-session"));
+  }
 }
 
 export function clearSession() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("kafi-mailer-session"));
+  }
 }
 
 export class ApiError extends Error {
@@ -112,7 +118,8 @@ export async function apiFetch<T>(
       data && typeof data === "object" && data !== null && "detail" in data
         ? String((data as { detail: unknown }).detail)
         : text || res.statusText;
-    if (res.status === 401) clearSession();
+    // Do not clearSession() here — a single 401 (e.g. stale /auth/me) was wiping
+    // the bulk handoff session and breaking picture-library uploads.
     throw new ApiError(res.status, detail);
   }
   return data as T;

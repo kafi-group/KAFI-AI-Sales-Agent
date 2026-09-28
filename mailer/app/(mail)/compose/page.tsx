@@ -16,7 +16,7 @@ import {
   plainTextToEditorHtml,
   type EmailBodyEditorHandle,
 } from "@/components/EmailBodyEditor";
-import { PictureLibraryPanel } from "@/components/PictureLibraryPanel";
+import { PictureDropdownPicker } from "@/components/PictureDropdownPicker";
 import { ensureDearSalutation } from "@/lib/personalizeEmail";
 import { normalizeEditorTextColor } from "@/lib/emailTextColor";
 import {
@@ -234,8 +234,7 @@ function ComposeInner() {
   }
 
   return (
-    <div className="compose-with-library">
-      <div className="compose-with-library-main compose-page">
+    <div className="compose-page">
       <h2 className="folder-title">Compose</h2>
       <p className="muted small">
         From: {user?.mailbox_email || user?.username} · Sends via Vercel SMTP (not Railway)
@@ -395,10 +394,13 @@ function ComposeInner() {
           {attachmentWarning && <p className="bad small">{attachmentWarning}</p>}
         </>
       )}
-      <label>Body</label>
-      <p className="muted small" style={{ marginTop: 0 }}>
-        Click a picture in the library on the right to insert it at the cursor.
-      </p>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "1rem", marginBottom: "0.4rem" }}>
+        <label style={{ margin: 0 }}>Body</label>
+        <PictureDropdownPicker
+          disabled={sending}
+          onInsert={(url, filename) => bodyEditorRef.current?.insertPicture(url, filename)}
+        />
+      </div>
       <EmailBodyEditor ref={bodyEditorRef} value={body} onChange={setBody} rows={14} />
       <div className="detail-actions">
         <button
@@ -431,11 +433,6 @@ function ComposeInner() {
             : "Add signature"}
         </button>
       </div>
-      </div>
-      <PictureLibraryPanel
-        disabled={sending}
-        onInsert={(url, filename) => bodyEditorRef.current?.insertPicture(url, filename)}
-      />
     </div>
   );
 }

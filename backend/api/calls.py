@@ -537,7 +537,16 @@ def get_call_recording(
         path, content_type, filename = calls_module.get_call_recording_file(
             db, interaction_id=interaction_id
         )
-    except ValueError as exc:
+    except Exception as exc:
+        # If local download failed or isn't saved yet, check if there is an external recording URL and redirect to it
+        from modules.call_media import get_call_media
+        from starlette.responses import RedirectResponse
+
+        interaction = db.get(Interaction, interaction_id)
+        media = get_call_media(interaction) if interaction else None
+        ext_url = (media or {}).get("recording_url")
+        if ext_url and str(ext_url).startswith("http"):
+            return RedirectResponse(url=ext_url)
         raise HTTPException(404, str(exc)) from exc
 
     headers = {}

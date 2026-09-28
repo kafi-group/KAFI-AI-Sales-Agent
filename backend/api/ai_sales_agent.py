@@ -2761,9 +2761,15 @@ async def vapi_ai_agent_status(request: Request) -> dict[str, Any]:
     for candidate in (
         message.get("recordingUrl"),
         message.get("stereoRecordingUrl"),
+        message.get("presignedMonoUrl"),
+        message.get("presignedStereoUrl"),
+        artifact.get("presignedMonoUrl") if isinstance(artifact, dict) else None,
+        artifact.get("presignedStereoUrl") if isinstance(artifact, dict) else None,
         artifact.get("recordingUrl") if isinstance(artifact, dict) else None,
         artifact.get("stereoRecordingUrl") if isinstance(artifact, dict) else None,
         artifact.get("recording") if isinstance(artifact, dict) else None,
+        call.get("presignedMonoUrl") if isinstance(call, dict) else None,
+        call.get("presignedStereoUrl") if isinstance(call, dict) else None,
         call.get("recordingUrl") if isinstance(call, dict) else None,
         call.get("stereoRecordingUrl") if isinstance(call, dict) else None,
     ):
@@ -2771,7 +2777,7 @@ async def vapi_ai_agent_status(request: Request) -> dict[str, Any]:
             recording_url = candidate.strip()
             break
         if isinstance(candidate, dict):
-            for key in ("url", "recordingUrl", "stereoRecordingUrl"):
+            for key in ("url", "presignedMonoUrl", "presignedStereoUrl", "recordingUrl", "stereoRecordingUrl"):
                 val = candidate.get(key)
                 if isinstance(val, str) and val.strip().startswith("http"):
                     recording_url = val.strip()
@@ -2791,12 +2797,19 @@ async def vapi_ai_agent_status(request: Request) -> dict[str, Any]:
             if vkey:
                 req = urllib.request.Request(
                     f"https://api.vapi.ai/call/{call_sid}",
-                    headers={"Authorization": f"Bearer {vkey}"},
+                    headers={
+                        "Authorization": f"Bearer {vkey}",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                    },
                 )
                 with urllib.request.urlopen(req, timeout=12) as res:
                     call_data = _json.loads(res.read().decode("utf-8"))
                 art = call_data.get("artifact") if isinstance(call_data, dict) else None
                 for candidate in (
+                    (art or {}).get("presignedMonoUrl") if isinstance(art, dict) else None,
+                    (art or {}).get("presignedStereoUrl") if isinstance(art, dict) else None,
+                    (call_data or {}).get("presignedMonoUrl"),
+                    (call_data or {}).get("presignedStereoUrl"),
                     (call_data or {}).get("recordingUrl"),
                     (call_data or {}).get("stereoRecordingUrl"),
                     (art or {}).get("recordingUrl") if isinstance(art, dict) else None,

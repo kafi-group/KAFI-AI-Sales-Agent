@@ -72,6 +72,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
+  // Stay in sync when storeSession/clearSession run outside React state.
+  useEffect(() => {
+    function onSession() {
+      setToken(getStoredToken());
+      setUser(getStoredUser());
+    }
+    window.addEventListener("kafi-mailer-session", onSession);
+    window.addEventListener("storage", onSession);
+    return () => {
+      window.removeEventListener("kafi-mailer-session", onSession);
+      window.removeEventListener("storage", onSession);
+    };
+  }, []);
+
   const login = useCallback(async (username: string, password: string) => {
     const result = await apiLogin(username, password);
     setUser(result.user);

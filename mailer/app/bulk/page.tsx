@@ -17,7 +17,7 @@ import {
   plainTextToEditorHtml,
   type EmailBodyEditorHandle,
 } from "@/components/EmailBodyEditor";
-import { PictureLibraryPanel } from "@/components/PictureLibraryPanel";
+import { PictureDropdownPicker } from "@/components/PictureDropdownPicker";
 import { ensureDearSalutation, personalizeEmailText } from "@/lib/personalizeEmail";
 import { normalizeEditorTextColor } from "@/lib/emailTextColor";
 import {
@@ -59,7 +59,7 @@ function BulkInner() {
   const params = useSearchParams();
   const token = params.get("token") || "";
   const scheduleMode = params.get("schedule") === "1";
-  const { refresh, user, adoptSession } = useAuth();
+  const { user, adoptSession } = useAuth();
 
   const preview = useMemo(() => {
     try {
@@ -86,15 +86,21 @@ function BulkInner() {
         const result = await loginFromHandoff(token);
         if (cancelled) return;
         adoptSession(result.token, result.user);
-        await refresh();
-      } catch {
-        /* preview still shows; send will prompt login */
+        // Do not call refresh() here — /auth/me can 401 while mailer session works,
+        // and a failed refresh used to wipe/confuse the picture-library session.
+      } catch (e) {
+        if (!cancelled) {
+          console.warn(
+            "[mailer bulk] handoff-login failed",
+            e instanceof Error ? e.message : e,
+          );
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [token, refresh, adoptSession]);
+  }, [token, adoptSession]);
 
   const [subject, setSubject] = useState(
     "Introduction — Kafi Commodities ({{company_name}})",
@@ -411,8 +417,6 @@ function BulkInner() {
   }
 
   return (
-    <div className="bulk-with-library">
-      <div className="bulk-with-library-main">
     <div className="wrap">
       <div className="card">
         <div className="folder-list-head">
@@ -547,10 +551,13 @@ function BulkInner() {
         <label>Subject</label>
         <input value={subject} onChange={(e) => setSubject(e.target.value)} />
 
-        <label>Body</label>
-        <p className="muted small" style={{ marginTop: 0 }}>
-          Click a picture in the library on the right to insert it at the cursor.
-        </p>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "1rem", marginBottom: "0.4rem" }}>
+          <label style={{ margin: 0 }}>Body</label>
+          <PictureDropdownPicker
+            disabled={running || scheduling}
+            onInsert={(url, filename) => bodyEditorRef.current?.insertPicture(url, filename)}
+          />
+        </div>
         <EmailBodyEditor ref={bodyEditorRef} value={body} onChange={setBody} rows={12} />
 
         <div className="row">
@@ -725,12 +732,6 @@ function BulkInner() {
           </div>
         )}
       </div>
-    </div>
-      </div>
-      <PictureLibraryPanel
-        disabled={running || scheduling}
-        onInsert={(url, filename) => bodyEditorRef.current?.insertPicture(url, filename)}
-      />
     </div>
   );
 }

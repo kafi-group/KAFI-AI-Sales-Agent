@@ -17,6 +17,7 @@ import {
   PLACEHOLDER_HINTS,
 } from "../utils/emailTemplateDefaults";
 import { capitalizeFirstLetter } from "../utils/spelling";
+import { PictureLibraryManager } from "../components/PictureLibraryManager";
 
 interface EmailTemplatesPageProps {
   onError: (message: string) => void;
@@ -33,6 +34,8 @@ export function EmailTemplatesPage({ onError, onCountChange }: EmailTemplatesPag
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [mode, setMode] = useState<"templates" | "pictures">("templates");
+  const [pictureCount, setPictureCount] = useState(0);
 
   const refreshTemplates = useCallback(async () => {
     setLoading(true);
@@ -191,39 +194,97 @@ export function EmailTemplatesPage({ onError, onCountChange }: EmailTemplatesPag
 
   return (
     <section className="space-y-6 w-full min-w-0">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div className="flex items-start justify-between gap-4 flex-wrap pb-4 border-b border-slate-800/80">
         <div>
-          <h2 className="text-lg font-medium text-slate-100">Email templates</h2>
-          <p className="text-sm text-slate-500 mt-1 max-w-2xl">
-            Create and manage reusable outreach templates here. Use placeholders like{" "}
-            <code className="text-slate-400">[company_name]</code> and{" "}
-            <code className="text-slate-400">[contact_name]</code> — they are filled in per lead
-            when you send from the Leads table.
+          <div className="flex items-center gap-3 flex-wrap">
+            <h2 className="text-lg font-medium text-slate-100">
+              {mode === "templates" ? "Email templates" : "Picture library"}
+            </h2>
+
+            {/* Switchable Mode Buttons */}
+            <div className="flex items-center rounded-lg bg-slate-950 p-1 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setMode("templates")}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                  mode === "templates"
+                    ? "bg-slate-800 text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <span>✉️ Email templates</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-900 border border-slate-700 text-slate-400 font-mono">
+                  {templates.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("pictures")}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                  mode === "pictures"
+                    ? "bg-slate-800 text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <span>🖼️ Picture library</span>
+                {pictureCount > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-900 border border-slate-700 text-slate-400 font-mono">
+                    {pictureCount}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-500 mt-1.5 max-w-2xl">
+            {mode === "templates" ? (
+              <>
+                Create and manage reusable outreach templates here. Use placeholders like{" "}
+                <code className="text-slate-400">[company_name]</code> and{" "}
+                <code className="text-slate-400">[contact_name]</code> — they are filled in per lead
+                when you send from the Leads table.
+              </>
+            ) : (
+              <>
+                Organize product photos, brochures, and company assets into groups. Pictures here can be
+                directly inserted into bulk emails and outreach from the Mailer.
+              </>
+            )}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={startAiCreate}
-            className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-sm font-medium"
-          >
-            AI create
-          </button>
-          <button
-            type="button"
-            onClick={startCreate}
-            className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium"
-          >
-            + New template
-          </button>
-        </div>
+
+        {mode === "templates" && (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={startAiCreate}
+              className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-sm font-medium"
+            >
+              AI create
+            </button>
+            <button
+              type="button"
+              onClick={startCreate}
+              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium"
+            >
+              + New template
+            </button>
+          </div>
+        )}
       </div>
 
-      {notice && (
-        <p className="text-sm text-emerald-300/90 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
-          {notice}
-        </p>
-      )}
+      {mode === "pictures" ? (
+        <PictureLibraryManager
+          onError={onError}
+          onTotalPicturesChange={setPictureCount}
+        />
+      ) : (
+        <>
+          {notice && (
+            <p className="text-sm text-emerald-300/90 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+              {notice}
+            </p>
+          )}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <div className="rounded-xl border border-slate-800 bg-slate-900/50 overflow-hidden">
@@ -469,6 +530,9 @@ export function EmailTemplatesPage({ onError, onCountChange }: EmailTemplatesPag
           )}
         </div>
       </div>
+        </>
+      )}
     </section>
   );
 }
+

@@ -739,10 +739,14 @@ def get_call_recording_file(db: Session, *, interaction_id: int) -> tuple[Path, 
 
     path = resolve_local_recording(media)
     if not path and media.get("recording_url") and media.get("recording_sid"):
-        path, content_type = download_twilio_recording(
-            str(media["recording_url"]),
-            str(media["recording_sid"]),
-        )
+        rec_url = str(media["recording_url"])
+        rec_sid = str(media["recording_sid"])
+        if "api.twilio.com" in rec_url.lower():
+            path, content_type = download_twilio_recording(rec_url, rec_sid)
+        else:
+            from modules.call_media import download_public_recording
+
+            path, content_type = download_public_recording(rec_url, rec_sid)
         attach_local_recording(
             db,
             interaction_id=interaction_id,

@@ -1228,6 +1228,30 @@ export interface EmailTemplatePreview {
   contact_email: string;
 }
 
+export interface PictureLibraryImage {
+  id: string;
+  url: string;
+  filename: string;
+  content_type?: string;
+  size?: number;
+  caption?: string;
+  uploaded_by?: string;
+  created_at?: string;
+}
+
+export interface PictureLibraryGroup {
+  id: string;
+  name: string;
+  created_at?: string;
+  created_by?: string;
+  images: PictureLibraryImage[];
+}
+
+export interface PictureLibrary {
+  groups: PictureLibraryGroup[];
+}
+
+
 export interface BulkEmailDraftResponse {
   created_count: number;
   skipped_count: number;
@@ -3804,6 +3828,62 @@ export const client = {
       method: "POST",
       body: JSON.stringify({ buyer_id: buyerId, subject, body }),
     }),
+
+  /** Shared mailer picture library (groups of hosted images). */
+  listPictureLibrary: () =>
+    request<{ groups: PictureLibraryGroup[] }>("/mailer/picture-library"),
+  createPictureGroup: (name: string) =>
+    request<{ ok: boolean; group: PictureLibraryGroup }>("/mailer/picture-library/groups", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  renamePictureGroup: (groupId: string, name: string) =>
+    request<{ ok: boolean; group: PictureLibraryGroup }>(
+      `/mailer/picture-library/groups/${encodeURIComponent(groupId)}/rename`,
+      { method: "POST", body: JSON.stringify({ name }) },
+    ),
+  deletePictureGroup: (groupId: string) =>
+    request<{ ok: boolean }>(
+      `/mailer/picture-library/groups/${encodeURIComponent(groupId)}/delete`,
+      { method: "POST" },
+    ),
+  savePictureLibrary: (groups: PictureLibraryGroup[]) =>
+    request<{ ok: boolean; library: { groups: PictureLibraryGroup[] } }>(
+      "/mailer/picture-library/save",
+      { method: "POST", body: JSON.stringify({ groups }) },
+    ),
+  updatePictureCaption: (groupId: string, mediaId: string, caption: string) =>
+    request<{ ok: boolean; image: PictureLibraryImage }>(
+      `/mailer/picture-library/groups/${encodeURIComponent(groupId)}/images/${encodeURIComponent(mediaId)}/caption`,
+      { method: "POST", body: JSON.stringify({ caption }) },
+    ),
+  deletePictureFromGroup: (groupId: string, mediaId: string) =>
+    request<{ ok: boolean }>(
+      `/mailer/picture-library/groups/${encodeURIComponent(groupId)}/images/${encodeURIComponent(mediaId)}/delete`,
+      { method: "POST" },
+    ),
+  uploadPictureToGroup: async (groupId: string, file: File): Promise<PictureLibraryImage> => {
+    const form = new FormData();
+    form.append("file", file);
+    const headers = new Headers(authHeaders());
+    const base = API_BASE.replace(/\/+$/, "");
+    const res = await fetch(
+      `${base}/mailer/picture-library/groups/${encodeURIComponent(groupId)}/images`,
+      { method: "POST", headers, credentials: "include", body: form },
+    );
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(messageForHttpError(res.status, text, res.statusText));
+    }
+    let data: { image?: PictureLibraryImage } = {};
+    try {
+      data = text ? (JSON.parse(text) as { image?: PictureLibraryImage }) : {};
+    } catch {
+      throw new Error("Invalid upload response");
+    }
+    if (!data.image) throw new Error("Upload succeeded but no image returned");
+    return data.image;
+  },
 
   uploadEmailAttachment: async (
     file: File,

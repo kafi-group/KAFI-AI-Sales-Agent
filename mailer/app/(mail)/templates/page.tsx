@@ -7,7 +7,7 @@ import {
   emailBodyHasContent,
   type EmailBodyEditorHandle,
 } from "@/components/EmailBodyEditor";
-import { PictureLibraryPanel } from "@/components/PictureLibraryPanel";
+import { PictureDropdownPicker } from "@/components/PictureDropdownPicker";
 
 type Template = {
   id: number;
@@ -60,8 +60,7 @@ export default function TemplatesPage() {
   }
 
   return (
-    <div className="compose-with-library">
-      <div className="compose-with-library-main">
+    <div>
         <h2 className="folder-title">Email templates</h2>
         {error && <p className="bad">{error}</p>}
         {notice && <p className="ok">{notice}</p>}
@@ -70,10 +69,12 @@ export default function TemplatesPage() {
           <input value={name} onChange={(e) => setName(e.target.value)} />
           <label>Subject</label>
           <input value={subject} onChange={(e) => setSubject(e.target.value)} />
-          <label>Body</label>
-          <p className="muted small" style={{ marginTop: 0 }}>
-            Click a picture in the library on the right to insert it at the cursor.
-          </p>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "1rem", marginBottom: "0.4rem" }}>
+            <label style={{ margin: 0 }}>Body</label>
+            <PictureDropdownPicker
+              onInsert={(url, filename) => bodyEditorRef.current?.insertPicture(url, filename)}
+            />
+          </div>
           <EmailBodyEditor ref={bodyEditorRef} value={body} onChange={setBody} rows={6} />
           <button
             type="button"
@@ -98,10 +99,6 @@ export default function TemplatesPage() {
           ))}
           {rows.length === 0 && <li className="muted">No templates</li>}
         </ul>
-      </div>
-      <PictureLibraryPanel
-        onInsert={(url, filename) => bodyEditorRef.current?.insertPicture(url, filename)}
-      />
     </div>
   );
 }

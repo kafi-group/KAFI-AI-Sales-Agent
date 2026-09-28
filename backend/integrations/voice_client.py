@@ -1165,7 +1165,10 @@ class VoiceClient:
 
                 req = urllib.request.Request(
                     f"https://api.vapi.ai/call/{sid}",
-                    headers={"Authorization": f"Bearer {vapi_key}"},
+                    headers={
+                        "Authorization": f"Bearer {vapi_key}",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                    },
                 )
                 with urllib.request.urlopen(req, timeout=8) as res:
                     data = json.loads(res.read().decode("utf-8"))
@@ -1176,10 +1179,14 @@ class VoiceClient:
                 art = data.get("artifact") if isinstance(data.get("artifact"), dict) else {}
                 recording_url = None
                 for candidate in (
-                    data.get("recordingUrl"),
-                    data.get("stereoRecordingUrl"),
+                    art.get("presignedMonoUrl"),
+                    art.get("presignedStereoUrl"),
                     art.get("recordingUrl"),
                     art.get("stereoRecordingUrl"),
+                    data.get("presignedMonoUrl"),
+                    data.get("presignedStereoUrl"),
+                    data.get("recordingUrl"),
+                    data.get("stereoRecordingUrl"),
                 ):
                     if isinstance(candidate, str) and candidate.strip().startswith("http"):
                         recording_url = candidate.strip()

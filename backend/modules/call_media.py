@@ -100,13 +100,17 @@ def public_call_media(media: dict[str, Any] | None, *, interaction_id: int) -> d
     }
 
 
+_ATTEMPTED_BACKFILLS: dict[str, float] = {}
+_BACKFILL_COOLDOWN_SECONDS = 300.0  # Do not re-poll Vapi for 5 minutes if already tried
+
+
 def download_public_recording(recording_url: str, recording_sid: str) -> tuple[Path, str]:
     """Download a publicly reachable recording URL (Vapi/S3) without Twilio auth."""
     _ensure_storage()
     url = (recording_url or "").strip()
     if not url:
         raise ValueError("Empty recording URL")
-    with httpx.Client(timeout=120.0, follow_redirects=True) as client:
+    with httpx.Client(timeout=15.0, follow_redirects=True) as client:
         response = client.get(url)
         response.raise_for_status()
         data = response.content
@@ -161,8 +165,8 @@ def save_ai_call_media(
             media["local_path"] = f"call_recordings/{path.name}"
             media["content_type"] = content_type
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to download AI call recording for %s", interaction_id)
-            media["transcript_error"] = f"Recording download failed: {exc}"
+            logger.warning("Local copy of AI call recording for %s skipped (%s) — streaming direct URL instead", interaction_id, exc)
+            # Retain recording_url so the user can still stream/listen directly from the presigned URL!
 
     text = (transcript or "").strip()
     if text:
@@ -184,6 +188,7 @@ def save_ai_call_media(
 def maybe_backfill_ai_call_media(db: Session, interaction: Interaction) -> dict[str, Any] | None:
     """If Call history has no recording yet, try once to pull it from Vapi by SID in content."""
     import re
+    import time
 
     existing = get_call_media(interaction)
     if existing and (
@@ -200,6 +205,13 @@ def maybe_backfill_ai_call_media(db: Session, interaction: Interaction) -> dict[
     sid = match.group(1).strip()
     if not sid or sid.startswith("CA"):
         return existing
+
+    # Check cooldown cache so we do not spam Vapi on every list/poll query
+    now = time.time()
+    last_attempt = _ATTEMPTED_BACKFILLS.get(sid)
+    if last_attempt and (now - last_attempt) < _BACKFILL_COOLDOWN_SECONDS:
+        return existing
+    _ATTEMPTED_BACKFILLS[sid] = now
 
     try:
         from integrations.voice_client import voice_client
