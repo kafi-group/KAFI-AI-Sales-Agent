@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from api.deps import get_current_user, get_db
+from api.deps import get_current_user, get_current_user_released, get_db
 from db.models import AppUser, Buyer, Contact
 from db.session import SessionLocal
 from modules import sales_assistant as assistant_module
@@ -971,7 +971,7 @@ def handle_ai_call_status(
 _LAST_RECONCILE_TIME: float = 0.0
 
 
-def _reconcile_live_calls(db: Session) -> None:
+def _reconcile_live_calls() -> None:
     """If webhooks were missed, poll Vapi/Twilio for ended calls; clear stale dials."""
     global _LAST_RECONCILE_TIME
     now = time.monotonic()
@@ -982,6 +982,17 @@ def _reconcile_live_calls(db: Session) -> None:
     from integrations.voice_client import voice_client
 
     live = [t for t in _TASKS if t.get("status") == "in_progress"]
+    if not live:
+        return
+    
+    db = SessionLocal()
+    try:
+        _do_reconcile_live_calls(db, live)
+    finally:
+        db.close()
+
+def _do_reconcile_live_calls(db: Session, live: list[dict[str, Any]]) -> None:
+    from integrations.voice_client import voice_client
     for task in live:
         started = task.get("started_at")
         try:
@@ -1063,7 +1074,7 @@ def _reconcile_live_calls(db: Session) -> None:
 @router.post("/unlock")
 def unlock_ai_sales_agent(
     payload: UnlockRequest,
-    user: AppUser = Depends(get_current_user),
+    user: AppUser = Depends(get_current_user_released),
 ) -> dict[str, bool]:
     _ = user
     code = (payload.access_code or "").strip()
@@ -1074,8 +1085,7 @@ def unlock_ai_sales_agent(
 
 @router.get("/runners")
 def list_runners(
-    db: Session = Depends(get_db),
-    user: AppUser = Depends(get_current_user),
+    user: AppUser = Depends(get_current_user_released),
 ) -> dict[str, Any]:
     _ = user
     try:
@@ -1083,7 +1093,7 @@ def list_runners(
     except Exception:  # noqa: BLE001
         pass
     try:
-        _reconcile_live_calls(db)
+        _reconcile_live_calls()
     except Exception:
         pass
     _refresh_runner_counts()
@@ -1095,12 +1105,11 @@ def list_tasks(
     persona: str | None = Query(default=None),
     status: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=500),
-    db: Session = Depends(get_db),
-    user: AppUser = Depends(get_current_user),
+    user: AppUser = Depends(get_current_user_released),
 ) -> dict[str, Any]:
     _ = user
     try:
-        _reconcile_live_calls(db)
+        _reconcile_live_calls()
     except Exception:
         pass
     filtered = _TASKS
