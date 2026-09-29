@@ -74,6 +74,7 @@ class RunnerControlRequest(BaseModel):
 
 
 _VALID_QUEUE_LANES = frozenset({"outreach", "data_update", "auto_mode"})
+_DIRECT_LANE = "direct"  # test calls only; not assignable, not part of the pipeline
 _PIPELINE_PERSONA = "pipeline"
 
 
@@ -210,6 +211,8 @@ def _load_persisted_queue() -> None:
                 t["outcome"] = None
                 t["remarks"] = "Still assigned — call interrupted by server restart; ready to dial again."
                 t.pop("started_at", None)
+            if t.get("is_test"):
+                t["queue_lane"] = _DIRECT_LANE  # move old test calls out of Outreach
         _TASKS = tasks
         saved_runners = {
             str(r.get("persona")): r
@@ -572,7 +575,7 @@ def _refresh_runner_counts() -> None:
         persona_tasks = [
             t
             for t in _TASKS
-            if t.get("persona") == r["persona"] and _task_lane(t) == "outreach"
+            if t.get("persona") == r["persona"] and _lane_matches(t, "outreach")
         ]
         pending = [t for t in persona_tasks if t.get("status") in ("queued", "in_progress")]
         r["pending_count"] = len(pending)
@@ -701,8 +704,18 @@ def _dial_task(
 
 
 def _task_lane(task: dict[str, Any]) -> str:
+    # Test calls ("Test call to your phone") live in their own lane so they never
+    # count as Outreach contacts, pipeline items or run-log entries.
+    if task.get("is_test") or str(task.get("queue_lane") or "").strip().lower() == _DIRECT_LANE:
+        return _DIRECT_LANE
     lane = str(task.get("queue_lane") or "outreach").strip().lower()
     return lane if lane in _VALID_QUEUE_LANES else "outreach"
+
+
+def _lane_matches(task: dict[str, Any], want: str) -> bool:
+    """Direct (test) calls are still dialed by the outreach dialer, but only listed separately."""
+    lane = _task_lane(task)
+    return lane == want or (want == "outreach" and lane == _DIRECT_LANE)
 
 
 def _next_queued(persona: str, *, lane: str = "outreach") -> dict[str, Any] | None:
@@ -715,7 +728,7 @@ def _next_queued(persona: str, *, lane: str = "outreach") -> dict[str, Any] | No
             and t.get("status") == "queued"
             and t.get("ready")
             and t.get("contact_phone")
-            and _task_lane(t) == want
+            and _lane_matches(t, want)
         ),
         None,
     )
@@ -1186,6 +1199,8 @@ def _lane_label(lane: str) -> str:
         return "Data Update"
     if l == "auto_mode":
         return "AI Auto Mode"
+    if l == _DIRECT_LANE:
+        return "Direct AI Call"
     return l or "—"
 
 
@@ -1495,6 +1510,7 @@ def queue_self_test(
         "status": "queued",
         "ready": True,
         "is_test": True,
+        "queue_lane": _DIRECT_LANE,
         "language": (payload.language or "en").strip().lower() or "en",
         "allowed_languages": payload.allowed_languages,
         "created_at": _now_iso(),
@@ -1973,7 +1989,7 @@ def start_runner(
             for t in _TASKS
             if t.get("persona") == payload.persona
             and t.get("status") in ("in_progress", "running")
-            and _task_lane(t) == dial_lane
+            and _lane_matches(t, dial_lane)
         ),
         None,
     )
@@ -1994,7 +2010,7 @@ def start_runner(
         if nxt.get("status") != "queued":
             raise HTTPException(400, "That queue item is not waiting to be called.")
         runner["sequence_mode"] = False
-        runner["queue_lane"] = _task_lane(nxt)
+        runner["queue_lane"] = "outreach" if _task_lane(nxt) == _DIRECT_LANE else _task_lane(nxt)
     else:
         nxt = _next_queued(payload.persona, lane=dial_lane)
         runner["sequence_mode"] = bool(payload.sequence)
@@ -2023,6 +2039,7 @@ def start_runner(
                 to_log = [nxt]
         else:
             to_log = [nxt] if nxt else []
+        to_log = [t for t in to_log if not t.get("is_test")]  # test calls stay out of run logs
         if to_log:
             asal.record_run_start(
                 db,

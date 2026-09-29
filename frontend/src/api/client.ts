@@ -5572,7 +5572,8 @@ export interface AiSalesAgentTask {
   contact_email?: string | null;
   country?: string | null;
   status: string;
-  queue_lane?: "outreach" | "data_update" | "auto_mode" | string | null;
+  queue_lane?: "outreach" | "data_update" | "auto_mode" | "direct" | string | null;
+  is_test?: boolean;
   interaction_id: number | null;
   call_sid: string | null;
   outcome: string | null;

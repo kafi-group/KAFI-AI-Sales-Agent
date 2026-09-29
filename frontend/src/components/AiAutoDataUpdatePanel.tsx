@@ -34,6 +34,11 @@ const LANE_LABEL: Record<QueueLane, string> = {
   auto_mode: "AI Auto Mode",
 };
 
+// "Test call to your phone" tasks: kept out of Outreach / Data Update / AI Auto Mode.
+function isDirectTask(t: AiSalesAgentTask): boolean {
+  return Boolean(t.is_test) || String(t.queue_lane || "").toLowerCase() === "direct";
+}
+
 function normalizeLane(raw: string | null | undefined): QueueLane {
   const v = (raw || "outreach").trim().toLowerCase();
   if (v === "data_update") return "data_update";
@@ -474,7 +479,17 @@ export function AiAutoDataUpdatePanel({
     const known = new Set(personas.map((p) => p.id));
     for (const t of tasks) {
       if (!known.has(t.persona)) continue;
+      if (isDirectTask(t)) continue; // test calls are listed in their own section
       out[t.persona][normalizeLane(t.queue_lane)].push(t);
+    }
+    return out;
+  }, [tasks, personas]);
+
+  const directQueues = useMemo(() => {
+    const out: Record<string, AiSalesAgentTask[]> = {};
+    for (const p of personas) out[p.id] = [];
+    for (const t of tasks) {
+      if (isDirectTask(t) && out[t.persona]) out[t.persona].push(t);
     }
     return out;
   }, [tasks, personas]);
@@ -704,6 +719,7 @@ export function AiAutoDataUpdatePanel({
               const outreach = queues[p.id]?.outreach || [];
               const dataUpdate = queues[p.id]?.data_update || [];
               const autoMode = queues[p.id]?.auto_mode || [];
+              const direct = directQueues[p.id] || [];
               const selected = selectedByPersona[p.id] || new Set<number>();
               const stopMode = (sch?.stop_mode || "until_done") as "until_done" | "until_end_time";
               const otherLanes = (from: QueueLane): QueueLane[] =>
@@ -913,6 +929,17 @@ export function AiAutoDataUpdatePanel({
                         onBulkMove: () => void moveSelected(p.id, lane),
                       }))}
                     />
+                    <QueueLaneBlock
+                      title={`Direct AI Call (${direct.length})`}
+                      hint="Test calls from “Test call to your phone” — separate from the pipeline, not counted in Outreach."
+                      tasks={direct}
+                      selected={selected}
+                      moving={moving}
+                      accent="amber"
+                      onToggle={(id) => toggleSelect(p.id, id)}
+                      onSelectAll={(on) => selectAllInLane(p.id, "outreach", on)}
+                      moveTargets={[]}
+                    />
                   </div>
                 </div>
               );
@@ -940,7 +967,7 @@ function QueueLaneBlock({
   tasks: AiSalesAgentTask[];
   selected: Set<number>;
   moving: boolean;
-  accent?: "cyan" | "violet";
+  accent?: "cyan" | "violet" | "amber";
   onToggle: (id: number) => void;
   onSelectAll: (on: boolean) => void;
   moveTargets: Array<{
@@ -968,15 +995,21 @@ function QueueLaneBlock({
       ? "border-violet-700/40 bg-violet-950/20"
       : accent === "cyan"
         ? "border-cyan-700/40 bg-cyan-950/20"
-        : "border-slate-800 bg-slate-950/40";
+        : accent === "amber"
+          ? "border-amber-700/40 bg-amber-950/20"
+          : "border-slate-800 bg-slate-950/40";
   const btnClass =
     accent === "violet"
       ? "border-violet-500/40 text-violet-200 hover:bg-violet-500/15"
-      : "border-cyan-500/40 text-cyan-200 hover:bg-cyan-500/15";
+      : accent === "amber"
+        ? "border-amber-500/40 text-amber-200 hover:bg-amber-500/15"
+        : "border-cyan-500/40 text-cyan-200 hover:bg-cyan-500/15";
   const bulkClass =
     accent === "violet"
       ? "border-violet-500/40 bg-violet-500/10 text-violet-100 hover:bg-violet-500/20"
-      : "border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20";
+      : accent === "amber"
+        ? "border-amber-500/40 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20"
+        : "border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20";
   return (
     <div className={`min-w-0 overflow-hidden rounded-md border p-2 ${borderClass}`}>
       <div className="flex flex-wrap items-center justify-between gap-2 min-w-0">
