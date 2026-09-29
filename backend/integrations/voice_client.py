@@ -795,6 +795,14 @@ class VoiceClient:
                         "voiceId": "21m00Tcm4TlvDq8ikWAM" if is_female else "ErXwobaYiN019PkySvjV",
                         "model": "eleven_multilingual_v2",
                     }
+                elif lang_code == "ur":
+                    # Vapi's built-in voices have no Urdu (400 "supported Vapi voice language"),
+                    # which silently dropped every Urdu call to the English Twilio fallback.
+                    # Use Azure's ur-PK neural voices instead.
+                    voice_config = {
+                        "provider": "azure",
+                        "voiceId": lang_cfg["voice_female"] if is_female else lang_cfg["voice_male"],
+                    }
                 else:
                     # Stick TTS to the selected start language (no auto).
                     voice_config = {
