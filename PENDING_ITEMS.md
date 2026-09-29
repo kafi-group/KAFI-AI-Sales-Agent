@@ -30,7 +30,17 @@ Already fixed today (commits `43fa0e0`, `9f913b9`, `f5e768c`): Vapi 400 (top-lev
 - Idea for later: skip that timeout when Vapi reports the call as `in-progress` (task is flagged
   `answered`), or raise it a lot. Not scheduled.
 
-## 4. DB pool can still jam — MONITOR
+## 4. DB pool can still jam — ROOT CAUSE OF THE FREEZE FIXED 2026-09-29 (`c4c8a23`), pool jams still possible
+- **Found at ~15:00 PKT:** the whole web server hung (health check -> 502) while background jobs kept running.
+  Cause: `require_api_auth` in `backend/main.py` is `async` but did a **blocking** DB lookup on the event
+  loop when the auth cache missed. A dead Supabase connection (SSL closed) or full pool blocked it for up to
+  25 s and stalled every request. Fix: the lookup now runs in a worker thread with a 10 s cap (503 + Retry-After
+  instead of hanging).
+- Still visible in logs: background jobs (Bulk email schedule, AI Mode email, Auto Trash) hit
+  `SSL connection has been closed unexpectedly` about every 2 minutes and recover by disposing the pool.
+  Worth a look: those scheduled jobs may be silently failing on some runs.
+- If the site ever hangs again: `curl https://kafi-sales-agent-production.up.railway.app/api/health` —
+  502 after ~15 s means the web side is stuck; restart from Railway and send the time.
 - Seen at 07:45 UTC and 08:39 UTC on 2026-09-29: `QueuePool limit ... reached` and
   `SSL connection has been closed unexpectedly` (Supabase pooler dropping connections).
 - Cause not proven. The polling endpoints (interested follow-ups, meeting alerts, unread counts) run heavy
