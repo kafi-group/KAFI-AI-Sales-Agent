@@ -893,7 +893,8 @@ class VoiceClient:
                         "voice": voice_config,
                         "transcriber": {
                             "provider": "deepgram",
-                            "model": "nova-3",
+                            # nova-3 has no Chinese (Vapi 400 -> English Twilio fallback); nova-2 does.
+                            "model": "nova-2" if transcriber_lang == "zh" else "nova-3",
                             "language": transcriber_lang,
                         },
                     },
