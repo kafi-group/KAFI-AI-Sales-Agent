@@ -1177,6 +1177,15 @@ class VoiceClient:
                 status = str(data.get("status") or "").lower()
                 ended_reason = str(data.get("endedReason") or data.get("ended_reason") or "")
                 duration = data.get("durationSeconds") or data.get("duration")
+                if duration in (None, "") and data.get("startedAt") and data.get("endedAt"):
+                    try:
+                        from datetime import datetime
+
+                        t0 = datetime.fromisoformat(str(data["startedAt"]).replace("Z", "+00:00"))
+                        t1 = datetime.fromisoformat(str(data["endedAt"]).replace("Z", "+00:00"))
+                        duration = max(0, int((t1 - t0).total_seconds()))
+                    except Exception:  # noqa: BLE001
+                        pass
                 ended = status in {"ended", "completed", "failed"} or bool(ended_reason)
                 art = data.get("artifact") if isinstance(data.get("artifact"), dict) else {}
                 recording_url = None

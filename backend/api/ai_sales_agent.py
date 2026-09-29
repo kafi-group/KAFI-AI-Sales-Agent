@@ -850,6 +850,35 @@ def _finish_task(
     return followup
 
 
+def _call_was_answered(call_sid: str | None, duration: Any, transcript: str | None) -> bool:
+    """True when the customer really talked to the agent (>=20s, or they spoke)."""
+
+    def _seconds(value: Any) -> int | None:
+        try:
+            return int(float(value)) if value not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    def _talked(text: str | None) -> bool:
+        low = (text or "").lower()
+        return "user:" in low or "customer:" in low
+
+    secs = _seconds(duration)
+    if (secs is not None and secs >= 20) or _talked(transcript):
+        return True
+    if call_sid:
+        try:
+            from integrations.voice_client import voice_client
+
+            info = voice_client.fetch_outbound_status(call_sid)
+            live_secs = _seconds(info.get("duration"))
+            if (live_secs is not None and live_secs >= 20) or _talked(info.get("call_transcript")):
+                return True
+        except Exception as exc:  # noqa: BLE001
+            print(f"Answered-call check failed: {exc}", flush=True)
+    return False
+
+
 def handle_ai_call_status(
     *,
     task_id: int | None,
@@ -907,6 +936,10 @@ def handle_ai_call_status(
     attempt = int(task.get("ring_attempt") or ring_attempt or 1)
     no_answer = _is_no_answer(status, ended_reason, duration)
     max_attempts = voice_client.max_ring_attempts()
+    # A conversation the customer took part in must never be redialed, even when the
+    # webhook omitted the duration (customer-ended-call + no duration looks "missed").
+    if no_answer and attempt < max_attempts and _call_was_answered(call_sid, duration, call_transcript):
+        no_answer = False
     if no_answer and attempt < max_attempts:
         phone = task.get("contact_phone")
         if phone:
