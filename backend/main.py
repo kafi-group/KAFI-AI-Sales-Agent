@@ -392,6 +392,40 @@ _PUBLIC_API_PREFIXES = (
 )
 
 
+def _auth_lookup_sync(token: str):
+    """Blocking DB session lookup. Always run in a worker thread, never on the event loop:
+    a slow/dead Supabase connection here used to freeze the whole web server."""
+    from modules import auth as auth_module
+    from sqlalchemy.exc import DBAPIError, OperationalError, TimeoutError as SATimeoutError
+
+    db = SessionLocal()
+    try:
+        try:
+            user = auth_module.get_user_by_token(db, token)
+        except (SATimeoutError, OperationalError, DBAPIError) as first_exc:
+            # Overnight Supabase SSL drops poison the pool; dispose so the retry
+            # (and later requests) get fresh connections instead of 503 forever.
+            try:
+                from db.session import engine as _db_engine
+
+                _db_engine.dispose()
+            except Exception:
+                pass
+            db.close()
+            db = SessionLocal()
+            user = auth_module.get_user_by_token(db, token)
+            print(
+                f"Auth middleware recovered after DB error ({type(first_exc).__name__}); pool disposed.",
+                flush=True,
+            )
+        if not user:
+            return None
+        role = user.role.value if hasattr(user.role, "value") else str(user.role)
+        return (user.id, role)
+    finally:
+        db.close()
+
+
 @app.middleware("http")
 async def require_api_auth(request, call_next):
     """Require a valid session (Bearer or httpOnly cookie) for dashboard API routes."""
@@ -422,46 +456,22 @@ async def require_api_auth(request, call_next):
         request.state.user_role = cached[1]
         return await call_next(request)
 
+    import asyncio
+
+    from fastapi.concurrency import run_in_threadpool
     from fastapi.responses import JSONResponse
-    from sqlalchemy.exc import DBAPIError, OperationalError, TimeoutError as SATimeoutError
 
-    db = SessionLocal()
     try:
-        user = auth_module.get_user_by_token(db, token)
-        if not user:
-            return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
-        request.state.user_id = user.id
-        request.state.user_role = user.role.value if hasattr(user.role, "value") else str(user.role)
-    except (SATimeoutError, OperationalError, DBAPIError) as first_exc:
-        # Overnight Supabase SSL drops poison the pool; dispose so the next
-        # request (and this retry) get fresh connections instead of 503 forever.
-        try:
-            from db.session import engine as _db_engine
-
-            _db_engine.dispose()
-        except Exception:
-            pass
-        try:
-            db.close()
-            db = SessionLocal()
-            user = auth_module.get_user_by_token(db, token)
-            if not user:
-                return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
-            request.state.user_id = user.id
-            request.state.user_role = user.role.value if hasattr(user.role, "value") else str(user.role)
-        except Exception:
-            return JSONResponse(
-                status_code=503,
-                content={"detail": "Database busy — retry shortly"},
-                headers={"Retry-After": "2"},
-            )
-        else:
-            print(
-                f"Auth middleware recovered after DB error ({type(first_exc).__name__}); pool disposed.",
-                flush=True,
-            )
-    finally:
-        db.close()
+        found = await asyncio.wait_for(run_in_threadpool(_auth_lookup_sync, token), timeout=10.0)
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Database busy — retry shortly"},
+            headers={"Retry-After": "2"},
+        )
+    if not found:
+        return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+    request.state.user_id, request.state.user_role = found
 
     return await call_next(request)
 
