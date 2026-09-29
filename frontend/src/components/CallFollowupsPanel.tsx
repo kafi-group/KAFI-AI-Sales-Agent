@@ -248,17 +248,6 @@ export function CallFollowupsPanel({ onError }: CallFollowupsPanelProps) {
         </p>
       )}
 
-      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-200/90">
-        Setup only for now — Sara and Rayan do not use these yet. When switched on, after every call
-        they will pick the best situation and draft, keep prices, weights, names and categories
-        exactly as written, and send by email (and WhatsApp when the QR is scanned). Placeholders:{" "}
-        {placeholders.map((p) => (
-          <code key={p} className="mx-0.5 text-amber-100">
-            [{p}]
-          </code>
-        ))}
-      </div>
-
       <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)]">
         {/* Situation list */}
         <div className="rounded-xl border border-slate-800 bg-slate-900/50 overflow-hidden">
@@ -472,6 +461,16 @@ export function CallFollowupsPanel({ onError }: CallFollowupsPanelProps) {
             value={draftForm.body}
             onChange={(e) => setDraftForm((f) => ({ ...f, body: e.target.value }))}
           />
+          {placeholders.length > 0 && (
+            <p className="mt-1 text-[11px] text-slate-500">
+              Placeholders:{" "}
+              {placeholders.map((p) => (
+                <code key={p} className="mr-1 text-slate-400">
+                  [{p}]
+                </code>
+              ))}
+            </p>
+          )}
         </div>
         <div>
           <label className={labelCls}>WhatsApp text (optional — sent only if WhatsApp is connected)</label>
