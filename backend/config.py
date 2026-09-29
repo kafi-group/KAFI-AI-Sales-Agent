@@ -157,8 +157,9 @@ class Settings(BaseSettings):
     web_search_combined_providers: str | None = None
 
     # Vapi AI Voice Integration (Sub-Second Ultra-Fast Conversational Voice Engine)
-    vapi_api_key: str | None = "7bc20bf2-f724-47d0-8b6b-ffb8c8b99905"
-    vapi_phone_number_id: str | None = "b64519d0-0296-4f0b-8a71-c49aa88f8e8f"
+    # Set VAPI_API_KEY / VAPI_PHONE_NUMBER_ID in Railway (or backend/.env locally).
+    vapi_api_key: str | None = None
+    vapi_phone_number_id: str | None = None
     vapi_enabled: bool = True
     elevenlabs_enabled: bool = False
     elevenlabs_api_key: str | None = "sk_880257fad111679821f7d3bbbf1a562b4d2c2fbe22cd14af"
