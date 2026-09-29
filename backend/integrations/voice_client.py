@@ -866,9 +866,10 @@ class VoiceClient:
 
                 payload = {
                     "customer": {"number": normalized, "name": c_name},
-                    # Disable call recording + artifact transcript.
-                    "recordingEnabled": False,
                     "assistant": {
+                        # Recording is off for now. Vapi rejects a top-level
+                        # "recordingEnabled" (HTTP 400), so it lives in artifactPlan.
+                        "artifactPlan": {"recordingEnabled": False},
                         "name": agent_name,
                         "firstMessage": first_msg,
                         "model": {
@@ -938,7 +939,12 @@ class VoiceClient:
                         "ring_attempt": safe_attempt,
                     }
             except Exception as exc:
-                print(f"Vapi call failed, falling back to Twilio TwiML: {exc}", flush=True)
+                detail = ""
+                try:
+                    detail = exc.read().decode("utf-8", "replace")[:500]  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                print(f"Vapi call failed, falling back to Twilio TwiML: {exc} {detail}", flush=True)
 
         if not self.is_configured:
             return {"ok": False, "error": "Neither Vapi nor Twilio is configured on the server."}

@@ -969,7 +969,9 @@ async def twilio_ai_agent_status(request: Request):
     call_sid = str(form.get("CallSid") or "") or None
     from api import ai_sales_agent as asa
 
-    asa.handle_ai_call_status(
+    from fastapi.concurrency import run_in_threadpool
+    await run_in_threadpool(
+        asa.handle_ai_call_status,
         task_id=task_id,
         call_sid=call_sid,
         status=status,
@@ -1059,7 +1061,12 @@ async def twilio_ai_agent_respond(request: Request):
             "Respond naturally in 1 to 2 clear, spoken sentences to answer their question, mention our commodities if relevant, and keep the conversation going smoothly. "
             "Do NOT use markdown, emojis, bullet points, or special characters."
         )
-        ai_reply = llm_client.generate(prompt)
+        # llm_client.generate is blocking (tries every model in turn), so run it in a
+        # worker thread with a cap; otherwise a slow Gemini stalls the whole server.
+        from fastapi.concurrency import run_in_threadpool
+        import asyncio
+
+        ai_reply = await asyncio.wait_for(run_in_threadpool(llm_client.generate, prompt), timeout=7.0)
         ai_reply = (ai_reply or "").strip().replace("*", "").replace("#", "")
         if not ai_reply:
             ai_reply = "We offer premium quality white rice, sesame seeds, and agricultural commodities. Are you currently importing any of these items?"

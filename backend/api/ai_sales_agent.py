@@ -2805,7 +2805,9 @@ async def vapi_ai_agent_status(request: Request) -> dict[str, Any]:
             interaction_id = int(metadata.get("interaction_id"))
         except (TypeError, ValueError):
             interaction_id = None
-    return handle_ai_call_status(
+    from fastapi.concurrency import run_in_threadpool
+    return await run_in_threadpool(
+        handle_ai_call_status,
         task_id=task_id_int,
         call_sid=str(call_sid) if call_sid else None,
         status=str(status or ""),
