@@ -18,6 +18,8 @@ import {
 } from "../utils/emailTemplateDefaults";
 import { capitalizeFirstLetter } from "../utils/spelling";
 import { PictureLibraryManager } from "../components/PictureLibraryManager";
+import { CallFollowupsPanel } from "../components/CallFollowupsPanel";
+import { CataloguePage } from "./CataloguePage";
 
 interface EmailTemplatesPageProps {
   onError: (message: string) => void;
@@ -34,7 +36,9 @@ export function EmailTemplatesPage({ onError, onCountChange }: EmailTemplatesPag
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [mode, setMode] = useState<"templates" | "pictures">("templates");
+  const [mode, setMode] = useState<"templates" | "pictures" | "followups" | "catalogue">(
+    "templates",
+  );
   const [pictureCount, setPictureCount] = useState(0);
 
   const refreshTemplates = useCallback(async () => {
@@ -198,7 +202,13 @@ export function EmailTemplatesPage({ onError, onCountChange }: EmailTemplatesPag
         <div>
           <div className="flex items-center gap-3 flex-wrap">
             <h2 className="text-xl font-bold tracking-tight text-white">
-              {mode === "templates" ? "Email templates" : "Picture library"}
+              {mode === "templates"
+                ? "Email templates"
+                : mode === "pictures"
+                  ? "Picture library"
+                  : mode === "followups"
+                    ? "Call follow-ups for AI Agents"
+                    : "Catalogue"}
             </h2>
 
             {/* Switchable Mode Toggle */}
@@ -238,6 +248,30 @@ export function EmailTemplatesPage({ onError, onCountChange }: EmailTemplatesPag
                   </span>
                 )}
               </button>
+
+              <button
+                type="button"
+                onClick={() => setMode("followups")}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${
+                  mode === "followups"
+                    ? "bg-violet-600 text-white shadow-md shadow-violet-950/40"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <span>🤖 Call follow-ups for AI Agents</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMode("catalogue")}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${
+                  mode === "catalogue"
+                    ? "bg-amber-600 text-white shadow-md shadow-amber-950/40"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <span>📚 Catalogue</span>
+              </button>
             </div>
           </div>
 
@@ -249,6 +283,13 @@ export function EmailTemplatesPage({ onError, onCountChange }: EmailTemplatesPag
                 <code className="text-slate-400">[contact_name]</code> — they are filled in per lead
                 when you send from the Leads table.
               </>
+            ) : mode === "followups" ? (
+              <>
+                Situations Sara and Rayan choose from after a call — each situation has a "when to use
+                this" description and one or more email drafts.
+              </>
+            ) : mode === "catalogue" ? (
+              <>Product catalogues and brand folios, ready to attach or send.</>
             ) : (
               <>
                 Organize product photos, brochures, and company assets into groups. Pictures here can be
@@ -278,7 +319,11 @@ export function EmailTemplatesPage({ onError, onCountChange }: EmailTemplatesPag
         )}
       </div>
 
-      {mode === "pictures" ? (
+      {mode === "followups" ? (
+        <CallFollowupsPanel onError={onError} />
+      ) : mode === "catalogue" ? (
+        <CataloguePage initialCatalogueId={null} onError={onError} />
+      ) : mode === "pictures" ? (
         <PictureLibraryManager
           onError={onError}
           onTotalPicturesChange={setPictureCount}

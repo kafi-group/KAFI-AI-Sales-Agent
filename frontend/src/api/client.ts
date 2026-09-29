@@ -3790,6 +3790,59 @@ export const client = {
       method: "POST",
     }),
 
+  /** Call follow-ups for AI Agents: situation groups + drafts (setup only). */
+  listCallFollowups: () =>
+    request<{ groups: CallFollowupGroup[]; placeholders: string[] }>("/call-followups"),
+  createCallFollowupGroup: (data: { name: string; description?: string; enabled?: boolean }) =>
+    request<CallFollowupGroup>("/call-followups/groups", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateCallFollowupGroup: (
+    id: number,
+    data: Partial<{ name: string; description: string; enabled: boolean }>,
+  ) =>
+    request<CallFollowupGroup>(`/call-followups/groups/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  deleteCallFollowupGroup: (id: number) =>
+    request<{ ok: boolean }>(`/call-followups/groups/${id}`, { method: "DELETE" }),
+  createCallFollowupDraft: (
+    groupId: number,
+    data: {
+      name: string;
+      subject?: string;
+      body?: string;
+      whatsapp_text?: string;
+      attachment_mode?: "none" | "auto" | "catalogue";
+      catalogue_ids?: string[];
+      enabled?: boolean;
+    },
+  ) =>
+    request<CallFollowupDraft>(`/call-followups/groups/${groupId}/drafts`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateCallFollowupDraft: (
+    id: number,
+    data: Partial<{
+      name: string;
+      subject: string;
+      body: string;
+      whatsapp_text: string;
+      attachment_mode: "none" | "auto" | "catalogue";
+      catalogue_ids: string[];
+      enabled: boolean;
+    }>,
+  ) =>
+    request<CallFollowupDraft>(`/call-followups/drafts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  deleteCallFollowupDraft: (id: number) =>
+    request<{ ok: boolean }>(`/call-followups/drafts/${id}`, { method: "DELETE" }),
+
   listEmailTemplates: () => request<EmailTemplate[]>("/email-templates"),
   getEmailTemplatePlaceholders: () =>
     request<{ placeholders: string[]; usage: string }>("/email-templates/placeholders"),
@@ -5430,6 +5483,32 @@ export interface AddRecipientPayload {
   country?: string;
   city?: string;
   remarks?: string;
+}
+
+export interface CallFollowupDraft {
+  id: number;
+  group_id: number;
+  name: string;
+  subject: string;
+  body: string;
+  whatsapp_text: string;
+  attachment_mode: "none" | "auto" | "catalogue";
+  catalogue_ids: string[];
+  enabled: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CallFollowupGroup {
+  id: number;
+  name: string;
+  description: string;
+  enabled: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  drafts: CallFollowupDraft[];
 }
 
 export interface CatalogueItem {

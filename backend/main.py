@@ -532,6 +532,12 @@ app.include_router(telegram_personal.router, prefix="/api")
 app.include_router(whatsapp.webhooks_router, prefix="/api")
 app.include_router(ai_mode.router, prefix="/api")
 app.include_router(catalogues.router, prefix="/api")
+try:  # additive feature: a failure here must never stop the app from booting
+    from api import call_followups as _call_followups_api
+
+    app.include_router(_call_followups_api.router, prefix="/api")
+except Exception as _cf_exc:  # noqa: BLE001
+    print(f"Call follow-ups router disabled: {_cf_exc}", flush=True)
 app.include_router(horeka.router, prefix="/api")
 app.include_router(target_workspace.router, prefix="/api")
 app.include_router(system.router, prefix="/api")
