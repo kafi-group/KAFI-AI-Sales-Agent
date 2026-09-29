@@ -940,6 +940,13 @@ def handle_ai_call_status(
     # webhook omitted the duration (customer-ended-call + no duration looks "missed").
     if no_answer and attempt < max_attempts and _call_was_answered(call_sid, duration, call_transcript):
         no_answer = False
+    if no_answer and (task.get("ended_by_user") or task.get("answered")):
+        print(
+            f"Redial skipped task={task.get('id')} ended_by_user={task.get('ended_by_user')} "
+            f"answered={task.get('answered')} status={status} reason={ended_reason}",
+            flush=True,
+        )
+        no_answer = False
     if no_answer and attempt < max_attempts:
         phone = task.get("contact_phone")
         if phone:
@@ -1053,6 +1060,8 @@ def _do_reconcile_live_calls(db: Session, live: list[dict[str, Any]]) -> None:
         info = voice_client.fetch_outbound_status(call_sid)
         status = str(info.get("status") or "").lower().replace("_", "-")
         ended_reason = str(info.get("ended_reason") or "")
+        if status in {"in-progress", "answered", "forwarding"}:
+            task["answered"] = True
 
         if info.get("ended"):
             handle_ai_call_status(
@@ -1599,6 +1608,11 @@ def end_ai_call(
                     live = next((x for x in _TASKS if x.get("id") == ct.get("id")), ct)
                     if live not in candidates:
                         candidates.append(live)
+
+    # Mark BEFORE hanging up: Vapi's "call-deleted / manually-canceled" webhook can arrive
+    # first and would otherwise look like a missed ring and trigger an auto-redial.
+    for t in candidates:
+        t["ended_by_user"] = True
 
     hangup_results: list[dict[str, Any]] = []
     for sid in sids:
@@ -2820,6 +2834,13 @@ async def vapi_ai_agent_status(request: Request) -> dict[str, Any]:
         except Exception as fetch_exc:  # noqa: BLE001
             print(f"Vapi call fetch for recording skipped: {fetch_exc}", flush=True)
 
+    if str(status or "").lower().replace("_", "-") in {"in-progress", "answered", "forwarding"}:
+        # The customer picked up: this call must never be treated as a missed ring/redialed.
+        live_task = _find_task(task_id_int)
+        if live_task is None and call_sid:
+            live_task = next((t for t in _TASKS if t.get("call_sid") == call_sid), None)
+        if live_task is not None:
+            live_task["answered"] = True
     if msg_type == "status-update" and str(status or "").lower() not in {
         "ended",
         "completed",
