@@ -26,7 +26,7 @@ import {
   htmlHasDataUriImages,
 } from "@/lib/hostInlineImagesClient";
 import {
-  applyEmailSignatureHtml,
+  buildEmailSignatureHtml,
   bodyHasCurrentUserSignature,
   signatureDisplayName,
 } from "@/lib/emailSignature";
@@ -687,17 +687,17 @@ function BulkInner() {
                 htmlToPlainText,
               )
             }
-            title={`Paste ${signatureDisplayName(
+            title={`Insert ${signatureDisplayName(
               user ?? {
                 username: preview?.username,
                 mailbox_email: preview?.mailbox_email,
                 mailbox_display_name: preview?.display_name,
               },
-            )} signature at the bottom of the body`}
+            )} signature where the cursor is`}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() =>
-              setBody((prev) =>
-                applyEmailSignatureHtml(
-                  prev,
+              bodyEditorRef.current?.insertBlock(
+                buildEmailSignatureHtml(
                   user ?? {
                     username: preview?.username,
                     mailbox_email: preview?.mailbox_email,

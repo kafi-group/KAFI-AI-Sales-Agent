@@ -21,6 +21,12 @@ import {
 export type EmailBodyEditorHandle = {
   /** Insert a hosted image at the last cursor position in the body. */
   insertPicture: (url: string, filename?: string) => void;
+  /**
+   * Insert an HTML block (e.g. the signature) as its own block at the last cursor
+   * position. An empty line is replaced; otherwise the block goes right after the
+   * paragraph holding the cursor. Existing message text is never modified.
+   */
+  insertBlock: (html: string) => void;
   focus: () => void;
 };
 
@@ -217,7 +223,40 @@ export const EmailBodyEditor = forwardRef<EmailBodyEditorHandle, EmailBodyEditor
       saveSelection();
     }
 
+    function insertBlockAtCursor(html: string) {
+      const el = editorRef.current;
+      if (!el) return;
+      const tpl = document.createElement("template");
+      tpl.innerHTML = normalizeEditorTextColor(html, uiTheme);
+      const frag = tpl.content;
+
+      // Find the top-level block that holds the last saved cursor.
+      let block: Node | null = null;
+      const range = savedRange.current;
+      if (range && el.contains(range.startContainer)) {
+        block = range.startContainer;
+        while (block && block.parentNode !== el) block = block.parentNode;
+      }
+
+      if (!block || block === el) {
+        el.appendChild(frag); // cursor never placed → bottom of the body
+      } else {
+        const isEmptyLine =
+          block.nodeType === Node.ELEMENT_NODE &&
+          (block.textContent || "").trim() === "" &&
+          !(block as Element).querySelector("img");
+        if (isEmptyLine) el.replaceChild(frag, block);
+        else el.insertBefore(frag, block.nextSibling);
+      }
+      savedRange.current = null;
+      emitChange();
+    }
+
     useImperativeHandle(ref, () => ({
+      insertBlock(html: string) {
+        if (disabled || !html) return;
+        insertBlockAtCursor(html);
+      },
       insertPicture(url: string, filename = "image") {
         if (disabled || !url) return;
         insertHtmlAtCursor(imgHtml(url, filename));

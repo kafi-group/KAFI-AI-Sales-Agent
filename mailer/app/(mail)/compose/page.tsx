@@ -31,7 +31,7 @@ import {
   type HostedAttachment,
 } from "@/lib/hostAttachments";
 import {
-  applyEmailSignatureHtml,
+  buildEmailSignatureHtml,
   bodyHasCurrentUserSignature,
   signatureDisplayName,
 } from "@/lib/emailSignature";
@@ -459,9 +459,10 @@ function ComposeInner() {
           type="button"
           className="btn"
           disabled={sending || saving || bodyHasCurrentUserSignature(body, user, htmlToPlainText)}
-          title={`Paste ${signatureDisplayName(user)} signature at the bottom of the body`}
+          title={`Insert ${signatureDisplayName(user)} signature where the cursor is`}
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() =>
-            setBody((prev) => applyEmailSignatureHtml(prev, user, plainTextToEditorHtml))
+            bodyEditorRef.current?.insertBlock(buildEmailSignatureHtml(user, plainTextToEditorHtml))
           }
           style={{
             background: bodyHasCurrentUserSignature(body, user, htmlToPlainText)

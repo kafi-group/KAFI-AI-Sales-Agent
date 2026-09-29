@@ -155,13 +155,23 @@ export function bodyHasCurrentUserSignature(
   );
 }
 
+/** Signature as a standalone HTML block, for inserting at the editor cursor. */
+export function buildEmailSignatureHtml(
+  user: SignatureUser | null | undefined,
+  toHtml: (plain: string) => string,
+): string {
+  return toHtml(buildEmailSignaturePlain(user));
+}
+
+/**
+ * Fallback: append the signature at the bottom. Never strips or rewrites the body
+ * (the old strip cut everything after any "Kafi Commodities" mention in the text).
+ */
 export function applyEmailSignatureHtml(
   html: string,
   user: SignatureUser | null | undefined,
   toHtml: (plain: string) => string,
 ): string {
-  const cleaned = stripEmailSignatureHtml(html);
-  const sigHtml = `${SIG_HTML_START}${toHtml(buildEmailSignaturePlain(user))}${SIG_HTML_END}`;
-  const spacer = cleaned.trim() ? "<p><br></p>" : "";
-  return `${cleaned}${spacer}${sigHtml}`;
+  const spacer = (html || "").trim() ? "<p><br></p>" : "";
+  return `${html || ""}${spacer}${buildEmailSignatureHtml(user, toHtml)}`;
 }
