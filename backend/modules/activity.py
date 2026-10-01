@@ -501,6 +501,82 @@ def _activity_dict(
     }
 
 
+_ANSWERED_MIN_SECONDS = 20
+
+
+def _with_unmarked_answered_calls(db: Session, events: list[Any]) -> list[Any]:
+    """Count answered calls nobody gave an outcome to as 'picked up'.
+
+    "Calls picked up" is the Follow up outcome. A call that really connected (completed, at least
+    ~20s) but was never given an outcome (only remarks, or nothing) was counted nowhere. Add a
+    transient (never saved) Follow up event for each one so the KPI cards, drill-down list and
+    summaries include it. As soon as someone marks an outcome on the call it is categorised there
+    instead. Any problem here returns the events unchanged, so KPIs can never break.
+    """
+    try:
+        from db.models import Interaction
+        from modules.calls import parse_call_fields
+
+        logged = [
+            e
+            for e in events
+            if e.activity_type == CALL_LOGGED and e.entity_type == "interaction" and e.entity_id
+        ]
+        if not logged:
+            return events
+        ids = sorted({int(e.entity_id) for e in logged})
+        answered: dict[int, int] = {}
+        for iid, content in db.query(Interaction.id, Interaction.content).filter(Interaction.id.in_(ids)).all():
+            fields = parse_call_fields(content)
+            if fields.get("call_outcome"):
+                continue  # already categorised (follow up / interested / not interested / no answer)
+            last_status = str(fields.get("call_status") or "").split("—")[-1].strip().lower()
+            seconds = int(fields.get("call_duration_seconds") or 0)
+            if last_status == "completed" and seconds >= _ANSWERED_MIN_SECONDS:
+                answered[int(iid)] = seconds
+        if not answered:
+            return events
+        extra: list[Any] = []
+        seen: set[int] = set()
+        for e in logged:
+            iid = int(e.entity_id)
+            if iid not in answered or iid in seen:
+                continue
+            seen.add(iid)
+            details = dict(e.details or {})
+            company = details.get("company_name") or "Unknown"
+            details.update(
+                {
+                    "outcome": "follow_up",
+                    "auto_picked_up": True,
+                    "call_seconds": answered[iid],
+                    "interaction_id": iid,
+                }
+            )
+            extra.append(
+                UserActivityEvent(
+                    id=-int(e.id),
+                    user_id=e.user_id,
+                    activity_type=CALL_OUTCOME,
+                    title="Follow up",
+                    summary=f"Call answered ({answered[iid]}s) - {company} - outcome not marked yet",
+                    quantity=1,
+                    entity_type="interaction",
+                    entity_id=iid,
+                    details=details,
+                    created_at=e.created_at,
+                )
+            )
+        if not extra:
+            return events
+        return sorted(
+            list(events) + extra, key=lambda ev: (ev.created_at, ev.id or 0), reverse=True
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"KPI answered-call add-on skipped: {exc}", flush=True)
+        return events
+
+
 def get_kpi_counts_for_range(
     db: Session,
     *,
@@ -528,7 +604,7 @@ def get_kpi_counts_for_range(
     if target_user_id is not None:
         query = query.filter(UserActivityEvent.user_id == target_user_id)
 
-    events = query.all()
+    events = _with_unmarked_answered_calls(db, query.all())
     email_by_user = _email_send_counts_by_user(
         db,
         start_utc=start_utc,
@@ -602,7 +678,7 @@ def get_kpi_report(
     if target_user_id is not None:
         query = query.filter(UserActivityEvent.user_id == target_user_id)
 
-    events = query.all()
+    events = _with_unmarked_answered_calls(db, query.all())
     email_by_user = _email_send_counts_by_user(
         db,
         start_utc=start_utc,
