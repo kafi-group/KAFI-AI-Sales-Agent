@@ -7,6 +7,7 @@ import {
 } from "../api/client";
 import { Pagination } from "../components/Pagination";
 import { BulkResultsModal } from "../components/BulkResultsModal";
+import { classifyWhatsAppFailure } from "../utils/whatsappFailure";
 import { useAuth } from "../auth/AuthContext";
 
 interface EmailActivityPageProps {
@@ -530,7 +531,7 @@ export function EmailActivityPage({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-3 text-sm">
+      <div className={`flex flex-wrap gap-3 text-sm ${isWhatsApp ? "hidden" : ""}`}>
         <span className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-slate-300">
           {total} event{total === 1 ? "" : "s"}
         </span>
@@ -925,6 +926,20 @@ export function EmailActivityPage({
                     {!bulkCampaign ? (
                       <p className="text-sm opacity-90 mt-1 whitespace-pre-wrap">{event.message}</p>
                     ) : null}
+                    {isWhatsApp && !bulkCampaign && event.event_type === "send_failed"
+                      ? (() => {
+                          const info = classifyWhatsAppFailure(event.message);
+                          if (info.key === "other") return null;
+                          return (
+                            <p className="mt-1.5 text-xs text-slate-400">
+                              <span className="inline-block mr-1.5 rounded bg-red-500/15 px-1.5 py-0.5 text-red-200">
+                                {info.label}
+                              </span>
+                              {info.hint}
+                            </p>
+                          );
+                        })()
+                      : null}
                     {!bulkCampaign && event.buyer_id && onOpenLead ? (
                       <button
                         type="button"

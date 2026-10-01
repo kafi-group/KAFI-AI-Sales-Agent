@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { client, type EmailActivityBulkResults } from "../api/client";
+import { classifyWhatsAppFailure, waDigits } from "../utils/whatsappFailure";
 
 interface BulkResultsModalProps {
   eventId: number;
@@ -31,6 +32,7 @@ export function BulkResultsModal({ eventId, onClose, onError, onOpenLead }: Bulk
   const [data, setData] = useState<EmailActivityBulkResults | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<StatusFilter>("all");
+  const [reasonFilter, setReasonFilter] = useState<string>("all");
 
   useEffect(() => {
     let active = true;
@@ -54,10 +56,29 @@ export function BulkResultsModal({ eventId, onClose, onError, onOpenLead }: Bulk
     };
   }, [eventId, onError]);
 
+  const isWhatsApp = data?.channel === "whatsapp";
+
+  // Failed contacts grouped by reason (WhatsApp only), e.g. "Healthy ecosystem engagement · 3".
+  const reasonCounts = useMemo(() => {
+    const map = new Map<string, { label: string; count: number }>();
+    if (!isWhatsApp) return [] as Array<[string, { label: string; count: number }]>;
+    for (const r of data?.results ?? []) {
+      if (r.status !== "failed") continue;
+      const info = classifyWhatsAppFailure(r.message);
+      const cur = map.get(info.key);
+      map.set(info.key, { label: info.label, count: (cur?.count ?? 0) + 1 });
+    }
+    return Array.from(map.entries());
+  }, [data, isWhatsApp]);
+
   const rows = useMemo(() => {
     const all = data?.results ?? [];
-    return filter === "all" ? all : all.filter((r) => r.status === filter);
-  }, [data, filter]);
+    const byStatus = filter === "all" ? all : all.filter((r) => r.status === filter);
+    if (reasonFilter === "all" || !isWhatsApp) return byStatus;
+    return byStatus.filter(
+      (r) => r.status === "failed" && classifyWhatsAppFailure(r.message).key === reasonFilter,
+    );
+  }, [data, filter, reasonFilter, isWhatsApp]);
 
   const chips: Array<[StatusFilter, string, number]> = data
     ? [
@@ -105,7 +126,10 @@ export function BulkResultsModal({ eventId, onClose, onError, onOpenLead }: Bulk
             <button
               key={key}
               type="button"
-              onClick={() => setFilter(key)}
+              onClick={() => {
+                setFilter(key);
+                setReasonFilter("all");
+              }}
               className={`px-3 py-1 rounded-full text-xs border transition-colors ${
                 filter === key
                   ? "bg-slate-100 text-slate-900 border-slate-100"
@@ -116,6 +140,37 @@ export function BulkResultsModal({ eventId, onClose, onError, onOpenLead }: Bulk
             </button>
           ))}
         </div>
+
+        {filter === "failed" && reasonCounts.length > 0 ? (
+          <div className="px-5 pt-2 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wide text-slate-500">Reason</span>
+            <button
+              type="button"
+              onClick={() => setReasonFilter("all")}
+              className={`px-2.5 py-0.5 rounded-full text-xs border ${
+                reasonFilter === "all"
+                  ? "bg-red-200 text-red-950 border-red-200"
+                  : "border-red-500/30 text-red-200 hover:bg-red-950/40"
+              }`}
+            >
+              All failed · {data?.counts.failed ?? 0}
+            </button>
+            {reasonCounts.map(([key, info]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setReasonFilter(key)}
+                className={`px-2.5 py-0.5 rounded-full text-xs border ${
+                  reasonFilter === key
+                    ? "bg-red-200 text-red-950 border-red-200"
+                    : "border-red-500/30 text-red-200 hover:bg-red-950/40"
+                }`}
+              >
+                {info.label} · {info.count}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {data?.reconstructed ? (
           <p className="mx-5 mt-3 rounded-lg border border-amber-500/20 bg-amber-950/20 px-3 py-2 text-xs text-amber-200/90">
@@ -161,7 +216,34 @@ export function BulkResultsModal({ eventId, onClose, onError, onOpenLead }: Bulk
                         {row.message}
                       </p>
                     ) : null}
+                    {isWhatsApp && row.status === "failed"
+                      ? (() => {
+                          const info = classifyWhatsAppFailure(row.message);
+                          return (
+                            <p className="text-xs mt-1 text-slate-400">
+                              <span className="inline-block mr-1.5 rounded bg-red-500/15 px-1.5 py-0.5 text-red-200">
+                                {info.label}
+                              </span>
+                              {info.hint}
+                            </p>
+                          );
+                        })()
+                      : null}
                   </div>
+                  {isWhatsApp &&
+                  row.status === "failed" &&
+                  classifyWhatsAppFailure(row.message).key === "undeliverable" &&
+                  waDigits(row.phone) ? (
+                    <a
+                      href={`https://wa.me/${waDigits(row.phone)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 px-3 py-1 rounded-lg border border-emerald-500/40 text-xs font-medium text-emerald-200 hover:bg-emerald-950/40"
+                      title="Opens WhatsApp for this number — if it refuses to open, the number is not on WhatsApp"
+                    >
+                      Check on WhatsApp
+                    </a>
+                  ) : null}
                   {row.buyer_id != null && onOpenLead ? (
                     <button
                       type="button"
