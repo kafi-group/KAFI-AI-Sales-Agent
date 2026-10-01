@@ -3554,6 +3554,43 @@ export const client = {
       `/inbox/messages/${encodeURIComponent(uid)}?${search.toString()}`,
     );
   },
+  /** Authenticated download of one attachment of a received message (index = its position in the list). */
+  fetchInboxAttachmentBlob: async (
+    uid: string,
+    index: number,
+    folder = "INBOX",
+    mailboxUserId?: number | null,
+  ) => {
+    const search = new URLSearchParams({ folder });
+    if (mailboxUserId != null && Number.isFinite(mailboxUserId)) {
+      search.set("mailbox_user_id", String(mailboxUserId));
+    }
+    const token = getStoredToken();
+    const res = await fetch(
+      `${API_BASE}/inbox/messages/${encodeURIComponent(uid)}/attachments/${index}?${search.toString()}`,
+      { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} },
+    );
+    if (res.status === 401) {
+      clearSession();
+      window.dispatchEvent(new Event("kafi:auth-expired"));
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(messageForHttpError(res.status, text, res.statusText || "Failed to download attachment"));
+    }
+    return res.blob();
+  },
+  /** Copies a message's attachments into outgoing-email storage so a Forward can re-attach them. */
+  stageInboxAttachmentsForForward: (uid: string, folder = "INBOX", mailboxUserId?: number | null) => {
+    const search = new URLSearchParams({ folder });
+    if (mailboxUserId != null && Number.isFinite(mailboxUserId)) {
+      search.set("mailbox_user_id", String(mailboxUserId));
+    }
+    return request<{ attachments: EmailAttachment[]; skipped: string[] }>(
+      `/inbox/messages/${encodeURIComponent(uid)}/attachments/stage?${search.toString()}`,
+      { method: "POST" },
+    );
+  },
   markInboxMessageRead: (uid: string, folder = "INBOX", mailboxUserId?: number | null) => {
     const search = new URLSearchParams({ folder });
     if (mailboxUserId != null && Number.isFinite(mailboxUserId)) {

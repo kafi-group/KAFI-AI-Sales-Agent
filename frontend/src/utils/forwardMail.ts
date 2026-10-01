@@ -163,8 +163,17 @@ function esc(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/** Standard "Forwarded message" block (headers + the original text) as editor HTML. */
-export function buildForwardBodyHtml(msg: InboxMessageDetail): string {
+/**
+ * Standard "Forwarded message" block (headers + the original text) as editor HTML.
+ *
+ * `notIncluded` is the list of original attachments that could NOT be re-attached: pass `null`
+ * when none were carried over at all (the note then names every original file), or the names
+ * that were skipped when the rest were attached.
+ */
+export function buildForwardBodyHtml(
+  msg: InboxMessageDetail,
+  notIncluded: string[] | null = null,
+): string {
   const sender = msg.from_name
     ? `${esc(msg.from_name)} &lt;${esc(msg.from_email || "")}&gt;`
     : esc(msg.from_email || "Unknown sender");
@@ -184,9 +193,9 @@ export function buildForwardBodyHtml(msg: InboxMessageDetail): string {
   ];
   if (msg.cc && msg.cc.length) lines.push(`Cc: ${esc(msg.cc.join(", "))}`);
 
-  const attachmentNames = (msg.attachments || [])
-    .map((a) => (a.filename || "").trim())
-    .filter(Boolean);
+  const attachmentNames =
+    notIncluded ??
+    (msg.attachments || []).map((a) => (a.filename || "").trim()).filter(Boolean);
   const attachmentNote = attachmentNames.length
     ? `<p><em>Original attachments (not included — please re-attach if needed): ${esc(
         attachmentNames.join(", "),

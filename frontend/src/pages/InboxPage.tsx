@@ -36,6 +36,7 @@ const DEFAULT_AUTO_TRASH: AutoTrashSettings = {
 };
 import { ComposeRecipientsPickerModal } from "../components/ComposeRecipientsPickerModal";
 import { buildForwardBodyHtml, forwardSubject } from "../utils/forwardMail";
+import { InboxAttachmentChips } from "../components/InboxAttachmentChips";
 import { AttachedFilesList } from "../components/AttachedFilesList";
 import { AttachCatalogueModal } from "../components/AttachCatalogueModal";
 import {
@@ -415,8 +416,15 @@ export function InboxPage({
   const [showComposeRecipients, setShowComposeRecipients] = useState(false);
   // Forward: the contact picker (To / Cc with filters) opens only after clicking Forward.
   const [showForwardPicker, setShowForwardPicker] = useState(false);
-  const forwardDraftRef = useRef<{ subject: string; body: string } | null>(null);
-  const [composeDraft, setComposeDraft] = useState<MailComposeDraft | null>(null);
+  const forwardDraftRef = useRef<{
+    subject: string;
+    body: string;
+    attachments: EmailAttachment[];
+  } | null>(null);
+  const forwardPreparingRef = useRef(false);
+  const [composeDraft, setComposeDraft] = useState<
+    (MailComposeDraft & { attachments?: EmailAttachment[] }) | null
+  >(null);
   const [drafts, setDrafts] = useState<MailComposeDraft[]>([]);
   const [labels, setLabels] = useState<MailLabel[]>([]);
   const [messageLabels, setMessageLabels] = useState<MailLabel[]>([]);
@@ -1294,16 +1302,45 @@ export function InboxPage({
     setReplyBody("");
   }
 
-  function startForward() {
+  async function startForward() {
     const source =
       isThreadView && thread ? thread.messages[thread.messages.length - 1] : messageDetail;
-    if (!source) return;
-    forwardDraftRef.current = {
-      subject: forwardSubject(source.subject),
-      body: buildForwardBodyHtml(source),
-    };
+    if (!source || forwardPreparingRef.current) return;
+    forwardPreparingRef.current = true;
     setNotice(null);
-    setShowForwardPicker(true);
+    try {
+      // Carry the original attachments over: copy them into outgoing storage first. If that
+      // fails the forward still works — the body then says the files were not included.
+      let attachments: EmailAttachment[] = [];
+      let notIncluded: string[] | null = null;
+      const originalNames = (source.attachments || [])
+        .map((a) => (a.filename || "").trim())
+        .filter(Boolean);
+      if (originalNames.length > 0) {
+        setNotice("Preparing the attachments for your forward…");
+        try {
+          const staged = await client.stageInboxAttachmentsForForward(
+            source.uid,
+            source.folder || "INBOX",
+            mailboxUserIdRef.current,
+          );
+          attachments = staged.attachments || [];
+          notIncluded = staged.skipped || [];
+        } catch {
+          notIncluded = null;
+        }
+        setNotice(null);
+      }
+
+      forwardDraftRef.current = {
+        subject: forwardSubject(source.subject),
+        body: buildForwardBodyHtml(source, notIncluded),
+        attachments,
+      };
+      setShowForwardPicker(true);
+    } finally {
+      forwardPreparingRef.current = false;
+    }
   }
 
   const canReplyAll = useMemo(() => {
@@ -2812,18 +2849,11 @@ export function InboxPage({
                             <span className="ml-auto shrink-0">{formatDate(message.date)}</span>
                           </div>
                           <MessageBody message={message} />
-                          {message.attachments?.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              {message.attachments.map((a, idx) => (
-                                <span
-                                  key={`${a.filename ?? "file"}-${idx}`}
-                                  className="rounded border border-slate-700 bg-slate-950/60 px-2 py-0.5 text-[11px] text-slate-400"
-                                >
-                                  {a.filename || "attachment"}
-                                </span>
-                              ))}
-                            </div>
-                          )}
+                          <InboxAttachmentChips
+                            message={message}
+                            mailboxUserId={mailboxUserIdRef.current}
+                            onError={onError}
+                          />
                         </div>
                       </div>
                     );
@@ -3259,18 +3289,12 @@ export function InboxPage({
               <div className="flex-1 overflow-y-auto min-h-0 px-4 py-4">
                 <div className="rounded-2xl border border-slate-700 bg-slate-900/80 px-5 py-4 max-w-5xl">
                   <MessageBody message={messageDetail} />
-                  {messageDetail.attachments?.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {messageDetail.attachments.map((a, idx) => (
-                        <span
-                          key={`${a.filename ?? "file"}-${idx}`}
-                          className="rounded border border-slate-700 bg-slate-950/60 px-2 py-0.5 text-[11px] text-slate-400"
-                        >
-                          {a.filename || "attachment"}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  <InboxAttachmentChips
+                    message={messageDetail}
+                    mailboxUserId={mailboxUserIdRef.current}
+                    onError={onError}
+                    className="mt-3 flex flex-wrap gap-1.5"
+                  />
                 </div>
               </div>
 
@@ -3483,6 +3507,7 @@ export function InboxPage({
               body: fwd?.body || "",
               created_at: "",
               updated_at: "",
+              attachments: fwd?.attachments || [],
             });
             setShowCompose(true);
           }}
