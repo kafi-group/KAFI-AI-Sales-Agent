@@ -570,6 +570,48 @@ def _apply_product_category_filter(buyer_query, product_interest: str):
     return buyer_query
 
 
+_NON_BLANK_TOKEN = "__non_blank__"
+
+
+def _apply_product_filter(buyer_query, product_interest: str | None):
+    """Product filter for the leads table.
+
+    * JSON array (column header filter): exact product_interest values, "(Blanks)" and the compact
+      "all except blanks" token (one short value instead of hundreds of strings in the URL).
+    * Comma-separated labels (top "Product" dropdown): canonical product categories.
+
+    This was removed from the table query in August (commit d553302), so the Product filter did
+    nothing on the server; restoring it here.
+    """
+    if not product_interest or not product_interest.strip():
+        return buyer_query
+    raw = product_interest.strip()
+    if not raw.startswith("["):
+        return _apply_product_category_filter(buyer_query, raw)
+
+    from sqlalchemy import and_ as sa_and, or_
+
+    items = _parse_multi_filter_values(raw)
+    if not items:
+        return buyer_query
+    col = Buyer.product_interest
+    blank = or_(col.is_(None), col == "", col == "—", col == "-")
+    not_blank = sa_and(col.isnot(None), col != "", col != "—", col != "-")
+    conds = []
+    exact: list[str] = []
+    for item in items:
+        low = item.strip().lower()
+        if low == _NON_BLANK_TOKEN:
+            conds.append(not_blank)
+        elif _is_blank_token(item):
+            conds.append(blank)
+        else:
+            exact.append(low)
+    if exact:
+        conds.append(sa_func.lower(sa_func.coalesce(col, "")).in_(exact))
+    return buyer_query.filter(or_(*conds)) if conds else buyer_query
+
+
 def _apply_lead_table_scope(
     buyer_query,
     *,
@@ -936,6 +978,29 @@ def _apply_column_field_filter(db: Session, buyer_query, field: str, values_str:
     if not items:
         return buyer_query
 
+    # Compact "all except blanks" token (hundreds of selected values would overflow the URL).
+    if any(it.strip().lower() == _NON_BLANK_TOKEN for it in items):
+        simple_cols = {
+            "excel_file_grading": Buyer.company_grading,
+            "company_grading": Buyer.company_grading,
+            "business_type": Buyer.industry,
+            "industry": Buyer.industry,
+            "city": Buyer.city,
+            "website": Buyer.website_url,
+            "address": Buyer.address,
+            "remarks": Buyer.remarks,
+        }
+        col = simple_cols.get(field)
+        if col is None:
+            return buyer_query
+        keep = [col.isnot(None), col != "", col != "—", col != "-"]
+        from sqlalchemy import and_ as sa_and
+
+        conds = [sa_and(*keep)]
+        if any(_is_blank_token(it) for it in items):
+            conds.append(or_(col.is_(None), col == "", col == "—", col == "-"))
+        return buyer_query.filter(or_(*conds))
+
     has_blank = any(_is_blank_token(it) for it in items)
     non_blank_items = [it.lower() for it in items if not _is_blank_token(it)]
 
@@ -1145,6 +1210,7 @@ def _filtered_lead_table_rows(
     buyer_query = _apply_column_field_filter(db, buyer_query, "address", address)
     buyer_query = _apply_column_field_filter(db, buyer_query, "remarks", remarks)
     buyer_query = _apply_column_field_filter(db, buyer_query, "assigned_to_filter", assigned_to_filter)
+    buyer_query = _apply_product_filter(buyer_query, product_interest)
     if market_role:
         try:
             role_value = MarketRole(market_role)

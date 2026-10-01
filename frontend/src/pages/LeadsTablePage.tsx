@@ -208,6 +208,18 @@ const COL_FILTER_API_KEY: Partial<Record<SortField, string>> = {
   assigned_to_user_id: "assigned_to_filter",
 };
 
+/** One short value meaning "every value except blanks" (hundreds of values would overflow the URL). */
+const NON_BLANK_TOKEN = "__NON_BLANK__";
+const NON_BLANK_FIELDS = new Set([
+  "business_type",
+  "excel_file_grading",
+  "product",
+  "city",
+  "website",
+  "address",
+  "remarks",
+]);
+
 function encodeColFilterValues(vals: string[]): string {
   // JSON so values with commas (e.g. "Wholesale trade of food, beverages,") stay intact
   return JSON.stringify(vals);
@@ -3287,6 +3299,7 @@ export function LeadsTablePage({
           const allowedVals = selectedColValues[field];
           const rawVal = getRowFieldValue(row, field);
           const valLabel = rawVal ? rawVal : "(Blanks)";
+          if (allowedVals.includes(NON_BLANK_TOKEN) && rawVal !== "") return true;
           return allowedVals.includes(valLabel) || (rawVal !== "" && allowedVals.includes(rawVal));
         });
       });
@@ -5836,7 +5849,11 @@ export function LeadsTablePage({
                     <>
                       <div className="flex items-center justify-between gap-3 flex-wrap">
                         <span className="text-sm font-bold text-slate-300">
-                          Select options ({pendingColSelections.length} selected)
+                          Select options (
+                          {pendingColSelections.includes(NON_BLANK_TOKEN)
+                            ? "all except blanks"
+                            : `${pendingColSelections.length} selected`}
+                          )
                           {colModalSearch.trim()
                             ? ` · ${filteredUniqueVals.length} matching values`
                             : ` · ${allUniqueVals.length} unique values`}
@@ -5887,8 +5904,10 @@ export function LeadsTablePage({
                           </div>
                         ) : (
                           filteredUniqueVals.map(([val, count]) => {
-                            const checked = pendingColSelections.includes(val);
+                            const nonBlankMode = pendingColSelections.includes(NON_BLANK_TOKEN);
                             const isBlank = val === "(Blanks)";
+                            const checked =
+                              pendingColSelections.includes(val) || (nonBlankMode && !isBlank);
                             return (
                               <label
                                 key={val}
@@ -5901,7 +5920,14 @@ export function LeadsTablePage({
                                     type="checkbox"
                                     checked={checked}
                                     onChange={(e) => {
-                                      if (e.target.checked) {
+                                      if (nonBlankMode && !isBlank && !e.target.checked) {
+                                        // Expand "all except blanks" into explicit values, minus this one.
+                                        setPendingColSelections(
+                                          allUniqueVals
+                                            .map(([v]) => v)
+                                            .filter((v) => v !== "(Blanks)" && v !== val),
+                                        );
+                                      } else if (e.target.checked) {
                                         setPendingColSelections((prev) => [...prev, val]);
                                       } else {
                                         setPendingColSelections((prev) =>
@@ -5965,19 +5991,33 @@ export function LeadsTablePage({
                       ).length;
                   if (blankCount === 0) return null;
                   return (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPendingColSelections(["(Blanks)"]);
-                      }}
-                      className="px-5 py-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 font-extrabold text-sm transition-colors flex items-center gap-2"
-                      title="Select only rows with blank/empty data for this column"
-                    >
-                      <span>Show Blanks Only</span>
-                      <span className="bg-amber-500/20 px-2 py-0.5 rounded-full text-xs font-mono">
-                        {blankCount}
-                      </span>
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPendingColSelections(["(Blanks)"]);
+                        }}
+                        className="px-5 py-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 font-extrabold text-sm transition-colors flex items-center gap-2"
+                        title="Select only rows with blank/empty data for this column"
+                      >
+                        <span>Show Blanks Only</span>
+                        <span className="bg-amber-500/20 px-2 py-0.5 rounded-full text-xs font-mono">
+                          {blankCount}
+                        </span>
+                      </button>
+                      {NON_BLANK_FIELDS.has(colFilterModal.field) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPendingColSelections([NON_BLANK_TOKEN]);
+                          }}
+                          className="px-5 py-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 font-extrabold text-sm transition-colors"
+                          title="Select every value except blank/empty data for this column"
+                        >
+                          All Except Blanks
+                        </button>
+                      )}
+                    </>
                   );
                 })()}
               </div>
