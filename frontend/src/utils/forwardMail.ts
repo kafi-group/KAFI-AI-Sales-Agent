@@ -10,9 +10,10 @@ export function forwardSubject(original: string | null | undefined): string {
 }
 
 const ALLOWED_TAGS = new Set([
-  "a", "b", "strong", "i", "em", "u", "p", "br", "div", "span", "ul", "ol", "li", "blockquote",
-  "table", "thead", "tbody", "tr", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "pre",
-  "code", "img", "font",
+  "a", "b", "strong", "i", "em", "u", "s", "strike", "sub", "sup", "small", "center", "p", "br",
+  "div", "span", "ul", "ol", "li", "blockquote", "table", "caption", "colgroup", "col", "thead",
+  "tbody", "tfoot", "tr", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "pre", "code",
+  "img", "font",
 ]);
 
 // Removed together with everything inside them.
@@ -21,13 +22,90 @@ const DROP_WITH_CONTENT = new Set([
   "link", "meta", "head", "title", "svg", "math", "audio", "video", "base", "noscript",
 ]);
 
+// Layout attributes older HTML emails (and Outlook / Word) use for tables, e.g. <table border="1">.
+const LAYOUT_ATTRS = new Set([
+  "border", "bordercolor", "cellpadding", "cellspacing", "width", "height", "align", "valign",
+  "bgcolor", "colspan", "rowspan", "nowrap", "size",
+]);
+const LAYOUT_ATTR_TAGS = new Set([
+  "table", "caption", "colgroup", "col", "thead", "tbody", "tfoot", "tr", "td", "th", "p", "div",
+  "h1", "h2", "h3", "h4", "h5", "h6", "hr", "img", "center",
+]);
+const SAFE_ATTR_VALUE = /^[\w#%.\s,()-]{0,60}$/;
+
+// Visual style properties that are safe to keep. Anything else (position, float, background images,
+// behaviours, Word-only "mso-*" ...) is dropped.
+const SAFE_STYLE_PROP =
+  /^(color|background-color|font(-.+)?|text-(align|decoration.*|indent|transform)|vertical-align|line-height|letter-spacing|white-space|word-break|width|height|min-width|max-width|min-height|border-(top|right|bottom|left)-(width|style|color)|border-(collapse|spacing|radius)|(padding|margin)(-(top|right|bottom|left))?|list-style-(type|position)|table-layout)$/;
+const UNSAFE_STYLE_VALUE = /url\s*\(|expression|javascript:|@import|behavio|binding|\\/i;
+
 /**
- * Cleans a received email's HTML before it is placed into the compose editor: keeps basic
- * formatting, drops scripts/forms/styles and every attribute except safe links and https images.
+ * Copies the rules of the email's own <style> blocks onto the elements they match (as inline
+ * style), because <style> blocks are dropped when the HTML is pasted into the compose editor.
+ * Outlook / Word emails keep most of their table borders and spacing there.
+ */
+function inlineStyleSheets(doc: Document): void {
+  if (typeof CSSStyleSheet === "undefined") return;
+  const css = Array.from(doc.querySelectorAll("style"))
+    .map((s) => s.textContent || "")
+    .join("\n")
+    .replace(/@import[^;]*;/gi, "");
+  if (!css.trim()) return;
+
+  let sheet: CSSStyleSheet;
+  try {
+    sheet = new CSSStyleSheet();
+    sheet.replaceSync(css);
+  } catch {
+    return;
+  }
+
+  const fromSheet = new Map<HTMLElement, string>();
+  for (const rule of Array.from(sheet.cssRules)) {
+    if (!(rule instanceof CSSStyleRule)) continue;
+    let matches: Element[];
+    try {
+      matches = Array.from(doc.querySelectorAll(rule.selectorText));
+    } catch {
+      continue; // selector the browser can't evaluate (e.g. vendor pseudo-classes)
+    }
+    for (const el of matches) {
+      if (!(el instanceof HTMLElement)) continue;
+      fromSheet.set(el, `${fromSheet.get(el) || ""}${rule.style.cssText};`);
+    }
+  }
+  // The element's own inline style comes last so it still wins over the stylesheet.
+  fromSheet.forEach((sheetCss, el) => {
+    el.setAttribute("style", `${sheetCss}${el.getAttribute("style") || ""}`);
+  });
+}
+
+/** Keeps only the safe visual properties of an element's inline style. */
+function cleanInlineStyle(el: Element): void {
+  if (!el.hasAttribute("style")) return;
+  const style = (el as HTMLElement).style;
+  if (!style) {
+    el.removeAttribute("style");
+    return;
+  }
+  for (const prop of Array.from(style)) {
+    if (!SAFE_STYLE_PROP.test(prop) || UNSAFE_STYLE_VALUE.test(style.getPropertyValue(prop))) {
+      style.removeProperty(prop);
+    }
+  }
+  if (style.length === 0) el.removeAttribute("style");
+  else el.setAttribute("style", style.cssText);
+}
+
+/**
+ * Cleans a received email's HTML before it is placed into the compose editor: keeps the look of
+ * the original (tables, borders, fonts, colours, spacing) and drops scripts/forms and everything
+ * unsafe — only safe links, https images and a whitelist of style properties survive.
  */
 export function sanitizeForwardHtml(html: string): string {
   if (!html || typeof DOMParser === "undefined") return "";
   const doc = new DOMParser().parseFromString(html, "text/html");
+  inlineStyleSheets(doc);
 
   const walk = (node: Node) => {
     for (const child of Array.from(node.childNodes)) {
@@ -56,12 +134,16 @@ export function sanitizeForwardHtml(html: string): string {
       for (const attr of Array.from(el.attributes)) {
         const name = attr.name.toLowerCase();
         const value = attr.value.trim();
+        if (name === "style") continue; // filtered property by property below
         if (tag === "a" && name === "href" && /^(https?:|mailto:)/i.test(value)) continue;
         if (tag === "img" && name === "src" && /^https:/i.test(value)) continue;
-        if (tag === "img" && (name === "alt" || name === "width" || name === "height")) continue;
-        if ((tag === "td" || tag === "th") && (name === "colspan" || name === "rowspan")) continue;
+        if (tag === "img" && name === "alt") continue;
+        if (LAYOUT_ATTR_TAGS.has(tag) && LAYOUT_ATTRS.has(name) && SAFE_ATTR_VALUE.test(value)) continue;
+        if (tag === "font" && (name === "color" || name === "face" || name === "size") && SAFE_ATTR_VALUE.test(value)) continue;
         el.removeAttribute(attr.name);
       }
+      cleanInlineStyle(el);
+
       if (tag === "img" && !el.getAttribute("src")) {
         node.removeChild(el); // image whose source was unsafe — drop it instead of a broken box
         continue;
@@ -115,5 +197,7 @@ export function buildForwardBodyHtml(msg: InboxMessageDetail): string {
     ? sanitizeForwardHtml(msg.body_html)
     : plainTextToEditorHtml(msg.body_text || "");
 
-  return `<p><br></p><p>${lines.join("<br>")}</p>${attachmentNote}<blockquote>${original}</blockquote>`;
+  // A plain <div> (not <blockquote>) so the original keeps its own layout instead of being
+  // indented — this is how Outlook / Gmail forward it.
+  return `<p><br></p><p>${lines.join("<br>")}</p>${attachmentNote}<div>${original}</div>`;
 }
