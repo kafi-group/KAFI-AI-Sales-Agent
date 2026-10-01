@@ -5072,6 +5072,52 @@ export const client = {
 
   // ── Catalogues ─────────────────────────────────────────────────────────────
   listCatalogues: () => request<CatalogueItem[]>("/catalogues"),
+  /** Admin: replace a catalogue's PDF (same id / name / links — only the file changes). */
+  uploadCataloguePdf: async (catalogueId: string, file: File): Promise<CatalogueItem> => {
+    const endpoints = [RAILWAY_API_BASE, API_BASE].filter(
+      (base, index, all) => all.indexOf(base) === index,
+    );
+    let lastError: Error | null = null;
+    for (const base of endpoints) {
+      const form = new FormData();
+      form.append("file", file);
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), ATTACHMENT_UPLOAD_TIMEOUT_MS);
+      try {
+        const res = await fetch(`${base}/catalogues/${encodeURIComponent(catalogueId)}/upload`, {
+          method: "POST",
+          body: form,
+          headers: authHeaders(),
+          credentials: base === API_BASE ? "include" : "omit",
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const textBody = await res.text().catch(() => "");
+          throw new Error(messageForHttpError(res.status, textBody, res.statusText));
+        }
+        return (await res.json()) as CatalogueItem;
+      } catch (err) {
+        const isAbort = err instanceof DOMException && err.name === "AbortError";
+        lastError = isAbort
+          ? new Error("Upload timed out. Check your connection and try again.")
+          : err instanceof Error
+            ? err
+            : new Error(String(err));
+        // A real answer from the server (not a network problem) will not change on retry.
+        if (/not a pdf|empty|larger than|incomplete|admin|not found|could not/i.test(lastError.message)) {
+          throw lastError;
+        }
+      } finally {
+        window.clearTimeout(timer);
+      }
+    }
+    throw lastError || new Error("Catalogue upload failed");
+  },
+  /** Admin: remove the uploaded replacement and go back to the original PDF. */
+  restoreCatalogueOriginal: (catalogueId: string) =>
+    request<CatalogueItem>(`/catalogues/${encodeURIComponent(catalogueId)}/upload`, {
+      method: "DELETE",
+    }),
   attachCatalogues: (catalogue_ids: string[]) =>
     request<EmailAttachment[]>("/catalogues/attach", {
       method: "POST",
@@ -5592,6 +5638,9 @@ export interface CatalogueItem {
   size: number;
   exists: boolean;
   download_url: string;
+  /** True when the PDF was replaced from the dashboard (not the original that shipped). */
+  custom?: boolean;
+  updated_at?: string | null;
 }
 
 export interface HorekaLineItemData {

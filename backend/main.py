@@ -544,6 +544,12 @@ try:  # additive feature: a failure here must never stop the app from booting
     app.include_router(_inbox_attachments_api.router, prefix="/api")
 except Exception as _ia_exc:  # noqa: BLE001
     print(f"Inbox attachments router disabled: {_ia_exc}", flush=True)
+try:  # additive feature: a failure here must never stop the app from booting
+    from api import catalogue_upload as _catalogue_upload_api
+
+    app.include_router(_catalogue_upload_api.router, prefix="/api")
+except Exception as _cu_exc:  # noqa: BLE001
+    print(f"Catalogue upload router disabled: {_cu_exc}", flush=True)
 app.include_router(horeka.router, prefix="/api")
 app.include_router(target_workspace.router, prefix="/api")
 app.include_router(system.router, prefix="/api")

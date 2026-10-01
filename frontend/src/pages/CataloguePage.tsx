@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   client,
   type CatalogueItem,
@@ -14,10 +14,13 @@ import {
   IconSend,
   IconWhatsApp,
   IconTelegram,
+  IconUpload,
 } from "../components/icons/AppIcons";
 
 interface CataloguePageProps {
   initialCatalogueId?: string | null;
+  /** Only admins can replace a catalogue PDF. */
+  isAdmin?: boolean;
   onError: (msg: string) => void;
   onNavigateToMail?: (initialThreadId?: string) => void;
 }
@@ -55,12 +58,18 @@ function cataloguePublicUrl(cat: CatalogueItem): string {
 
 export function CataloguePage({
   initialCatalogueId,
+  isAdmin = false,
   onError,
 }: CataloguePageProps) {
   const [catalogues, setCatalogues] = useState<CatalogueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCatIds, setSelectedCatIds] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Replace a catalogue PDF (admin)
+  const replaceInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceTargetRef = useRef<string | null>(null);
+  const [replacingId, setReplacingId] = useState<string | null>(null);
 
   // Send modal state
   const [showCompose, setShowCompose] = useState(false);
@@ -95,6 +104,61 @@ export function CataloguePage({
   useEffect(() => {
     void loadData();
   }, [initialCatalogueId]);
+
+  function handlePickReplacement(catId: string) {
+    replaceTargetRef.current = catId;
+    replaceInputRef.current?.click();
+  }
+
+  async function handleReplacementChosen(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const catId = replaceTargetRef.current;
+    e.target.value = "";
+    replaceTargetRef.current = null;
+    if (!file || !catId) return;
+    const cat = catalogues.find((c) => c.id === catId);
+    if (!cat) return;
+    if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") {
+      onError("Please choose a PDF file.");
+      return;
+    }
+    const ok = window.confirm(
+      `Replace "${cat.title}" (${formatSize(cat.size)}) with "${file.name}" (${formatSize(file.size)})?\n\n` +
+        "This becomes the file that Email, WhatsApp and the AI agent send from now on. " +
+        "You can go back to the original at any time.",
+    );
+    if (!ok) return;
+    setReplacingId(catId);
+    setNotice(null);
+    try {
+      const updated = await client.uploadCataloguePdf(catId, file);
+      setCatalogues((prev) => prev.map((c) => (c.id === catId ? { ...c, ...updated } : c)));
+      setNotice(
+        `${cat.title} replaced — now ${formatSize(updated.size || file.size)} (was ${formatSize(cat.size)}).`,
+      );
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Could not replace the catalogue");
+    } finally {
+      setReplacingId(null);
+    }
+  }
+
+  async function handleRestoreOriginal(cat: CatalogueItem) {
+    if (!window.confirm(`Go back to the original "${cat.title}" PDF? The uploaded version will be removed.`)) {
+      return;
+    }
+    setReplacingId(cat.id);
+    setNotice(null);
+    try {
+      const updated = await client.restoreCatalogueOriginal(cat.id);
+      setCatalogues((prev) => prev.map((c) => (c.id === cat.id ? { ...c, ...updated } : c)));
+      setNotice(`${cat.title} is back to the original PDF.`);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Could not restore the original catalogue");
+    } finally {
+      setReplacingId(null);
+    }
+  }
 
   function toggleSelect(id: string) {
     setSelectedCatIds((prev) =>
@@ -389,6 +453,25 @@ export function CataloguePage({
                     <p className="text-xs text-slate-300 leading-relaxed">
                       {cat.description}
                     </p>
+
+                    {cat.custom ? (
+                      <p className="text-[11px] text-amber-200/90 flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10">
+                          Uploaded PDF
+                          {cat.updated_at ? ` · ${new Date(cat.updated_at).toLocaleDateString()}` : ""}
+                        </span>
+                        {isAdmin ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleRestoreOriginal(cat)}
+                            disabled={replacingId !== null}
+                            className="underline text-slate-400 hover:text-slate-200 disabled:opacity-50"
+                          >
+                            Restore original
+                          </button>
+                        ) : null}
+                      </p>
+                    ) : null}
                   </div>
 
                   <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800 text-xs">
@@ -423,6 +506,18 @@ export function CataloguePage({
                       <IconDownload size="xs" />
                       <span>Download</span>
                     </a>
+                    {isAdmin ? (
+                      <button
+                        type="button"
+                        onClick={() => handlePickReplacement(cat.id)}
+                        disabled={replacingId !== null}
+                        className="px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 disabled:opacity-50 text-xs font-medium text-amber-200 transition flex items-center gap-1.5"
+                        title="Upload a new (for example compressed) PDF to replace this catalogue"
+                      >
+                        <IconUpload size="xs" />
+                        <span>{replacingId === cat.id ? "Uploading…" : "Replace PDF"}</span>
+                      </button>
+                    ) : null}
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -457,6 +552,16 @@ export function CataloguePage({
           })}
         </div>
       )}
+
+      {isAdmin ? (
+        <input
+          ref={replaceInputRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          className="hidden"
+          onChange={(e) => void handleReplacementChosen(e)}
+        />
+      ) : null}
 
       {/* Compose Mail Modal */}
       {showCompose && (

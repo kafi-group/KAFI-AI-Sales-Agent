@@ -58,6 +58,14 @@ CATALOGUES_DEF = [
 
 
 def resolve_catalogue_file_path(filename: str) -> Path | None:
+    try:  # a PDF replaced from the dashboard wins over the bundled original
+        from modules.catalogue_overrides import custom_file
+
+        replaced = custom_file(filename)
+    except Exception:  # noqa: BLE001 - never let this lookup break the bundled catalogues
+        replaced = None
+    if replaced is not None:
+        return replaced
     primary = STATIC_CATALOGUES_DIR / filename
     if primary.is_file():
         return primary
@@ -74,8 +82,15 @@ def list_catalogues() -> list[dict[str, Any]]:
         path = resolve_catalogue_file_path(item["filename"])
         size_bytes = path.stat().st_size if path and path.is_file() else 0
         exists = path is not None and path.is_file()
+        try:
+            from modules.catalogue_overrides import custom_info
+
+            replaced_info = custom_info(item["filename"])
+        except Exception:  # noqa: BLE001
+            replaced_info = {"custom": False, "updated_at": None}
         results.append(
             {
+                **replaced_info,
                 "id": item["id"],
                 "title": item["title"],
                 "category": item["category"],

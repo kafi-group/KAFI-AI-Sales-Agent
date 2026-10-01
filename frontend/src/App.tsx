@@ -2038,6 +2038,7 @@ function DashboardApp() {
             )}
             {tab === "catalogue" && (
               <CataloguePage
+                isAdmin={isAdmin}
                 initialCatalogueId={catalogueId === "all" ? null : catalogueId}
                 onError={setError}
               />
