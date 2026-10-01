@@ -203,6 +203,9 @@ const COL_FILTER_API_KEY: Partial<Record<SortField, string>> = {
   business_type: "industry",
   excel_file_grading: "company_grading",
   product: "product_interest",
+  // "Assigned To" values are labels (unassigned / asim / ...). The server's assigned_to_user_id
+  // param is a single numeric id, so the column filter needs its own key.
+  assigned_to_user_id: "assigned_to_filter",
 };
 
 function encodeColFilterValues(vals: string[]): string {

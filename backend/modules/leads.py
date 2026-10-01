@@ -984,6 +984,19 @@ def _apply_column_field_filter(db: Session, buyer_query, field: str, values_str:
         if conds:
             buyer_query = buyer_query.filter(or_(*conds))
 
+    elif field == "assigned_to_filter":
+        # Matches the "Assigned To" label shown in the table (Buyer.assigned_to). "unassigned"
+        # (or a blank label) covers rows nobody owns. NOTE: the column's own name, not the
+        # numeric assigned_to_user_id scope param, which is a single user id.
+        conds = []
+        labels = [it for it in non_blank_items if it != "unassigned"]
+        if has_blank or "unassigned" in non_blank_items:
+            conds.append(sa_func.lower(sa_func.coalesce(Buyer.assigned_to, "")).in_(["", "unassigned"]))
+        if labels:
+            conds.append(sa_func.lower(sa_func.coalesce(Buyer.assigned_to, "")).in_(labels))
+        if conds:
+            buyer_query = buyer_query.filter(or_(*conds))
+
     elif field == "remarks":
         conds = []
         if has_blank:
@@ -1082,6 +1095,7 @@ def _filtered_lead_table_rows(
     website: str | None = None,
     address: str | None = None,
     remarks: str | None = None,
+    assigned_to_filter: str | None = None,
 ) -> tuple[list[dict[str, object]], int, int]:
     """Filter leads for the table.
 
@@ -1130,6 +1144,7 @@ def _filtered_lead_table_rows(
     buyer_query = _apply_column_field_filter(db, buyer_query, "website", website)
     buyer_query = _apply_column_field_filter(db, buyer_query, "address", address)
     buyer_query = _apply_column_field_filter(db, buyer_query, "remarks", remarks)
+    buyer_query = _apply_column_field_filter(db, buyer_query, "assigned_to_filter", assigned_to_filter)
     if market_role:
         try:
             role_value = MarketRole(market_role)
@@ -1500,6 +1515,7 @@ def get_lead_table_column_values(
     website: str | None = None,
     address: str | None = None,
     remarks: str | None = None,
+    assigned_to_filter: str | None = None,
 ) -> dict[str, object]:
     id_rows, _section_total, filtered_count = _filtered_lead_table_rows(
         db,
@@ -1536,6 +1552,7 @@ def get_lead_table_column_values(
         website=website,
         address=address,
         remarks=remarks,
+        assigned_to_filter=assigned_to_filter,
         ids_only=True,
     )
 
@@ -1766,6 +1783,7 @@ def list_leads_table_ids(
     website: str | None = None,
     address: str | None = None,
     remarks: str | None = None,
+    assigned_to_filter: str | None = None,
 ) -> dict[str, object]:
     rows, _section_total, filtered_count = _filtered_lead_table_rows(
         db,
@@ -1805,6 +1823,7 @@ def list_leads_table_ids(
         website=website,
         address=address,
         remarks=remarks,
+        assigned_to_filter=assigned_to_filter,
     )
     return {
         "filtered_count": filtered_count,
@@ -1852,6 +1871,7 @@ def list_leads_table(
     website: str | None = None,
     address: str | None = None,
     remarks: str | None = None,
+    assigned_to_filter: str | None = None,
 ) -> dict[str, object]:
     page = max(1, page)
     page_size = min(max(1, page_size), 50000)
@@ -1895,6 +1915,7 @@ def list_leads_table(
         website=website,
         address=address,
         remarks=remarks,
+        assigned_to_filter=assigned_to_filter,
     )
 
     total_pages = max(1, (filtered_count + page_size - 1) // page_size) if filtered_count else 1

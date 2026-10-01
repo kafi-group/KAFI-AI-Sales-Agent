@@ -510,6 +510,7 @@ def list_leads_table(
     website: str | None = None,
     address: str | None = None,
     remarks: str | None = None,
+    assigned_to_filter: str | None = None,
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -564,6 +565,7 @@ def list_leads_table(
         website=website,
         address=address,
         remarks=remarks,
+        assigned_to_filter=assigned_to_filter,
     )
     return LeadTableResponse(**result)
 
@@ -602,6 +604,7 @@ def get_lead_table_column_values(
     website: str | None = None,
     address: str | None = None,
     remarks: str | None = None,
+    assigned_to_filter: str | None = None,
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -653,6 +656,7 @@ def get_lead_table_column_values(
         website=website,
         address=address,
         remarks=remarks,
+        assigned_to_filter=assigned_to_filter,
     )
     return result
 
@@ -692,6 +696,7 @@ def list_leads_table_ids(
     website: str | None = None,
     address: str | None = None,
     remarks: str | None = None,
+    assigned_to_filter: str | None = None,
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -744,6 +749,7 @@ def list_leads_table_ids(
         website=website,
         address=address,
         remarks=remarks,
+        assigned_to_filter=assigned_to_filter,
     )
     return LeadTableIdsResponse(**result)
 
