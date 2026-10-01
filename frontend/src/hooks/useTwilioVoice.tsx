@@ -27,9 +27,19 @@ export interface ActiveCallTarget {
   phone: string | null;
 }
 
+/** Thrown when the user presses End while a call is still being set up. */
+export class DialCancelledError extends Error {
+  constructor() {
+    super("Call cancelled.");
+    this.name = "DialCancelled";
+  }
+}
+
 interface TwilioVoiceContextValue {
   ready: boolean;
   active: boolean;
+  /** True from the moment a call is requested until it is connected (or cancelled / failed). */
+  dialing: boolean;
   activeCall: ActiveCallTarget | null;
   initError: string | null;
   /** Last outbound call failure (does not mean the dialer is offline). */
@@ -121,6 +131,9 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
   const activePrepRef = useRef<CallInitiateResult | null>(null);
   const [ready, setReady] = useState(false);
   const [active, setActive] = useState(false);
+  const [dialing, setDialing] = useState(false);
+  const dialingRef = useRef(false);
+  const dialAttemptRef = useRef<{ cancelled: boolean } | null>(null);
   const [activeCall, setActiveCall] = useState<ActiveCallTarget | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const [callError, setCallError] = useState<string | null>(null);
@@ -250,9 +263,23 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
   }, [initDevice]);
 
   const hangUp = useCallback(() => {
+    // End must stop EVERYTHING immediately, including a call that is still being set up
+    // (server round-trip / connecting): mark it cancelled so it can never connect later,
+    // release the dial lock, then drop any live call.
+    if (dialAttemptRef.current) {
+      dialAttemptRef.current.cancelled = true;
+      dialAttemptRef.current = null;
+    }
+    dialingRef.current = false;
+    setDialing(false);
     const call = callRef.current;
     try {
       call?.disconnect();
+    } catch {
+      /* ignore */
+    }
+    try {
+      deviceRef.current?.disconnectAll();
     } catch {
       /* ignore */
     }
@@ -273,7 +300,12 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const connectPreparedCall = useCallback(async (activeDevice: Device, prep: CallInitiateResult) => {
+  const connectPreparedCall = useCallback(
+    async (
+      activeDevice: Device,
+      prep: CallInitiateResult,
+      isCancelled: () => boolean = () => false,
+    ) => {
     activePrepRef.current = prep;
     setCallError(null);
 
@@ -342,6 +374,15 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
       );
 
       const call = await Promise.race([connectPromise, timeoutPromise]);
+      if (isCancelled()) {
+        // User pressed End while this was connecting: hang up the moment it appears.
+        try {
+          call.disconnect();
+        } catch {
+          /* ignore */
+        }
+        throw new DialCancelledError();
+      }
       callRef.current = call;
 
       // Attach lifecycle listeners before flipping UI to "in call".
@@ -368,11 +409,16 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
       callRef.current = null;
       setActive(false);
       setActiveCall(null);
+      if (err instanceof DialCancelledError || isCancelled()) {
+        throw new DialCancelledError();
+      }
       const friendly = friendlyCallError(err);
       setCallError(friendly);
       throw new Error(friendly);
     }
-  }, []);
+  },
+  [],
+  );
 
   const ensureRegisteredDevice = useCallback(async () => {
     let device = deviceRef.current;
@@ -388,39 +434,84 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
     return device;
   }, [initDevice]);
 
-  const placeCall = useCallback(
-    async (leadId: number, contactId?: number, phone?: string) => {
-      const device = await ensureRegisteredDevice();
-
-      const prep = await client.initiateLeadCall(leadId, {
-        contact_id: contactId,
-        phone: phone?.trim() || undefined,
-      });
-      if (!prep.lead_phone) {
-        throw new Error("Lead phone number missing");
+  /**
+   * One lock for every Call button: only one call can be set up or live at a time. It is held
+   * from the click until the call is connected, and given up after 30s if the server is stuck
+   * (a late answer then dials nothing). End releases it immediately.
+   */
+  const withDialLock = useCallback(
+    async <T,>(fn: (isCancelled: () => boolean) => Promise<T>): Promise<T> => {
+      if (dialingRef.current || callRef.current) {
+        throw new Error("A call is already in progress — end it (or wait) before dialing again.");
       }
-
-      return connectPreparedCall(device, { ...prep, buyer_id: leadId });
+      const attempt = { cancelled: false };
+      dialingRef.current = true;
+      dialAttemptRef.current = attempt;
+      setDialing(true);
+      const release = () => {
+        if (dialAttemptRef.current === attempt) {
+          dialAttemptRef.current = null;
+          dialingRef.current = false;
+          setDialing(false);
+        }
+      };
+      const guard = window.setTimeout(() => {
+        attempt.cancelled = true;
+        release();
+      }, 30000);
+      try {
+        return await fn(() => attempt.cancelled);
+      } finally {
+        window.clearTimeout(guard);
+        release();
+      }
     },
-    [connectPreparedCall, ensureRegisteredDevice],
+    [],
+  );
+
+  const placeCall = useCallback(
+    (leadId: number, contactId?: number, phone?: string) =>
+      withDialLock(async (isCancelled) => {
+        const device = await ensureRegisteredDevice();
+        if (isCancelled()) throw new DialCancelledError();
+
+        const prep = await client.initiateLeadCall(leadId, {
+          contact_id: contactId,
+          phone: phone?.trim() || undefined,
+        });
+        if (isCancelled()) {
+          throw new Error("The server was too slow, so nothing was dialed. Please try again.");
+        }
+        if (!prep.lead_phone) {
+          throw new Error("Lead phone number missing");
+        }
+
+        return connectPreparedCall(device, { ...prep, buyer_id: leadId }, isCancelled);
+      }),
+    [connectPreparedCall, ensureRegisteredDevice, withDialLock],
   );
 
   const placeManualCall = useCallback(
-    async (phone: string, options?: { contactName?: string; country?: string }) => {
-      const device = await ensureRegisteredDevice();
+    (phone: string, options?: { contactName?: string; country?: string }) =>
+      withDialLock(async (isCancelled) => {
+        const device = await ensureRegisteredDevice();
+        if (isCancelled()) throw new DialCancelledError();
 
-      const prep = await client.initiateManualCall({
-        phone,
-        contact_name: options?.contactName,
-        country: options?.country,
-      });
-      if (!prep.lead_phone) {
-        throw new Error("Phone number missing");
-      }
+        const prep = await client.initiateManualCall({
+          phone,
+          contact_name: options?.contactName,
+          country: options?.country,
+        });
+        if (isCancelled()) {
+          throw new Error("The server was too slow, so nothing was dialed. Please try again.");
+        }
+        if (!prep.lead_phone) {
+          throw new Error("Phone number missing");
+        }
 
-      return connectPreparedCall(device, prep);
-    },
-    [connectPreparedCall, ensureRegisteredDevice],
+        return connectPreparedCall(device, prep, isCancelled);
+      }),
+    [connectPreparedCall, ensureRegisteredDevice, withDialLock],
   );
 
   return (
@@ -428,6 +519,7 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
       value={{
         ready,
         active,
+        dialing,
         activeCall,
         initError,
         callError,

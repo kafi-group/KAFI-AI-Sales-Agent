@@ -69,6 +69,7 @@ export function CallLeadButton({
       const result = await voice.placeCall(leadId, contactId, targetPhone);
       onSuccess?.(result);
     } catch (e) {
+      if (e instanceof Error && e.name === "DialCancelled") return; // user pressed End
       onError(e instanceof Error ? e.message : "Call failed");
     } finally {
       window.clearTimeout(safetyTimer);
@@ -138,7 +139,7 @@ export function CallLeadButton({
         <button
           type="button"
           onClick={() => void handleTwilioCall()}
-          disabled={calling}
+          disabled={calling || Boolean(voice?.dialing)}
           className={btnClass}
           title={
             voice?.ready
@@ -150,6 +151,22 @@ export function CallLeadButton({
         >
           <IconPhone size={compact ? "xs" : "sm"} />
           {calling ? "Connecting…" : compact ? "Call" : "Call now"}
+        </button>
+      )}
+
+      {!isThisCall && (calling || voice?.dialing) && (
+        <button
+          type="button"
+          onClick={() => voice?.hangUp()}
+          className={
+            compact
+              ? "inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-red-600 hover:bg-red-500 text-white"
+              : "inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs bg-red-600 hover:bg-red-500 text-white"
+          }
+          title="Cancel this call right now"
+        >
+          <IconX size="xs" />
+          End
         </button>
       )}
 

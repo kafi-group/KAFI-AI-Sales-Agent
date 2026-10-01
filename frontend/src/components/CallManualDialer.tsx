@@ -39,7 +39,9 @@ export function CallManualDialer({ onError, onSuccess }: CallManualDialerProps) 
     return e164 ?? "";
   }, [countryCode, digits]);
 
-  const canCall = Boolean(voice?.ready && formattedNumber && !voice.active && !calling);
+  const canCall = Boolean(
+    voice?.ready && formattedNumber && !voice.active && !voice.dialing && !calling,
+  );
 
   const [lastSentDtmf, setLastSentDtmf] = useState<string | null>(null);
 
@@ -78,6 +80,7 @@ export function CallManualDialer({ onError, onSuccess }: CallManualDialerProps) 
       });
       onSuccess?.(result);
     } catch (e) {
+      if (e instanceof Error && e.name === "DialCancelled") return; // user pressed End
       onError(e instanceof Error ? e.message : "Call failed");
     } finally {
       window.clearTimeout(safetyTimer);
@@ -198,7 +201,7 @@ export function CallManualDialer({ onError, onSuccess }: CallManualDialerProps) 
         >
           Delete
         </button>
-        {voice?.active ? (
+        {voice?.active || voice?.dialing ? (
           <button
             type="button"
             onClick={() => voice.hangUp()}

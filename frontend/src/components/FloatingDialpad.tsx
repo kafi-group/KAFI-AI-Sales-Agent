@@ -101,7 +101,9 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
     () => buildE164(countryCode, digits) ?? "",
     [countryCode, digits],
   );
-  const canCall = Boolean(voice?.ready && formattedNumber && !voice.active && !calling);
+  const canCall = Boolean(
+    voice?.ready && formattedNumber && !voice.active && !voice.dialing && !calling,
+  );
 
   const filteredCountries = useMemo(() => {
     const q = countryQuery.trim().toLowerCase();
@@ -198,6 +200,7 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
         country: selectedCountry?.name,
       });
     } catch (e) {
+      if (e instanceof Error && e.name === "DialCancelled") return; // user pressed End
       onError(e instanceof Error ? e.message : "Call failed");
     } finally {
       setCalling(false);
@@ -479,7 +482,7 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
               >
                 Delete
               </button>
-              {voice?.active ? (
+              {voice?.active || voice?.dialing ? (
                 <button
                   type="button"
                   onClick={() => voice.hangUp()}
