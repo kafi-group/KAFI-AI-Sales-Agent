@@ -3518,7 +3518,7 @@ export const client = {
     request<{ ok: boolean }>(`/telegram-personal/templates/${id}`, {
       method: "DELETE",
     }),
-  sendWhatsAppPersonalBulk: (payload: { buyer_ids: number[]; message: string }) =>
+  sendWhatsAppPersonalBulk: (payload: { buyer_ids: number[]; message: string; to_phone?: string }) =>
     request<WhatsAppCampaignDraftResponse>("/whatsapp-personal/bulk-send", {
       method: "POST",
       body: JSON.stringify(payload),

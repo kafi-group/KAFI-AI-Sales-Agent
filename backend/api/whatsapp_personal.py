@@ -126,6 +126,9 @@ class WhatsAppPersonalBulkSendRequest(BaseModel):
     buyer_ids: list[int] = Field(default_factory=list)
     phones: list[str] = Field(default_factory=list)
     message: str = Field(min_length=1, max_length=4096)
+    # Single-lead sends only: use this exact number instead of the lead's default contact phone
+    # (the Workspace lets you pick which of a lead's numbers to message).
+    to_phone: str | None = None
 
 
 class WhatsAppRephraseRequest(BaseModel):
@@ -553,6 +556,9 @@ def whatsapp_personal_bulk_send(
                 continue
             c = buyers_module.primary_contact_with_phone(db, bid)
             phone = (c.phone or c.wa_id) if c else None
+            chosen_phone = (body.to_phone or "").strip()
+            if chosen_phone and len(body.buyer_ids) == 1:
+                phone = chosen_phone  # the number picked in the Workspace, same lead / name / company
             if phone:
                 targets.append({
                     "buyer_id": bid,

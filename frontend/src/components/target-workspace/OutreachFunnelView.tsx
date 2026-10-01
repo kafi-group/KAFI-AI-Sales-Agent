@@ -5,10 +5,8 @@ import { CallRecommendationBadge } from "../CallRecommendationBadge";
 import { ClientHistoryPanel } from "../ClientHistoryPanel";
 import { KnowYourCustomerModal } from "../KnowYourCustomerModal";
 import { IconX } from "../icons/AppIcons";
-import {
-  LeadWhatsAppComposeModal,
-  type WhatsAppComposeTarget,
-} from "../WhatsAppComposeLink";
+import { BulkWhatsAppModal } from "../BulkWhatsAppModal";
+import type { WhatsAppComposeTarget } from "../WhatsAppComposeLink";
 import {
   LeadTelegramComposeModal,
   type TelegramComposeTarget,
@@ -1287,16 +1285,34 @@ export const OutreachFunnelView: React.FC<OutreachFunnelViewProps> = ({
         onSave={handleSaveWhatsAppProof}
       />
       {whatsappTarget ? (
-        <LeadWhatsAppComposeModal
-          target={whatsappTarget}
+        <BulkWhatsAppModal
+          buyerIds={[whatsappTarget.row.id]}
+          toPhone={whatsappTarget.phone}
           onClose={() => setWhatsappTarget(null)}
           onError={(msg) => {
             onError?.(msg);
             setError(msg);
           }}
-          onSent={(message) => {
-            setActionNotice(message);
-            setWhatsappTarget(null);
+          onCreated={(result) => {
+            const sent = result.sent_count ?? 0;
+            const failed = result.failed_count ?? 0;
+            const deliveryErr =
+              result.delivery_error ||
+              result.created?.find((c) => c.send_message)?.send_message ||
+              "";
+            if (sent === 0) {
+              const reason = result.skipped?.[0]?.reason;
+              const msg =
+                failed > 0
+                  ? `WhatsApp delivery failed${deliveryErr ? `: ${deliveryErr}` : ""}.`
+                  : reason
+                    ? `WhatsApp was not sent: ${reason}.`
+                    : "WhatsApp message was not sent.";
+              onError?.(msg);
+              setError(msg);
+              return;
+            }
+            setActionNotice(`WhatsApp sent to ${whatsappTarget.row.company_name}.`);
             window.setTimeout(() => setActionNotice(null), 5000);
           }}
         />

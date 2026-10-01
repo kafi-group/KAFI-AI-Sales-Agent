@@ -11,6 +11,8 @@ import { WhatsAppTemplatePreviewModal } from "./WhatsAppTemplatePreviewModal";
 
 interface BulkWhatsAppModalProps {
   buyerIds: number[];
+  /** Single-lead sends: message this exact number (e.g. the one picked in the Workspace). */
+  toPhone?: string | null;
   onClose: () => void;
   onError: (message: string) => void;
   onCreated: (result: WhatsAppCampaignDraftResponse) => void;
@@ -33,11 +35,14 @@ type BulkWhatsAppTab = "personal" | "template" | "personal_template";
 
 export function BulkWhatsAppModal({
   buyerIds,
+  toPhone,
   onClose,
   onError,
   onCreated,
 }: BulkWhatsAppModalProps) {
   const [tab, setTab] = useState<BulkWhatsAppTab>("personal");
+  // Only meaningful for a single lead; with several leads each uses its own default number.
+  const exactPhone = buyerIds.length === 1 && toPhone && toPhone.trim() ? toPhone.trim() : undefined;
   const [sending, setSending] = useState(false);
   const [draftingAi, setDraftingAi] = useState(false);
 
@@ -175,6 +180,7 @@ export function BulkWhatsAppModal({
       const result = await client.sendWhatsAppPersonalBulk({
         buyer_ids: buyerIds,
         message: personalMessage.trim(),
+        to_phone: exactPhone,
       });
       onCreated({
         created_count: result.sent_count,
@@ -203,6 +209,7 @@ export function BulkWhatsAppModal({
       const result = await client.sendWhatsAppPersonalBulk({
         buyer_ids: buyerIds,
         message,
+        to_phone: exactPhone,
       });
       onCreated({
         created_count: result.sent_count,
@@ -232,6 +239,7 @@ export function BulkWhatsAppModal({
         buyer_ids: buyerIds,
         template_variables: variables,
         require_opt_in: requireOptIn,
+        to_phone: exactPhone,
       });
       onCreated(result);
       onClose();
@@ -285,6 +293,9 @@ export function BulkWhatsAppModal({
             </h3>
             <p className="text-sm text-slate-400 mt-1">
               Dispatch to your staff testing list or targeted buyer contacts.
+              {exactPhone ? (
+                <span className="ml-2 text-emerald-300">Sending to {exactPhone}</span>
+              ) : null}
             </p>
           </div>
           <button
