@@ -48,11 +48,6 @@ class DraftUpdate(BaseModel):
     enabled: bool | None = None
 
 
-class MarkSet(BaseModel):
-    mark: Literal["do_not_disturb", "not_interested"]
-    reason: str | None = None
-
-
 @router.get("")
 def list_followups() -> dict[str, Any]:
     return {"groups": cf.list_all(), "placeholders": cf.PLACEHOLDERS}
@@ -100,17 +95,3 @@ def delete_draft(draft_id: int) -> dict[str, bool]:
         raise HTTPException(404, "Draft not found")
     return {"ok": True}
 
-
-@router.get("/marks/{buyer_id}")
-def get_mark(buyer_id: int) -> dict[str, Any]:
-    return {"mark": cf.get_mark(buyer_id)}
-
-
-@router.put("/marks/{buyer_id}")
-def set_mark(buyer_id: int, payload: MarkSet) -> dict[str, Any]:
-    return {"mark": cf.set_mark(buyer_id, payload.mark, payload.reason)}
-
-
-@router.delete("/marks/{buyer_id}")
-def clear_mark(buyer_id: int) -> dict[str, bool]:
-    return {"ok": cf.clear_mark(buyer_id)}

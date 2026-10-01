@@ -7,8 +7,6 @@ more email *drafts*. After a call the agent will pick the best situation + draft
 Tables are created on first use with CREATE TABLE IF NOT EXISTS, so it never touches the Alembic
 chain or app boot, and every function opens its own short-lived connection.
 
-`call_marks` holds the per-company "do not disturb" / "not interested" marks (data only for now:
-nothing dials, skips or colours anything from it yet).
 """
 
 from __future__ import annotations
@@ -30,7 +28,6 @@ PLACEHOLDERS = [
     "referrer_name",
 ]
 ATTACHMENT_MODES = ("none", "auto", "catalogue")
-MARKS = ("do_not_disturb", "not_interested")
 
 _LOCK = threading.Lock()
 _READY = False
@@ -63,13 +60,6 @@ _DDL = [
     """CREATE TABLE IF NOT EXISTS call_followup_meta (
         key VARCHAR(60) PRIMARY KEY,
         value VARCHAR(255) NOT NULL DEFAULT ''
-    )""",
-    """CREATE TABLE IF NOT EXISTS call_marks (
-        buyer_id INTEGER PRIMARY KEY,
-        mark VARCHAR(30) NOT NULL,
-        reason TEXT,
-        source_task_id INTEGER,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
 ]
 
@@ -413,20 +403,68 @@ Best regards,""",
     {
         "name": "Do not disturb",
         "description": (
-            "The customer clearly asks not to be contacted again (stop calling / do not disturb). "
-            "This is different from 'not interested'. Drafts to be added."
+            "The customer says they are not available / do not want to be disturbed by phone calls. "
+            "This is different from 'not interested'. We ask for their availability so a scheduled "
+            "meeting can be arranged, by email and WhatsApp."
         ),
         "enabled": True,
-        "drafts": [],
+        "drafts": [
+            {
+                "name": "Ask for availability",
+                "subject": "Kafi Commodities - when would suit you for a short meeting?",
+                "attachment_mode": "none",
+                "body": """Dear [contact_name],
+
+Thank you for your time.
+
+We understand that you are not available on the phone for a call at the moment. However, we would like to know your schedule of availability so that we can arrange a scheduled meeting at a time that suits you.
+
+Please let us know a convenient day and time, and the platform you prefer (Zoom, Google Meet or any other), and we will arrange it accordingly.
+
+We look forward to hearing from you.
+
+Best regards,""",
+                "whatsapp_text": (
+                    "Dear [contact_name], this is [agent_name] from Kafi Commodities. We understand "
+                    "you are not available on the phone for a call. Could you please share your "
+                    "availability so we can schedule a meeting at a time that suits you? Zoom, "
+                    "Google Meet or any medium you prefer works for us. Thank you."
+                ),
+            }
+        ],
     },
     {
         "name": "Not interested",
         "description": (
-            "The customer politely says they are not interested (no need, not buying). "
-            "Drafts to be added."
+            "The customer politely says they are not interested. This is different from 'do not "
+            "disturb'. We ask the reason (for example they already have a supplier) and mention our "
+            "wider FMCG range, by email and WhatsApp."
         ),
         "enabled": True,
-        "drafts": [],
+        "drafts": [
+            {
+                "name": "Ask the reason",
+                "subject": "Kafi Commodities - may we ask what would suit you better?",
+                "attachment_mode": "none",
+                "body": """Dear [contact_name],
+
+Thank you for letting us know.
+
+We understand that you are not interested at the moment, and we respect that. If you don't mind sharing, we would like to understand the reason, for example whether you already have a supplier you are happy with.
+
+In case it is of interest, we also offer a wide variety of FMCG products, including rice, spices, sauces, pickles, and more, which you might find useful.
+
+If any of these fit your needs now or in the future, please let us know and we will be glad to share the details.
+
+Best regards,""",
+                "whatsapp_text": (
+                    "Dear [contact_name], this is [agent_name] from Kafi Commodities. Thank you for "
+                    "letting us know. If you don't mind sharing, may we ask the reason - for example, "
+                    "do you already have a supplier? We also offer a variety of FMCG products (rice, "
+                    "spices, sauces, pickles and more) that you might be interested in. Thank you."
+                ),
+            }
+        ],
     },
 ]
 
@@ -467,6 +505,50 @@ def _insert_draft(conn: Any, group_id: int, d: dict[str, Any], order: int) -> in
     )
 
 
+def _apply_seed_v2(conn: Any) -> None:
+    """Add the Do not disturb / Not interested drafts to databases seeded before they existed.
+
+    Runs once (meta flag). Only fills a group that still has no drafts and the original
+    placeholder description, so nothing the user edited is overwritten.
+    """
+    done = conn.execute(text("SELECT value FROM call_followup_meta WHERE key = 'seed_v2'")).scalar()
+    if done:
+        return
+    for g in _SEED_GROUPS:
+        if g["name"] not in ("Do not disturb", "Not interested"):
+            continue
+        row = conn.execute(
+            text(
+                "SELECT id, description FROM call_followup_groups "
+                "WHERE name = :n ORDER BY id LIMIT 1"
+            ),
+            {"n": g["name"]},
+        ).first()
+        if row is None:
+            continue
+        gid = int(row[0])
+        if "Drafts to be added" in (row[1] or ""):
+            conn.execute(
+                text(
+                    "UPDATE call_followup_groups SET description = :d, updated_at = NOW() "
+                    "WHERE id = :id"
+                ),
+                {"d": g["description"], "id": gid},
+            )
+        has = conn.execute(
+            text("SELECT COUNT(*) FROM call_followup_drafts WHERE group_id = :g"), {"g": gid}
+        ).scalar() or 0
+        if int(has) == 0:
+            for di, d in enumerate(g.get("drafts") or [], start=1):
+                _insert_draft(conn, gid, d, di)
+    conn.execute(
+        text(
+            "INSERT INTO call_followup_meta (key, value) VALUES ('seed_v2', '1') "
+            "ON CONFLICT (key) DO NOTHING"
+        )
+    )
+
+
 def seed_defaults_if_needed() -> None:
     """Load the starter situations once. A meta flag stops re-seeding after the user deletes them."""
     ensure_tables()
@@ -475,22 +557,24 @@ def seed_defaults_if_needed() -> None:
             done = conn.execute(
                 text("SELECT value FROM call_followup_meta WHERE key = 'seeded'")
             ).scalar()
-            if done:
-                return
-            existing = conn.execute(text("SELECT COUNT(*) FROM call_followup_groups")).scalar() or 0
-            if int(existing) == 0:
-                for gi, g in enumerate(_SEED_GROUPS, start=1):
-                    gid = _insert_group(
-                        conn, g["name"], g["description"], bool(g.get("enabled", True)), gi
-                    )
-                    for di, d in enumerate(g.get("drafts") or [], start=1):
-                        _insert_draft(conn, gid, d, di)
-            conn.execute(
-                text(
-                    "INSERT INTO call_followup_meta (key, value) VALUES ('seeded', '1') "
-                    "ON CONFLICT (key) DO NOTHING"
+            if not done:
+                existing = (
+                    conn.execute(text("SELECT COUNT(*) FROM call_followup_groups")).scalar() or 0
                 )
-            )
+                if int(existing) == 0:
+                    for gi, g in enumerate(_SEED_GROUPS, start=1):
+                        gid = _insert_group(
+                            conn, g["name"], g["description"], bool(g.get("enabled", True)), gi
+                        )
+                        for di, d in enumerate(g.get("drafts") or [], start=1):
+                            _insert_draft(conn, gid, d, di)
+                conn.execute(
+                    text(
+                        "INSERT INTO call_followup_meta (key, value) VALUES ('seeded', '1') "
+                        "ON CONFLICT (key) DO NOTHING"
+                    )
+                )
+            _apply_seed_v2(conn)
 
 
 # --------------------------------------------------------------------------- reads
@@ -642,48 +726,3 @@ def delete_draft(draft_id: int) -> bool:
         res = conn.execute(text("DELETE FROM call_followup_drafts WHERE id = :id"), {"id": draft_id})
     return bool(res.rowcount)
 
-
-# --------------------------------------------------------------------------- marks
-
-
-def get_mark(buyer_id: int) -> dict[str, Any] | None:
-    ensure_tables()
-    with engine.connect() as conn:
-        row = conn.execute(
-            text(
-                "SELECT buyer_id, mark, reason, source_task_id, created_at "
-                "FROM call_marks WHERE buyer_id = :b"
-            ),
-            {"b": buyer_id},
-        ).first()
-    return dict(row._mapping) if row is not None else None
-
-
-def set_mark(
-    buyer_id: int,
-    mark: str,
-    reason: str | None = None,
-    source_task_id: int | None = None,
-) -> dict[str, Any] | None:
-    ensure_tables()
-    if mark not in MARKS:
-        raise ValueError(f"mark must be one of {', '.join(MARKS)}")
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO call_marks (buyer_id, mark, reason, source_task_id) "
-                "VALUES (:b, :m, :r, :t) "
-                "ON CONFLICT (buyer_id) DO UPDATE SET mark = EXCLUDED.mark, "
-                "reason = EXCLUDED.reason, source_task_id = EXCLUDED.source_task_id, "
-                "created_at = NOW()"
-            ),
-            {"b": buyer_id, "m": mark, "r": reason, "t": source_task_id},
-        )
-    return get_mark(buyer_id)
-
-
-def clear_mark(buyer_id: int) -> bool:
-    ensure_tables()
-    with engine.begin() as conn:
-        res = conn.execute(text("DELETE FROM call_marks WHERE buyer_id = :b"), {"b": buyer_id})
-    return bool(res.rowcount)
