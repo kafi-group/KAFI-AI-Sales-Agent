@@ -28,6 +28,8 @@ PLACEHOLDERS = [
     "referrer_name",
 ]
 ATTACHMENT_MODES = ("none", "auto", "catalogue")
+MODES = ("off", "test_only", "all")
+DEFAULT_MODE = "test_only"
 
 _LOCK = threading.Lock()
 _READY = False
@@ -726,3 +728,30 @@ def delete_draft(draft_id: int) -> bool:
         res = conn.execute(text("DELETE FROM call_followup_drafts WHERE id = :id"), {"id": draft_id})
     return bool(res.rowcount)
 
+
+
+# --------------------------------------------------------------------------- sending mode
+
+
+def get_mode() -> str:
+    """off = old generic follow-up for everyone; test_only = situations for test calls only;
+    all = situations for every call. Defaults to test_only."""
+    ensure_tables()
+    with engine.connect() as conn:
+        value = conn.execute(text("SELECT value FROM call_followup_meta WHERE key = 'mode'")).scalar()
+    return value if value in MODES else DEFAULT_MODE
+
+
+def set_mode(mode: str) -> str:
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {', '.join(MODES)}")
+    ensure_tables()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO call_followup_meta (key, value) VALUES ('mode', :m) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            ),
+            {"m": mode},
+        )
+    return mode

@@ -48,9 +48,19 @@ class DraftUpdate(BaseModel):
     enabled: bool | None = None
 
 
+class ModeSet(BaseModel):
+    mode: Literal["off", "test_only", "all"]
+
+
 @router.get("")
 def list_followups() -> dict[str, Any]:
-    return {"groups": cf.list_all(), "placeholders": cf.PLACEHOLDERS}
+    return {"groups": cf.list_all(), "placeholders": cf.PLACEHOLDERS, "mode": cf.get_mode()}
+
+
+@router.put("/mode")
+def set_mode(payload: ModeSet) -> dict[str, str]:
+    """off = old generic mail; test_only = situations for test calls only; all = every call."""
+    return {"mode": cf.set_mode(payload.mode)}
 
 
 @router.post("/groups", status_code=201)

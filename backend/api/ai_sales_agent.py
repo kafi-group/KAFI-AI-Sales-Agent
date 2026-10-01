@@ -555,6 +555,26 @@ def _send_task_followup(
     email = (task.get("contact_email") or "").strip() or None
     if task.get("is_test") and not email and operator:
         email = (operator.mailbox_email or "").strip() or None
+    # "Call follow-ups for AI Agents": situation-based mail. Returns None when nothing was sent
+    # (mode off, no fit, any failure before sending) and we fall back to the generic follow-up below.
+    try:
+        from modules.call_followup_engine import try_situation_followup
+
+        situation_followup = try_situation_followup(
+            db,
+            task,
+            outcome=outcome,
+            operator=operator,
+            email=email,
+            agent_name=_agent_name(str(task.get("persona") or "female")),
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Call follow-up situations failed before sending, using generic follow-up: {exc}", flush=True)
+        situation_followup = None
+    if situation_followup is not None:
+        task["followup"] = situation_followup
+        task["followup_sent"] = True
+        return situation_followup
     followup = _auto_followup_after_call(
         db,
         user=operator,

@@ -3792,7 +3792,14 @@ export const client = {
 
   /** Call follow-ups for AI Agents: situation groups + drafts (setup only). */
   listCallFollowups: () =>
-    request<{ groups: CallFollowupGroup[]; placeholders: string[] }>("/call-followups"),
+    request<{ groups: CallFollowupGroup[]; placeholders: string[]; mode: CallFollowupMode }>(
+      "/call-followups",
+    ),
+  setCallFollowupMode: (mode: CallFollowupMode) =>
+    request<{ mode: CallFollowupMode }>("/call-followups/mode", {
+      method: "PUT",
+      body: JSON.stringify({ mode }),
+    }),
   createCallFollowupGroup: (data: { name: string; description?: string; enabled?: boolean }) =>
     request<CallFollowupGroup>("/call-followups/groups", {
       method: "POST",
@@ -5484,6 +5491,8 @@ export interface AddRecipientPayload {
   city?: string;
   remarks?: string;
 }
+
+export type CallFollowupMode = "off" | "test_only" | "all";
 
 export interface CallFollowupDraft {
   id: number;

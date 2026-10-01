@@ -3,6 +3,7 @@ import {
   client,
   type CallFollowupDraft,
   type CallFollowupGroup,
+  type CallFollowupMode,
   type CatalogueItem,
 } from "../api/client";
 
@@ -49,6 +50,7 @@ const labelCls = "block text-[11px] font-medium uppercase tracking-wide text-sla
 export function CallFollowupsPanel({ onError }: CallFollowupsPanelProps) {
   const [groups, setGroups] = useState<CallFollowupGroup[]>([]);
   const [placeholders, setPlaceholders] = useState<string[]>([]);
+  const [mode, setMode] = useState<CallFollowupMode>("test_only");
   const [catalogues, setCatalogues] = useState<CatalogueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -75,6 +77,7 @@ export function CallFollowupsPanel({ onError }: CallFollowupsPanelProps) {
         const data = await client.listCallFollowups();
         setGroups(data.groups || []);
         setPlaceholders(data.placeholders || []);
+        if (data.mode) setMode(data.mode);
         setSelectedId((prev) => {
           const want = keepSelected !== undefined ? keepSelected : prev;
           if (want && data.groups.some((g) => g.id === want)) return want;
@@ -114,6 +117,24 @@ export function CallFollowupsPanel({ onError }: CallFollowupsPanelProps) {
   function flash(msg: string) {
     setNotice(msg);
     window.setTimeout(() => setNotice(null), 3500);
+  }
+
+  async function changeMode(next: CallFollowupMode) {
+    const prev = mode;
+    setMode(next);
+    try {
+      await client.setCallFollowupMode(next);
+      flash(
+        next === "off"
+          ? "Off — Sara and Rayan send the old generic follow-up."
+          : next === "test_only"
+            ? "Test calls only — situations are used for test calls; real calls keep the old follow-up."
+            : "All calls — every call now uses these situations.",
+      );
+    } catch (e) {
+      setMode(prev);
+      onError(e instanceof Error ? e.message : "Could not change the sending mode");
+    }
   }
 
   async function addGroup() {
@@ -247,6 +268,22 @@ export function CallFollowupsPanel({ onError }: CallFollowupsPanelProps) {
           {notice}
         </p>
       )}
+
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-3">
+        <label className="text-sm font-medium text-slate-300" htmlFor="followup-mode">
+          Sara &amp; Rayan send these after a call:
+        </label>
+        <select
+          id="followup-mode"
+          className="rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-1.5 text-sm text-slate-100 focus:border-emerald-500/60 focus:outline-none"
+          value={mode}
+          onChange={(e) => void changeMode(e.target.value as CallFollowupMode)}
+        >
+          <option value="off">Off (old generic follow-up)</option>
+          <option value="test_only">Test calls only</option>
+          <option value="all">All calls</option>
+        </select>
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)]">
         {/* Situation list */}
