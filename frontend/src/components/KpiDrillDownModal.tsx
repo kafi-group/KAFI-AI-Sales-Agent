@@ -311,7 +311,7 @@ export function KpiDrillDownModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="relative flex flex-col w-[96vw] max-w-[1550px] max-h-[92vh] rounded-3xl border-2 border-slate-700 bg-slate-950 p-5 sm:p-8 shadow-2xl shadow-black text-slate-100 space-y-4 overflow-hidden">
+      <div className="relative flex flex-col w-[96vw] max-w-[1550px] max-h-[92vh] rounded-3xl border-2 border-slate-700 bg-slate-950 p-4 sm:p-6 shadow-2xl shadow-black text-slate-100 space-y-3 overflow-hidden">
         
         {/* Header */}
         <div className="flex items-start justify-between border-b border-slate-800 pb-4">
@@ -373,7 +373,7 @@ export function KpiDrillDownModal({
         </div>
 
         {/* Table Content */}
-        <div className="flex-1 overflow-y-auto rounded-2xl border border-slate-800 bg-slate-900/60 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto overflow-x-auto sm:overflow-x-hidden rounded-2xl border border-slate-800 bg-slate-900/60 custom-scrollbar">
           {isCompanyView ? (
             /* Distinct Companies View */
             displayedCompanies.length === 0 ? (
@@ -381,31 +381,31 @@ export function KpiDrillDownModal({
                 No company records found matching your query.
               </div>
             ) : (
-              <table className="w-full text-left text-xs sm:text-sm">
-                <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-300 uppercase text-xs sm:text-sm font-extrabold tracking-wider">
+              <table className="w-full table-fixed text-left text-xs sm:text-sm">
+                <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-300 uppercase text-[11px] sm:text-xs font-extrabold tracking-wide">
                   <tr>
-                    <th className="px-5 py-3.5">#</th>
-                    <th className="px-5 py-3.5">Company Name</th>
-                    <th className="px-5 py-3.5">Contact Person &amp; Role</th>
-                    <th className="px-5 py-3.5">Country</th>
-                    <th className="px-5 py-3.5">Phone</th>
-                    <th className="px-5 py-3.5">Calls Made</th>
-                    <th className="px-5 py-3.5 whitespace-nowrap">Last Call Time</th>
-                    <th className="px-5 py-3.5">Latest Status &amp; Remarks</th>
+                    <th className="px-3 py-2.5 w-[3%]">#</th>
+                    <th className="px-3 py-2.5 w-[16%]">Company Name</th>
+                    <th className="px-3 py-2.5 w-[14%]">Contact Person &amp; Role</th>
+                    <th className="px-3 py-2.5 w-[8%]">Country</th>
+                    <th className="px-3 py-2.5 w-[11%]">Phone</th>
+                    <th className="px-3 py-2.5 w-[8%]">Calls Made</th>
+                    <th className="px-3 py-2.5 w-[11%]">Last Call Time</th>
+                    <th className="px-3 py-2.5 w-[29%]">Latest Status &amp; Remarks</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
                   {displayedCompanies.map((comp, idx) => (
                     <tr key={comp.company_name + idx} className="hover:bg-slate-800/50 transition">
-                      <td className="px-5 py-4 text-slate-500 font-mono text-xs sm:text-sm">{idx + 1}</td>
-                      <td className="px-5 py-4 font-black text-slate-100 text-sm sm:text-base">
+                      <td className="px-3 py-2.5 text-slate-500 font-mono text-xs sm:text-sm">{idx + 1}</td>
+                      <td className="px-3 py-2.5 font-black text-slate-100 text-sm break-words">
                         <div className="flex items-center gap-2.5">
                           <span className="text-lg">🏢</span>
                           <span>{comp.company_name}</span>
                         </div>
                       </td>
-                      <td className="px-5 py-4">
-                        <div className="font-bold text-slate-200 text-sm sm:text-base">
+                      <td className="px-3 py-2.5">
+                        <div className="font-bold text-slate-200 text-sm break-words">
                           {comp.contact_name || "—"}
                         </div>
                         {comp.contact_designation && (
@@ -414,9 +414,9 @@ export function KpiDrillDownModal({
                           </div>
                         )}
                       </td>
-                      <td className="px-5 py-4">
+                      <td className="px-3 py-2.5">
                         {comp.country ? (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 border border-slate-700 font-bold text-slate-200 text-xs sm:text-sm">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-800 border border-slate-700 font-bold text-slate-200 text-xs">
                             <span>🌍</span>
                             <span>{comp.country}</span>
                           </span>
@@ -424,30 +424,30 @@ export function KpiDrillDownModal({
                           <span className="text-slate-500">—</span>
                         )}
                       </td>
-                      <td className="px-5 py-4 font-mono text-xs sm:text-sm font-bold text-sky-300">
+                      <td className="px-3 py-2.5 font-mono text-xs sm:text-sm font-bold text-sky-300">
                         {comp.phone ? (
-                          <a href={`tel:${comp.phone}`} className="hover:underline">
+                          <a href={`tel:${comp.phone}`} className="hover:underline break-all">
                             {comp.phone}
                           </a>
                         ) : (
                           <span className="text-slate-500">—</span>
                         )}
                       </td>
-                      <td className="px-5 py-4">
+                      <td className="px-3 py-2.5">
                         <span className="px-3 py-1 rounded-full bg-emerald-950 border border-emerald-500/60 font-black text-emerald-300 text-xs sm:text-sm whitespace-nowrap">
                           {comp.call_count} {comp.call_count === 1 ? "call" : "calls"}
                         </span>
                       </td>
-                      <td className="px-5 py-4 text-slate-200 font-semibold text-xs sm:text-sm whitespace-nowrap">
+                      <td className="px-3 py-2.5 text-slate-200 font-semibold text-xs sm:text-sm">
                         {formatCallTime(comp.latest_time)}
                       </td>
-                      <td className="px-5 py-4">
+                      <td className="px-3 py-2.5">
                         {comp.latest_outcome ? (
                           <span className="inline-block px-3 py-1 rounded-lg bg-slate-800 border border-slate-700 font-bold text-xs sm:text-sm uppercase text-slate-200">
                             {comp.latest_outcome.replace(/_/g, " ")}
                           </span>
                         ) : (
-                          <div className="text-slate-200 text-xs sm:text-sm leading-relaxed max-w-md">
+                          <div className="text-slate-200 text-xs sm:text-sm leading-snug break-words">
                             {comp.latest_summary}
                           </div>
                         )}
@@ -466,17 +466,17 @@ export function KpiDrillDownModal({
                   : "No activity records found matching this filter for the selected period."}
               </div>
             ) : (
-              <table className="w-full text-left text-xs sm:text-sm">
-                <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-300 uppercase text-xs sm:text-sm font-extrabold tracking-wider">
+              <table className="w-full table-fixed text-left text-xs sm:text-sm">
+                <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-300 uppercase text-[11px] sm:text-xs font-extrabold tracking-wide">
                   <tr>
-                    <th className="px-5 py-3.5">#</th>
-                    <th className="px-5 py-3.5 whitespace-nowrap">Time of Call / Action</th>
-                    <th className="px-5 py-3.5">Company Name</th>
-                    <th className="px-5 py-3.5">Contact Person</th>
-                    <th className="px-5 py-3.5">Country</th>
-                    <th className="px-5 py-3.5">Phone / Contact</th>
-                    <th className="px-5 py-3.5">Agent</th>
-                    <th className="px-5 py-3.5">Status / Remarks / Details</th>
+                    <th className="px-3 py-2.5 w-[3%]">#</th>
+                    <th className="px-3 py-2.5 w-[10%]">Time of Call / Action</th>
+                    <th className="px-3 py-2.5 w-[16%]">Company Name</th>
+                    <th className="px-3 py-2.5 w-[12%]">Contact Person</th>
+                    <th className="px-3 py-2.5 w-[8%]">Country</th>
+                    <th className="px-3 py-2.5 w-[10%]">Phone / Contact</th>
+                    <th className="px-3 py-2.5 w-[7%]">Agent</th>
+                    <th className="px-3 py-2.5 w-[34%]">Status / Remarks / Details</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
@@ -499,18 +499,18 @@ export function KpiDrillDownModal({
 
                     return (
                       <tr key={item.id + "-" + idx} className="hover:bg-slate-800/50 transition">
-                        <td className="px-5 py-4 text-slate-500 font-mono text-xs sm:text-sm">{idx + 1}</td>
-                        <td className="px-5 py-4 text-slate-200 whitespace-nowrap font-semibold text-xs sm:text-sm">
+                        <td className="px-3 py-2.5 text-slate-500 font-mono text-xs sm:text-sm">{idx + 1}</td>
+                        <td className="px-3 py-2.5 text-slate-200 font-semibold text-xs sm:text-sm">
                           {formatCallTime(item.created_at)}
                         </td>
-                        <td className="px-5 py-4 font-black text-slate-100 text-sm sm:text-base">
+                        <td className="px-3 py-2.5 font-black text-slate-100 text-sm break-words">
                           <div className="flex items-center gap-2">
                             <span className="text-slate-400 text-base">🏢</span>
                             <span>{cName}</span>
                           </div>
                         </td>
-                        <td className="px-5 py-4">
-                          <div className="font-bold text-slate-200 text-sm sm:text-base">
+                        <td className="px-3 py-2.5">
+                          <div className="font-bold text-slate-200 text-sm break-words">
                             {contactName}
                           </div>
                           {designation && (
@@ -519,9 +519,9 @@ export function KpiDrillDownModal({
                             </div>
                           )}
                         </td>
-                        <td className="px-5 py-4">
+                        <td className="px-3 py-2.5">
                           {country ? (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 border border-slate-700 font-bold text-slate-200 text-xs sm:text-sm">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-800 border border-slate-700 font-bold text-slate-200 text-xs">
                               <span>🌍</span>
                               <span>{country}</span>
                             </span>
@@ -529,7 +529,7 @@ export function KpiDrillDownModal({
                             <span className="text-slate-500">—</span>
                           )}
                         </td>
-                        <td className="px-5 py-4 font-mono text-xs sm:text-sm font-bold text-sky-300">
+                        <td className="px-3 py-2.5 font-mono text-xs sm:text-sm font-bold text-sky-300">
                           {phone ? (
                             <a
                               href={phone.includes("@") ? `mailto:${phone}` : `tel:${phone}`}
@@ -541,10 +541,10 @@ export function KpiDrillDownModal({
                             <span className="text-slate-500">—</span>
                           )}
                         </td>
-                        <td className="px-5 py-4 text-slate-200 font-medium text-xs sm:text-sm">
+                        <td className="px-3 py-2.5 text-slate-200 font-medium text-xs sm:text-sm">
                           {item.full_name || item.username || `User #${item.user_id}`}
                         </td>
-                        <td className="px-5 py-4">
+                        <td className="px-3 py-2.5">
                           {outcome ? (
                             <span
                               className={`inline-block px-3 py-1 rounded-lg border font-black text-xs sm:text-sm uppercase tracking-wide ${
@@ -560,11 +560,11 @@ export function KpiDrillDownModal({
                               {outcome.replace(/_/g, " ")}
                             </span>
                           ) : item.remarks ? (
-                            <div className="text-slate-200 text-xs sm:text-sm leading-relaxed max-w-lg whitespace-pre-wrap break-words">
+                            <div className="text-slate-200 text-xs sm:text-sm leading-snug whitespace-pre-wrap break-words">
                               {item.remarks}
                             </div>
                           ) : (
-                            <div className="text-slate-300 text-xs sm:text-sm leading-relaxed max-w-lg">
+                            <div className="text-slate-300 text-xs sm:text-sm leading-snug break-words">
                               {item.summary || item.title}
                             </div>
                           )}
