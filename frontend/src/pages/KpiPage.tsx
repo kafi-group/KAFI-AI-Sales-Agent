@@ -521,6 +521,11 @@ export function KpiPage({ onError }: KpiPageProps) {
           counts={report.counts}
           scopeLabel={scopeLabel}
           dateLabel={formatRangeLabel(report)}
+          reportParams={{
+            date,
+            period,
+            user_id: isAdmin && selectedUserId ? Number(selectedUserId) : null,
+          }}
           onClose={() => {
             setDrillDownKey(null);
             setDrillDownLabel("");

@@ -3120,6 +3120,22 @@ export const client = {
     if (params.user_id != null) search.set("user_id", String(params.user_id));
     return request<DailyKpiReport>(`/kpi/daily?${search.toString()}`);
   },
+  /** One row per contact behind a KPI box (personal/bulk email & WhatsApp, leads imported). */
+  getKpiCardRows: (params: {
+    card: string;
+    date: string;
+    period?: KpiPeriod | string;
+    user_id?: number | null;
+  }) => {
+    const search = new URLSearchParams();
+    search.set("card", params.card);
+    search.set("date", params.date);
+    if (params.period) search.set("period", params.period);
+    if (params.user_id != null) search.set("user_id", String(params.user_id));
+    return request<{ card: string; total: number; rows: KpiActivityItem[] }>(
+      `/kpi/card-rows?${search.toString()}`,
+    );
+  },
   generateKpiSummary: (params: {
     date: string;
     period?: KpiPeriod | string;

@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import type { KpiActivityItem, KpiCounts } from "../api/client";
+import { useEffect, useMemo, useState } from "react";
+import { client, type KpiActivityItem, type KpiCounts } from "../api/client";
 
 interface KpiDrillDownModalProps {
   cardKey: keyof KpiCounts | null;
@@ -8,8 +8,20 @@ interface KpiDrillDownModalProps {
   counts: KpiCounts;
   scopeLabel: string;
   dateLabel: string;
+  /** Same date / period / user the KPI page is showing — used to load per-contact rows. */
+  reportParams?: { date: string; period: string; user_id: number | null };
   onClose: () => void;
 }
+
+// Boxes whose number is counted from the Email / WhatsApp Activity feed (or from imports), where
+// the work log alone only has one summary line per campaign — these load one row per contact.
+const PER_CONTACT_CARDS = new Set<string>([
+  "personal_emails_sent",
+  "bulk_emails_sent",
+  "personal_whatsapp_sent",
+  "bulk_whatsapp_sent",
+  "leads_imported",
+]);
 
 function formatCallTime(iso: string) {
   const date = new Date(iso);
@@ -71,13 +83,45 @@ export function KpiDrillDownModal({
   counts,
   scopeLabel,
   dateLabel,
+  reportParams,
   onClose,
 }: KpiDrillDownModalProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [serverRows, setServerRows] = useState<KpiActivityItem[] | null>(null);
+  const [rowsLoading, setRowsLoading] = useState(false);
+
+  const reportDate = reportParams?.date;
+  const reportPeriod = reportParams?.period;
+  const reportUserId = reportParams?.user_id ?? null;
+  useEffect(() => {
+    setServerRows(null);
+    if (!cardKey || !reportDate || !PER_CONTACT_CARDS.has(cardKey)) {
+      setRowsLoading(false);
+      return;
+    }
+    let active = true;
+    setRowsLoading(true);
+    client
+      .getKpiCardRows({ card: cardKey, date: reportDate, period: reportPeriod, user_id: reportUserId })
+      .then((res) => {
+        if (active) setServerRows(res.rows);
+      })
+      .catch(() => {
+        // Keep the work-log list below if the per-contact list cannot be loaded.
+        if (active) setServerRows(null);
+      })
+      .finally(() => {
+        if (active) setRowsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [cardKey, reportDate, reportPeriod, reportUserId]);
 
   // Filter activities matching the clicked KPI card
   const filteredActivities = useMemo(() => {
     if (!cardKey) return [];
+    if (serverRows) return serverRows;
 
     return activities.filter((item) => {
       const type = item.activity_type || "";
@@ -163,7 +207,7 @@ export function KpiDrillDownModal({
           return true;
       }
     });
-  }, [cardKey, activities]);
+  }, [cardKey, activities, serverRows]);
 
   // Group by distinct company if "companies_called"
   const companyGroupedList = useMemo(() => {
@@ -417,7 +461,9 @@ export function KpiDrillDownModal({
             /* Standard Event List (Calls, Picked Up, Remarks, Emails, etc.) */
             displayedItems.length === 0 ? (
               <div className="p-8 text-center text-slate-400 text-sm sm:text-base">
-                No activity records found matching this filter for the selected period.
+                {rowsLoading
+                  ? "Loading the list…"
+                  : "No activity records found matching this filter for the selected period."}
               </div>
             ) : (
               <table className="w-full text-left text-xs sm:text-sm">
@@ -443,7 +489,12 @@ export function KpiDrillDownModal({
                     const contactName = item.contact_name || (item.details?.contact_name as string) || "—";
                     const designation = item.contact_designation || (item.details?.contact_designation as string);
                     const country = item.country || (item.details?.country as string);
-                    const phone = item.phone || (item.details?.phone as string) || (item.details?.lead_phone as string);
+                    const phone =
+                      item.phone ||
+                      (item.details?.phone as string) ||
+                      (item.details?.lead_phone as string) ||
+                      (item.details?.to_email as string) ||
+                      (item.details?.to as string);
                     const outcome = item.outcome || (item.details?.outcome as string);
 
                     return (
@@ -480,7 +531,10 @@ export function KpiDrillDownModal({
                         </td>
                         <td className="px-5 py-4 font-mono text-xs sm:text-sm font-bold text-sky-300">
                           {phone ? (
-                            <a href={`tel:${phone}`} className="hover:underline">
+                            <a
+                              href={phone.includes("@") ? `mailto:${phone}` : `tel:${phone}`}
+                              className="hover:underline break-all"
+                            >
                               {phone}
                             </a>
                           ) : (
@@ -506,7 +560,7 @@ export function KpiDrillDownModal({
                               {outcome.replace(/_/g, " ")}
                             </span>
                           ) : item.remarks ? (
-                            <div className="text-slate-200 text-xs sm:text-sm leading-relaxed max-w-lg">
+                            <div className="text-slate-200 text-xs sm:text-sm leading-relaxed max-w-lg whitespace-pre-wrap break-words">
                               {item.remarks}
                             </div>
                           ) : (
