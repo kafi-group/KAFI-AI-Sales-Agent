@@ -31,6 +31,7 @@ _OUTCOME_LABELS = {
     "follow_up": "Follow up",
     "not_interested": "Not interested",
     "not_received_call": "Did not receive call",
+    "closed_business": "Closed Business – Do Not Contact",
 }
 
 _EMPTY_COUNTS = {

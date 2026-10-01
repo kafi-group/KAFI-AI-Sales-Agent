@@ -159,6 +159,12 @@ def sync_buyer_interested_status(
                 note="Call outcome: Not interested",
                 commit=False,
             )
+    elif new == "closed_business":
+        # Closed business / do not contact: out of Interested and Follow up, no reminders.
+        buyer.interested_at = None
+        buyer.interested_follow_up_ack_at = None
+        buyer.follow_up_at = None
+        buyer.interested_clients_list_at = None
     elif prev in {"interested", "follow_up", "not_received_call"} and new not in {
         "interested",
         "follow_up",

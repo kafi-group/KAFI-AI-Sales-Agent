@@ -3,6 +3,7 @@ export const CALL_OUTCOMES = [
   { value: "follow_up", label: "Follow up" },
   { value: "not_interested", label: "Not interested" },
   { value: "not_received_call", label: "Did not receive call" },
+  { value: "closed_business", label: "Closed Business – Do Not Contact" },
 ] as const;
 
 export type CallOutcome = (typeof CALL_OUTCOMES)[number]["value"];
@@ -217,6 +218,9 @@ export function callOutcomeBadge(value: string | null | undefined): string {
   if (value === "not_received_call") {
     return "bg-amber-500/15 text-amber-300 border-amber-500/30";
   }
+  if (value === "closed_business") {
+    return "bg-rose-900/40 text-rose-200 border-rose-700/50";
+  }
   return "bg-slate-700/50 text-slate-300 border-slate-600";
 }
 
@@ -225,6 +229,7 @@ export function callOutcomeListNotice(value: string | null | undefined): string 
   if (value === "follow_up") return "Client moved to Follow up clients.";
   if (value === "not_interested") return "Client moved to Not interested.";
   if (value === "not_received_call") return "Client moved to Did not receive call.";
+  if (value === "closed_business") return "Marked as Closed Business – Do Not Contact.";
   return null;
 }
 
@@ -240,6 +245,9 @@ export function callOutcomeSectionHint(value: CallOutcome | ""): string | null {
   }
   if (value === "not_received_call") {
     return "Client moves from Leads table or Old clients to Did not receive call.";
+  }
+  if (value === "closed_business") {
+    return "The business has closed or must not be contacted — it leaves Interested and Follow up.";
   }
   return null;
 }

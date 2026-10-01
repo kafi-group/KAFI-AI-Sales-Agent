@@ -25,7 +25,7 @@ _DIAL_TARGET_ATTACHMENT = "dial_target"
 _NOTES_MARKER = "\n\nNOTES:"
 _OUTCOME_MARKER = "\n\nOUTCOME:"
 _VALID_CALL_OUTCOMES = frozenset(
-    {"interested", "follow_up", "not_interested", "not_received_call"}
+    {"interested", "follow_up", "not_interested", "not_received_call", "closed_business"}
 )
 # Recent Calls keeps ~1 rolling month of logs, then they may be purged.
 CALL_HISTORY_RETENTION_DAYS = 30
@@ -962,6 +962,7 @@ def delete_call_log(db: Session, *, interaction_id: int) -> bool:
         "follow_up",
         "not_received_call",
         "not_interested",
+        "closed_business",
     }:
         from modules.interested_follow_ups import sync_buyer_interested_status
 
