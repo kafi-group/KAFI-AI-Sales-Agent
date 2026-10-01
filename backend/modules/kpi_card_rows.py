@@ -102,8 +102,21 @@ def _plain_text(value: Any, limit: int = 600) -> str:
     text = re.sub(r"<[^>]+>", " ", text)
     text = html_lib.unescape(text)
     text = re.sub(r"[ \t\r\f\v]+", " ", text)
-    text = re.sub(r"\n\s*\n+", "\n\n", text).strip()
+    text = re.sub(r"\n\s*\n+", "\n", text).strip()  # no blank lines: keeps the rows short
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+NO_COMPANY_LABEL = "(no company name saved)"
+
+
+def _company_label(*names: Any) -> str:
+    """First non-blank company name; some imported records have an empty company and keep the
+    business name only in the contact field, so say so instead of showing something unrelated."""
+    for name in names:
+        cleaned = str(name or "").strip()
+        if cleaned:
+            return cleaned
+    return NO_COMPANY_LABEL
 
 
 def _detail_text(*parts: str | None) -> str | None:
@@ -200,15 +213,38 @@ def _personal_rows(
             continue
         events.append(event)
 
+    kind = (
+        activity_module.PERSONAL_WHATSAPP_SENT if want_whatsapp else activity_module.PERSONAL_EMAILS_SENT
+    )
+    rows = _send_event_rows(db, events, want_whatsapp=want_whatsapp, kind=kind, users=users)
+
+    # The box shows the larger of this feed and the work log — list whichever is bigger.
+    logged = _logged_rows(
+        db,
+        kind=kind,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        target_user_id=target_user_id,
+        users=users,
+    )
+    return logged if len(logged) > len(rows) else rows
+
+
+def _send_event_rows(
+    db: Session,
+    events: list[EmailActivityEvent],
+    *,
+    want_whatsapp: bool,
+    kind: str,
+    users: dict[int, AppUser],
+) -> list[dict[str, Any]]:
+    """One drill-down row per send record: company, contact, reach and the message text."""
     buyers, contacts = _lookup_maps(db, events)
     interaction_ids = {e.interaction_id for e in events if e.interaction_id}
     interactions = (
         {ix.id: ix for ix in db.query(Interaction).filter(Interaction.id.in_(interaction_ids)).all()}
         if interaction_ids
         else {}
-    )
-    kind = (
-        activity_module.PERSONAL_WHATSAPP_SENT if want_whatsapp else activity_module.PERSONAL_EMAILS_SENT
     )
     rows: list[dict[str, Any]] = []
     for event in events:
@@ -217,10 +253,9 @@ def _personal_rows(
         contact = contacts.get(event.contact_id) if event.contact_id else None
         interaction = interactions.get(event.interaction_id) if event.interaction_id else None
         body = _plain_text(interaction.content, 600) if interaction is not None else ""
-        company = (
-            (buyer.company_name if buyer is not None else None)
-            or details.get("company_name")
-            or None
+        company = _company_label(
+            buyer.company_name if buyer is not None else None,
+            details.get("company_name"),
         )
         if want_whatsapp:
             reach = _contact_phone(contact) or details.get("phone") or details.get("to")
@@ -253,17 +288,7 @@ def _personal_rows(
                 details=details,
             )
         )
-
-    # The box shows the larger of this feed and the work log — list whichever is bigger.
-    logged = _logged_rows(
-        db,
-        kind=kind,
-        start_utc=start_utc,
-        end_utc=end_utc,
-        target_user_id=target_user_id,
-        users=users,
-    )
-    return logged if len(logged) > len(rows) else rows
+    return rows
 
 
 def _email_bulk_from_interactions(
@@ -379,6 +404,69 @@ def _whatsapp_messages_for(
     return latest
 
 
+def _uncovered_logged_bulk_rows(
+    db: Session,
+    bulk_events: list[EmailActivityEvent],
+    *,
+    want_whatsapp: bool,
+    kind: str,
+    start_utc: datetime,
+    end_utc: datetime,
+    target_user_id: int | None,
+    users: dict[int, AppUser],
+) -> list[dict[str, Any]]:
+    """Work-log "bulk" entries that have no campaign summary in the activity feed.
+
+    A single-contact send made through the bulk route is logged as "bulk" in the work log but
+    recorded as an individual send in the feed, so the box (which takes the larger count) includes
+    it while the campaign list does not. Match each such entry to the send records just before it.
+    """
+    query = db.query(UserActivityEvent).filter(
+        UserActivityEvent.activity_type == kind,
+        UserActivityEvent.created_at >= start_utc,
+        UserActivityEvent.created_at < end_utc,
+    )
+    if target_user_id is not None:
+        query = query.filter(UserActivityEvent.user_id == target_user_id)
+
+    rows: list[dict[str, Any]] = []
+    used_event_ids: set[int] = set()
+    for logged in query.order_by(UserActivityEvent.created_at.asc(), UserActivityEvent.id.asc()).all():
+        covered = any(
+            e.user_id == logged.user_id
+            and abs((e.created_at - logged.created_at).total_seconds()) <= 300
+            for e in bulk_events
+        )
+        if covered:
+            continue
+        quantity = max(1, int(logged.quantity or 1))
+        singles: list[EmailActivityEvent] = []
+        for candidate in _activity_events(
+            db,
+            start_utc=logged.created_at - timedelta(minutes=10),
+            end_utc=logged.created_at + timedelta(minutes=1),
+            target_user_id=logged.user_id,
+            event_types=("sent",),
+        ):
+            if candidate.id in used_event_ids:
+                continue
+            if bool(activity_module._is_whatsapp_activity_event(candidate)) != want_whatsapp:  # noqa: SLF001
+                continue
+            singles.append(candidate)
+            if len(singles) >= quantity:
+                break
+        if singles:
+            used_event_ids.update(e.id for e in singles)
+            rows.extend(
+                _send_event_rows(db, singles, want_whatsapp=want_whatsapp, kind=kind, users=users)
+            )
+        else:
+            row = activity_module._activity_dict(logged, users.get(logged.user_id))  # noqa: SLF001
+            row["remarks"] = row.get("remarks") or "The individual recipients were not saved for this send."
+            rows.append(row)
+    return rows
+
+
 def _bulk_rows(
     db: Session,
     *,
@@ -482,8 +570,10 @@ def _bulk_rows(
                     title=event.title,
                     summary=detail_line,
                     remarks=_detail_text(detail_line, detail_body),
-                    company_name=result.get("company_name")
-                    or (buyer.company_name if buyer is not None else None),
+                    company_name=_company_label(
+                        result.get("company_name"),
+                        buyer.company_name if buyer is not None else None,
+                    ),
                     contact_name=result.get("contact_name"),
                     designation=result.get("designation"),
                     country=result.get("country") or (buyer.country if buyer is not None else None),
@@ -491,6 +581,19 @@ def _bulk_rows(
                     details={"event_id": event.id},
                 )
             )
+
+    rows.extend(
+        _uncovered_logged_bulk_rows(
+            db,
+            events,
+            want_whatsapp=want_whatsapp,
+            kind=kind,
+            start_utc=start_utc,
+            end_utc=end_utc,
+            target_user_id=target_user_id,
+            users=users,
+        )
+    )
     return rows
 
 
@@ -544,7 +647,7 @@ def _leads_imported_rows(
                     activity_type=activity_module.LEADS_IMPORTED,
                     title="Lead imported",
                     summary=f"Imported from {source}",
-                    company_name=buyer.company_name,
+                    company_name=_company_label(buyer.company_name),
                     contact_name=contact.full_name if contact is not None else None,
                     designation=getattr(contact, "designation", None) if contact is not None else None,
                     country=buyer.country,
