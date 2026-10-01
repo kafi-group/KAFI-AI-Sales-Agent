@@ -35,6 +35,7 @@ const DEFAULT_AUTO_TRASH: AutoTrashSettings = {
   can_auto_trash: false,
 };
 import { ComposeRecipientsPickerModal } from "../components/ComposeRecipientsPickerModal";
+import { buildForwardBodyHtml, forwardSubject } from "../utils/forwardMail";
 import { AttachedFilesList } from "../components/AttachedFilesList";
 import { AttachCatalogueModal } from "../components/AttachCatalogueModal";
 import {
@@ -412,6 +413,9 @@ export function InboxPage({
   const [aiLoading, setAiLoading] = useState(false);
   const [showCompose, setShowCompose] = useState(false);
   const [showComposeRecipients, setShowComposeRecipients] = useState(false);
+  // Forward: the contact picker (To / Cc with filters) opens only after clicking Forward.
+  const [showForwardPicker, setShowForwardPicker] = useState(false);
+  const forwardDraftRef = useRef<{ subject: string; body: string } | null>(null);
   const [composeDraft, setComposeDraft] = useState<MailComposeDraft | null>(null);
   const [drafts, setDrafts] = useState<MailComposeDraft[]>([]);
   const [labels, setLabels] = useState<MailLabel[]>([]);
@@ -1288,6 +1292,18 @@ export function InboxPage({
 
     // Clean empty compose box — do not quote the prior thread.
     setReplyBody("");
+  }
+
+  function startForward() {
+    const source =
+      isThreadView && thread ? thread.messages[thread.messages.length - 1] : messageDetail;
+    if (!source) return;
+    forwardDraftRef.current = {
+      subject: forwardSubject(source.subject),
+      body: buildForwardBodyHtml(source),
+    };
+    setNotice(null);
+    setShowForwardPicker(true);
   }
 
   const canReplyAll = useMemo(() => {
@@ -2691,6 +2707,13 @@ export function InboxPage({
                               Reply all
                             </ActionButton>
                           )}
+                          <ActionButton
+                            icon={IconSend}
+                            onClick={() => startForward()}
+                            title="Forward this email — pick To and Cc contacts"
+                          >
+                            Forward
+                          </ActionButton>
                           {aiAnalysis?.draft_reply ? (
                             <ActionButton
                               icon={IconSparkles}
@@ -2830,6 +2853,14 @@ export function InboxPage({
                         Reply all
                       </ActionButton>
                     )}
+                    <ActionButton
+                      icon={IconSend}
+                      size="md"
+                      onClick={() => startForward()}
+                      title="Forward this email — pick To and Cc contacts"
+                    >
+                      Forward
+                    </ActionButton>
                     <span className="text-xs text-slate-500">
                       Write a reply and send from your mailbox
                     </span>
@@ -3146,6 +3177,13 @@ export function InboxPage({
                             Reply all
                           </ActionButton>
                         )}
+                        <ActionButton
+                          icon={IconSend}
+                          onClick={() => startForward()}
+                          title="Forward this email — pick To and Cc contacts"
+                        >
+                          Forward
+                        </ActionButton>
                         {aiAnalysis?.draft_reply ? (
                           <ActionButton
                             icon={IconSparkles}
@@ -3258,6 +3296,14 @@ export function InboxPage({
                       Reply all
                     </ActionButton>
                   )}
+                  <ActionButton
+                    icon={IconSend}
+                    size="md"
+                    onClick={() => startForward()}
+                    title="Forward this email — pick To and Cc contacts"
+                  >
+                    Forward
+                  </ActionButton>
                   <span className="text-xs text-slate-500">
                     Write a reply and send from your mailbox
                   </span>
@@ -3419,6 +3465,27 @@ export function InboxPage({
           onClose={() => setShowAttachCatalogue(false)}
           onAttach={(newAtts) => setReplyAttachments((prev) => [...prev, ...newAtts])}
           onError={onError}
+        />
+      )}
+
+      {showForwardPicker && (
+        <ComposeRecipientsPickerModal
+          onClose={() => setShowForwardPicker(false)}
+          onError={onError}
+          onContinue={({ to, cc }) => {
+            setShowForwardPicker(false);
+            const fwd = forwardDraftRef.current;
+            setComposeDraft({
+              id: 0,
+              to_addrs: to.join(", "),
+              cc_addrs: cc.join(", "),
+              subject: fwd?.subject || "Fwd:",
+              body: fwd?.body || "",
+              created_at: "",
+              updated_at: "",
+            });
+            setShowCompose(true);
+          }}
         />
       )}
 
