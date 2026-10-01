@@ -44,9 +44,8 @@ export function classifyWhatsAppFailure(message: string | null | undefined): Wha
       key: "undeliverable",
       label: "Not on WhatsApp, or blocked",
       hint:
-        "WhatsApp does not say which. Use “Check on WhatsApp”: if the chat will not open, the number " +
-        "is not on WhatsApp (fix it in the contact); if it opens, this person may have blocked the " +
-        "business or not accepted WhatsApp’s latest terms.",
+        "WhatsApp does not say which: either the number is not on WhatsApp (fix it in the contact), " +
+        "or this person has blocked the business or not accepted WhatsApp’s latest terms.",
     };
   }
   if (has("131047", "re-engagement", "24 hour", "24-hour")) {

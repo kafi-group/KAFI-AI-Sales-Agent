@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { client, type EmailActivityBulkResults } from "../api/client";
-import { classifyWhatsAppFailure, waDigits } from "../utils/whatsappFailure";
+import { classifyWhatsAppFailure } from "../utils/whatsappFailure";
 
 interface BulkResultsModalProps {
   eventId: number;
@@ -230,20 +230,6 @@ export function BulkResultsModal({ eventId, onClose, onError, onOpenLead }: Bulk
                         })()
                       : null}
                   </div>
-                  {isWhatsApp &&
-                  row.status === "failed" &&
-                  classifyWhatsAppFailure(row.message).key === "undeliverable" &&
-                  waDigits(row.phone) ? (
-                    <a
-                      href={`https://wa.me/${waDigits(row.phone)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="shrink-0 px-3 py-1 rounded-lg border border-emerald-500/40 text-xs font-medium text-emerald-200 hover:bg-emerald-950/40"
-                      title="Opens WhatsApp for this number — if it refuses to open, the number is not on WhatsApp"
-                    >
-                      Check on WhatsApp
-                    </a>
-                  ) : null}
                   {row.buyer_id != null && onOpenLead ? (
                     <button
                       type="button"
