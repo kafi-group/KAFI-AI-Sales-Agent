@@ -2429,12 +2429,17 @@ export const client = {
     page_size?: number;
     search?: string;
     buyer_id?: number;
+    /** YYYY-MM-DD, inclusive. Same value for both = a single day. */
+    date_from?: string;
+    date_to?: string;
   } = {}) => {
     const search = new URLSearchParams();
     if (params.page) search.set("page", String(params.page));
     if (params.page_size) search.set("page_size", String(params.page_size));
     if (params.search) search.set("search", params.search);
     if (params.buyer_id != null) search.set("buyer_id", String(params.buyer_id));
+    if (params.date_from) search.set("date_from", params.date_from);
+    if (params.date_to) search.set("date_to", params.date_to);
     const query = search.toString();
     return request<ClientHistoryFeedResponse>(
       `/leads/client-history${query ? `?${query}` : ""}`,

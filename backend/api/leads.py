@@ -359,6 +359,8 @@ def list_client_history(
     search: str | None = None,
     page: int = 1,
     page_size: int = 50,
+    date_from: str | None = None,
+    date_to: str | None = None,
     db: Session = Depends(get_db),
     user: AppUser = Depends(get_current_user),
 ):
@@ -371,6 +373,8 @@ def list_client_history(
         search=search,
         page=page,
         page_size=page_size,
+        date_from=date_from,
+        date_to=date_to,
     )
 
 

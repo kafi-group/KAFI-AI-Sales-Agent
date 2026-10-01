@@ -20,6 +20,8 @@ interface ClientHistoryPageProps {
 
 const PAGE_SIZE = 30;
 
+type DateMode = "any" | "day" | "range";
+
 const CLIENT_HISTORY_COLUMNS: ColumnDef[] = [
   { id: "when", label: "Date & time" },
   { id: "client", label: "Client", locked: true },
@@ -52,6 +54,10 @@ export function ClientHistoryPage({
   const [search, setSearch] = useState("");
   const [buyerFilter, setBuyerFilter] = useState<number | null>(initialBuyerId);
   const [searchDraft, setSearchDraft] = useState("");
+  // Date filter: any date / one day / a range (YYYY-MM-DD values from <input type="date">).
+  const [dateMode, setDateMode] = useState<DateMode>("any");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,6 +67,9 @@ export function ClientHistoryPage({
         page_size: PAGE_SIZE,
         search: search || undefined,
         buyer_id: buyerFilter ?? undefined,
+        date_from: dateMode === "any" ? undefined : dateFrom || undefined,
+        // A single day is the same date for "from" and "to".
+        date_to: dateMode === "any" ? undefined : (dateMode === "day" ? dateFrom : dateTo) || undefined,
       });
       setData(result);
     } catch (e) {
@@ -68,7 +77,24 @@ export function ClientHistoryPage({
     } finally {
       setLoading(false);
     }
-  }, [buyerFilter, onError, page, search]);
+  }, [buyerFilter, dateFrom, dateMode, dateTo, onError, page, search]);
+
+  function changeDateMode(mode: DateMode) {
+    setDateMode(mode);
+    if (mode === "any") {
+      setDateFrom("");
+      setDateTo("");
+    }
+    setPage(1);
+  }
+
+  function setToday() {
+    const now = new Date();
+    const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    setDateMode("day");
+    setDateFrom(iso);
+    setPage(1);
+  }
 
   useEffect(() => {
     void load();
@@ -111,6 +137,63 @@ export function ClientHistoryPage({
           </button>
         </form>
         <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <select
+              value={dateMode}
+              onChange={(e) => changeDateMode(e.target.value as DateMode)}
+              className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-sm text-slate-200"
+              title="Filter the remarks by the date they were saved"
+            >
+              <option value="any">Any date</option>
+              <option value="day">Single day</option>
+              <option value="range">Date range</option>
+            </select>
+            {dateMode !== "any" ? (
+              <>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  max={dateMode === "range" && dateTo ? dateTo : undefined}
+                  onChange={(e) => {
+                    setDateFrom(e.target.value);
+                    setPage(1);
+                  }}
+                  aria-label={dateMode === "day" ? "Date" : "From date"}
+                  className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-sm text-slate-200"
+                />
+                {dateMode === "range" ? (
+                  <>
+                    <span className="text-slate-500">to</span>
+                    <input
+                      type="date"
+                      value={dateTo}
+                      min={dateFrom || undefined}
+                      onChange={(e) => {
+                        setDateTo(e.target.value);
+                        setPage(1);
+                      }}
+                      aria-label="To date"
+                      className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-sm text-slate-200"
+                    />
+                  </>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={setToday}
+                  className="rounded-lg border border-slate-700 px-2.5 py-2 text-xs text-slate-300 hover:bg-slate-800"
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  onClick={() => changeDateMode("any")}
+                  className="text-xs text-slate-400 hover:text-slate-200"
+                >
+                  Clear dates
+                </button>
+              </>
+            ) : null}
+          </div>
           {buyerFilter != null ? (
             <button
               type="button"
@@ -158,8 +241,9 @@ export function ClientHistoryPage({
               {!loading && (data?.rows.length ?? 0) === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
-                    No remarks in history yet. Edits in the clients table and saved call remarks appear
-                    here automatically.
+                    {dateMode !== "any" && (dateFrom || dateTo)
+                      ? "No remarks were saved on the selected date(s)."
+                      : "No remarks in history yet. Edits in the clients table and saved call remarks appear here automatically."}
                   </td>
                 </tr>
               ) : null}

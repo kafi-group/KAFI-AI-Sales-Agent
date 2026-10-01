@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -64,6 +64,30 @@ def buyer_history_entries(buyer: Buyer) -> list[dict[str, Any]]:
     return history
 
 
+_PKT = timezone(timedelta(hours=5))  # Asia/Karachi has no daylight saving
+
+
+def _filter_day(value: str | None) -> date | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def _entry_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def list_client_history_feed(
     db: Session,
     *,
@@ -72,8 +96,26 @@ def list_client_history_feed(
     search: str | None = None,
     page: int = 1,
     page_size: int = 50,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> dict[str, Any]:
-    """Flatten remark history across buyers, newest first."""
+    """Flatten remark history across buyers, newest first.
+
+    ``date_from`` / ``date_to`` (YYYY-MM-DD, both inclusive, Karachi days) narrow the entries to
+    one day (same value for both) or a range; either one may be left out.
+    """
+    day_from = _filter_day(date_from)
+    day_to = _filter_day(date_to)
+    if day_from and day_to and day_from > day_to:
+        day_from, day_to = day_to, day_from
+    window_start = (
+        datetime.combine(day_from, datetime.min.time(), tzinfo=_PKT) if day_from else None
+    )
+    window_end = (
+        datetime.combine(day_to, datetime.min.time(), tzinfo=_PKT) + timedelta(days=1)
+        if day_to
+        else None
+    )
     query = db.query(Buyer)
     from sqlalchemy import or_
 
@@ -108,6 +150,14 @@ def list_client_history_feed(
             is_current_only = bool(entry.get("current"))
             if is_current_only and logged:
                 continue
+            if window_start is not None or window_end is not None:
+                when = _entry_time(entry.get("at"))
+                if when is None:
+                    continue  # undated entries cannot be placed on a day
+                if window_start is not None and when < window_start:
+                    continue
+                if window_end is not None and when >= window_end:
+                    continue
             flat.append(
                 {
                     "id": f"{buyer.id}:{entry.get('at') or text[:24]}",
