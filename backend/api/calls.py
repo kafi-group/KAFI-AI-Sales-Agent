@@ -776,13 +776,25 @@ async def twilio_client_dial(request: Request):
         # Prefer the phone prepared at dial time (interaction), then SDK params.
         lead_phone: str | None = None
         if iid:
-            db = SessionLocal()
+            import asyncio
+
+            from fastapi.concurrency import run_in_threadpool
+
+            def _lookup_prepared_phone() -> str | None:
+                db = SessionLocal()
+                try:
+                    return calls_module.get_prepared_dial_phone(db, iid)
+                finally:
+                    db.close()
+
+            # Worker thread + time limit: a dead DB connection must never block the event loop
+            # (it froze the whole server for ~70s). On timeout fall back to the SDK's own params.
             try:
-                lead_phone = calls_module.get_prepared_dial_phone(db, iid)
+                lead_phone = await asyncio.wait_for(
+                    run_in_threadpool(_lookup_prepared_phone), timeout=8.0
+                )
             except Exception as exc:  # noqa: BLE001
                 log.warning("client-dial prepared phone lookup failed: %s", exc)
-            finally:
-                db.close()
         if not lead_phone:
             lead_phone = _param_phone(
                 "leadPhone",
@@ -853,63 +865,75 @@ async def twilio_call_status(request: Request):
     call_sid = str(form.get("CallSid") or "") or None
     dial_status = str(form.get("DialCallStatus") or "").lower()
 
-    db = SessionLocal()
-    try:
-        calls_module.update_call_status(
-            db,
-            interaction_id=iid,
-            call_status=status,
-            call_duration=duration,
-            call_sid=call_sid,
-        )
-        # Helpful spoken error when PSTN dial never connected (trial / geo / invalid).
-        if dial_status == "failed":
-            return _twiml_response(
-                voice_client.say_twiml(
+    def _handle_status() -> str:
+        """All the DB work, returned as TwiML. Runs in a worker thread (never on the event loop)."""
+        db = SessionLocal()
+        try:
+            calls_module.update_call_status(
+                db,
+                interaction_id=iid,
+                call_status=status,
+                call_duration=duration,
+                call_sid=call_sid,
+            )
+            # Helpful spoken error when PSTN dial never connected (trial / geo / invalid).
+            if dial_status == "failed":
+                return voice_client.say_twiml(
                     "Could not connect this number. If Twilio is on a trial account, "
                     "verify the destination number under Verified Caller IDs, or upgrade "
                     "the account. Also enable the country under Voice Geographic Permissions."
                 )
-            )
 
-        # Hang up after ~4 rings (16s), then Dial again until answered or max attempts.
-        # If the callee hangs up / declines early, DialCallStatus is canceled/busy —
-        # that ends this attempt immediately (Twilio does not wait out the remaining timeout).
-        no_connect = dial_status in {
-            "no-answer",
-            "busy",
-            "canceled",
-            "cancelled",
-        }
-        if no_connect and attempt < voice_client.max_ring_attempts():
-            phone = calls_module.get_prepared_dial_phone(db, iid)
-            if phone:
-                return _twiml_response(
-                    voice_client.client_dial_twiml(
+            # Hang up after ~4 rings (16s), then Dial again until answered or max attempts.
+            # If the callee hangs up / declines early, DialCallStatus is canceled/busy —
+            # that ends this attempt immediately (Twilio does not wait out the remaining timeout).
+            no_connect = dial_status in {
+                "no-answer",
+                "busy",
+                "canceled",
+                "cancelled",
+            }
+            if no_connect and attempt < voice_client.max_ring_attempts():
+                phone = calls_module.get_prepared_dial_phone(db, iid)
+                if phone:
+                    return voice_client.client_dial_twiml(
                         str(phone),
                         iid,
                         attempt=attempt + 1,
                     )
-                )
 
-        return _twiml_response("<Response><Hangup/></Response>")
+            return "<Response><Hangup/></Response>"
+        finally:
+            db.close()
+
+    import asyncio
+
+    from fastapi.concurrency import run_in_threadpool
+
+    # This handler is async, so the blocking DB calls MUST NOT run on the event loop: a dead
+    # Supabase connection blocked here for ~70s and froze every request (30 Sep / 1 Oct).
+    try:
+        xml = await asyncio.wait_for(run_in_threadpool(_handle_status), timeout=12.0)
+        return _twiml_response(xml)
     except SATimeoutError:
         logging.getLogger("twilio.webhook").warning(
             "voice/status DB pool busy interaction_id=%s status=%s", iid, status
         )
         return _twiml_response("<Response><Hangup/></Response>")
+    except asyncio.TimeoutError:
+        logging.getLogger("twilio.webhook").warning(
+            "voice/status timed out interaction_id=%s status=%s", iid, status
+        )
+        return _twiml_response("<Response><Hangup/></Response>")
     except Exception as exc:  # noqa: BLE001
         logging.getLogger("twilio.webhook").exception("voice/status failed: %s", exc)
         return _twiml_response("<Response><Hangup/></Response>")
-    finally:
-        db.close()
 
 
 @webhooks_router.post("/voice/recording")
 async def twilio_call_recording(
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
 ):
     """Twilio posts here when a Dial recording is ready."""
     try:
@@ -934,14 +958,24 @@ async def twilio_call_recording(
     if not recording_sid or not recording_url:
         return _twiml_response("<Response/>")
 
-    media = calls_module.save_call_recording(
-        db,
-        interaction_id=iid,
-        recording_sid=recording_sid,
-        recording_url=recording_url,
-        recording_status=recording_status,
-        recording_duration=recording_duration,
-    )
+    from fastapi.concurrency import run_in_threadpool
+
+    def _save_recording():
+        # Downloads the audio over HTTP and writes the DB: never on the event loop.
+        rec_db = SessionLocal()
+        try:
+            return calls_module.save_call_recording(
+                rec_db,
+                interaction_id=iid,
+                recording_sid=recording_sid,
+                recording_url=recording_url,
+                recording_status=recording_status,
+                recording_duration=recording_duration,
+            )
+        finally:
+            rec_db.close()
+
+    media = await run_in_threadpool(_save_recording)
     if media and media.get("local_path") and media.get("transcript_status") == "pending":
         background_tasks.add_task(_transcribe_in_background, iid)
     return _twiml_response("<Response/>")
