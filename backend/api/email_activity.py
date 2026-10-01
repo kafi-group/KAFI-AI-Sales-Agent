@@ -227,3 +227,21 @@ def mark_email_activity_read(
         channel=ch,
     )
     return {"updated": updated}
+
+
+@router.get("/events/{event_id}/results")
+def email_activity_bulk_results(
+    event_id: int,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(get_current_user),
+):
+    """Per-contact sent / failed / skipped list for a bulk campaign summary event."""
+    result = email_activity.bulk_results_for_event(
+        db,
+        event_id=event_id,
+        viewer_id=user.id,
+        is_admin=_is_admin(user),
+    )
+    if result is None:
+        raise HTTPException(404, "Event not found")
+    return result

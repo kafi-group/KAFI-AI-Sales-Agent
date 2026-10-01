@@ -1012,6 +1012,18 @@ function DashboardApp() {
     setSelectedLeadId(leadId);
   }
 
+  /** Open a contact from the Email / WhatsApp Activity pages (lead profile, where it can be edited). */
+  function handleOpenLeadFromActivity(buyerId: number) {
+    setError(null);
+    if (isWorkspaceOnlySalesUser) {
+      setTab("target-workspace");
+      setSelectedLeadId(buyerId);
+      return;
+    }
+    setTab("table");
+    setSelectedLeadId(buyerId);
+  }
+
   function handleBackFromProfile() {
     setSelectedLeadId(null);
     void loadDiscoverLeadsCount();
@@ -1844,6 +1856,7 @@ function DashboardApp() {
                 channel="email"
                 onError={setError}
                 onUnreadChange={setEmailActivityUnread}
+                onOpenLead={handleOpenLeadFromActivity}
               />
             )}
             {tab === "email-templates" && (
@@ -1863,6 +1876,7 @@ function DashboardApp() {
                 channel="whatsapp"
                 onError={setError}
                 onUnreadChange={setWhatsappActivityUnread}
+                onOpenLead={handleOpenLeadFromActivity}
               />
             )}
             {(tab === "whatsapp-mobile" || tab === "whatsapp-qr") && (

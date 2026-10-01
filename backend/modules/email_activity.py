@@ -1425,3 +1425,163 @@ def suggest_email_improvements(
         "content": content,
         "stats": stats,
     }
+
+
+# --------------------------------------------------------------------------- bulk results (per contact)
+
+
+def _reconstruct_whatsapp_bulk(db: Session, event: EmailActivityEvent) -> list[dict[str, Any]]:
+    """Older WhatsApp bulk summaries stored only counts. Rebuild per-contact results from the
+    matching "bulk started" event (the selected buyer ids) and the messages created in that window."""
+    from datetime import timedelta
+
+    from db.models import Buyer, Channel, Contact, Direction, Interaction
+    from modules.email_attachments import whatsapp_send_error
+
+    details = event.details if isinstance(event.details, dict) else {}
+    started = (
+        db.query(EmailActivityEvent)
+        .filter(
+            EmailActivityEvent.event_type == "bulk_started",
+            EmailActivityEvent.user_id == event.user_id,
+            EmailActivityEvent.created_at <= event.created_at,
+            _is_whatsapp_event_clause(),
+        )
+        .order_by(EmailActivityEvent.created_at.desc())
+        .first()
+    )
+    started_details = started.details if started is not None and isinstance(started.details, dict) else {}
+    buyer_ids = [int(b) for b in (started_details.get("buyer_ids") or []) if str(b).isdigit()]
+    if started is None or not buyer_ids:
+        return []
+    window_start = started.created_at
+    window_end = event.created_at + timedelta(minutes=2)
+
+    skipped_by_buyer: dict[int, dict[str, Any]] = {}
+    for sk in details.get("skipped") or []:
+        if isinstance(sk, dict) and sk.get("buyer_id") is not None:
+            skipped_by_buyer[int(sk["buyer_id"])] = sk
+
+    rows = (
+        db.query(Interaction, Contact)
+        .join(Contact, Interaction.contact_id == Contact.id)
+        .filter(
+            Contact.buyer_id.in_(buyer_ids),
+            Interaction.channel == Channel.whatsapp,
+            Interaction.direction == Direction.outbound,
+            Interaction.created_at >= window_start,
+            Interaction.created_at <= window_end,
+        )
+        .order_by(Interaction.created_at.desc())
+        .all()
+    )
+    latest: dict[int, tuple[Any, Any]] = {}
+    for ix, contact in rows:
+        latest.setdefault(int(contact.buyer_id), (ix, contact))
+
+    buyers = {b.id: b for b in db.query(Buyer).filter(Buyer.id.in_(buyer_ids)).all()}
+    out: list[dict[str, Any]] = []
+    for bid in buyer_ids:
+        buyer = buyers.get(bid)
+        company = buyer.company_name if buyer is not None else None
+        if bid in latest:
+            ix, contact = latest[bid]
+            wa = str(ix.wa_status or "").lower()
+            status_value = getattr(ix.status, "value", str(ix.status))
+            sent = wa in {"sent", "delivered", "read"} or (status_value == "sent" and wa != "failed")
+            out.append(
+                {
+                    "buyer_id": bid,
+                    "company_name": company,
+                    "contact_name": contact.full_name,
+                    "phone": (
+                        contact.phone
+                        or contact.primary_phone
+                        or contact.secondary_mobile
+                        or contact.secondary_phone
+                    ),
+                    "status": "sent" if sent else "failed",
+                    "message": "" if sent else (whatsapp_send_error(ix.attachments) or "Not delivered"),
+                }
+            )
+        elif bid in skipped_by_buyer:
+            out.append(
+                {
+                    "buyer_id": bid,
+                    "company_name": company or skipped_by_buyer[bid].get("company_name"),
+                    "contact_name": None,
+                    "phone": None,
+                    "status": "skipped",
+                    "message": str(skipped_by_buyer[bid].get("reason") or "Skipped"),
+                }
+            )
+        else:
+            out.append(
+                {
+                    "buyer_id": bid,
+                    "company_name": company,
+                    "contact_name": None,
+                    "phone": None,
+                    "status": "unknown",
+                    "message": "No message record was found for this contact.",
+                }
+            )
+    return out
+
+
+def bulk_results_for_event(
+    db: Session,
+    *,
+    event_id: int,
+    viewer_id: int | None,
+    is_admin: bool,
+) -> dict[str, Any] | None:
+    """Per-contact sent / failed / skipped list for a bulk campaign summary event."""
+    event = db.get(EmailActivityEvent, event_id)
+    if event is None:
+        return None
+    if not is_admin and event.user_id != viewer_id:
+        return None
+
+    details = event.details if isinstance(event.details, dict) else {}
+    channel = "whatsapp" if _is_whatsapp_event(event) else "email"
+    results = details.get("results")
+    reconstructed = False
+    if not isinstance(results, list) or not results:
+        results = []
+        if channel == "whatsapp" and event.event_type in ("bulk_partial", "bulk_completed", "send_failed"):
+            try:
+                results = _reconstruct_whatsapp_bulk(db, event)
+                reconstructed = True
+            except Exception:  # noqa: BLE001
+                results = []
+        elif channel == "email":
+            for raw in details.get("failures") or []:
+                if not isinstance(raw, dict):
+                    continue
+                results.append(
+                    {
+                        "buyer_id": raw.get("buyer_id"),
+                        "company_name": raw.get("company_name"),
+                        "contact_name": None,
+                        "phone": None,
+                        "email": raw.get("to_email") or raw.get("email"),
+                        "status": "failed",
+                        "message": raw.get("error") or raw.get("send_message") or raw.get("message") or "Send failed",
+                    }
+                )
+
+    counts = {
+        s: sum(1 for r in results if isinstance(r, dict) and r.get("status") == s)
+        for s in ("sent", "failed", "skipped", "unknown")
+    }
+    return {
+        "event_id": event.id,
+        "title": event.title,
+        "channel": channel,
+        "created_at": event.created_at.isoformat() if event.created_at else None,
+        "selected_count": details.get("selected_count"),
+        "reconstructed": reconstructed,
+        "counts": counts,
+        "results": results,
+    }

@@ -6,6 +6,7 @@ import {
   type EmailActivityModeStats,
 } from "../api/client";
 import { Pagination } from "../components/Pagination";
+import { BulkResultsModal } from "../components/BulkResultsModal";
 import { useAuth } from "../auth/AuthContext";
 
 interface EmailActivityPageProps {
@@ -13,6 +14,8 @@ interface EmailActivityPageProps {
   onUnreadChange?: (count: number) => void;
   /** email = Mail → Email Activity; whatsapp = WhatsApp → WhatsApp Activity */
   channel?: "email" | "whatsapp";
+  /** Open a contact (lead profile) from a result row — used by "View results" and "Open contact". */
+  onOpenLead?: (buyerId: number) => void;
 }
 
 const PAGE_SIZE = 25;
@@ -268,9 +271,11 @@ export function EmailActivityPage({
   onError,
   onUnreadChange,
   channel = "email",
+  onOpenLead,
 }: EmailActivityPageProps) {
   const { isAdmin } = useAuth();
   const isWhatsApp = channel === "whatsapp";
+  const [resultsEventId, setResultsEventId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<EmailActivityEvent[]>([]);
   const [total, setTotal] = useState(0);
@@ -444,6 +449,15 @@ export function EmailActivityPage({
     void refreshInsights();
   }, [showInsights, refreshInsights]);
 
+  async function markAllRead() {
+    try {
+      await client.markEmailActivityRead({ mark_all: true, channel });
+      await refresh();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to mark notifications read");
+    }
+  }
+
   async function markOneRead(eventId: number) {
     if (eventId < 0) return;
     try {
@@ -523,6 +537,20 @@ export function EmailActivityPage({
         <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-emerald-200">
           {unreadCount} unread
         </span>
+        {unreadCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => void markAllRead()}
+            className="rounded-lg border border-slate-700 px-3 py-2 text-slate-300 hover:bg-slate-800"
+            title={
+              isAdmin
+                ? "Clear the unread count for ALL users (events stay in the list)"
+                : "Clear your unread count (events stay in the list)"
+            }
+          >
+            Mark all read
+          </button>
+        ) : null}
       </div>
 
       {showInsights && (
@@ -803,6 +831,16 @@ export function EmailActivityPage({
                             : ""}
                           .
                         </p>
+                        {event.id > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setResultsEventId(event.id)}
+                            className="mt-1 inline-flex items-center rounded-lg bg-sky-600 hover:bg-sky-500 px-3 py-1.5 text-xs font-medium text-white"
+                            title="See which contacts were sent, failed or skipped"
+                          >
+                            View results
+                          </button>
+                        ) : null}
                         {mailboxEmail ? (
                           <p>
                             From:{" "}
@@ -887,6 +925,16 @@ export function EmailActivityPage({
                     {!bulkCampaign ? (
                       <p className="text-sm opacity-90 mt-1 whitespace-pre-wrap">{event.message}</p>
                     ) : null}
+                    {!bulkCampaign && event.buyer_id && onOpenLead ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenLead(event.buyer_id as number)}
+                        className="mt-2 inline-flex items-center rounded-lg bg-sky-600/80 hover:bg-sky-500 px-3 py-1 text-xs font-medium text-white"
+                        title="Open this contact to edit it"
+                      >
+                        Open contact
+                      </button>
+                    ) : null}
                     <p className="text-xs opacity-60 mt-2">{formatWhen(event.created_at)}</p>
                   </div>
                   {!isWhatsApp && unread && event.id > 0 && (
@@ -904,6 +952,15 @@ export function EmailActivityPage({
           })}
         </ul>
       )}
+
+      {resultsEventId != null ? (
+        <BulkResultsModal
+          eventId={resultsEventId}
+          onClose={() => setResultsEventId(null)}
+          onError={onError}
+          onOpenLead={onOpenLead}
+        />
+      ) : null}
 
       {aiPanel ? (
         <div

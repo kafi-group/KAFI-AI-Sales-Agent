@@ -114,6 +114,35 @@ def _whatsapp_unread_count(db: Session, contact_id: int) -> int:
     return int(query.count())
 
 
+def _bulk_results_detail(created: list[dict], skipped: list[dict], limit: int = 1000) -> list[dict]:
+    """Per-contact outcome of a bulk WhatsApp send (stored on the campaign summary event)."""
+    rows: list[dict] = []
+    for item in created:
+        sent = bool(item.get("sent"))
+        rows.append(
+            {
+                "buyer_id": item.get("buyer_id"),
+                "company_name": item.get("company_name"),
+                "contact_name": item.get("contact_name"),
+                "phone": item.get("phone"),
+                "status": "sent" if sent else "failed",
+                "message": "" if sent else str(item.get("send_message") or "Not delivered")[:300],
+            }
+        )
+    for sk in skipped:
+        rows.append(
+            {
+                "buyer_id": sk.get("buyer_id"),
+                "company_name": sk.get("company_name"),
+                "contact_name": None,
+                "phone": None,
+                "status": "skipped",
+                "message": str(sk.get("reason") or "Skipped")[:300],
+            }
+        )
+    return rows[:limit]
+
+
 class CommsGenerator:
     """Template-based draft messages. LLM generation plugs in later."""
 
@@ -1077,6 +1106,13 @@ class CommsGenerator:
                 item = {
                     "buyer_id": buyer_id,
                     "company_name": buyer.company_name,
+                    "contact_name": getattr(contact, "full_name", None),
+                    "phone": (
+                        getattr(contact, "phone", None)
+                        or getattr(contact, "primary_phone", None)
+                        or getattr(contact, "secondary_mobile", None)
+                        or getattr(contact, "secondary_phone", None)
+                    ),
                     "to_email": contact.email,
                     "interaction_id": draft.id,
                     "contact_id": draft.contact_id,
@@ -1191,6 +1227,8 @@ class CommsGenerator:
                     "channel": "whatsapp",
                     "skipped": skipped[:20],
                     "delivery_error": delivery_error,
+                    # Per-contact outcome for the "View results" window in WhatsApp Activity.
+                    "results": _bulk_results_detail(created, skipped),
                 },
             )
 

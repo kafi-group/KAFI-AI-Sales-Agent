@@ -1308,6 +1308,28 @@ export interface EmailActivityEvent {
   created_at: string | null;
 }
 
+export interface EmailActivityBulkResultRow {
+  buyer_id: number | null;
+  company_name: string | null;
+  contact_name: string | null;
+  phone: string | null;
+  email?: string | null;
+  status: "sent" | "failed" | "skipped" | "unknown" | string;
+  message: string | null;
+}
+
+export interface EmailActivityBulkResults {
+  event_id: number;
+  title: string;
+  channel: "email" | "whatsapp";
+  created_at: string | null;
+  selected_count: number | null;
+  /** True when rebuilt from messages (older sends did not store per-contact results). */
+  reconstructed: boolean;
+  counts: { sent: number; failed: number; skipped: number; unknown: number };
+  results: EmailActivityBulkResultRow[];
+}
+
 export interface EmailActivityListResponse {
   total: number;
   unread_count: number;
@@ -2996,6 +3018,8 @@ export const client = {
     const query = search.toString();
     return request<EmailActivityInsights>(`/email-activity/insights${query ? `?${query}` : ""}`);
   },
+  getEmailActivityBulkResults: (eventId: number) =>
+    request<EmailActivityBulkResults>(`/email-activity/events/${eventId}/results`),
   markEmailActivityRead: (data: {
     event_ids?: number[];
     mark_all?: boolean;
