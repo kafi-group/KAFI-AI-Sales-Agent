@@ -10,6 +10,69 @@ import { detectLeadingZeroAfterCountryCode, type PhoneZeroCheckResult } from "..
 
 const DIAL_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"] as const;
 
+/** How the customer's end of the call is shown (the browser connecting is not the customer answering). */
+const LEG_UI: Record<
+  string,
+  { label: string; box: string; text: string; dot: string; pulse: boolean }
+> = {
+  dialing: {
+    label: "Dialing…",
+    box: "border-amber-500/40 bg-amber-950/30",
+    text: "text-amber-300",
+    dot: "bg-amber-400",
+    pulse: true,
+  },
+  ringing: {
+    label: "Ringing…",
+    box: "border-sky-500/40 bg-sky-950/30",
+    text: "text-sky-300",
+    dot: "bg-sky-400",
+    pulse: true,
+  },
+  answered: {
+    label: "Call Connected",
+    box: "border-emerald-500/40 bg-emerald-950/40",
+    text: "text-emerald-300",
+    dot: "bg-emerald-400",
+    pulse: true,
+  },
+  busy: {
+    label: "Busy — the phone or its network rejected the call",
+    box: "border-rose-500/40 bg-rose-950/30",
+    text: "text-rose-300",
+    dot: "bg-rose-400",
+    pulse: false,
+  },
+  "no-answer": {
+    label: "No answer",
+    box: "border-amber-500/40 bg-amber-950/30",
+    text: "text-amber-300",
+    dot: "bg-amber-400",
+    pulse: false,
+  },
+  failed: {
+    label: "Call failed",
+    box: "border-rose-500/40 bg-rose-950/30",
+    text: "text-rose-300",
+    dot: "bg-rose-400",
+    pulse: false,
+  },
+  ended: {
+    label: "Call ended",
+    box: "border-slate-600 bg-slate-900",
+    text: "text-slate-300",
+    dot: "bg-slate-400",
+    pulse: false,
+  },
+  unknown: {
+    label: "Call in progress",
+    box: "border-slate-600 bg-slate-900",
+    text: "text-slate-300",
+    dot: "bg-slate-400",
+    pulse: false,
+  },
+};
+
 const FAB_SIZE = 56;
 const PANEL_WIDTH = 300;
 const STORAGE_KEY = "kafi_floating_dialpad_pos";
@@ -414,26 +477,40 @@ export function FloatingDialpad({ onError }: FloatingDialpadProps) {
             </div>
 
             {voice?.active ? (
-              <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/40 px-3 py-2.5 min-h-[4.5rem] flex flex-col justify-center">
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-300">
-                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                    Call Connected
-                  </span>
-                  <span className="text-[10px] uppercase font-mono tracking-wider px-1.5 py-0.5 rounded bg-emerald-900/60 text-emerald-200 border border-emerald-700/50">
-                    DTMF / Keypad Mode
-                  </span>
-                </div>
-                <p className="mt-1 font-mono text-sm text-slate-200 truncate">
-                  {voice.activeCall?.phone || contactName || "On Live Call"}
-                </p>
-                <div className="mt-1 flex items-center justify-between text-xs">
-                  <span className="text-slate-400 text-[11px]">Sent digits:</span>
-                  <span className="font-mono font-bold text-emerald-300 bg-slate-900 border border-emerald-700/60 px-2 py-0.5 rounded min-w-[2.5rem] text-center">
-                    {sentDtmfHistory || "—"}
-                  </span>
-                </div>
-              </div>
+              (() => {
+                const leg = LEG_UI[voice.legStatus] ?? LEG_UI.unknown;
+                return (
+                  <div className={`rounded-xl border px-3 py-2.5 min-h-[4.5rem] flex flex-col justify-center ${leg.box}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`flex items-center gap-1.5 text-xs font-semibold ${leg.text}`}>
+                        <span
+                          className={`h-2 w-2 shrink-0 rounded-full ${leg.dot} ${leg.pulse ? "animate-pulse" : ""}`}
+                        />
+                        {leg.label}
+                      </span>
+                      {voice.legStatus === "answered" ? (
+                        <span className="text-[10px] uppercase font-mono tracking-wider px-1.5 py-0.5 rounded bg-emerald-900/60 text-emerald-200 border border-emerald-700/50">
+                          DTMF / Keypad Mode
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 font-mono text-sm text-slate-200 truncate">
+                      {voice.activeCall?.phone || contactName || "On Live Call"}
+                    </p>
+                    {voice.legAttempts > 1 && voice.legStatus !== "answered" ? (
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        Attempt {voice.legAttempts} — the system keeps retrying automatically
+                      </p>
+                    ) : null}
+                    <div className="mt-1 flex items-center justify-between text-xs">
+                      <span className="text-slate-400 text-[11px]">Sent digits:</span>
+                      <span className="font-mono font-bold text-emerald-300 bg-slate-900 border border-emerald-700/60 px-2 py-0.5 rounded min-w-[2.5rem] text-center">
+                        {sentDtmfHistory || "—"}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()
             ) : (
               <div className="rounded-xl border border-emerald-700/40 bg-slate-900 px-3 py-3 min-h-[4.5rem] flex flex-col justify-center">
                 <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Number</p>

@@ -568,6 +568,12 @@ try:  # additive feature: a failure here must never stop the app from booting
     app.include_router(_kpi_scorecard_api.router, prefix="/api")
 except Exception as _ks_exc:  # noqa: BLE001
     print(f"KPI scorecard router disabled: {_ks_exc}", flush=True)
+try:  # additive feature: a failure here must never stop the app from booting
+    from api import call_leg_status as _call_leg_status_api
+
+    app.include_router(_call_leg_status_api.router, prefix="/api")
+except Exception as _cl_exc:  # noqa: BLE001
+    print(f"Call leg status router disabled: {_cl_exc}", flush=True)
 app.include_router(horeka.router, prefix="/api")
 app.include_router(target_workspace.router, prefix="/api")
 app.include_router(system.router, prefix="/api")

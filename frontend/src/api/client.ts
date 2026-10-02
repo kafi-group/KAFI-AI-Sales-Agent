@@ -3206,6 +3206,11 @@ export const client = {
     if (params.user_id != null) search.set("user_id", String(params.user_id));
     return request<DailyKpiReport>(`/kpi/daily?${search.toString()}`);
   },
+  /** What the customer's phone is doing during a dashboard call (ringing / answered / busy ...). */
+  getCallLegStatus: (callSid: string) =>
+    request<{ status: string; twilio_status: string | null; attempts: number }>(
+      `/call-legs/status?call_sid=${encodeURIComponent(callSid)}`,
+    ),
   /** Graded scorecard (targets vs. actual) for a day / week / month. */
   getKpiScorecard: (params: { date: string; period?: KpiPeriod | string; user_id?: number | null }) => {
     const search = new URLSearchParams();

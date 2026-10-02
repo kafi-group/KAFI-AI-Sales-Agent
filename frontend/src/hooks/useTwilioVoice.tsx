@@ -35,12 +35,26 @@ export class DialCancelledError extends Error {
   }
 }
 
+/** What the CUSTOMER's phone is doing. The browser reaching Twilio is not the customer answering. */
+export type CallLegStatus =
+  | "dialing"
+  | "ringing"
+  | "answered"
+  | "busy"
+  | "no-answer"
+  | "failed"
+  | "ended"
+  | "unknown";
+
 interface TwilioVoiceContextValue {
   ready: boolean;
   active: boolean;
   /** True from the moment a call is requested until it is connected (or cancelled / failed). */
   dialing: boolean;
   activeCall: ActiveCallTarget | null;
+  /** State of the customer's end of the live call, and how many times the system has dialled. */
+  legStatus: CallLegStatus;
+  legAttempts: number;
   initError: string | null;
   /** Last outbound call failure (does not mean the dialer is offline). */
   callError: string | null;
@@ -135,6 +149,8 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
   const dialingRef = useRef(false);
   const dialAttemptRef = useRef<{ cancelled: boolean } | null>(null);
   const [activeCall, setActiveCall] = useState<ActiveCallTarget | null>(null);
+  const [legStatus, setLegStatus] = useState<CallLegStatus>("dialing");
+  const [legAttempts, setLegAttempts] = useState(0);
   const [initError, setInitError] = useState<string | null>(null);
   const [callError, setCallError] = useState<string | null>(null);
   const [pendingFollowUp, setPendingFollowUp] = useState<PendingCallFollowUp | null>(null);
@@ -514,6 +530,35 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
     [connectPreparedCall, ensureRegisteredDevice, withDialLock],
   );
 
+  // While a call is up, ask the server (read-only) what the customer's phone is doing.
+  useEffect(() => {
+    if (!active) {
+      setLegStatus("dialing");
+      setLegAttempts(0);
+      return;
+    }
+    let stopped = false;
+    const poll = async () => {
+      const sid = (callRef.current as unknown as { parameters?: Record<string, string> } | null)
+        ?.parameters?.CallSid;
+      if (!sid) return;
+      try {
+        const res = await client.getCallLegStatus(sid);
+        if (stopped) return;
+        setLegStatus(res.status as CallLegStatus);
+        setLegAttempts(res.attempts);
+      } catch {
+        /* keep the last known status */
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 2500);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [active]);
+
   return (
     <TwilioVoiceContext.Provider
       value={{
@@ -521,6 +566,8 @@ export function TwilioVoiceProvider({ children }: { children: ReactNode }) {
         active,
         dialing,
         activeCall,
+        legStatus,
+        legAttempts,
         initError,
         callError,
         clearCallError,
