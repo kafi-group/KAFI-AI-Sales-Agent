@@ -20,6 +20,8 @@ class MoveToMasterListRequest(BaseModel):
     lead_ids: list[int] = Field(default_factory=list)
     target_master_type: str
     expected_count: int | None = None
+    # Optional key of a user-created list to put the moved leads into (default: keep their section).
+    target_section: str | None = None
 
 
 @router.post("")
@@ -42,6 +44,7 @@ def move_leads_to_master_list(
             lead_ids=unique,
             target_master_type=payload.target_master_type,
             by_username=user.username,
+            target_section=payload.target_section,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

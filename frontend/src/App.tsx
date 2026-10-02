@@ -1952,6 +1952,7 @@ function DashboardApp() {
                 onError={setError}
                 onSelectLead={handleSelectLead}
                 onSectionCountsChange={setTableCounts}
+                onCustomModulesChanged={() => void loadCustomModules()}
                 masterType={masterType}
                 focusEditLeadId={focusEditLeadId}
                 focusEditCompany={focusEditCompany}

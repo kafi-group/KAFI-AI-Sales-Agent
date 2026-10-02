@@ -2355,7 +2355,13 @@ export const client = {
       }),
     }),
   /** Admin: move leads to another master list (FMCG / Minerals & Ores / ...). Only that changes. */
-  moveLeadsToMasterList: (leadIds: number[], targetMasterType: string, expectedCount?: number) =>
+  moveLeadsToMasterList: (
+    leadIds: number[],
+    targetMasterType: string,
+    expectedCount?: number,
+    /** Key of a user-created list to put the moved leads into (default: keep their section). */
+    targetSection?: string,
+  ) =>
     request<{
       updated_count: number;
       updated_ids: number[];
@@ -2364,12 +2370,15 @@ export const client = {
       missing: number;
       target_master_type: string;
       target_label: string;
+      target_section: string | null;
+      target_section_label: string | null;
     }>("/master-list-move", {
       method: "POST",
       body: JSON.stringify({
         lead_ids: leadIds,
         target_master_type: targetMasterType,
         expected_count: expectedCount ?? leadIds.length,
+        target_section: targetSection || undefined,
       }),
     }),
   suggestLeadMeeting: (leadId: number) =>

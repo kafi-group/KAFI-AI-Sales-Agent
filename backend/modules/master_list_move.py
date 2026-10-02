@@ -14,7 +14,9 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from db.models import Buyer
+from sqlalchemy import func
+
+from db.models import Buyer, CustomLeadModule
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ def move_leads_to_master_list(
     lead_ids: list[int],
     target_master_type: str,
     by_username: str | None = None,
+    target_section: str | None = None,
 ) -> dict[str, Any]:
     from modules import org_admin_config as org
     from modules.audit import log_action
@@ -57,9 +60,23 @@ def move_leads_to_master_list(
         raise ValueError("That master list does not exist or is disabled")
     target_label = str(lists[target].get("label") or target)
 
+    # Optional: also put the moved leads into one of the user-created lists (sections), e.g. a
+    # "Minerals and Ores" list, so they do not mix with the clients already in the new master list.
+    section_key = _norm(target_section)
+    section_label: str | None = None
+    if section_key:
+        module = (
+            db.query(CustomLeadModule).filter(func.lower(CustomLeadModule.key) == section_key).first()
+        )
+        if module is None or module.is_builtin or not module.is_enabled:
+            raise ValueError("That list does not exist, is disabled, or is a built-in list")
+        section_key = module.key
+        section_label = module.name
+
     buyers = db.query(Buyer).filter(Buyer.id.in_(ids)).all()
 
     previous: dict[str, list[int]] = {}
+    previous_sections: dict[str, list[int]] = {}
     moved_ids: list[int] = []
     already_there = 0
     for buyer in buyers:
@@ -68,6 +85,10 @@ def move_leads_to_master_list(
             already_there += 1
             continue
         buyer.master_type = target
+        if section_key:
+            previous_sections.setdefault(buyer.source or "", []).append(buyer.id)
+            buyer.source = section_key
+            buyer.intake_method = "upload"  # same as moving a lead into a custom list
         previous.setdefault(old, []).append(buyer.id)
         moved_ids.append(buyer.id)
 
@@ -84,6 +105,8 @@ def move_leads_to_master_list(
                 details={
                     "target_master_type": target,
                     "previous_master_types": previous,  # undo = move each group back
+                    "target_section": section_key or None,
+                    "previous_sections": previous_sections if section_key else None,
                     "lead_ids": moved_ids,
                 },
             )
@@ -98,4 +121,6 @@ def move_leads_to_master_list(
         "missing": len(ids) - len(buyers),
         "target_master_type": target,
         "target_label": target_label,
+        "target_section": section_key or None,
+        "target_section_label": section_label,
     }

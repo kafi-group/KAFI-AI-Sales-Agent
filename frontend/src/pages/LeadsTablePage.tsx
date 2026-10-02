@@ -106,6 +106,7 @@ import {
   spellingPropsForLeadField,
 } from "../utils/spelling";
 import { ManageModulesModal } from "../components/ManageModulesModal";
+import { MoveToMasterListModal, type MasterMoveSection } from "../components/MoveToMasterListModal";
 import {
   client,
   type CustomLeadModule,
@@ -156,6 +157,8 @@ interface LeadsTablePageProps {
   onError: (message: string) => void;
   onSelectLead: (leadId: number) => void;
   onSectionCountsChange?: (counts: LeadTableSectionCountsResponse) => void;
+  /** Called after this page creates a custom list, so the sidebar can show it. */
+  onCustomModulesChanged?: () => void;
   masterType?: string;
   /** From Target Workspace Edit — search company and open table edit mode. */
   focusEditLeadId?: number | null;
@@ -1138,6 +1141,7 @@ export function LeadsTablePage({
   onError,
   onSelectLead,
   onSectionCountsChange,
+  onCustomModulesChanged,
   masterType = "fmcg",
   focusEditLeadId = null,
   focusEditCompany = null,
@@ -1215,6 +1219,11 @@ export function LeadsTablePage({
   const [movingToModule, setMovingToModule] = useState(false);
   // Master lists (FMCG / Minerals & Ores / ...) an admin can move selected leads into.
   const [masterListOptions, setMasterListOptions] = useState<Array<{ key: string; label: string }>>([]);
+  const [masterMoveRequest, setMasterMoveRequest] = useState<{
+    target: { key: string; label: string };
+    ids: number[];
+    fromLabel: string;
+  } | null>(null);
   useEffect(() => {
     if (!isAdmin) return;
     let active = true;
@@ -2704,23 +2713,37 @@ export function LeadsTablePage({
     }
   }
 
-  async function handleMoveToMasterList(target: { key: string; label: string }) {
+  function handleMoveToMasterList(target: { key: string; label: string }) {
     if (movingToModule) return;
     const ids = [...selected];
     if (ids.length === 0) return;
     const currentKey = (masterType || "fmcg").toLowerCase();
     const fromLabel = masterListOptions.find((m) => m.key === currentKey)?.label || currentKey;
-    const confirmed = window.confirm(
-      `Move ${ids.length} selected lead${ids.length === 1 ? "" : "s"} from "${fromLabel}" to "${target.label}"?\n\n` +
-        "Their contacts, emails, calls, WhatsApp history, assignment and section stay with them — " +
-        "only the master list changes. You can move them back the same way.",
-    );
-    if (!confirmed) return;
+    setMasterMoveRequest({ target, ids, fromLabel });
+  }
+
+  async function performMasterListMove(section: MasterMoveSection) {
+    const request = masterMoveRequest;
+    if (!request || movingToModule) return;
+    const { target, ids } = request;
 
     setMovingToModule(true);
     setSaveNotice(null);
     const startedAt = Date.now();
     try {
+      // A new list is created first (and shows in the sidebar), then the leads go into it.
+      let sectionKey: string | undefined;
+      let sectionLabel = "";
+      if (section.mode === "existing") {
+        sectionKey = section.key;
+        sectionLabel = customModules.find((m) => m.key === section.key)?.name ?? "";
+      } else if (section.mode === "new") {
+        const created = await client.createCustomModule({ name: section.name });
+        sectionKey = created.key;
+        sectionLabel = created.name;
+        await loadCustomModules();
+        onCustomModulesChanged?.();
+      }
       let moved = 0;
       let alreadyThere = 0;
       const failedChunks: string[] = [];
@@ -2739,7 +2762,7 @@ export function LeadsTablePage({
           });
         }
         try {
-          const res = await client.moveLeadsToMasterList(chunk, target.key, chunk.length);
+          const res = await client.moveLeadsToMasterList(chunk, target.key, chunk.length, sectionKey);
           moved += res.updated_count;
           alreadyThere += res.already_in_target;
           for (const id of res.updated_ids) movedIds.add(id);
@@ -2761,10 +2784,11 @@ export function LeadsTablePage({
       await loadSectionCounts();
       void loadTable();
       const extra = alreadyThere > 0 ? ` ${alreadyThere} were already in that list.` : "";
+      const where = sectionLabel ? `${target.label} › ${sectionLabel}` : target.label;
       setSaveNotice(
         failedChunks.length > 0
-          ? `Moved ${moved} of ${ids.length} to ${target.label}. Some batches failed — retry the rest.${extra}`
-          : `Moved ${moved} lead${moved === 1 ? "" : "s"} to ${target.label}.${extra}`,
+          ? `Moved ${moved} of ${ids.length} to ${where}. Some batches failed — retry the rest.${extra}`
+          : `Moved ${moved} lead${moved === 1 ? "" : "s"} to ${where}.${extra}`,
       );
       if (failedChunks.length > 0) onError(failedChunks.slice(0, 2).join(" · "));
       setTimeout(() => setSaveNotice(null), 7000);
@@ -2773,6 +2797,7 @@ export function LeadsTablePage({
     } finally {
       setActionProgress(null);
       setMovingToModule(false);
+      setMasterMoveRequest(null);
     }
   }
 
@@ -6228,6 +6253,18 @@ export function LeadsTablePage({
       )}
 
       {/* Dynamic Module & List Manager Modal */}
+      {masterMoveRequest ? (
+        <MoveToMasterListModal
+          count={masterMoveRequest.ids.length}
+          fromLabel={masterMoveRequest.fromLabel}
+          toLabel={masterMoveRequest.target.label}
+          lists={customModules.filter((m) => !m.is_builtin && m.is_enabled)}
+          busy={movingToModule}
+          onConfirm={(section) => void performMasterListMove(section)}
+          onCancel={() => setMasterMoveRequest(null)}
+        />
+      ) : null}
+
       <ManageModulesModal
         isOpen={showManageModules}
         onClose={() => setShowManageModules(false)}
