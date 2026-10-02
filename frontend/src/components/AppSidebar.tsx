@@ -459,24 +459,27 @@ export function AppSidebar({
           </div>
 
           <nav className="flex-1 overflow-y-auto overscroll-contain px-3 py-4 space-y-1">
-            {/* Active Master List Selection */}
-            <div className="px-3 py-2 bg-slate-950/40 rounded-lg border border-slate-800/80 mb-3">
-              <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-1">
-                Active Master List
-              </label>
-              <SearchableSelect
-                value={
-                  masterLists.some((m) => m.key === masterType)
-                    ? masterType
-                    : masterLists[0]?.key || masterType
-                }
-                onChange={(next) => onMasterTypeChange?.(next)}
-                options={masterListOptions}
-                multiSelect={false}
-                allowEmpty={false}
-                placeholder="Search master lists…"
-              />
-              <p className="mt-1 text-[9px] text-slate-600 font-mono truncate" title="Deploy build id — Chrome and Edge should match">
+            {/* Active Master List Selection — hidden from view on request. Kept mounted (display:none)
+                so nothing that depends on it changes; only the build id below stays visible. */}
+            <div className="px-3 py-1 mb-2">
+              <div className="hidden" aria-hidden="true">
+                <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-1">
+                  Active Master List
+                </label>
+                <SearchableSelect
+                  value={
+                    masterLists.some((m) => m.key === masterType)
+                      ? masterType
+                      : masterLists[0]?.key || masterType
+                  }
+                  onChange={(next) => onMasterTypeChange?.(next)}
+                  options={masterListOptions}
+                  multiSelect={false}
+                  allowEmpty={false}
+                  placeholder="Search master lists…"
+                />
+              </div>
+              <p className="text-[9px] text-slate-600 font-mono truncate" title="Deploy build id — Chrome and Edge should match">
                 build {typeof __KAFI_BUILD_ID__ !== "undefined" ? __KAFI_BUILD_ID__ : "dev"}
               </p>
             </div>

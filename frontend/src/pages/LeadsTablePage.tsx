@@ -118,6 +118,9 @@ import {
 import { useAuth } from "../auth/AuthContext";
 
 const TABLE_PAGE_SIZE = 20;
+/** "Move to another master list" in the Move-to menu is hidden on request. Nothing behind it was
+ *  removed — set to true to show it again. */
+const SHOW_MASTER_LIST_MOVE = false;
 const TABLE_VIEW_STORAGE_PREFIX = "kafi_leads_table_view_v2";
 
 const MOVE_MODULE_LABELS: Record<string, string> = {
@@ -3951,7 +3954,8 @@ export function LeadsTablePage({
                 </ToolbarMenuItem>
               );
             })}
-            {isAdmin &&
+            {SHOW_MASTER_LIST_MOVE &&
+            isAdmin &&
             masterListOptions.filter((m) => m.key !== (masterType || "fmcg").toLowerCase()).length > 0 ? (
               <>
                 <ToolbarMenuLabel>Move to another master list</ToolbarMenuLabel>
