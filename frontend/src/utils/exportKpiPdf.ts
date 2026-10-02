@@ -115,15 +115,15 @@ export function exportKpiReportPdf(input: KpiPdfInput): void {
 
   // Summary
   if (summary?.trim()) {
-    addHeading("Shareable summary", 13);
+    addHeading("Score card", 13);
     if (summarySubject?.trim()) {
       addBody(summarySubject.trim(), { bold: true, size: 11 });
     }
     addBody(summary.trim(), { size: 9 });
     addRule();
   } else {
-    addHeading("Shareable summary", 13);
-    addBody("No summary generated yet. Use Generate summary on the KPI page, then export again.", {
+    addHeading("Score card", 13);
+    addBody("No score card for this period (no targets set yet, or an off day).", {
       size: 9,
       color: [120, 80, 40],
     });

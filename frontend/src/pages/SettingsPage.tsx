@@ -28,6 +28,7 @@ import {
   unlockAiTools,
 } from "../lib/aiToolsGate";
 import { OrgAdminSettingsPanel } from "../components/OrgAdminSettingsPanel";
+import { KpiScorecardSettingsPanel } from "../components/KpiScorecardSettingsPanel";
 
 interface SettingsPageProps {
   onError: (message: string) => void;
@@ -385,6 +386,8 @@ export function SettingsPage({ onError, onOpenRestrictedAi }: SettingsPageProps)
       </div>
 
       <OrgAdminSettingsPanel onError={onError} />
+
+      <KpiScorecardSettingsPanel onError={onError} />
 
       <section className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-5 space-y-4">
         <div>

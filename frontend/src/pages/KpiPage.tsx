@@ -4,12 +4,14 @@ import {
   type DailyKpiReport,
   type KpiCounts,
   type KpiPeriod,
+  type KpiScorecard as KpiScorecardData,
   type AppUser,
 } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ManualKpiSection } from "../components/ManualKpiSection";
 import { ColumnVisibilityMenu } from "../components/ColumnVisibilityMenu";
 import { KpiDrillDownModal } from "../components/KpiDrillDownModal";
+import { KpiScorecard, scorecardToText } from "../components/KpiScorecard";
 import {
   useColumnVisibility,
   type ColumnDef,
@@ -91,11 +93,8 @@ export function KpiPage({ onError }: KpiPageProps) {
   const [assignees, setAssignees] = useState<AppUser[]>([]);
   const [report, setReport] = useState<DailyKpiReport | null>(null);
   const [loading, setLoading] = useState(true);
-  const [summary, setSummary] = useState<string | null>(null);
-  const [summarySubject, setSummarySubject] = useState<string | null>(null);
-  const [summarySource, setSummarySource] = useState<string | null>(null);
-  const [summaryLoading, setSummaryLoading] = useState(false);
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const [scorecard, setScorecard] = useState<KpiScorecardData | null>(null);
+  const [scorecardLoading, setScorecardLoading] = useState(true);
   const [pdfExporting, setPdfExporting] = useState(false);
   const [drillDownKey, setDrillDownKey] = useState<keyof KpiCounts | null>(null);
   const [drillDownLabel, setDrillDownLabel] = useState<string>("");
@@ -110,10 +109,6 @@ export function KpiPage({ onError }: KpiPageProps) {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    setSummary(null);
-    setSummarySubject(null);
-    setSummarySource(null);
-    setCopyState("idle");
     try {
       const userId =
         isAdmin && selectedUserId ? Number(selectedUserId) : undefined;
@@ -135,39 +130,22 @@ export function KpiPage({ onError }: KpiPageProps) {
     void refresh();
   }, [refresh]);
 
-  async function generateSummary() {
-    setSummaryLoading(true);
-    setCopyState("idle");
+  const loadScorecard = useCallback(async () => {
+    setScorecardLoading(true);
     try {
-      const userId =
-        isAdmin && selectedUserId ? Number(selectedUserId) : undefined;
-      const result = await client.generateKpiSummary({
-        date,
-        period,
-        user_id: userId ?? null,
-      });
-      setSummary(result.summary);
-      setSummarySubject(result.subject);
-      setSummarySource(result.source);
-      setReport(result.report);
+      const userId = isAdmin && selectedUserId ? Number(selectedUserId) : undefined;
+      setScorecard(await client.getKpiScorecard({ date, period, user_id: userId ?? null }));
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Failed to generate KPI summary");
+      setScorecard(null);
+      onError(e instanceof Error ? e.message : "Failed to load the score card");
     } finally {
-      setSummaryLoading(false);
+      setScorecardLoading(false);
     }
-  }
+  }, [date, isAdmin, onError, period, selectedUserId]);
 
-  async function copySummary() {
-    if (!summary) return;
-    const text = summarySubject ? `${summarySubject}\n\n${summary}` : summary;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopyState("copied");
-      window.setTimeout(() => setCopyState("idle"), 2000);
-    } catch {
-      setCopyState("failed");
-    }
-  }
+  useEffect(() => {
+    void loadScorecard();
+  }, [loadScorecard]);
 
   function exportPdf() {
     if (!report) return;
@@ -175,8 +153,8 @@ export function KpiPage({ onError }: KpiPageProps) {
     try {
       exportKpiReportPdf({
         report,
-        summary,
-        summarySubject,
+        summary: scorecardToText(scorecard),
+        summarySubject: "KPI score card",
         scopeLabel,
         periodLabel,
       });
@@ -255,18 +233,13 @@ export function KpiPage({ onError }: KpiPageProps) {
           )}
           <button
             type="button"
-            onClick={() => void refresh()}
+            onClick={() => {
+              void refresh();
+              void loadScorecard();
+            }}
             className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800"
           >
             Refresh
-          </button>
-          <button
-            type="button"
-            disabled={summaryLoading || loading}
-            onClick={() => void generateSummary()}
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-          >
-            {summaryLoading ? "Generating…" : "Generate summary"}
           </button>
           <button
             type="button"
@@ -289,50 +262,7 @@ export function KpiPage({ onError }: KpiPageProps) {
             {report.activity_count === 1 ? "y" : "ies"} · {formatRangeLabel(report)}
           </p>
 
-          {summary && (
-            <section className="space-y-3 rounded-lg border border-emerald-800/40 bg-emerald-950/20 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-medium uppercase tracking-wider text-emerald-400/90">
-                    Shareable summary
-                  </h3>
-                  {summarySubject && (
-                    <p className="mt-1 text-sm font-medium text-slate-100">{summarySubject}</p>
-                  )}
-                  {summarySource && (
-                    <p className="mt-0.5 text-xs text-slate-500">
-                      Generated via {summarySource === "llm" ? "AI" : "rules"} · ready to paste to
-                      WhatsApp / email
-                    </p>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void copySummary()}
-                    className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
-                  >
-                    {copyState === "copied"
-                      ? "Copied"
-                      : copyState === "failed"
-                        ? "Copy failed"
-                        : "Copy for boss"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={pdfExporting}
-                    onClick={exportPdf}
-                    className="rounded-lg border border-emerald-700/60 px-3 py-1.5 text-sm text-emerald-200 hover:bg-emerald-950/40 disabled:opacity-50"
-                  >
-                    Export PDF
-                  </button>
-                </div>
-              </div>
-              <pre className="whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/60 p-4 text-sm leading-relaxed text-slate-200">
-                {summary}
-              </pre>
-            </section>
-          )}
+          <KpiScorecard scorecard={scorecard} loading={scorecardLoading} />
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             {COUNT_CARDS.map((card) => {

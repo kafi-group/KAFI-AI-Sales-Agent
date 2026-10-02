@@ -746,6 +746,65 @@ export interface KpiPerUserSummary {
 }
 
 export type KpiPeriod = "day" | "week" | "month";
+
+export interface KpiScorecardCell {
+  key: string;
+  actual: number;
+  target: number | null;
+  percent: number | null;
+  grade: string | null;
+}
+
+export interface KpiScorecard {
+  period: string;
+  date: string;
+  date_start: string;
+  date_end: string;
+  timezone: string;
+  /** Working days elapsed in the period (targets are per day). */
+  working_days: number;
+  bands: Array<{ grade: string; min: number }>;
+  pointers: Array<{
+    key: string;
+    label: string;
+    note: string;
+    source: "auto" | "manual";
+    target_per_day: number;
+  }>;
+  users: Array<{
+    user: { id: number; username: string; full_name: string };
+    overall_percent: number | null;
+    overall_grade: string | null;
+    pointers: KpiScorecardCell[];
+  }>;
+  team: {
+    overall_percent: number | null;
+    overall_grade: string | null;
+    pointers: KpiScorecardCell[];
+  };
+}
+
+export interface KpiScorecardConfig {
+  pointers: Array<{
+    key: string;
+    label: string;
+    metric: string;
+    target: number;
+    weight: number;
+    enabled: boolean;
+    note: string;
+  }>;
+  user_targets: Record<string, Record<string, number>>;
+  grade_bands: Record<string, number>;
+  working_days: number[];
+}
+
+export interface KpiScorecardConfigPayload {
+  config: KpiScorecardConfig;
+  metrics: Array<{ key: string; label: string; source: "auto" | "manual" }>;
+  users: Array<{ id: number; username: string; full_name: string }>;
+  grade_order: string[];
+}
 export type ManualKpiPeriod = "day" | "week" | "month" | "year";
 
 export interface ManualKpiEntry {
@@ -3147,6 +3206,26 @@ export const client = {
     if (params.user_id != null) search.set("user_id", String(params.user_id));
     return request<DailyKpiReport>(`/kpi/daily?${search.toString()}`);
   },
+  /** Graded scorecard (targets vs. actual) for a day / week / month. */
+  getKpiScorecard: (params: { date: string; period?: KpiPeriod | string; user_id?: number | null }) => {
+    const search = new URLSearchParams();
+    search.set("date", params.date);
+    if (params.period) search.set("period", params.period);
+    if (params.user_id != null) search.set("user_id", String(params.user_id));
+    return request<KpiScorecard>(`/kpi/scorecard?${search.toString()}`);
+  },
+  /** Admin + password: read the scorecard targets / settings. */
+  unlockKpiScorecardConfig: (pin: string) =>
+    request<KpiScorecardConfigPayload>("/kpi/scorecard/config/unlock", {
+      method: "POST",
+      body: JSON.stringify({ pin }),
+    }),
+  /** Admin + password: save the scorecard targets / settings. */
+  saveKpiScorecardConfig: (pin: string, config: KpiScorecardConfig) =>
+    request<KpiScorecardConfigPayload>("/kpi/scorecard/config", {
+      method: "PUT",
+      body: JSON.stringify({ pin, config }),
+    }),
   /** One row per contact behind a KPI box (personal/bulk email & WhatsApp, leads imported). */
   getKpiCardRows: (params: {
     card: string;
