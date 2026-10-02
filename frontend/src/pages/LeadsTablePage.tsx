@@ -135,7 +135,7 @@ const MOVE_MODULE_LABELS: Record<string, string> = {
   schedule_meeting: "📅 SCHEDULE MEETING",
   incomplete_archives: "📂 Incomplete Data from Archives",
   old_clients: "🏛️ Old clients",
-  master: "📋 Master Table (FMCG)",
+  master: "📋 Master Table (ALL)",
   testing: "🧪 Testing (Staff Numbers)",
 };
 
@@ -863,7 +863,7 @@ function sectionTitle(
       ? "Master Table (Minerals & Ores)"
       : masterType === "other_items"
       ? "Master Table (Other Items)"
-      : "Master Table (FMCG)";
+      : "Master Table (ALL)";
   }
   if (section === "old_clients") return isAdmin ? "Old clients" : "Clients";
   if (section === "khalid_focused_sales") return "Khalid Focused Sales";
@@ -2649,7 +2649,8 @@ export function LeadsTablePage({
         try {
           const res = await client.moveLeadsToModule(chunk, targetModule, chunk.length);
           moved += res.updated_count;
-          targetLabel = res.target_label || targetLabel;
+          // The server still names it "(FMCG)"; show the current name in the message.
+          targetLabel = (res.target_label || targetLabel).replace("Master Table (FMCG)", "Master Table (ALL)");
         } catch (chunkErr) {
           const msg =
             chunkErr instanceof Error ? chunkErr.message : "Batch failed";

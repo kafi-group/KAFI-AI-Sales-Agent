@@ -129,7 +129,7 @@ export function DataSynthesisPage({ onError, masterType = "fmcg" }: DataSynthesi
   const masterLabel = useMemo(() => {
     if (masterType === "minerals_ores") return "Master Table (Minerals & Ores)";
     if (masterType === "other_items") return "Master Table (Other Items)";
-    return "Master Table (FMCG)";
+    return "Master Table (ALL)";
   }, [masterType]);
 
   // State for Missing Data Report

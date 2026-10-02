@@ -1285,7 +1285,7 @@ function DashboardApp() {
       ? "Master Table (Minerals & Ores)"
       : masterType === "other_items"
       ? "Master Table (Other Items)"
-      : "Master Table (FMCG)";
+      : "Master Table (ALL)";
 
   const enabledCustomNavItems = customModules
     .filter((m) => m.is_enabled)
