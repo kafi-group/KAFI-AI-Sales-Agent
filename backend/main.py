@@ -556,6 +556,12 @@ try:  # additive feature: a failure here must never stop the app from booting
     app.include_router(_kpi_card_rows_api.router, prefix="/api")
 except Exception as _kc_exc:  # noqa: BLE001
     print(f"KPI card rows router disabled: {_kc_exc}", flush=True)
+try:  # additive feature: a failure here must never stop the app from booting
+    from api import master_list_move as _master_list_move_api
+
+    app.include_router(_master_list_move_api.router, prefix="/api")
+except Exception as _mm_exc:  # noqa: BLE001
+    print(f"Master list move router disabled: {_mm_exc}", flush=True)
 app.include_router(horeka.router, prefix="/api")
 app.include_router(target_workspace.router, prefix="/api")
 app.include_router(system.router, prefix="/api")

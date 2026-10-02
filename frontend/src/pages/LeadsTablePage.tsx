@@ -1213,6 +1213,23 @@ export function LeadsTablePage({
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [intakeMethodFilter, setIntakeMethodFilter] = useState<"all" | "upload" | "discover">("all");
   const [movingToModule, setMovingToModule] = useState(false);
+  // Master lists (FMCG / Minerals & Ores / ...) an admin can move selected leads into.
+  const [masterListOptions, setMasterListOptions] = useState<Array<{ key: string; label: string }>>([]);
+  useEffect(() => {
+    if (!isAdmin) return;
+    let active = true;
+    client
+      .getMyMasterLists()
+      .then((res) => {
+        if (active) setMasterListOptions(res.master_lists.map((m) => ({ key: m.key, label: m.label })));
+      })
+      .catch(() => {
+        if (active) setMasterListOptions([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isAdmin]);
   const [assigningToAi, setAssigningToAi] = useState(false);
   const [moveConfirmTarget, setMoveConfirmTarget] = useState<{
     moduleKey: string;
@@ -2687,6 +2704,78 @@ export function LeadsTablePage({
     }
   }
 
+  async function handleMoveToMasterList(target: { key: string; label: string }) {
+    if (movingToModule) return;
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    const currentKey = (masterType || "fmcg").toLowerCase();
+    const fromLabel = masterListOptions.find((m) => m.key === currentKey)?.label || currentKey;
+    const confirmed = window.confirm(
+      `Move ${ids.length} selected lead${ids.length === 1 ? "" : "s"} from "${fromLabel}" to "${target.label}"?\n\n` +
+        "Their contacts, emails, calls, WhatsApp history, assignment and section stay with them — " +
+        "only the master list changes. You can move them back the same way.",
+    );
+    if (!confirmed) return;
+
+    setMovingToModule(true);
+    setSaveNotice(null);
+    const startedAt = Date.now();
+    try {
+      let moved = 0;
+      let alreadyThere = 0;
+      const failedChunks: string[] = [];
+      const movedIds = new Set<number>();
+      for (let i = 0; i < ids.length; i += BULK_MOVE_CHUNK) {
+        const chunk = ids.slice(i, i + BULK_MOVE_CHUNK);
+        if (ids.length > 1) {
+          setActionProgress({
+            title: `Moving to ${target.label}`,
+            mode: "determinate",
+            current: i,
+            total: ids.length,
+            detail: `Batch ${Math.floor(i / BULK_MOVE_CHUNK) + 1} · ${chunk.length} leads`,
+            startedAt,
+            accent: "emerald",
+          });
+        }
+        try {
+          const res = await client.moveLeadsToMasterList(chunk, target.key, chunk.length);
+          moved += res.updated_count;
+          alreadyThere += res.already_in_target;
+          for (const id of res.updated_ids) movedIds.add(id);
+        } catch (chunkErr) {
+          failedChunks.push(chunkErr instanceof Error ? chunkErr.message : "Batch failed");
+        }
+      }
+      if (moved === 0 && failedChunks.length > 0) {
+        onError(failedChunks[0] || "Failed to move leads to the other master list");
+        return;
+      }
+      if (movedIds.size > 0) {
+        // They now belong to another master list, so they leave this table view.
+        setRows((prev) => prev.filter((row) => !movedIds.has(row.id)));
+        setTotal((prev) => Math.max(0, prev - movedIds.size));
+        setFilteredCount((prev) => Math.max(0, prev - movedIds.size));
+      }
+      clearSelection();
+      await loadSectionCounts();
+      void loadTable();
+      const extra = alreadyThere > 0 ? ` ${alreadyThere} were already in that list.` : "";
+      setSaveNotice(
+        failedChunks.length > 0
+          ? `Moved ${moved} of ${ids.length} to ${target.label}. Some batches failed — retry the rest.${extra}`
+          : `Moved ${moved} lead${moved === 1 ? "" : "s"} to ${target.label}.${extra}`,
+      );
+      if (failedChunks.length > 0) onError(failedChunks.slice(0, 2).join(" · "));
+      setTimeout(() => setSaveNotice(null), 7000);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to move leads to the other master list");
+    } finally {
+      setActionProgress(null);
+      setMovingToModule(false);
+    }
+  }
+
   async function moveSelectedToInterestedClients(inList: boolean) {
     if (selected.size === 0) return;
     const count = selected.size;
@@ -3837,6 +3926,24 @@ export function LeadsTablePage({
                 </ToolbarMenuItem>
               );
             })}
+            {isAdmin &&
+            masterListOptions.filter((m) => m.key !== (masterType || "fmcg").toLowerCase()).length > 0 ? (
+              <>
+                <ToolbarMenuLabel>Move to another master list</ToolbarMenuLabel>
+                {masterListOptions
+                  .filter((m) => m.key !== (masterType || "fmcg").toLowerCase())
+                  .map((m) => (
+                    <ToolbarMenuItem
+                      key={m.key}
+                      disabled={selected.size === 0 || movingToModule}
+                      title={`Move the selected leads out of this master list into ${m.label}`}
+                      onClick={() => void handleMoveToMasterList(m)}
+                    >
+                      🗂️ {m.label}
+                    </ToolbarMenuItem>
+                  ))}
+              </>
+            ) : null}
           </ToolbarDropdown>
 
           {isIncompleteArchives && isAdmin && selected.size > 0 ? (

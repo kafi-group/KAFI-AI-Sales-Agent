@@ -2354,6 +2354,24 @@ export const client = {
         expected_count: expectedCount ?? leadIds.length,
       }),
     }),
+  /** Admin: move leads to another master list (FMCG / Minerals & Ores / ...). Only that changes. */
+  moveLeadsToMasterList: (leadIds: number[], targetMasterType: string, expectedCount?: number) =>
+    request<{
+      updated_count: number;
+      updated_ids: number[];
+      requested_count: number;
+      already_in_target: number;
+      missing: number;
+      target_master_type: string;
+      target_label: string;
+    }>("/master-list-move", {
+      method: "POST",
+      body: JSON.stringify({
+        lead_ids: leadIds,
+        target_master_type: targetMasterType,
+        expected_count: expectedCount ?? leadIds.length,
+      }),
+    }),
   suggestLeadMeeting: (leadId: number) =>
     request<{
       buyer_id: number;
